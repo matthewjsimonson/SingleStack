@@ -21,6 +21,7 @@ declare
   v_gtm    uuid;
   v_signal uuid;
   v_source uuid;
+  v_proposal uuid;
 begin
   -- The org. (Every new signup auto-joins this one via the on_auth_user_created trigger.)
   insert into orgs (name) values ('Acme GovCon') returning id into v_org;
@@ -77,5 +78,21 @@ begin
        '"Explainable AI" mentions up 3x QoQ in discovery calls.')
     returning id into v_signal;
   insert into signal_sources (org_id, signal_id, source_id) values (v_org, v_signal, v_source);
+
+  -- A PENDING proposal: change the product's "what it is", backed by the signal.
+  -- Leave it pending so you can run it through the engine yourself:
+  --   select accept_proposal('<this proposal id>', 'M. Schmidt');
+  -- then watch product_records' what_it_is value change and a field_revisions row appear.
+  insert into proposals (org_id, product_id, title, rationale, conf_level, conf_label, proposed_by, status)
+    values (v_org, v_prod,
+       'Reflect end-to-end coverage in "what it is"',
+       'v4.3 shipped the bidirectional ProposalAI handoff; the description should say so.',
+       0.87, 'High', 'CPO agent', 'pending')
+    returning id into v_proposal;
+  insert into proposal_changes (org_id, proposal_id, change_kind, record_field_id, old_value, proposed_value)
+    values (v_org, v_proposal, 'update_field', v_field,
+       'An AI-native business development and capture platform for government contractors.',
+       'An AI-native business development and capture platform for government contractors — from opportunity through proposal handoff.');
+  insert into proposal_signals (org_id, proposal_id, signal_id) values (v_org, v_proposal, v_signal);
 end
 $$;
