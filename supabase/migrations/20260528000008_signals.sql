@@ -1,10 +1,10 @@
 -- ============================================================================
 -- signals — the signals that back a GTM record.
 -- Plain English: one row per signal. Each carries a confidence level (a number
--- like 0.89), a confidence label (like "High" or "Needs input"), when it was
--- observed, a title, and a "why". A signal belongs to a GTM record via
--- gtm_record_id. (Weighting signals to proposals is a LATER step — for now a
--- signal just links to its record and to its sources.)
+-- like 0.89), a confidence label (free text like "High" or "Needs input"),
+-- when it was observed, a title, and a "why". A signal belongs to a GTM record
+-- via gtm_record_id. (Weighting signals to proposals is a LATER step — for now
+-- a signal just links to its record and to its sources.)
 -- NOTE: the UI shows age as "6h ago"; we store observed_at as a timestamp and
 -- derive the relative age, so it never goes stale.
 -- ============================================================================
@@ -17,7 +17,7 @@ create table signals (
   gtm_record_id uuid not null references gtm_records (id) on delete cascade,
 
   conf_level    numeric(3,2),    -- 0.00–1.00 confidence (e.g. 0.89)
-  conf_label    text,            -- e.g. "High", "Medium", "Needs input"
+  conf_label    text,            -- free text, e.g. "High" / "Medium" / "Needs input"
   observed_at   timestamptz,     -- when observed; "age" is derived from this
   title         text not null,
   why           text,

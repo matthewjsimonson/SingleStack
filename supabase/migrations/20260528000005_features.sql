@@ -1,8 +1,8 @@
 -- ============================================================================
 -- features — features that belong to a module.
--- Plain English: one row per feature (e.g. "Pursuit alerts"). A feature
--- belongs to exactly one module via module_id. Counting these per module is
--- how a module's "feature count" is produced.
+-- Plain English: one row per feature. A feature belongs to exactly one module
+-- via module_id, and may carry a status from the client's status vocabulary.
+-- Counting these per module is how a module's "feature count" is produced.
 -- ============================================================================
 
 create table features (
@@ -11,16 +11,17 @@ create table features (
   created_at  timestamptz not null default now(),
 
   module_id   uuid not null references modules (id) on delete cascade,
+  status_id   uuid references statuses (id),
 
   name        text not null,
-  description text,
-  status      release_status                -- optional per-feature status
+  description text
 );
 
 comment on table features is 'Features belonging to a module. Counting rows per module_id yields the module feature count.';
 
 create index features_org_id_idx on features (org_id);
 create index features_module_id_idx on features (module_id);
+create index features_status_id_idx on features (status_id);
 
 alter table features enable row level security;
 

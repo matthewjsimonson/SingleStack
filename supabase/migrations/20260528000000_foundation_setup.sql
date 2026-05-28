@@ -1,25 +1,21 @@
 -- ============================================================================
 -- Foundation setup — shared building blocks used by every Foundation table.
 -- Plain English: before we make any tables, we turn on the UUID generator,
--- define the small set of fixed status values the records use, and create one
--- helper that answers "which org is the current user in?" so Row-Level
--- Security can fence every table to that org.
+-- define the one fixed state the system itself relies on (drafted vs ratified),
+-- and create one helper that answers "which org is the current user in?" so
+-- Row-Level Security can fence every table to that org.
+--
+-- Note on agnosticism: there are deliberately NO domain-specific value lists
+-- baked in here. Statuses (GA/BETA/EA and the like) live in a client-editable
+-- table (see 20260528000001_statuses.sql), not a hardcoded enum. The only enum
+-- is ratification_status, which is intrinsic to the product's core mechanic.
 -- ============================================================================
 
 -- UUID generation (gen_random_uuid). Present on Supabase, safe to re-run.
 create extension if not exists pgcrypto;
 
--- Release status — reused by the product hub and by modules.
--- GA = generally available, BETA = beta, EA = early access.
-do $$
-begin
-  if not exists (select 1 from pg_type where typname = 'release_status') then
-    create type release_status as enum ('GA', 'BETA', 'EA');
-  end if;
-end
-$$;
-
 -- Ratification status — whether a value is still a draft or has been ratified.
+-- This is a core system state (not client vocabulary), so it stays an enum.
 do $$
 begin
   if not exists (select 1 from pg_type where typname = 'ratification_status') then
