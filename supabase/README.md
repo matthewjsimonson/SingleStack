@@ -38,6 +38,21 @@ http://127.0.0.1:54323) to browse the tables and the seeded example.
 - Every table is fenced by **Row-Level Security** to one org. New signups
   auto-join the single org, so access "just works" while there's one tenant.
 
+## Deploy to a hosted Supabase project
+
+A GitHub Action (`.github/workflows/deploy-supabase.yml`) pushes the migrations
+(not the seed) to your real Supabase project on every merge to `main`. It is
+**off until you turn it on**:
+
+1. Repo **Settings → Secrets and variables → Actions**, add three secrets:
+   - `SUPABASE_ACCESS_TOKEN` — from supabase.com/dashboard/account/tokens
+   - `SUPABASE_PROJECT_REF` — your project ref (Project Settings → General)
+   - `SUPABASE_DB_PASSWORD` — the database password for the project
+2. Add a **variable** `SUPABASE_DEPLOY_ENABLED` = `true`.
+
+Prefer to do it once by hand instead? Locally: `supabase link --project-ref
+<ref>` then `supabase db push`.
+
 ## Trying it
 
 After `supabase db reset`, sign up a test user in Studio's Auth section — the

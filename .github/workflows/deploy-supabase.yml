@@ -1,0 +1,41 @@
+name: Deploy migrations to Supabase
+
+# Pushes the schema in supabase/migrations to your hosted Supabase project.
+# Runs migrations ONLY — seed.sql is local-dev data and never runs here.
+#
+# This job is INERT until you opt in:
+#   1. Repo Settings -> Secrets and variables -> Actions
+#   2. Add secrets: SUPABASE_ACCESS_TOKEN, SUPABASE_DB_PASSWORD, SUPABASE_PROJECT_REF
+#        - SUPABASE_ACCESS_TOKEN: supabase.com/dashboard/account/tokens
+#        - SUPABASE_PROJECT_REF:  your project's ref (Project Settings -> General)
+#        - SUPABASE_DB_PASSWORD:  the database password you set for the project
+#   3. Add a variable: SUPABASE_DEPLOY_ENABLED = true
+# Until that variable is "true", this workflow does nothing.
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'supabase/migrations/**'
+      - 'supabase/config.toml'
+  workflow_dispatch:
+
+jobs:
+  deploy:
+    if: vars.SUPABASE_DEPLOY_ENABLED == 'true'
+    runs-on: ubuntu-latest
+    env:
+      SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}
+      SUPABASE_DB_PASSWORD: ${{ secrets.SUPABASE_DB_PASSWORD }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: supabase/setup-cli@v1
+        with:
+          version: latest
+
+      - name: Link to the Supabase project
+        run: supabase link --project-ref "${{ secrets.SUPABASE_PROJECT_REF }}"
+
+      - name: Push migrations
+        run: supabase db push
