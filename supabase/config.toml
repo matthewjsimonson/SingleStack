@@ -1,0 +1,43 @@
+# Supabase local config. Enough to run the project locally with the CLI:
+#   supabase start      -> boots Postgres + Auth + Studio in Docker
+#   supabase db reset   -> recreates the DB, applies all migrations, runs seed.sql
+# Everything below uses the standard local ports; change them only if they clash.
+
+project_id = "singlestack"
+
+[api]
+enabled = true
+port = 54321
+# Schemas exposed over the auto-generated REST/GraphQL API.
+schemas = ["public", "graphql_public"]
+extra_search_path = ["public", "extensions"]
+max_rows = 1000
+
+[db]
+port = 54322
+shadow_port = 54320
+# Postgres major version. Matches Supabase's current default.
+major_version = 15
+
+[db.seed]
+# Run supabase/seed.sql on `db reset` (the one org + worked example).
+# Production deploys apply migrations only — this seed never runs there.
+enabled = true
+sql_paths = ["./seed.sql"]
+
+[studio]
+# The local dashboard UI at http://127.0.0.1:54323
+enabled = true
+port = 54323
+
+[auth]
+# Local Auth — needed so signups create auth.users rows, which fires the
+# on_auth_user_created trigger that auto-joins the user to the org.
+enabled = true
+site_url = "http://127.0.0.1:3000"
+enable_signup = true
+
+[auth.email]
+enable_signup = true
+# No email confirmation locally, so test signups are instant.
+enable_confirmations = false
