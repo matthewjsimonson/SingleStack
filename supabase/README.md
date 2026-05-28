@@ -40,18 +40,13 @@ http://127.0.0.1:54323) to browse the tables and the seeded example.
 
 ## Deploy to a hosted Supabase project
 
-A GitHub Action (`.github/workflows/deploy-supabase.yml`) pushes the migrations
-(not the seed) to your real Supabase project on every merge to `main`. It is
-**off until you turn it on**:
+This repo uses **Supabase's native GitHub integration**. Supabase watches the
+production branch (`main`) and applies anything in `supabase/migrations`
+automatically when changes land there — no GitHub Action or secrets needed.
+Migrations only; `seed.sql` is local-dev data and never runs on deploy.
 
-1. Repo **Settings → Secrets and variables → Actions**, add three secrets:
-   - `SUPABASE_ACCESS_TOKEN` — from supabase.com/dashboard/account/tokens
-   - `SUPABASE_PROJECT_REF` — your project ref (Project Settings → General)
-   - `SUPABASE_DB_PASSWORD` — the database password for the project
-2. Add a **variable** `SUPABASE_DEPLOY_ENABLED` = `true`.
-
-Prefer to do it once by hand instead? Locally: `supabase link --project-ref
-<ref>` then `supabase db push`.
+So: merging a PR into `main` is what deploys the schema. Open a PR to get a
+Supabase preview branch (if branching is enabled) and merge to release.
 
 ## Trying it
 
