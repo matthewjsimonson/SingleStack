@@ -21,30 +21,8 @@ const GROUPS: Group[] = [
   {
     label: "Foundation",
     items: [
-      { label: "Overview", href: "/" },
       { label: "Product records", href: "/products" },
       { label: "GTM records", href: "/gtm" },
-    ],
-  },
-  {
-    label: "Intelligence",
-    items: [
-      { label: "Signals", href: "/signals", soon: true },
-      { label: "Competitors", href: "/competitors", soon: true },
-    ],
-  },
-  {
-    label: "Build",
-    items: [
-      { label: "Roadmap", href: "/roadmap", soon: true },
-      { label: "Ship", href: "/ship", soon: true },
-    ],
-  },
-  {
-    label: "Go-to-market",
-    items: [
-      { label: "Content", href: "/content", soon: true },
-      { label: "Enablement", href: "/enablement", soon: true },
     ],
   },
 ];
@@ -90,6 +68,11 @@ export default function Shell({
         </div>
 
         <div style={{ flex: 1, overflowY: "auto", padding: "0 8px" }}>
+          {/* Command center home */}
+          <a href="/" style={{ ...itemStyle(isActive("/")), marginBottom: 14 }}>
+            <span>Overview</span>
+          </a>
+
           {GROUPS.map((g) => (
             <div key={g.label} style={{ marginBottom: 14 }}>
               <div style={{ padding: "0 10px 5px", fontSize: 10.5, fontWeight: 700, letterSpacing: "0.07em", textTransform: "uppercase", color: "var(--sb-text-dim)" }}>{g.label}</div>
