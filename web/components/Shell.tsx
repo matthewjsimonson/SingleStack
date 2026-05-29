@@ -1,17 +1,53 @@
 "use client";
 
-// App shell with a FOUNDATION tree in the sidebar. The Foundation is the
-// product's canonical truth; Product records and their GTM records are
-// navigable children beneath it — so you keep the whole structure in view while
-// drilling into any layer. The tree is fetched live (session-scoped via RLS).
+// App shell. Grouped sidebar matching the product's mental model:
+//   Foundation  → Overview, Product records, GTM records
+//   Intelligence → Signals, Competitors        (placeholders)
+//   Build        → Roadmap, Ship               (placeholders)
+//   Campaigns    → Content, Enablement         (placeholders)
+//   Agents
+// Live sections route to real pages; placeholders route to a "coming soon"
+// scaffold so the full IA is visible and navigable now.
 import { createClient } from "@/lib/supabase/client";
 import { useRouter, usePathname } from "next/navigation";
-import { useEffect, useState, useCallback, type ReactNode } from "react";
-
-type Product = { id: string; name: string };
-type Gtm = { id: string; name: string; product_id: string };
+import type { ReactNode } from "react";
 
 export type Crumb = { label: string; href?: string };
+
+type Item = { label: string; href: string; soon?: boolean };
+type Group = { label: string; items: Item[] };
+
+const GROUPS: Group[] = [
+  {
+    label: "Foundation",
+    items: [
+      { label: "Overview", href: "/" },
+      { label: "Product records", href: "/products" },
+      { label: "GTM records", href: "/gtm" },
+    ],
+  },
+  {
+    label: "Intelligence",
+    items: [
+      { label: "Signals", href: "/signals", soon: true },
+      { label: "Competitors", href: "/competitors", soon: true },
+    ],
+  },
+  {
+    label: "Build",
+    items: [
+      { label: "Roadmap", href: "/roadmap", soon: true },
+      { label: "Ship", href: "/ship", soon: true },
+    ],
+  },
+  {
+    label: "Go-to-market",
+    items: [
+      { label: "Content", href: "/content", soon: true },
+      { label: "Enablement", href: "/enablement", soon: true },
+    ],
+  },
+];
 
 export default function Shell({
   children,
@@ -26,29 +62,6 @@ export default function Shell({
   const pathname = usePathname();
   const supabase = createClient();
 
-  const [products, setProducts] = useState<Product[]>([]);
-  const [gtm, setGtm] = useState<Gtm[]>([]);
-  const [expanded, setExpanded] = useState<Record<string, boolean>>({});
-
-  const load = useCallback(async () => {
-    const [{ data: p }, { data: g }] = await Promise.all([
-      supabase.from("product_records").select("id, name").order("created_at", { ascending: false }),
-      supabase.from("gtm_records").select("id, name, product_id").order("created_at"),
-    ]);
-    setProducts(p ?? []);
-    setGtm(g ?? []);
-    // auto-expand the product whose page (or whose GTM child) is active
-    const next: Record<string, boolean> = {};
-    (p ?? []).forEach((prod) => {
-      const onProduct = pathname === `/records/${prod.id}`;
-      const childActive = (g ?? []).some((x) => x.product_id === prod.id && pathname === `/gtm/${x.id}`);
-      if (onProduct || childActive) next[prod.id] = true;
-    });
-    setExpanded((e) => ({ ...next, ...e }));
-  }, [supabase, pathname]);
-
-  useEffect(() => { load(); }, [load]);
-
   async function signOut() {
     await supabase.auth.signOut();
     router.push("/login");
@@ -56,65 +69,48 @@ export default function Shell({
   }
 
   const trail: Crumb[] = crumbs ?? [{ label: "Foundation" }];
-  const childrenOf = (pid: string) => gtm.filter((g) => g.product_id === pid);
-  const navItem = (active: boolean): React.CSSProperties => ({
-    display: "flex", alignItems: "center", gap: 7, padding: "7px 10px", borderRadius: 7,
-    fontSize: 13, fontWeight: 600, color: active ? "#fff" : "var(--sb-text)",
-    background: active ? "var(--sb-fill)" : "transparent", cursor: "pointer", width: "100%",
-    textAlign: "left", border: "none", letterSpacing: "-0.005em",
+
+  const isActive = (href: string) =>
+    href === "/" ? pathname === "/" : pathname === href || pathname.startsWith(href + "/");
+
+  const itemStyle = (active: boolean): React.CSSProperties => ({
+    display: "flex", alignItems: "center", justifyContent: "space-between",
+    padding: "6px 10px", borderRadius: 7, fontSize: 13, fontWeight: 600,
+    color: active ? "#fff" : "var(--sb-text)",
+    background: active ? "var(--sb-fill)" : "transparent",
+    letterSpacing: "-0.005em",
   });
 
   return (
     <div style={{ display: "flex", height: "100vh", overflow: "hidden" }}>
-      <aside style={{ width: 248, minWidth: 248, background: "var(--sb)", color: "var(--sb-text)", display: "flex", flexDirection: "column", padding: "16px 0" }}>
-        <div style={{ padding: "0 16px 16px", display: "flex", alignItems: "center", gap: 9 }}>
+      <aside style={{ width: 240, minWidth: 240, background: "var(--sb)", color: "var(--sb-text)", display: "flex", flexDirection: "column", padding: "16px 0" }}>
+        <div style={{ padding: "0 16px 18px", display: "flex", alignItems: "center", gap: 9 }}>
           <span style={{ width: 22, height: 22, borderRadius: 6, background: "var(--ac)", display: "inline-flex", alignItems: "center", justifyContent: "center", color: "#fff", fontWeight: 800, fontSize: 13 }}>S</span>
           <span style={{ color: "#fff", fontSize: 15, fontWeight: 680, letterSpacing: "-0.02em" }}>SingleStack</span>
         </div>
 
         <div style={{ flex: 1, overflowY: "auto", padding: "0 8px" }}>
-          {/* Foundation root */}
-          <a href="/" style={navItem(pathname === "/")}>
-            <span style={{ fontSize: 14 }}>◆</span> Foundation
-          </a>
+          {GROUPS.map((g) => (
+            <div key={g.label} style={{ marginBottom: 14 }}>
+              <div style={{ padding: "0 10px 5px", fontSize: 10.5, fontWeight: 700, letterSpacing: "0.07em", textTransform: "uppercase", color: "var(--sb-text-dim)" }}>{g.label}</div>
+              {g.items.map((it) => {
+                const active = isActive(it.href);
+                return (
+                  <a key={it.href} href={it.href} style={itemStyle(active)}>
+                    <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{it.label}</span>
+                    {it.soon && <span style={{ fontSize: 9, fontWeight: 700, color: "var(--sb-text-dim)", border: "1px solid var(--sb-border)", borderRadius: 4, padding: "1px 4px", letterSpacing: "0.04em" }}>SOON</span>}
+                  </a>
+                );
+              })}
+            </div>
+          ))}
 
-          {/* Product tree */}
-          <div style={{ marginTop: 4 }}>
-            {products.length === 0 && (
-              <div style={{ padding: "6px 12px", fontSize: 12, color: "var(--sb-text-dim)" }}>No products yet</div>
-            )}
-            {products.map((p) => {
-              const kids = childrenOf(p.id);
-              const open = expanded[p.id];
-              const active = pathname === `/records/${p.id}`;
-              return (
-                <div key={p.id} style={{ marginLeft: 6 }}>
-                  <div style={{ display: "flex", alignItems: "center" }}>
-                    <button onClick={() => setExpanded((e) => ({ ...e, [p.id]: !e[p.id] }))}
-                      style={{ background: "none", border: "none", color: "var(--sb-text-dim)", width: 18, cursor: "pointer", fontSize: 10, flexShrink: 0 }}
-                      aria-label={open ? "collapse" : "expand"}>
-                      {kids.length > 0 ? (open ? "▾" : "▸") : "·"}
-                    </button>
-                    <a href={`/records/${p.id}`} style={{ ...navItem(active), padding: "6px 8px" }}>
-                      <span style={{ width: 6, height: 6, borderRadius: 999, background: "var(--ac)", flexShrink: 0 }} />
-                      <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{p.name}</span>
-                    </a>
-                  </div>
-                  {open && kids.map((k) => (
-                    <a key={k.id} href={`/gtm/${k.id}`} style={{ ...navItem(pathname === `/gtm/${k.id}`), padding: "5px 8px 5px 30px", fontWeight: 500, fontSize: 12.5 }}>
-                      <span style={{ width: 5, height: 5, borderRadius: 999, background: "var(--vl)", flexShrink: 0 }} />
-                      <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{k.name}</span>
-                    </a>
-                  ))}
-                </div>
-              );
-            })}
+          {/* Agents — standalone */}
+          <div style={{ marginBottom: 14 }}>
+            <a href="/agents" style={itemStyle(isActive("/agents"))}>
+              <span>Agents</span>
+            </a>
           </div>
-
-          {/* Agents */}
-          <a href="/agents" style={{ ...navItem(pathname === "/agents"), marginTop: 10 }}>
-            <span style={{ fontSize: 13 }}>✦</span> Agents
-          </a>
         </div>
 
         <div style={{ padding: "12px 16px 0", borderTop: "1px solid var(--sb-border)", margin: "0 8px" }}>
@@ -133,7 +129,7 @@ export default function Shell({
           ))}
         </header>
         <main style={{ flex: 1, overflowY: "auto" }}>
-          <div style={{ maxWidth: 980, margin: "0 auto", width: "100%", padding: "28px 24px 64px" }}>{children}</div>
+          <div style={{ maxWidth: 1000, margin: "0 auto", width: "100%", padding: "28px 28px 64px" }}>{children}</div>
         </main>
       </div>
     </div>
