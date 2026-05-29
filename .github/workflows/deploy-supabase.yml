@@ -1,7 +1,8 @@
-name: Deploy migrations to Supabase
+name: Deploy to Supabase
 
-# Deploys everything in supabase/migrations to the connected project.
-# Runs on GitHub's servers, pulling SQL straight from the repo (no copy-paste).
+# Deploys supabase/migrations (the schema) and supabase/functions (Edge
+# Functions) to the connected project. Runs on GitHub's servers, pulling
+# straight from the repo (no copy-paste).
 # Requires two repo secrets: SUPABASE_ACCESS_TOKEN and SUPABASE_DB_PASSWORD.
 
 on:
@@ -25,3 +26,13 @@ jobs:
         run: supabase link --project-ref "$PROJECT_REF"
       - name: Push migrations
         run: supabase db push
+      - name: Deploy Edge Functions
+        # Deploys all functions if any exist; a no-op before the first function
+        # lands, so merging this PR won't fail. Functions read their own secrets
+        # (e.g. ANTHROPIC_API_KEY, OPENAI_API_KEY) set in the Supabase dashboard.
+        run: |
+          if [ -d supabase/functions ] && [ -n "$(ls -A supabase/functions 2>/dev/null)" ]; then
+            supabase functions deploy --project-ref "$PROJECT_REF"
+          else
+            echo "No supabase/functions present — skipping function deploy."
+          fi
