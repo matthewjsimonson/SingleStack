@@ -39,6 +39,20 @@ jobs:
           esac
           case "$PW" in [[:space:]]*) echo "WARNING: leading whitespace" ;; esac
           case "$PW" in *[[:space:]]) echo "WARNING: trailing whitespace" ;; esac
+      - name: Probe pooler auth with psql (verdict only — never prints the value)
+        # Decisive test: does THIS password authenticate to THIS project's
+        # pooler, independent of the supabase CLI? Prints AUTH_OK or the auth
+        # error (no password). Never fails the step. Remove once green.
+        run: |
+          command -v psql >/dev/null || { sudo apt-get update -qq && sudo apt-get install -y -qq postgresql-client >/dev/null; }
+          export PGPASSWORD="$SUPABASE_DB_PASSWORD"
+          HOST="aws-0-us-west-2.pooler.supabase.com"
+          for PORT in 5432 6543; do
+            echo "--- probe $HOST:$PORT  user=postgres.$PROJECT_REF ---"
+            psql "host=$HOST port=$PORT user=postgres.$PROJECT_REF dbname=postgres sslmode=require" \
+              -tAc "select 'AUTH_OK'" 2>&1 | sed 's/^/    /' || true
+          done
+          echo "--- probe done ---"
       - name: Link to the project
         run: supabase link --project-ref "$PROJECT_REF"
       - name: Push migrations
