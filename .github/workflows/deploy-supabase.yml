@@ -17,11 +17,28 @@ jobs:
       SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}
       SUPABASE_DB_PASSWORD: ${{ secrets.SUPABASE_DB_PASSWORD }}
       PROJECT_REF: pzulufyoqvqevjrmtmfj
+      # Opt JS actions into Node 24 ahead of the June 2026 forced cutover
+      # (clears the Node 20 deprecation warning).
+      FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: "true"
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
       - uses: supabase/setup-cli@v1
         with:
           version: latest
+      - name: Check DB password secret (safe — never prints the value)
+        # Temporary diagnostic for the 28P01 auth failure. Prints only the
+        # password's length and character class, never the password itself.
+        # Remove once the deploy is green.
+        run: |
+          PW="$SUPABASE_DB_PASSWORD"
+          echo "length: ${#PW}"
+          [ -z "$PW" ] && echo "WARNING: secret is EMPTY"
+          case "$PW" in
+            *[!A-Za-z0-9]*) echo "charset: contains NON-alphanumeric (special) characters" ;;
+            *) echo "charset: alphanumeric only" ;;
+          esac
+          case "$PW" in [[:space:]]*) echo "WARNING: leading whitespace" ;; esac
+          case "$PW" in *[[:space:]]) echo "WARNING: trailing whitespace" ;; esac
       - name: Link to the project
         run: supabase link --project-ref "$PROJECT_REF"
       - name: Push migrations
