@@ -59,9 +59,7 @@ export default function RecordsView({ initial }: { initial: Record[] }) {
   return (
     <div>
       <div style={{ display: "flex", alignItems: "baseline", justifyContent: "space-between", marginBottom: 20 }}>
-        <h1 className="serif" style={{ fontSize: 24, fontWeight: 600 }}>
-          Product records
-        </h1>
+        <h1 className="page-title">Records</h1>
         {!creating && (
           <button className="btn" onClick={() => setCreating(true)}>
             + New record
@@ -113,8 +111,9 @@ export default function RecordsView({ initial }: { initial: Record[] }) {
 
       <div style={{ display: "grid", gap: 12, gridTemplateColumns: "repeat(auto-fill, minmax(280px, 1fr))" }}>
         {records.map((r) => (
-          <a key={r.id} href={`/records/${r.id}`} className="card" style={{ padding: 18, display: "block" }}>
-            <div style={{ fontSize: 15.5, fontWeight: 600, marginBottom: 6 }}>{r.name}</div>
+          <a key={r.id} href={`/records/${r.id}`} className="card card-hover" style={{ padding: 18, display: "block" }}>
+            <span className="chip chip-accent" style={{ marginBottom: 10 }}>Product</span>
+            <div style={{ fontSize: 15, fontWeight: 600, marginTop: 10, marginBottom: 5 }}>{r.name}</div>
             <div className="mono muted" style={{ fontSize: 11 }}>
               {new Date(r.created_at).toLocaleDateString()}
             </div>

@@ -7,32 +7,32 @@
    ============================================================================ */
 
 :root {
-  /* surfaces */
-  --bg: #F7F6F3;        /* app canvas (cream) */
+  /* surfaces — neutral, modern (near-white canvas, crisp cards) */
+  --bg: #FAFAFA;        /* app canvas */
   --tb: #FFFFFF;        /* top bar / white surfaces */
-  --tbb: #E8E6E1;       /* top bar border */
+  --tbb: #ECECEC;       /* top bar border */
   --cb: #FFFFFF;        /* card background */
-  --cbr: #E8E6E1;       /* card border */
-  --s2: #F1EFEB;        /* subtle fill */
-  --s3: #E8E5E0;        /* subtle fill, stronger */
+  --cbr: #EAEAEA;       /* card border (light, hairline) */
+  --s2: #F4F4F5;        /* subtle fill */
+  --s3: #ECECEE;        /* subtle fill, stronger */
 
-  /* sidebar (dark) */
-  --sb: #0F1115;
-  --sbb: #1F2126;
-  --sbl: #5A5F6B;
-  --sbt: #9BA0AB;
-  --sa: #1A1D22;
-  --sat: #5E8AFF;
+  /* sidebar (dark, refined) */
+  --sb: #111113;
+  --sbb: #232326;
+  --sbl: #6B6B72;
+  --sbt: #A1A1A8;
+  --sa: #1C1C20;
+  --sat: #6E8BFF;
 
   /* text */
-  --tp: #0F1115;        /* primary */
-  --ts: #52555E;        /* secondary */
-  --tm: #8B8F99;        /* muted */
+  --tp: #18181B;        /* primary */
+  --ts: #5B5B63;        /* secondary */
+  --tm: #9A9AA2;        /* muted */
 
   /* accent (blue) */
-  --ac: #5E8AFF;
-  --al: #EEF2FF;
-  --at: #3B5BCC;
+  --ac: #4F6BFF;
+  --al: #EEF1FF;
+  --at: #3A52CC;
 
   /* amber / warning */
   --am: #C97A1B;
@@ -59,7 +59,11 @@
   --lyra-bg: #EEF2FF;
   --lyra-bd: #CBD7FF;
 
-  --radius: 8px;
+  --radius: 10px;
+
+  /* type scale — clean, restrained */
+  --t-page: 20px;       /* page titles (no decorative serif) */
+  --t-section: 12px;    /* section labels (uppercase, tracked) */
 }
 
 * { box-sizing: border-box; margin: 0; padding: 0; }
@@ -89,20 +93,35 @@ button { font-family: inherit; cursor: pointer; }
   border: 1px solid var(--cbr);
   border-radius: var(--radius);
 }
+.card-hover { transition: border-color 0.12s ease, box-shadow 0.12s ease; }
+.card-hover:hover {
+  border-color: #DADADA;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.04), 0 4px 12px rgba(0, 0, 0, 0.03);
+}
+
+/* page title — clean Inter, not serif */
+.page-title { font-size: var(--t-page); font-weight: 650; letter-spacing: -0.02em; color: var(--tp); }
+
+/* section label — small, uppercase, tracked */
+.section-label {
+  font-size: var(--t-section); font-weight: 600; letter-spacing: 0.06em;
+  text-transform: uppercase; color: var(--tm);
+}
 
 .btn {
   background: var(--tp);
   color: #fff;
   border: none;
-  border-radius: 7px;
+  border-radius: 8px;
   padding: 8px 15px;
-  font-size: 13.5px;
+  font-size: 13px;
   font-weight: 600;
   letter-spacing: -0.005em;
-  transition: opacity 0.12s ease;
+  transition: opacity 0.12s ease, transform 0.04s ease;
 }
-.btn:hover { opacity: 0.88; }
-.btn:disabled { opacity: 0.45; cursor: not-allowed; }
+.btn:hover { opacity: 0.9; }
+.btn:active { transform: translateY(0.5px); }
+.btn:disabled { opacity: 0.4; cursor: not-allowed; }
 
 .btn-ghost {
   background: transparent;
