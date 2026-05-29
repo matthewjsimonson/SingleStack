@@ -1,23 +1,22 @@
 "use client";
 
-// Signals — the intelligence tab. Two halves:
-//  1) Sources: register where signals come from (internal/external). Each
-//     catalog connector is "manual" today (log signals by hand); live MCP
-//     pulling plugs in later via the same source rows.
-//  2) Signals: the evidence stream, grouped internal vs external, with source,
-//     confidence, scope, and age — and a "Log signal" form.
-// Client-fetched (session-carrying) so RLS scopes everything to the org.
+// Signals — the intelligence dashboard (not a library; sources live in Settings).
+// Top: two agent-sliced lenses (Product: CPO+CEng / GTM: CRO+CCO) that turn
+// intel into action — run the right agent on the right record to generate a
+// proposal. Below: the signal stream (all/internal/external) + manual logging.
 import { useEffect, useState, useCallback } from "react";
 import { createClient } from "@/lib/supabase/client";
 import { getOrgId } from "@/lib/org";
 import { PageHeader, Section, Chip, Banner, Confidence } from "@/components/ui";
-import { SOURCE_CATALOG, CATALOG_BY_KIND, type SourceDef } from "@/lib/sources";
+import { LENSES, type Lens } from "@/lib/lenses";
+import { EXEC_BY_KEY } from "@/lib/team";
 
-type Source = { id: string; label: string; icon: string; origin: string; kind: string; status: string };
+type Source = { id: string; label: string; icon: string; origin: string };
 type Signal = {
   id: string; title: string; why: string | null; conf_label: string | null; conf_level: number | null;
-  observed_at: string | null; scope: string; source_id: string | null;
+  observed_at: string | null; scope: string; source_id: string | null; product_id: string | null; gtm_record_id: string | null;
 };
+type Rec = { id: string; name: string };
 
 function ago(iso: string | null) {
   if (!iso) return "";
@@ -31,39 +30,54 @@ export default function SignalsView() {
   const supabase = createClient();
   const [sources, setSources] = useState<Source[]>([]);
   const [signals, setSignals] = useState<Signal[]>([]);
+  const [products, setProducts] = useState<Rec[]>([]);
+  const [gtm, setGtm] = useState<Rec[]>([]);
+  const [activeAgents, setActiveAgents] = useState<Set<string>>(new Set());
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [tab, setTab] = useState<"all" | "internal" | "external">("all");
+  const [running, setRunning] = useState<string | null>(null);
+  const [done, setDone] = useState<string | null>(null);
 
-  // log-signal form
   const [logging, setLogging] = useState(false);
   const [form, setForm] = useState({ title: "", why: "", conf: "0.7", source_id: "" });
   const [busy, setBusy] = useState(false);
 
   const load = useCallback(async () => {
-    const [{ data: srcs }, { data: sigs }] = await Promise.all([
-      supabase.from("sources").select("id, label, icon, origin, kind, status").order("created_at"),
-      supabase.from("signals").select("id, title, why, conf_label, conf_level, observed_at, scope, source_id").order("observed_at", { ascending: false, nullsFirst: false }).order("created_at", { ascending: false }),
+    const [{ data: srcs }, { data: sigs }, { data: prods }, { data: gtms }, { data: ags }] = await Promise.all([
+      supabase.from("sources").select("id, label, icon, origin").order("created_at"),
+      supabase.from("signals").select("id, title, why, conf_label, conf_level, observed_at, scope, source_id, product_id, gtm_record_id").order("observed_at", { ascending: false, nullsFirst: false }).order("created_at", { ascending: false }),
+      supabase.from("product_records").select("id, name"),
+      supabase.from("gtm_records").select("id, name"),
+      supabase.from("agents").select("key").eq("is_active", true),
     ]);
-    setSources(srcs ?? []);
-    setSignals(sigs ?? []);
+    setSources(srcs ?? []); setSignals(sigs ?? []); setProducts(prods ?? []); setGtm(gtms ?? []);
+    setActiveAgents(new Set((ags ?? []).map((a) => a.key)));
     setLoading(false);
   }, [supabase]);
 
   useEffect(() => { load(); }, [load]);
 
-  async function addSource(def: SourceDef) {
-    setError(null);
+  const sourceById = (id: string | null) => sources.find((s) => s.id === id) ?? null;
+  const internalIds = new Set(sources.filter((s) => s.origin === "internal").map((s) => s.id));
+
+  // signals relevant to a lens: org-wide always, plus the lens's record scope
+  const lensSignals = (lens: Lens) =>
+    signals.filter((s) => s.scope === "org" || s.scope === lens.recordType);
+
+  async function runAgentOnRecord(agentKey: string, lens: Lens, recordId: string) {
+    const tagId = `${agentKey}:${recordId}`;
+    setRunning(tagId); setError(null); setDone(null);
     try {
-      const orgId = await getOrgId();
-      if (!orgId) throw new Error("Could not resolve your organization.");
-      const { error } = await supabase.from("sources").insert({
-        org_id: orgId, label: def.label, icon: def.icon, origin: def.origin, kind: def.kind,
-        status: def.live ? "connected" : "manual",
-      });
+      const { data: s } = await supabase.auth.getSession();
+      const token = s.session?.access_token;
+      const body = lens.recordType === "product" ? { agent_key: agentKey, product_id: recordId } : { agent_key: agentKey, gtm_record_id: recordId };
+      const { data, error } = await supabase.functions.invoke("agent-propose", { body, headers: token ? { Authorization: `Bearer ${token}` } : undefined });
       if (error) throw error;
-      await load();
-    } catch (e) { setError(e instanceof Error ? e.message : "Could not add source."); }
+      if (data?.error) throw new Error(data.error);
+      setDone(tagId);
+    } catch (e) { setError(e instanceof Error ? e.message : "Agent run failed."); }
+    finally { setRunning(null); }
   }
 
   async function logSignal(e: React.FormEvent) {
@@ -78,8 +92,7 @@ export default function SignalsView() {
         org_id: orgId, scope: "org", title: form.title.trim(), why: form.why.trim() || null,
         conf_level: isNaN(lvl) ? null : lvl,
         conf_label: isNaN(lvl) ? null : lvl >= 0.75 ? "High" : lvl >= 0.5 ? "Medium" : "Low",
-        observed_at: new Date().toISOString(),
-        source_id: form.source_id || null,
+        observed_at: new Date().toISOString(), source_id: form.source_id || null,
       });
       if (error) throw error;
       setLogging(false); setForm({ title: "", why: "", conf: "0.7", source_id: "" });
@@ -88,26 +101,15 @@ export default function SignalsView() {
     finally { setBusy(false); }
   }
 
-  const registeredKinds = new Set(sources.map((s) => s.kind));
-  const sourceById = (id: string | null) => sources.find((s) => s.id === id) ?? null;
-  const internalSources = new Set(sources.filter((s) => s.origin === "internal").map((s) => s.id));
-
-  const visible = signals.filter((s) => {
-    if (tab === "all") return true;
-    const src = sourceById(s.source_id);
-    const origin = src?.origin ?? "internal";
-    return origin === tab;
-  });
-
-  const internalCount = signals.filter((s) => internalSources.has(s.source_id ?? "")).length;
-  const externalCount = signals.length - internalCount;
+  const visible = signals.filter((s) => tab === "all" ? true : tab === "internal" ? internalIds.has(s.source_id ?? "") : !internalIds.has(s.source_id ?? ""));
+  const internalCount = signals.filter((s) => internalIds.has(s.source_id ?? "")).length;
 
   return (
     <div>
       <PageHeader
         title="Signals"
-        meta="Internal & external evidence that informs your Foundation and feeds your agents."
-        actions={<button className="btn" onClick={() => setLogging((v) => !v)}>{logging ? "Close" : "+ Log signal"}</button>}
+        meta="Your intelligence dashboard — turn internal & external intel into product and go-to-market updates."
+        actions={<><a className="btn btn-secondary" href="/settings">Manage sources</a><button className="btn" onClick={() => setLogging((v) => !v)}>{logging ? "Close" : "+ Log signal"}</button></>}
       />
       <Banner>{error}</Banner>
 
@@ -132,45 +134,73 @@ export default function SignalsView() {
         </form>
       )}
 
-      {/* Sources catalog */}
-      <Section label="Sources">
-        {sources.length > 0 && (
-          <div className="row gap-2" style={{ flexWrap: "wrap", marginBottom: "var(--sp-4)" }}>
-            {sources.map((s) => (
-              <span key={s.id} className="chip" style={{ padding: "5px 11px" }}>
-                <span>{s.icon}</span> {s.label}
-                <span className="chip" style={{ marginLeft: 4, fontSize: 9.5, background: s.status === "connected" ? "var(--gn-fill)" : "var(--fill-2)", color: s.status === "connected" ? "var(--gn-text)" : "var(--tm)" }}>{s.status === "connected" ? "LIVE" : "MANUAL"}</span>
-              </span>
-            ))}
-          </div>
-        )}
-        <div className="t-sub t-muted" style={{ fontSize: 12.5, marginBottom: 10 }}>Add a source to track. Manual sources let you log signals now; connectors marked “live later” will pull automatically once connected.</div>
-        <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(230px, 1fr))", gap: "var(--sp-3)" }}>
-          {SOURCE_CATALOG.filter((d) => !registeredKinds.has(d.kind)).map((d) => (
-            <button key={d.kind} className="card card-pad pop" style={{ textAlign: "left" }} onClick={() => addSource(d)}>
-              <div className="row-between" style={{ marginBottom: 6 }}>
-                <span className="row gap-2"><span style={{ fontSize: 16 }}>{d.icon}</span><span style={{ fontSize: 13.5, fontWeight: 620 }}>{d.label}</span></span>
-                <Chip tone={d.origin === "internal" ? "accent" : "violet"}>{d.origin}</Chip>
+      {/* Intelligence lenses — the actionable core */}
+      <Section label="Turn intel into action">
+        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "var(--sp-4)" }}>
+          {LENSES.map((lens) => {
+            const relevant = lensSignals(lens);
+            const records = lens.recordType === "product" ? products : gtm;
+            const agents = lens.agentKeys.filter((k) => activeAgents.has(k)).map((k) => EXEC_BY_KEY[k]).filter(Boolean);
+            return (
+              <div key={lens.key} className="card card-pad" style={{ borderTop: `2px solid ${lens.accent}` }}>
+                <div className="row-between" style={{ marginBottom: 6 }}>
+                  <span className="t-h2" style={{ fontSize: 14.5 }}>{lens.title}</span>
+                  <Chip tone={lens.key === "product" ? "accent" : "violet"}>{relevant.length} signals</Chip>
+                </div>
+                <div className="t-sub t-muted" style={{ fontSize: 12.5, marginBottom: 12, lineHeight: 1.45 }}>{lens.blurb}</div>
+
+                {/* interpreting agents */}
+                <div className="row gap-2" style={{ marginBottom: 12 }}>
+                  {agents.length === 0 ? <a href="/" className="t-sub" style={{ color: "var(--ac-text)", fontWeight: 600 }}>Set up agents →</a>
+                    : agents.map((a) => (
+                      <span key={a.key} className="row gap-2" title={a.name} style={{ gap: 6 }}>
+                        <span style={{ width: 24, height: 24, borderRadius: 7, background: a.accent, color: "#fff", display: "inline-flex", alignItems: "center", justifyContent: "center", fontWeight: 700, fontSize: 11 }}>{a.short}</span>
+                      </span>
+                    ))}
+                </div>
+
+                {/* actionable: run the lead agent on a record to generate a proposal */}
+                {agents.length > 0 && (
+                  <div>
+                    <div className="t-label" style={{ marginBottom: 6 }}>Interpret into a record</div>
+                    {records.length === 0 ? (
+                      <div className="t-sub t-muted" style={{ fontSize: 12.5 }}>No {lens.recordType} records yet.</div>
+                    ) : (
+                      <div className="stack-3">
+                        {records.slice(0, 4).map((r) => {
+                          const lead = agents[0];
+                          const tagId = `${lead.key}:${r.id}`;
+                          return (
+                            <div key={r.id} className="row-between card" style={{ padding: "8px 12px" }}>
+                              <span style={{ fontSize: 13, fontWeight: 600, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{r.name}</span>
+                              {done === tagId
+                                ? <a className="chip chip-green" href={lens.recordType === "product" ? `/records/${r.id}` : `/gtm/${r.id}`}>Proposal ready →</a>
+                                : <button className="btn btn-sm" disabled={running !== null} onClick={() => runAgentOnRecord(lead.key, lens, r.id)}>{running === tagId ? "Running…" : `Run ${lead.short}`}</button>}
+                            </div>
+                          );
+                        })}
+                      </div>
+                    )}
+                  </div>
+                )}
               </div>
-              <div className="t-sub t-muted" style={{ fontSize: 12, lineHeight: 1.45 }}>{d.blurb}</div>
-              <div style={{ marginTop: 8, fontSize: 11, fontWeight: 700, color: d.live ? "var(--gn-text)" : "var(--tm)" }}>{d.live ? "+ Add" : "+ Add · live later"}</div>
-            </button>
-          ))}
+            );
+          })}
         </div>
       </Section>
 
-      {/* Signals stream */}
+      {/* Signal stream */}
       <Section label={<span className="row gap-2" style={{ gap: 10 }}>Signal stream
         <span className="row gap-2" style={{ gap: 4 }}>
           {(["all", "internal", "external"] as const).map((t) => (
-            <button key={t} onClick={() => setTab(t)} className="chip" style={{ cursor: "pointer", background: tab === t ? "var(--tp)" : "var(--fill)", color: tab === t ? "#fff" : "var(--ts)", textTransform: "capitalize" }}>
-              {t}{t === "internal" ? ` · ${internalCount}` : t === "external" ? ` · ${externalCount}` : ` · ${signals.length}`}
+            <button key={t} onClick={() => setTab(t)} className="chip" style={{ cursor: "pointer", textTransform: "capitalize", background: tab === t ? "var(--tp)" : "var(--fill)", color: tab === t ? "#fff" : "var(--ts)" }}>
+              {t} · {t === "internal" ? internalCount : t === "external" ? signals.length - internalCount : signals.length}
             </button>
           ))}
         </span>
       </span>}>
         {loading ? <div className="t-sub t-muted">Loading…</div>
-          : visible.length === 0 ? <div className="t-sub t-muted">No signals yet. Log one above, or connect a source.</div>
+          : visible.length === 0 ? <div className="t-sub t-muted">No signals yet. Log one above, or connect a source in Settings.</div>
           : (
             <div className="stack-3">
               {visible.map((s) => {

@@ -28,7 +28,7 @@ const GROUPS: Group[] = [
   {
     label: "Intelligence",
     items: [
-      { label: "Signals", href: "/signals", soon: true },
+      { label: "Signals", href: "/signals" },
       { label: "Competitors", href: "/competitors", soon: true },
     ],
   },
@@ -110,9 +110,12 @@ export default function Shell({
           ))}
 
           {/* Agents — standalone */}
-          <div style={{ marginBottom: 14 }}>
+          <div style={{ marginBottom: 6 }}>
             <a href="/agents" style={itemStyle(isActive("/agents"))}>
               <span>Agents</span>
+            </a>
+            <a href="/settings" style={itemStyle(isActive("/settings"))}>
+              <span>Settings</span>
             </a>
           </div>
         </div>
