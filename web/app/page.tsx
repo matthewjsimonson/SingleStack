@@ -10,7 +10,7 @@ export default async function HomePage() {
   } = await supabase.auth.getUser();
 
   return (
-    <Shell email={user?.email} crumbs={[{ label: "Foundation" }]}>
+    <Shell email={user?.email} crumbs={[{ label: "Overview" }]}>
       <FoundationView />
     </Shell>
   );
