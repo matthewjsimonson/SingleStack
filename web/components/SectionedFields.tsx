@@ -70,6 +70,32 @@ export default function SectionedFields({ target }: { target: Target }) {
     finally { setScaffolding(false); }
   }
 
+  // Add only the recommended sections/fields this record is MISSING, so an
+  // existing (pre-template) record can adopt the fuller structure without
+  // duplicating what it already has.
+  async function addMissing(missing: { section: string; fields: { key: string; label: string }[] }[]) {
+    setScaffolding(true); setError(null);
+    try {
+      const orgId = await getOrgId();
+      if (!orgId) throw new Error("Could not resolve your organization.");
+      const existingKeys = new Set(fields.map((f) => f.field_key));
+      let pos = fields.length;
+      const rows: Record<string, unknown>[] = [];
+      for (const s of missing) {
+        for (const f of s.fields) {
+          if (existingKeys.has(f.key)) continue;
+          rows.push({ org_id: orgId, [fk(target)]: target.id, field_key: f.key, label: f.label, section: s.section, value: null, position: pos++ });
+        }
+      }
+      if (rows.length) {
+        const { error } = await supabase.from("record_fields").insert(rows);
+        if (error) throw error;
+      }
+      await load();
+    } catch (e) { setError(e instanceof Error ? e.message : "Could not add sections."); }
+    finally { setScaffolding(false); }
+  }
+
   async function save(id: string) {
     setError(null);
     const { error } = await supabase.from("record_fields").update({ value: draft }).eq("id", id);
@@ -107,6 +133,14 @@ export default function SectionedFields({ target }: { target: Target }) {
     bySection[s].push(f);
   }
 
+  // What recommended structure is this record MISSING? (so existing records can
+  // adopt the fuller template without duplicating what they have)
+  const existingKeys = new Set(fields.map((f) => f.field_key));
+  const missing = templateFor(target.kind)
+    .map((s) => ({ section: s.section, fields: s.fields.filter((f) => !existingKeys.has(f.key)) }))
+    .filter((s) => s.fields.length > 0);
+  const missingFieldCount = missing.reduce((n, s) => n + s.fields.length, 0);
+
   if (fields.length === 0) {
     return (
       <Section label="Content">
@@ -143,6 +177,19 @@ export default function SectionedFields({ target }: { target: Target }) {
           </div>
         </div>
       </div>
+
+      {/* Adopt the fuller recommended structure (for records that predate it) */}
+      {missingFieldCount > 0 && (
+        <div className="card card-pad" style={{ marginBottom: "var(--sp-5)", display: "flex", alignItems: "center", gap: 14, background: "var(--ac-fill)", borderColor: "var(--ac)" }}>
+          <div style={{ flex: 1 }}>
+            <div style={{ fontSize: 13.5, fontWeight: 640, color: "var(--ac-text)" }}>Recommended structure available</div>
+            <div className="t-sub" style={{ fontSize: 12.5, color: "var(--ac-text)" }}>
+              Add {missingFieldCount} recommended field{missingFieldCount === 1 ? "" : "s"} across {missing.length} section{missing.length === 1 ? "" : "s"} ({missing.map((m) => m.section).join(", ")}) to fully define this {target.kind === "product" ? "product" : "GTM record"}.
+            </div>
+          </div>
+          <button className="btn btn-accent" disabled={scaffolding} onClick={() => addMissing(missing)}>{scaffolding ? "Adding…" : "Add sections"}</button>
+        </div>
+      )}
 
       {order.map((sName) => {
         const items = bySection[sName];
