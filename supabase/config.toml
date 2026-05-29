@@ -47,3 +47,8 @@ enable_confirmations = false
 # session (org-scoped via RLS), or the service_role key for trusted
 # server-side/testing calls. The gateway rejects unauthenticated requests.
 verify_jwt = true
+
+[functions.agent-chat]
+# Requires a valid JWT (the user's session) so the agent's data reads are
+# org-scoped by RLS. Same posture as agent-propose.
+verify_jwt = true

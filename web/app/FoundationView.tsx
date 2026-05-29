@@ -9,6 +9,7 @@ import { useEffect, useState, useCallback } from "react";
 import { useRouter } from "next/navigation";
 import { createClient } from "@/lib/supabase/client";
 import { PageHeader, Section, Chip, Confidence } from "@/components/ui";
+import ExecutiveRow from "@/components/ExecutiveRow";
 
 type Agent = { id: string; key: string; name: string; role: string | null };
 type Run = { id: string; status: string; model: string | null; cost_usd: number | null; started_at: string; agent_id: string };
@@ -83,6 +84,9 @@ export default function FoundationView() {
           <Stat n={totals.pending} label="Pending proposals" accent={totals.pending > 0} />
         </div>
       )}
+
+      {/* Executive team */}
+      <ExecutiveRow />
 
       <div style={{ display: "grid", gridTemplateColumns: "1.4fr 1fr", gap: "var(--sp-6)", alignItems: "start" }}>
         {/* Needs you: pending proposals */}
