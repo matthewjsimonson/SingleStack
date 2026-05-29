@@ -9,7 +9,7 @@ export default async function AgentsPage() {
   } = await supabase.auth.getUser();
 
   return (
-    <Shell email={user?.email} active="agents">
+    <Shell email={user?.email} crumbs={[{ label: "Agents" }]}>
       <AgentsView />
     </Shell>
   );

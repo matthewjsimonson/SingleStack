@@ -6,11 +6,12 @@ import { useRouter } from "next/navigation";
 import { createClient } from "@/lib/supabase/client";
 import { getOrgId } from "@/lib/org";
 import RecordWorkspace from "@/components/RecordWorkspace";
+import Modules from "@/components/Modules";
 import { Section, Chip, Banner, Empty } from "@/components/ui";
 
 type Gtm = { id: string; name: string; created_at: string };
 
-export default function RecordView({ recordId, onName }: { recordId: string; onName?: (n: string) => void }) {
+export default function RecordView({ recordId }: { recordId: string }) {
   const supabase = createClient();
   const router = useRouter();
   const [record, setRecord] = useState<{ id: string; name: string } | null>(null);
@@ -28,8 +29,7 @@ export default function RecordView({ recordId, onName }: { recordId: string; onN
     if (!rec) { setNotFound(true); setLoading(false); return; }
     const { data: g } = await supabase.from("gtm_records").select("id, name, created_at").eq("product_id", recordId).order("created_at");
     setRecord(rec); setGtm(g ?? []); setLoading(false);
-    onName?.(rec.name);
-  }, [supabase, recordId, onName]);
+  }, [supabase, recordId]);
 
   useEffect(() => { load(); }, [load]);
 
@@ -55,6 +55,8 @@ export default function RecordView({ recordId, onName }: { recordId: string; onN
       <h1 className="t-page" style={{ marginBottom: "var(--sp-6)" }}>{record.name}</h1>
 
       <RecordWorkspace target={{ kind: "product", id: recordId }} />
+
+      <Modules productId={recordId} />
 
       <Section label="GTM records" action={!creating ? <button className="btn btn-secondary btn-sm" onClick={() => setCreating(true)}>+ New GTM record</button> : undefined}>
         {creating && (
