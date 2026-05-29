@@ -112,7 +112,10 @@ export default function AgentsView() {
                     <span className="t-mono-xs" style={{ marginLeft: 8 }}>{a.model}</span>
                   </div>
                 </div>
-                <button className="btn btn-secondary btn-sm" onClick={() => startEdit(a)}>Edit</button>
+                <div className="row gap-2">
+                  <a className="btn btn-secondary btn-sm" href={`/agents/${a.id}`}>Open</a>
+                  <button className="btn btn-secondary btn-sm" onClick={() => startEdit(a)}>Edit</button>
+                </div>
               </div>
             ))}
           </div>
