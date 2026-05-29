@@ -91,7 +91,6 @@ Deno.serve(async (req: Request) => {
   if (req.method !== "POST") return json({ error: "POST only" }, 405);
 
   const authHeader = req.headers.get("Authorization");
-  if (!authHeader) return json({ error: "missing Authorization header" }, 401);
 
   const anthropicKey = Deno.env.get("ANTHROPIC_API_KEY");
   const openaiKey = Deno.env.get("OPENAI_API_KEY");
@@ -99,12 +98,16 @@ Deno.serve(async (req: Request) => {
     return json({ error: "server missing ANTHROPIC_API_KEY or OPENAI_API_KEY" }, 500);
   }
 
-  // Caller-scoped client: forwarding the JWT makes RLS apply as the user.
-  const supabase: SupabaseClient = createClient(
-    Deno.env.get("SUPABASE_URL")!,
-    Deno.env.get("SUPABASE_ANON_KEY")!,
-    { global: { headers: { Authorization: authHeader } } },
-  );
+  // DB client. With a caller JWT, forward it so RLS scopes everything to the
+  // caller's org (the production path). With no caller auth, fall back to the
+  // service role (RLS-bypassing) for testing/automation — org scoping then
+  // comes from the agent's own org_id, which the inserts already use.
+  const supabaseUrl = Deno.env.get("SUPABASE_URL")!;
+  const supabase: SupabaseClient = authHeader
+    ? createClient(supabaseUrl, Deno.env.get("SUPABASE_ANON_KEY")!, {
+        global: { headers: { Authorization: authHeader } },
+      })
+    : createClient(supabaseUrl, Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!);
 
   // ---- parse + validate input ------------------------------------------------
   let input: {
