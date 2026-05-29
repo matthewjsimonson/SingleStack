@@ -1,24 +1,25 @@
 // ============================================================================
-// agent-propose — the first working agent: embed → retrieve → Claude → propose.
+// agent-propose — the first working agent: read → Claude → propose.
 //
 // Plain English: this is the loop the prototype demoed, made real. Given an
 // agent and a target record, it:
-//   1. builds a query from the record + an optional instruction,
-//   2. embeds it and retrieves the most relevant document chunks (RAG),
-//   3. asks Claude to propose a concrete change to the record, citing why,
-//   4. writes that as a `proposal` (+ `proposal_changes`) for human approval,
-//   5. logs the whole invocation in `agent_runs`.
+//   1. loads the record and its fields,
+//   2. asks Claude to propose a concrete change to the record, citing why,
+//   3. writes that as a `proposal` (+ `proposal_changes`) for human approval,
+//   4. logs the whole invocation in `agent_runs`.
+//
+// Anthropic-only: the agent reasons from the record alone. RAG retrieval is
+// parked (Anthropic has no embeddings API) — the documents/document_chunks
+// tables and the match_document_chunks RPC stay in place so retrieval can be
+// switched on later without schema changes.
 //
 // Runs as the caller (the user's JWT is forwarded to Supabase), so every read
-// and write is fenced to their org by RLS. Provider keys come from secrets:
+// and write is fenced to their org by RLS. Provider key comes from a secret:
 //   ANTHROPIC_API_KEY  — Claude (the reasoning)
-//   OPENAI_API_KEY     — embeddings (text-embedding-3-small, 1536-dim)
 // ============================================================================
 
 import Anthropic from "npm:@anthropic-ai/sdk@0.69.0";
 import { createClient, type SupabaseClient } from "npm:@supabase/supabase-js@2";
-
-const EMBEDDING_MODEL = "text-embedding-3-small"; // 1536 dims — matches document_chunks
 const DEFAULT_CLAUDE_MODEL = "claude-opus-4-8";
 const DEFAULT_TOP_K = 6;
 
@@ -75,39 +76,22 @@ function json(body: unknown, status = 200): Response {
   });
 }
 
-async function embed(text: string, apiKey: string): Promise<number[]> {
-  const res = await fetch("https://api.openai.com/v1/embeddings", {
-    method: "POST",
-    headers: { "content-type": "application/json", authorization: `Bearer ${apiKey}` },
-    body: JSON.stringify({ model: EMBEDDING_MODEL, input: text }),
-  });
-  if (!res.ok) throw new Error(`embedding failed (${res.status}): ${await res.text()}`);
-  const data = await res.json();
-  return data.data[0].embedding;
-}
-
 Deno.serve(async (req: Request) => {
   if (req.method === "OPTIONS") return new Response("ok", { headers: CORS });
   if (req.method !== "POST") return json({ error: "POST only" }, 405);
 
   const authHeader = req.headers.get("Authorization");
+  if (!authHeader) return json({ error: "missing Authorization header" }, 401);
 
   const anthropicKey = Deno.env.get("ANTHROPIC_API_KEY");
-  const openaiKey = Deno.env.get("OPENAI_API_KEY");
-  if (!anthropicKey || !openaiKey) {
-    return json({ error: "server missing ANTHROPIC_API_KEY or OPENAI_API_KEY" }, 500);
-  }
+  if (!anthropicKey) return json({ error: "server missing ANTHROPIC_API_KEY" }, 500);
 
-  // DB client. With a caller JWT, forward it so RLS scopes everything to the
-  // caller's org (the production path). With no caller auth, fall back to the
-  // service role (RLS-bypassing) for testing/automation — org scoping then
-  // comes from the agent's own org_id, which the inserts already use.
-  const supabaseUrl = Deno.env.get("SUPABASE_URL")!;
-  const supabase: SupabaseClient = authHeader
-    ? createClient(supabaseUrl, Deno.env.get("SUPABASE_ANON_KEY")!, {
-        global: { headers: { Authorization: authHeader } },
-      })
-    : createClient(supabaseUrl, Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!);
+  // Caller-scoped client: forwarding the JWT makes RLS apply as the caller's org.
+  const supabase: SupabaseClient = createClient(
+    Deno.env.get("SUPABASE_URL")!,
+    Deno.env.get("SUPABASE_ANON_KEY")!,
+    { global: { headers: { Authorization: authHeader } } },
+  );
 
   // ---- parse + validate input ------------------------------------------------
   let input: {
@@ -181,23 +165,12 @@ Deno.serve(async (req: Request) => {
       .order("position", { ascending: true });
     if (fieldsErr) throw new Error(`fields lookup failed: ${fieldsErr.message}`);
 
-    // ---- embed a query built from the record + instruction ------------------
-    const queryText = [
-      instruction,
-      `Record: ${record.name ?? targetId}`,
-      ...(fields ?? []).map((f) => `${f.label}: ${f.value ?? ""}`),
-    ]
-      .filter(Boolean)
-      .join("\n");
-
-    const queryEmbedding = await embed(queryText, openaiKey);
-
-    // ---- retrieve relevant chunks (RAG) -------------------------------------
-    const { data: chunks, error: matchErr } = await supabase.rpc("match_document_chunks", {
-      query_embedding: queryEmbedding,
-      match_count: topK,
-    });
-    if (matchErr) throw new Error(`retrieval failed: ${matchErr.message}`);
+    // ---- retrieval (RAG) parked: Anthropic-only ----------------------------
+    // RAG needs an embedding model and Anthropic has no embeddings API, so the
+    // agent reasons from the record + its fields alone. The documents /
+    // document_chunks tables and match_document_chunks RPC remain in place, so
+    // retrieval can be re-enabled later without schema changes.
+    const chunks: Array<Record<string, unknown>> = [];
 
     // ---- ask Claude for a proposal ------------------------------------------
     const anthropic = new Anthropic({ apiKey: anthropicKey });

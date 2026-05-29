@@ -27,24 +27,6 @@ jobs:
           version: latest
       - name: Link to the project
         run: supabase link --project-ref "$PROJECT_REF"
-      - name: Repair migration history (one-time — pre-existing hand-applied schema)
-        # The foundation + change-engine schema (000001–000017) was applied by
-        # hand earlier, so the tables exist but aren't recorded in the migration
-        # log — making db push try to re-create them ("already exists"). Mark
-        # exactly those proven-present migrations as applied. 000000 is already
-        # recorded; 20260529000000_deploy_trigger is an idempotent
-        # 'comment on schema' that db push applies safely, so both are omitted
-        # (nothing genuinely-unapplied is skipped). Temporary — remove once green.
-        run: |
-          DBURL="postgresql://postgres.${PROJECT_REF}:${SUPABASE_DB_PASSWORD}@aws-0-us-west-2.pooler.supabase.com:5432/postgres?sslmode=require"
-          for V in 20260528000001 20260528000002 20260528000003 20260528000004 \
-                   20260528000005 20260528000006 20260528000007 20260528000008 \
-                   20260528000009 20260528000010 20260528000011 20260528000012 \
-                   20260528000013 20260528000014 20260528000015 20260528000016 \
-                   20260528000017; do
-            echo "repair applied $V"
-            supabase migration repair --status applied "$V" --db-url "$DBURL"
-          done
       - name: Push migrations (via session pooler, port 5432)
         # The CLI's default pooler selection lands on transaction mode (6543),
         # which rejected auth here and is the wrong mode for migrations anyway.
@@ -56,7 +38,7 @@ jobs:
       - name: Deploy Edge Functions
         # Deploys all functions if any exist; a no-op before the first function
         # lands, so merging this PR won't fail. Functions read their own secrets
-        # (e.g. ANTHROPIC_API_KEY, OPENAI_API_KEY) set in the Supabase dashboard.
+        # (e.g. ANTHROPIC_API_KEY) set in the Supabase dashboard.
         run: |
           if [ -d supabase/functions ] && [ -n "$(ls -A supabase/functions 2>/dev/null)" ]; then
             supabase functions deploy --project-ref "$PROJECT_REF"
