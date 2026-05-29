@@ -1,22 +1,26 @@
 "use client";
 
-// Signals — the intelligence dashboard (not a library; sources live in Settings).
-// Top: two agent-sliced lenses (Product: CPO+CEng / GTM: CRO+CCO) that turn
-// intel into action — run the right agent on the right record to generate a
-// proposal. Below: the signal stream (all/internal/external) + manual logging.
+// Signals — a tabbed intelligence area:
+//   • Homepage  — the dynamic dashboard. AI synthesizes ALL signals into THEMES,
+//                 split Product vs GTM, each with a prescriptive recommendation.
+//                 "Synthesize" runs the synthesize-signals function (real Claude).
+//   • Internal  — raw signal stream from your own tools/subscriptions.
+//   • External  — raw signal stream from market/web resources.
+// Sources are managed in Settings; agents primarily run from the Homepage.
 import { useEffect, useState, useCallback } from "react";
 import { createClient } from "@/lib/supabase/client";
 import { getOrgId } from "@/lib/org";
 import { PageHeader, Section, Chip, Banner, Confidence } from "@/components/ui";
-import { LENSES, type Lens } from "@/lib/lenses";
-import { EXEC_BY_KEY } from "@/lib/team";
 
 type Source = { id: string; label: string; icon: string; origin: string };
 type Signal = {
   id: string; title: string; why: string | null; conf_label: string | null; conf_level: number | null;
-  observed_at: string | null; scope: string; source_id: string | null; product_id: string | null; gtm_record_id: string | null;
+  observed_at: string | null; scope: string; source_id: string | null;
 };
-type Rec = { id: string; name: string };
+type Theme = {
+  id: string; category: string; title: string; summary: string | null;
+  recommendation: string | null; conf_level: number | null; signal_ids: string[] | null;
+};
 
 function ago(iso: string | null) {
   if (!iso) return "";
@@ -26,58 +30,51 @@ function ago(iso: string | null) {
   return `${Math.round(s / 86400)}d ago`;
 }
 
+type Tab = "home" | "internal" | "external";
+
 export default function SignalsView() {
   const supabase = createClient();
   const [sources, setSources] = useState<Source[]>([]);
   const [signals, setSignals] = useState<Signal[]>([]);
-  const [products, setProducts] = useState<Rec[]>([]);
-  const [gtm, setGtm] = useState<Rec[]>([]);
-  const [activeAgents, setActiveAgents] = useState<Set<string>>(new Set());
+  const [themes, setThemes] = useState<Theme[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  const [tab, setTab] = useState<"all" | "internal" | "external">("all");
-  const [running, setRunning] = useState<string | null>(null);
-  const [done, setDone] = useState<string | null>(null);
+  const [tab, setTab] = useState<Tab>("home");
+  const [synth, setSynth] = useState(false);
 
   const [logging, setLogging] = useState(false);
   const [form, setForm] = useState({ title: "", why: "", conf: "0.7", source_id: "" });
   const [busy, setBusy] = useState(false);
 
   const load = useCallback(async () => {
-    const [{ data: srcs }, { data: sigs }, { data: prods }, { data: gtms }, { data: ags }] = await Promise.all([
+    const [{ data: srcs }, { data: sigs }, { data: ths }] = await Promise.all([
       supabase.from("sources").select("id, label, icon, origin").order("created_at"),
-      supabase.from("signals").select("id, title, why, conf_label, conf_level, observed_at, scope, source_id, product_id, gtm_record_id").order("observed_at", { ascending: false, nullsFirst: false }).order("created_at", { ascending: false }),
-      supabase.from("product_records").select("id, name"),
-      supabase.from("gtm_records").select("id, name"),
-      supabase.from("agents").select("key").eq("is_active", true),
+      supabase.from("signals").select("id, title, why, conf_label, conf_level, observed_at, scope, source_id").order("observed_at", { ascending: false, nullsFirst: false }).order("created_at", { ascending: false }),
+      supabase.from("signal_themes").select("id, category, title, summary, recommendation, conf_level, signal_ids").order("position"),
     ]);
-    setSources(srcs ?? []); setSignals(sigs ?? []); setProducts(prods ?? []); setGtm(gtms ?? []);
-    setActiveAgents(new Set((ags ?? []).map((a) => a.key)));
+    setSources(srcs ?? []); setSignals(sigs ?? []); setThemes(ths ?? []);
     setLoading(false);
   }, [supabase]);
 
   useEffect(() => { load(); }, [load]);
 
-  const sourceById = (id: string | null) => sources.find((s) => s.id === id) ?? null;
   const internalIds = new Set(sources.filter((s) => s.origin === "internal").map((s) => s.id));
+  const sourceById = (id: string | null) => sources.find((s) => s.id === id) ?? null;
+  const isInternal = (s: Signal) => internalIds.has(s.source_id ?? "");
 
-  // signals relevant to a lens: org-wide always, plus the lens's record scope
-  const lensSignals = (lens: Lens) =>
-    signals.filter((s) => s.scope === "org" || s.scope === lens.recordType);
-
-  async function runAgentOnRecord(agentKey: string, lens: Lens, recordId: string) {
-    const tagId = `${agentKey}:${recordId}`;
-    setRunning(tagId); setError(null); setDone(null);
+  async function synthesize() {
+    setSynth(true); setError(null);
     try {
       const { data: s } = await supabase.auth.getSession();
       const token = s.session?.access_token;
-      const body = lens.recordType === "product" ? { agent_key: agentKey, product_id: recordId } : { agent_key: agentKey, gtm_record_id: recordId };
-      const { data, error } = await supabase.functions.invoke("agent-propose", { body, headers: token ? { Authorization: `Bearer ${token}` } : undefined });
+      const { data, error } = await supabase.functions.invoke("synthesize-signals", {
+        body: {}, headers: token ? { Authorization: `Bearer ${token}` } : undefined,
+      });
       if (error) throw error;
       if (data?.error) throw new Error(data.error);
-      setDone(tagId);
-    } catch (e) { setError(e instanceof Error ? e.message : "Agent run failed."); }
-    finally { setRunning(null); }
+      await load();
+    } catch (e) { setError(e instanceof Error ? e.message : "Synthesis failed."); }
+    finally { setSynth(false); }
   }
 
   async function logSignal(e: React.FormEvent) {
@@ -101,14 +98,15 @@ export default function SignalsView() {
     finally { setBusy(false); }
   }
 
-  const visible = signals.filter((s) => tab === "all" ? true : tab === "internal" ? internalIds.has(s.source_id ?? "") : !internalIds.has(s.source_id ?? ""));
-  const internalCount = signals.filter((s) => internalIds.has(s.source_id ?? "")).length;
+  const stream = signals.filter((s) => tab === "internal" ? isInternal(s) : tab === "external" ? !isInternal(s) : true);
+  const productThemes = themes.filter((t) => t.category === "product");
+  const gtmThemes = themes.filter((t) => t.category === "gtm");
 
   return (
     <div>
       <PageHeader
         title="Signals"
-        meta="Your intelligence dashboard — turn internal & external intel into product and go-to-market updates."
+        meta="Your intelligence dashboard — internal & external intel, synthesized into what to do next."
         actions={<><a className="btn btn-secondary" href="/settings">Manage sources</a><button className="btn" onClick={() => setLogging((v) => !v)}>{logging ? "Close" : "+ Log signal"}</button></>}
       />
       <Banner>{error}</Banner>
@@ -134,95 +132,106 @@ export default function SignalsView() {
         </form>
       )}
 
-      {/* Intelligence lenses — the actionable core */}
-      <Section label="Turn intel into action">
-        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "var(--sp-4)" }}>
-          {LENSES.map((lens) => {
-            const relevant = lensSignals(lens);
-            const records = lens.recordType === "product" ? products : gtm;
-            const agents = lens.agentKeys.filter((k) => activeAgents.has(k)).map((k) => EXEC_BY_KEY[k]).filter(Boolean);
-            return (
-              <div key={lens.key} className="card card-pad" style={{ borderTop: `2px solid ${lens.accent}` }}>
-                <div className="row-between" style={{ marginBottom: 6 }}>
-                  <span className="t-h2" style={{ fontSize: 14.5 }}>{lens.title}</span>
-                  <Chip tone={lens.key === "product" ? "accent" : "violet"}>{relevant.length} signals</Chip>
-                </div>
-                <div className="t-sub t-muted" style={{ fontSize: 12.5, marginBottom: 12, lineHeight: 1.45 }}>{lens.blurb}</div>
+      {/* Tabs */}
+      <div className="row gap-2" style={{ marginBottom: "var(--sp-5)", borderBottom: "1px solid var(--border)" }}>
+        {([["home", "Homepage"], ["internal", "Internal"], ["external", "External"]] as [Tab, string][]).map(([k, label]) => (
+          <button key={k} onClick={() => setTab(k)}
+            style={{ background: "none", border: "none", borderBottom: tab === k ? "2px solid var(--ac)" : "2px solid transparent", color: tab === k ? "var(--tp)" : "var(--ts)", fontWeight: 640, fontSize: 13.5, padding: "8px 14px", cursor: "pointer", marginBottom: -1 }}>
+            {label}{k === "internal" ? ` · ${signals.filter(isInternal).length}` : k === "external" ? ` · ${signals.filter((s) => !isInternal(s)).length}` : ""}
+          </button>
+        ))}
+      </div>
 
-                {/* interpreting agents */}
-                <div className="row gap-2" style={{ marginBottom: 12 }}>
-                  {agents.length === 0 ? <a href="/" className="t-sub" style={{ color: "var(--ac-text)", fontWeight: 600 }}>Set up agents →</a>
-                    : agents.map((a) => (
-                      <span key={a.key} className="row gap-2" title={a.name} style={{ gap: 6 }}>
-                        <span style={{ width: 24, height: 24, borderRadius: 7, background: a.accent, color: "#fff", display: "inline-flex", alignItems: "center", justifyContent: "center", fontWeight: 700, fontSize: 11 }}>{a.short}</span>
-                      </span>
-                    ))}
-                </div>
+      {loading ? <div className="t-sub t-muted">Loading…</div> : tab === "home" ? (
+        <HomeTab themes={themes} productThemes={productThemes} gtmThemes={gtmThemes} signals={signals} synth={synth} onSynthesize={synthesize} />
+      ) : (
+        <Stream stream={stream} sourceById={sourceById} kind={tab} />
+      )}
+    </div>
+  );
+}
 
-                {/* actionable: run the lead agent on a record to generate a proposal */}
-                {agents.length > 0 && (
-                  <div>
-                    <div className="t-label" style={{ marginBottom: 6 }}>Interpret into a record</div>
-                    {records.length === 0 ? (
-                      <div className="t-sub t-muted" style={{ fontSize: 12.5 }}>No {lens.recordType} records yet.</div>
-                    ) : (
-                      <div className="stack-3">
-                        {records.slice(0, 4).map((r) => {
-                          const lead = agents[0];
-                          const tagId = `${lead.key}:${r.id}`;
-                          return (
-                            <div key={r.id} className="row-between card" style={{ padding: "8px 12px" }}>
-                              <span style={{ fontSize: 13, fontWeight: 600, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{r.name}</span>
-                              {done === tagId
-                                ? <a className="chip chip-green" href={lens.recordType === "product" ? `/records/${r.id}` : `/gtm/${r.id}`}>Proposal ready →</a>
-                                : <button className="btn btn-sm" disabled={running !== null} onClick={() => runAgentOnRecord(lead.key, lens, r.id)}>{running === tagId ? "Running…" : `Run ${lead.short}`}</button>}
-                            </div>
-                          );
-                        })}
-                      </div>
-                    )}
-                  </div>
-                )}
-              </div>
-            );
-          })}
+function HomeTab({ themes, productThemes, gtmThemes, signals, synth, onSynthesize }: {
+  themes: Theme[]; productThemes: Theme[]; gtmThemes: Theme[]; signals: Signal[]; synth: boolean; onSynthesize: () => void;
+}) {
+  return (
+    <div>
+      <div className="card card-pad" style={{ marginBottom: "var(--sp-6)", display: "flex", alignItems: "center", gap: 16 }}>
+        <div style={{ flex: 1 }}>
+          <div style={{ fontSize: 14.5, fontWeight: 640 }}>Intelligence synthesis</div>
+          <div className="t-sub t-muted" style={{ fontSize: 12.5 }}>
+            {themes.length > 0 ? `${themes.length} themes across ${signals.length} signals. Re-synthesize when new intel lands.` : `Synthesize ${signals.length} signal${signals.length === 1 ? "" : "s"} into actionable themes.`}
+          </div>
         </div>
-      </Section>
+        <button className="btn btn-accent" disabled={synth || signals.length === 0} onClick={onSynthesize}>{synth ? "Synthesizing…" : themes.length ? "Re-synthesize" : "Synthesize"}</button>
+      </div>
 
-      {/* Signal stream */}
-      <Section label={<span className="row gap-2" style={{ gap: 10 }}>Signal stream
-        <span className="row gap-2" style={{ gap: 4 }}>
-          {(["all", "internal", "external"] as const).map((t) => (
-            <button key={t} onClick={() => setTab(t)} className="chip" style={{ cursor: "pointer", textTransform: "capitalize", background: tab === t ? "var(--tp)" : "var(--fill)", color: tab === t ? "#fff" : "var(--ts)" }}>
-              {t} · {t === "internal" ? internalCount : t === "external" ? signals.length - internalCount : signals.length}
-            </button>
-          ))}
-        </span>
-      </span>}>
-        {loading ? <div className="t-sub t-muted">Loading…</div>
-          : visible.length === 0 ? <div className="t-sub t-muted">No signals yet. Log one above, or connect a source in Settings.</div>
-          : (
-            <div className="stack-3">
-              {visible.map((s) => {
-                const src = sourceById(s.source_id);
-                return (
-                  <div key={s.id} className="card card-pad">
-                    <div className="row-between" style={{ gap: 12, alignItems: "flex-start", marginBottom: 5 }}>
-                      <span style={{ fontSize: 14.5, fontWeight: 620 }}>{s.title}</span>
-                      <Confidence label={s.conf_label} level={s.conf_level} />
-                    </div>
-                    {s.why && <p className="t-sub" style={{ lineHeight: 1.5, marginBottom: 8 }}>{s.why}</p>}
-                    <div className="row gap-2" style={{ flexWrap: "wrap" }}>
-                      {src && <Chip>{src.icon} {src.label}</Chip>}
-                      <Chip tone={s.scope === "org" ? "default" : s.scope === "product" ? "accent" : "violet"}>{s.scope}</Chip>
-                      {s.observed_at && <span className="t-mono-xs">{ago(s.observed_at)}</span>}
-                    </div>
-                  </div>
-                );
-              })}
+      {themes.length === 0 ? (
+        <div className="empty">
+          <div className="t-body" style={{ fontWeight: 600, marginBottom: 6 }}>No themes yet</div>
+          <div className="t-sub" style={{ maxWidth: 460, marginInline: "auto" }}>
+            {signals.length === 0 ? "Log signals or connect sources, then synthesize to see the patterns across them." : "Click Synthesize — AI will read every signal and surface the product & GTM themes worth acting on."}
+          </div>
+        </div>
+      ) : (
+        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "var(--sp-5)", alignItems: "start" }}>
+          <ThemeColumn title="Product themes" tone="accent" themes={productThemes} />
+          <ThemeColumn title="Go-to-market themes" tone="violet" themes={gtmThemes} />
+        </div>
+      )}
+    </div>
+  );
+}
+
+function ThemeColumn({ title, tone, themes }: { title: string; tone: "accent" | "violet"; themes: Theme[] }) {
+  return (
+    <div>
+      <div className="t-label" style={{ marginBottom: "var(--sp-3)" }}>{title}</div>
+      {themes.length === 0 ? <div className="t-sub t-muted" style={{ fontSize: 12.5 }}>No themes in this category.</div> : (
+        <div className="stack-3">
+          {themes.map((t) => (
+            <div key={t.id} className="card card-pad" style={{ borderTop: `2px solid var(--${tone === "accent" ? "ac" : "vl"})` }}>
+              <div className="row-between" style={{ gap: 10, alignItems: "flex-start", marginBottom: 6 }}>
+                <span style={{ fontSize: 14.5, fontWeight: 640 }}>{t.title}</span>
+                <Confidence level={t.conf_level} label={t.conf_level != null ? (t.conf_level >= 0.75 ? "High" : t.conf_level >= 0.5 ? "Med" : "Low") : null} />
+              </div>
+              {t.summary && <p className="t-sub" style={{ lineHeight: 1.5, marginBottom: 10 }}>{t.summary}</p>}
+              {t.recommendation && (
+                <div style={{ background: "var(--panel-2)", borderRadius: 8, padding: "10px 12px" }}>
+                  <div className="t-label" style={{ marginBottom: 3 }}>Recommended</div>
+                  <div className="t-body" style={{ fontSize: 13, lineHeight: 1.5 }}>{t.recommendation}</div>
+                </div>
+              )}
+              <div className="t-mono-xs" style={{ marginTop: 8 }}>{(t.signal_ids ?? []).length} supporting signal{(t.signal_ids ?? []).length === 1 ? "" : "s"}</div>
             </div>
-          )}
-      </Section>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function Stream({ stream, sourceById, kind }: { stream: Signal[]; sourceById: (id: string | null) => Source | null; kind: "internal" | "external" }) {
+  if (stream.length === 0) return <div className="t-sub t-muted">No {kind} signals yet. {kind === "internal" ? "Connect your tools in Settings, or log one." : "Add external sources in Settings, or log one."}</div>;
+  return (
+    <div className="stack-3">
+      {stream.map((s) => {
+        const src = sourceById(s.source_id);
+        return (
+          <div key={s.id} className="card card-pad">
+            <div className="row-between" style={{ gap: 12, alignItems: "flex-start", marginBottom: 5 }}>
+              <span style={{ fontSize: 14.5, fontWeight: 620 }}>{s.title}</span>
+              <Confidence label={s.conf_label} level={s.conf_level} />
+            </div>
+            {s.why && <p className="t-sub" style={{ lineHeight: 1.5, marginBottom: 8 }}>{s.why}</p>}
+            <div className="row gap-2" style={{ flexWrap: "wrap" }}>
+              {src && <Chip>{src.icon} {src.label}</Chip>}
+              <Chip tone={s.scope === "org" ? "default" : s.scope === "product" ? "accent" : "violet"}>{s.scope}</Chip>
+              {s.observed_at && <span className="t-mono-xs">{ago(s.observed_at)}</span>}
+            </div>
+          </div>
+        );
+      })}
     </div>
   );
 }
