@@ -1,0 +1,150 @@
+/* ============================================================================
+   SingleStack design tokens + base styles.
+   Ported from the v1 prototype (SingleStack - 5/SingleStack v1) so the real app
+   shares the prototype's exact look: cream canvas, Inter/Fraunces type, the
+   blue accent + "Lyra" agent color, soft card borders. Keep this the single
+   source of truth for color/spacing; components reference the variables.
+   ============================================================================ */
+
+:root {
+  /* surfaces */
+  --bg: #F7F6F3;        /* app canvas (cream) */
+  --tb: #FFFFFF;        /* top bar / white surfaces */
+  --tbb: #E8E6E1;       /* top bar border */
+  --cb: #FFFFFF;        /* card background */
+  --cbr: #E8E6E1;       /* card border */
+  --s2: #F1EFEB;        /* subtle fill */
+  --s3: #E8E5E0;        /* subtle fill, stronger */
+
+  /* sidebar (dark) */
+  --sb: #0F1115;
+  --sbb: #1F2126;
+  --sbl: #5A5F6B;
+  --sbt: #9BA0AB;
+  --sa: #1A1D22;
+  --sat: #5E8AFF;
+
+  /* text */
+  --tp: #0F1115;        /* primary */
+  --ts: #52555E;        /* secondary */
+  --tm: #8B8F99;        /* muted */
+
+  /* accent (blue) */
+  --ac: #5E8AFF;
+  --al: #EEF2FF;
+  --at: #3B5BCC;
+
+  /* amber / warning */
+  --am: #C97A1B;
+  --aml: #FAF3E7;
+  --amt: #7A4A0F;
+
+  /* red / danger */
+  --rd: #D14343;
+  --rdl: #FBEAEA;
+  --rdt: #8A2727;
+
+  /* violet (proposals) */
+  --vl: #6B6FE0;
+  --vll: #EDEEFB;
+  --vlt: #4044A8;
+
+  /* green (success / accepted) */
+  --gn: #3A8F66;
+  --gnl: #E6F2EB;
+  --gnt: #1F5C3B;
+
+  /* Lyra (agent) */
+  --lyra: #5E8AFF;
+  --lyra-bg: #EEF2FF;
+  --lyra-bd: #CBD7FF;
+
+  --radius: 8px;
+}
+
+* { box-sizing: border-box; margin: 0; padding: 0; }
+
+html, body {
+  font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
+  background: var(--bg);
+  color: var(--tp);
+  font-size: 15px;
+  font-feature-settings: 'cv11', 'ss01', 'ss03';
+  -webkit-font-smoothing: antialiased;
+  letter-spacing: -0.005em;
+  min-height: 100%;
+}
+
+.tabular { font-variant-numeric: tabular-nums; }
+.mono { font-family: 'JetBrains Mono', monospace; }
+.serif { font-family: 'Fraunces', Georgia, serif; }
+
+a { color: inherit; text-decoration: none; }
+button { font-family: inherit; cursor: pointer; }
+
+/* ---- reusable primitives (ported from prototype component styles) ---- */
+
+.card {
+  background: var(--cb);
+  border: 1px solid var(--cbr);
+  border-radius: var(--radius);
+}
+
+.btn {
+  background: var(--tp);
+  color: #fff;
+  border: none;
+  border-radius: 7px;
+  padding: 8px 15px;
+  font-size: 13.5px;
+  font-weight: 600;
+  letter-spacing: -0.005em;
+  transition: opacity 0.12s ease;
+}
+.btn:hover { opacity: 0.88; }
+.btn:disabled { opacity: 0.45; cursor: not-allowed; }
+
+.btn-ghost {
+  background: transparent;
+  color: var(--tp);
+  border: 1px solid var(--cbr);
+  border-radius: 7px;
+  padding: 7px 13px;
+  font-size: 13px;
+  font-weight: 500;
+}
+.btn-ghost:hover { background: var(--s2); }
+
+.btn-accent { background: var(--at); }
+.btn-green { background: var(--gnt); }
+
+.chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  border-radius: 999px;
+  padding: 3px 10px;
+  font-size: 11.5px;
+  font-weight: 600;
+  background: var(--s2);
+  color: var(--ts);
+}
+.chip-accent { background: var(--al); color: var(--at); }
+.chip-violet { background: var(--vll); color: var(--vlt); }
+.chip-green { background: var(--gnl); color: var(--gnt); }
+.chip-amber { background: var(--aml); color: var(--amt); }
+
+.input {
+  width: 100%;
+  background: #fff;
+  border: 1px solid var(--cbr);
+  border-radius: 7px;
+  padding: 9px 12px;
+  font-family: inherit;
+  font-size: 14px;
+  color: var(--tp);
+}
+.input:focus { outline: none; border-color: var(--ac); box-shadow: 0 0 0 3px var(--al); }
+
+.muted { color: var(--tm); }
+.secondary { color: var(--ts); }
