@@ -43,9 +43,7 @@ enable_signup = true
 enable_confirmations = false
 
 [functions.agent-propose]
-# verify_jwt = false: the gateway accepts calls without a JWT, so it can be
-# invoked from the SQL Editor (pg_net) or any client without a service_role
-# key. The function itself falls back to its built-in service role for DB
-# access. TEMPORARY for the first live test — re-enable (true) once we wire up
-# a real user JWT for org-scoped, production-safe calls.
-verify_jwt = false
+# Require a valid JWT (production-safe): callers pass the user's Supabase
+# session (org-scoped via RLS), or the service_role key for trusted
+# server-side/testing calls. The gateway rejects unauthenticated requests.
+verify_jwt = true
