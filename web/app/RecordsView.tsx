@@ -57,7 +57,7 @@ export default function RecordsView({ initial }: { initial: Record[] }) {
   }
 
   return (
-    <div style={{ maxWidth: 920 }}>
+    <div>
       <div style={{ display: "flex", alignItems: "baseline", justifyContent: "space-between", marginBottom: 20 }}>
         <h1 className="serif" style={{ fontSize: 24, fontWeight: 600 }}>
           Product records
