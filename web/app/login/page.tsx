@@ -53,33 +53,31 @@ export default function LoginPage() {
       }}
     >
       <div className="card" style={{ width: 380, padding: 32 }}>
-        <div
-          style={{ fontSize: 26, fontWeight: 650, letterSpacing: "-0.02em", marginBottom: 4 }}
-        >
-          SingleStack
+        <div className="row gap-2" style={{ marginBottom: 18 }}>
+          <span style={{
+            width: 24, height: 24, borderRadius: 7, background: "var(--ac)",
+            display: "inline-flex", alignItems: "center", justifyContent: "center",
+            color: "#fff", fontWeight: 800, fontSize: 14,
+          }}>S</span>
+          <span style={{ fontSize: 19, fontWeight: 680, letterSpacing: "-0.02em" }}>SingleStack</span>
         </div>
-        <p className="secondary" style={{ fontSize: 13.5, marginBottom: 24 }}>
+        <p className="t-sub" style={{ marginBottom: 24 }}>
           {mode === "signin" ? "Sign in to continue." : "Create your account."}
         </p>
 
         <form onSubmit={submit}>
-          <label style={{ display: "block", marginBottom: 14 }}>
-            <span style={{ fontSize: 12.5, fontWeight: 600, color: "var(--ts)" }}>
-              Email
-            </span>
+          <label className="field">
+            <span className="t-label">Email</span>
             <input
               className="input"
               type="email"
               required
               value={email}
               onChange={(e) => setEmail(e.target.value)}
-              style={{ marginTop: 6 }}
             />
           </label>
-          <label style={{ display: "block", marginBottom: 20 }}>
-            <span style={{ fontSize: 12.5, fontWeight: 600, color: "var(--ts)" }}>
-              Password
-            </span>
+          <label className="field">
+            <span className="t-label">Password</span>
             <input
               className="input"
               type="password"
@@ -87,35 +85,16 @@ export default function LoginPage() {
               minLength={6}
               value={password}
               onChange={(e) => setPassword(e.target.value)}
-              style={{ marginTop: 6 }}
             />
           </label>
 
           {error && (
-            <div
-              style={{
-                background: "var(--rdl)",
-                color: "var(--rdt)",
-                borderRadius: 7,
-                padding: "9px 12px",
-                fontSize: 13,
-                marginBottom: 14,
-              }}
-            >
+            <div className="banner banner-error" style={{ marginBottom: 14 }}>
               {error}
             </div>
           )}
           {notice && (
-            <div
-              style={{
-                background: "var(--gnl)",
-                color: "var(--gnt)",
-                borderRadius: 7,
-                padding: "9px 12px",
-                fontSize: 13,
-                marginBottom: 14,
-              }}
-            >
+            <div className="banner" style={{ background: "var(--gn-fill)", color: "var(--gn-text)", marginBottom: 14 }}>
               {notice}
             </div>
           )}
@@ -134,7 +113,7 @@ export default function LoginPage() {
           style={{
             background: "none",
             border: "none",
-            color: "var(--at)",
+            color: "var(--ac-text)",
             fontSize: 13,
             fontWeight: 600,
             marginTop: 18,
