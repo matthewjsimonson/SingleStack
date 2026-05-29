@@ -25,38 +25,16 @@ jobs:
       - uses: supabase/setup-cli@v1
         with:
           version: latest
-      - name: Check DB password secret (safe — never prints the value)
-        # Temporary diagnostic for the 28P01 auth failure. Prints only the
-        # password's length and character class, never the password itself.
-        # Remove once the deploy is green.
-        run: |
-          PW="$SUPABASE_DB_PASSWORD"
-          echo "length: ${#PW}"
-          [ -z "$PW" ] && echo "WARNING: secret is EMPTY"
-          case "$PW" in
-            *[!A-Za-z0-9]*) echo "charset: contains NON-alphanumeric (special) characters" ;;
-            *) echo "charset: alphanumeric only" ;;
-          esac
-          case "$PW" in [[:space:]]*) echo "WARNING: leading whitespace" ;; esac
-          case "$PW" in *[[:space:]]) echo "WARNING: trailing whitespace" ;; esac
-      - name: Probe pooler auth with psql (verdict only — never prints the value)
-        # Decisive test: does THIS password authenticate to THIS project's
-        # pooler, independent of the supabase CLI? Prints AUTH_OK or the auth
-        # error (no password). Never fails the step. Remove once green.
-        run: |
-          command -v psql >/dev/null || { sudo apt-get update -qq && sudo apt-get install -y -qq postgresql-client >/dev/null; }
-          export PGPASSWORD="$SUPABASE_DB_PASSWORD"
-          HOST="aws-0-us-west-2.pooler.supabase.com"
-          for PORT in 5432 6543; do
-            echo "--- probe $HOST:$PORT  user=postgres.$PROJECT_REF ---"
-            psql "host=$HOST port=$PORT user=postgres.$PROJECT_REF dbname=postgres sslmode=require" \
-              -tAc "select 'AUTH_OK'" 2>&1 | sed 's/^/    /' || true
-          done
-          echo "--- probe done ---"
       - name: Link to the project
         run: supabase link --project-ref "$PROJECT_REF"
-      - name: Push migrations
-        run: supabase db push
+      - name: Push migrations (via session pooler, port 5432)
+        # The CLI's default pooler selection lands on transaction mode (6543),
+        # which rejected auth here and is the wrong mode for migrations anyway.
+        # Point db push at the SESSION pooler (5432) explicitly — the connection
+        # verified to authenticate. NOTE: the DB password must stay alphanumeric
+        # so it's safe inline in this URL (no URL-encoding needed).
+        run: |
+          supabase db push --db-url "postgresql://postgres.${PROJECT_REF}:${SUPABASE_DB_PASSWORD}@aws-0-us-west-2.pooler.supabase.com:5432/postgres?sslmode=require"
       - name: Deploy Edge Functions
         # Deploys all functions if any exist; a no-op before the first function
         # lands, so merging this PR won't fail. Functions read their own secrets
