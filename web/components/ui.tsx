@@ -91,3 +91,27 @@ export function Confidence({ label, level }: { label?: string | null; level?: nu
     </Chip>
   );
 }
+
+// Back link — consistent "get out of this page" affordance.
+export function BackLink({ href, label }: { href: string; label: string }) {
+  return (
+    <a href={href} className="t-sub" style={{ display: "inline-flex", alignItems: "center", gap: 5, fontWeight: 600, marginBottom: "var(--sp-4)" }}>
+      <span style={{ fontSize: 15, lineHeight: 1 }}>‹</span> {label}
+    </a>
+  );
+}
+
+// Placeholder for nav sections that are scaffolded but not built yet. Keeps the
+// full IA navigable and communicates intent.
+export function ComingSoon({ title, blurb }: { title: string; blurb: string }) {
+  return (
+    <div>
+      <PageHeader title={title} meta="Planned" />
+      <div className="empty">
+        <div className="t-body" style={{ fontWeight: 600, marginBottom: 6 }}>Coming soon</div>
+        <div className="t-sub" style={{ maxWidth: 460, marginInline: "auto" }}>{blurb}</div>
+      </div>
+    </div>
+  );
+}
+

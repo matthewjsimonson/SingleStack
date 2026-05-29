@@ -7,7 +7,7 @@ import { createClient } from "@/lib/supabase/client";
 import { getOrgId } from "@/lib/org";
 import RecordWorkspace from "@/components/RecordWorkspace";
 import Modules from "@/components/Modules";
-import { Section, Chip, Banner, Empty } from "@/components/ui";
+import { Section, Chip, Banner, Empty, BackLink } from "@/components/ui";
 
 type Gtm = { id: string; name: string; created_at: string };
 
@@ -51,6 +51,7 @@ export default function RecordView({ recordId }: { recordId: string }) {
 
   return (
     <div>
+      <BackLink href="/products" label="Product records" />
       <div className="row" style={{ marginBottom: 6 }}><Chip tone="accent">Product record</Chip></div>
       <h1 className="t-page" style={{ marginBottom: "var(--sp-6)" }}>{record.name}</h1>
 

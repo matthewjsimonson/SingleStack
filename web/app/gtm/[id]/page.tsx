@@ -16,7 +16,7 @@ export default async function GtmPage({
   } = await supabase.auth.getUser();
 
   return (
-    <Shell email={user?.email} crumbs={[{ label: "Foundation", href: "/" }, { label: "GTM record" }]}>
+    <Shell email={user?.email} crumbs={[{ label: "Foundation", href: "/" }, { label: "GTM records", href: "/gtm" }]}>
       <GtmView gtmId={id} />
     </Shell>
   );
