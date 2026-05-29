@@ -1,163 +1,159 @@
 "use client";
 
-// Overview — the command center. Not just a record list: a live view of what's
-// happening across the Foundation (your agent team, pending proposals needing
-// you, recent activity) plus quick actions. The natural-language bar is an
-// honest first step — it routes intent to the right place; full agentic
-// execution is a later layer.
+// Homepage — the command center. Chat/action bar, the executive team row, a row
+// of dynamic KPI widgets (including "Needs your review" → opens a drawer), and
+// tailored suggested-prompt widgets. Not a list of record counts — a useful,
+// dynamic view of what's happening and what to do next.
 import { useEffect, useState, useCallback } from "react";
 import { useRouter } from "next/navigation";
 import { createClient } from "@/lib/supabase/client";
-import { PageHeader, Section, Chip, Confidence } from "@/components/ui";
+import { PageHeader, Section } from "@/components/ui";
 import ExecutiveRow from "@/components/ExecutiveRow";
+import ReviewDrawer from "@/components/ReviewDrawer";
 
-type Agent = { id: string; key: string; name: string; role: string | null };
-type Run = { id: string; status: string; model: string | null; cost_usd: number | null; started_at: string; agent_id: string };
-type Pending = { id: string; title: string; conf_label: string | null; conf_level: number | null; product_id: string | null; gtm_record_id: string | null };
-type Product = { id: string; name: string };
-type Gtm = { id: string; name: string };
+type Run = { id: string; status: string; started_at: string; cost_usd: number | null };
 
 export default function FoundationView() {
   const router = useRouter();
   const supabase = createClient();
-  const [agents, setAgents] = useState<Agent[]>([]);
-  const [runs, setRuns] = useState<Run[]>([]);
-  const [pending, setPending] = useState<Pending[]>([]);
-  const [products, setProducts] = useState<Product[]>([]);
-  const [gtm, setGtm] = useState<Gtm[]>([]);
-  const [totals, setTotals] = useState({ products: 0, gtm: 0, signals: 0, pending: 0 });
+  const [stats, setStats] = useState({ pending: 0, runs7d: 0, signals7d: 0, fieldsCompletion: 0, cost30d: 0 });
   const [loading, setLoading] = useState(true);
   const [q, setQ] = useState("");
+  const [reviewOpen, setReviewOpen] = useState(false);
 
   const load = useCallback(async () => {
-    const [{ data: ags }, { data: rns }, { data: prps }, { data: prods }, { data: gtms }, { count: sig }] = await Promise.all([
-      supabase.from("agents").select("id, key, name, role").eq("is_active", true).order("name"),
-      supabase.from("agent_runs").select("id, status, model, cost_usd, started_at, agent_id").order("started_at", { ascending: false }).limit(6),
-      supabase.from("proposals").select("id, title, conf_label, conf_level, product_id, gtm_record_id").eq("status", "pending").order("created_at", { ascending: false }).limit(8),
-      supabase.from("product_records").select("id, name"),
-      supabase.from("gtm_records").select("id, name"),
-      supabase.from("signals").select("id", { count: "exact", head: true }),
+    const now = Date.now();
+    const d7 = new Date(now - 7 * 864e5).toISOString();
+    const d30 = new Date(now - 30 * 864e5).toISOString();
+    const [{ count: pending }, { data: runs }, { count: sig7 }, { data: fields }, { data: cost }] = await Promise.all([
+      supabase.from("proposals").select("id", { count: "exact", head: true }).eq("status", "pending"),
+      supabase.from("agent_runs").select("id, status, started_at").gte("started_at", d7),
+      supabase.from("signals").select("id", { count: "exact", head: true }).gte("observed_at", d7),
+      supabase.from("record_fields").select("value"),
+      supabase.from("agent_runs").select("cost_usd").gte("started_at", d30),
     ]);
-    setAgents(ags ?? []); setRuns(rns ?? []); setPending(prps ?? []);
-    setProducts(prods ?? []); setGtm(gtms ?? []);
-    setTotals({ products: (prods ?? []).length, gtm: (gtms ?? []).length, signals: sig ?? 0, pending: (prps ?? []).length });
+    const filled = (fields ?? []).filter((f) => f.value && (f.value as string).trim()).length;
+    const total = (fields ?? []).length;
+    const cost30d = (cost ?? []).reduce((s, r) => s + (Number(r.cost_usd) || 0), 0);
+    setStats({
+      pending: pending ?? 0,
+      runs7d: (runs ?? []).length,
+      signals7d: sig7 ?? 0,
+      fieldsCompletion: total ? Math.round((filled / total) * 100) : 0,
+      cost30d,
+    });
     setLoading(false);
   }, [supabase]);
 
   useEffect(() => { load(); }, [load]);
 
-  const agentName = (id: string) => agents.find((a) => a.id === id)?.name ?? "Agent";
-  const proposalHref = (p: Pending) => p.product_id ? `/records/${p.product_id}` : p.gtm_record_id ? `/gtm/${p.gtm_record_id}` : "/";
-  const targetName = (p: Pending) =>
-    p.product_id ? (products.find((x) => x.id === p.product_id)?.name ?? "product")
-      : p.gtm_record_id ? (gtm.find((x) => x.id === p.gtm_record_id)?.name ?? "GTM record") : "";
+  // open the review drawer if linked with ?review=1 (from a suggestion)
+  useEffect(() => {
+    if (typeof window !== "undefined" && new URLSearchParams(window.location.search).get("review") === "1") {
+      setReviewOpen(true);
+    }
+  }, []);
 
-  // NL bar: route obvious intents; otherwise point to where the action lives.
   function runIntent(e: React.FormEvent) {
     e.preventDefault();
     const t = q.trim().toLowerCase();
     if (!t) return;
-    if (t.includes("product")) router.push("/products");
-    else if (t.includes("gtm") || t.includes("messaging") || t.includes("go-to-market")) router.push("/gtm");
-    else if (t.includes("agent")) router.push("/agents");
+    if (t.includes("review") || t.includes("proposal")) setReviewOpen(true);
+    else if (t.includes("gtm") || t.includes("messaging")) router.push("/gtm");
+    else if (t.includes("agent") || t.includes("brief")) router.push("/"); // exec row is here
+    else if (t.includes("signal")) router.push("/signals");
     else router.push("/products");
   }
 
+  // Suggested prompts — tailored to current state. (Heuristic today; will key off
+  // role/company once that exists.)
+  const suggestions = buildSuggestions(stats);
+
   return (
     <div>
-      <PageHeader title="Overview" meta="Your command center — agents, what needs you, and what's moving." />
+      <PageHeader title="Homepage" meta="Your command center — what's moving, what needs you, and what to do next." />
 
-      {/* NL action bar */}
+      {/* chat / action bar */}
       <form onSubmit={runIntent} className="card" style={{ display: "flex", alignItems: "center", gap: 10, padding: "10px 14px", marginBottom: "var(--sp-6)" }}>
         <span style={{ width: 26, height: 26, borderRadius: 7, background: "var(--ac-fill)", color: "var(--ac-text)", display: "inline-flex", alignItems: "center", justifyContent: "center", fontWeight: 800, fontSize: 13, flexShrink: 0 }}>⌘</span>
-        <input value={q} onChange={(e) => setQ(e.target.value)} placeholder="Ask or act — e.g. “new product record”, “review pending proposals”, “add an agent”…"
+        <input value={q} onChange={(e) => setQ(e.target.value)} placeholder="Ask or act — e.g. “review pending proposals”, “open GTM records”, “brief me”…"
           style={{ flex: 1, border: "none", outline: "none", fontSize: 14, background: "transparent", color: "var(--tp)" }} />
         <button className="btn btn-sm" type="submit">Go</button>
       </form>
 
-      {/* stats */}
-      {!loading && (
-        <div className="card card-pad" style={{ marginBottom: "var(--sp-6)", display: "grid", gridTemplateColumns: "repeat(4, 1fr)", gap: "var(--sp-4)" }}>
-          <Stat n={totals.products} label="Products" href="/products" />
-          <Stat n={totals.gtm} label="GTM records" href="/gtm" />
-          <Stat n={totals.signals} label="Signals" />
-          <Stat n={totals.pending} label="Pending proposals" accent={totals.pending > 0} />
-        </div>
-      )}
-
-      {/* Executive team */}
+      {/* executive team */}
       <ExecutiveRow />
 
-      <div style={{ display: "grid", gridTemplateColumns: "1.4fr 1fr", gap: "var(--sp-6)", alignItems: "start" }}>
-        {/* Needs you: pending proposals */}
-        <Section label="Needs your review">
-          {loading ? <div className="t-sub t-muted">Loading…</div>
-            : pending.length === 0 ? <div className="t-sub t-muted">Nothing pending. Agents will surface proposals here as they run.</div>
-            : (
-              <div className="stack-3">
-                {pending.map((p) => (
-                  <a key={p.id} href={proposalHref(p)} className="card card-link card-pad">
-                    <div className="row-between" style={{ gap: 10, alignItems: "flex-start" }}>
-                      <div>
-                        <div style={{ fontSize: 14, fontWeight: 620, marginBottom: 3 }}>{p.title}</div>
-                        <div className="t-sub t-muted" style={{ fontSize: 12 }}>{targetName(p)}</div>
-                      </div>
-                      <Confidence label={p.conf_label} level={p.conf_level} />
-                    </div>
-                  </a>
-                ))}
-              </div>
-            )}
-        </Section>
-
-        {/* Your team + recent activity */}
-        <div>
-          <Section label="Your team">
-            {agents.length === 0 ? (
-              <a href="/agents" className="card card-link card-pad t-sub" style={{ color: "var(--ac-text)", fontWeight: 600 }}>+ Set up your first agent →</a>
-            ) : (
-              <div className="stack-3">
-                {agents.map((a) => (
-                  <a key={a.id} href="/agents" className="card card-link" style={{ padding: "12px 14px", display: "flex", alignItems: "center", gap: 10 }}>
-                    <span style={{ width: 30, height: 30, borderRadius: 8, background: "var(--ac-fill)", color: "var(--ac-text)", display: "inline-flex", alignItems: "center", justifyContent: "center", fontWeight: 700, fontSize: 13, flexShrink: 0 }}>
-                      {a.name.slice(0, 2).toUpperCase()}
-                    </span>
-                    <div style={{ minWidth: 0 }}>
-                      <div style={{ fontSize: 13.5, fontWeight: 620, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{a.name}</div>
-                      <div className="t-sub t-muted" style={{ fontSize: 12, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{a.role || "Agent"}</div>
-                    </div>
-                  </a>
-                ))}
-              </div>
-            )}
-          </Section>
-
-          <Section label="Recent activity">
-            {runs.length === 0 ? <div className="t-sub t-muted">No agent runs yet.</div>
-              : (
-                <div className="card">
-                  {runs.map((r, i) => (
-                    <div key={r.id} style={{ padding: "10px 14px", borderTop: i === 0 ? "none" : "1px solid var(--border)", display: "flex", alignItems: "center", gap: 8 }}>
-                      <span style={{ width: 7, height: 7, borderRadius: 999, flexShrink: 0, background: r.status === "succeeded" ? "var(--gn)" : r.status === "failed" ? "var(--rd-text)" : "var(--am-text)" }} />
-                      <span style={{ fontSize: 13, fontWeight: 600, flex: 1, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{agentName(r.agent_id)}</span>
-                      <span className="t-mono-xs">{new Date(r.started_at).toLocaleDateString()}</span>
-                    </div>
-                  ))}
-                </div>
-              )}
-          </Section>
+      {/* KPI widgets — dynamic, useful */}
+      <Section label="At a glance">
+        <div style={{ display: "grid", gridTemplateColumns: "repeat(4, 1fr)", gap: "var(--sp-3)" }}>
+          <Widget label="Needs review" value={loading ? "—" : String(stats.pending)} hint="pending proposals" accent={stats.pending > 0} onClick={() => setReviewOpen(true)} cta="Review →" />
+          <Widget label="Agent activity" value={loading ? "—" : String(stats.runs7d)} hint="runs · last 7d" />
+          <Widget label="New signals" value={loading ? "—" : String(stats.signals7d)} hint="last 7d" />
+          <Widget label="Foundation filled" value={loading ? "—" : `${stats.fieldsCompletion}%`} hint="record completeness" ring={stats.fieldsCompletion} />
         </div>
-      </div>
+      </Section>
+
+      {/* suggested prompts */}
+      <Section label="Suggested for you">
+        <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(260px, 1fr))", gap: "var(--sp-3)" }}>
+          {suggestions.map((s, i) => (
+            <button key={i} className="card card-pad pop" style={{ textAlign: "left" }} onClick={s.action}>
+              <div className="row gap-2" style={{ marginBottom: 6 }}>
+                <span style={{ width: 24, height: 24, borderRadius: 7, background: s.tint, display: "inline-flex", alignItems: "center", justifyContent: "center", fontSize: 13 }}>{s.icon}</span>
+                <span className="t-label" style={{ color: "var(--tm)" }}>{s.tag}</span>
+              </div>
+              <div style={{ fontSize: 13.5, fontWeight: 600, lineHeight: 1.4 }}>{s.text}</div>
+            </button>
+          ))}
+        </div>
+      </Section>
+
+      <ReviewDrawer open={reviewOpen} onClose={() => setReviewOpen(false)} onChanged={load} />
     </div>
   );
 }
 
-function Stat({ n, label, href, accent }: { n: number; label: string; href?: string; accent?: boolean }) {
-  const inner = (
-    <div className="stat">
-      <span className="stat-num" style={{ color: accent ? "var(--vl-text)" : undefined }}>{n}</span>
-      <span className="stat-label">{label}</span>
+function Widget({ label, value, hint, accent, onClick, cta, ring }: {
+  label: string; value: string; hint: string; accent?: boolean; onClick?: () => void; cta?: string; ring?: number;
+}) {
+  const clickable = !!onClick;
+  return (
+    <div className={`card card-pad ${clickable ? "pop" : ""}`} onClick={onClick} style={{ cursor: clickable ? "pointer" : "default", display: "flex", flexDirection: "column", gap: 4 }}>
+      <div className="row-between">
+        <span className="stat-label">{label}</span>
+        {ring != null && <Ring pct={ring} />}
+      </div>
+      <span className="stat-num" style={{ color: accent ? "var(--vl-text)" : undefined }}>{value}</span>
+      <span className="t-sub t-muted" style={{ fontSize: 12 }}>{hint}</span>
+      {cta && <span style={{ color: "var(--ac-text)", fontSize: 12.5, fontWeight: 600, marginTop: 4 }}>{cta}</span>}
     </div>
   );
-  return href ? <a href={href} style={{ display: "block" }}>{inner}</a> : inner;
+}
+
+function Ring({ pct }: { pct: number }) {
+  const r = 8, c = 2 * Math.PI * r, off = c - (pct / 100) * c;
+  const color = pct === 100 ? "var(--gn)" : pct > 0 ? "var(--ac)" : "var(--border-strong)";
+  return (
+    <svg width="20" height="20" viewBox="0 0 20 20" style={{ transform: "rotate(-90deg)" }}>
+      <circle cx="10" cy="10" r={r} fill="none" stroke="var(--fill-2)" strokeWidth="2.5" />
+      <circle cx="10" cy="10" r={r} fill="none" stroke={color} strokeWidth="2.5" strokeDasharray={c} strokeDashoffset={off} strokeLinecap="round" />
+    </svg>
+  );
+}
+
+type Suggestion = { tag: string; text: string; icon: string; tint: string; action: () => void };
+function buildSuggestions(stats: { pending: number; fieldsCompletion: number; signals7d: number }): Suggestion[] {
+  // Note: client-side, so we build closures lazily via window.location for routing.
+  const go = (href: string) => () => { window.location.href = href; };
+  const list: Suggestion[] = [];
+  if (stats.pending > 0)
+    list.push({ tag: "Review", text: `Review ${stats.pending} pending proposal${stats.pending === 1 ? "" : "s"} and accept what's ready`, icon: "📝", tint: "var(--vl-fill)", action: go("/?review=1") });
+  if (stats.fieldsCompletion < 70)
+    list.push({ tag: "Foundation", text: "Fill out your product record — completeness is low", icon: "◆", tint: "var(--ac-fill)", action: go("/products") });
+  list.push({ tag: "Product", text: "Ask the CPO agent to sharpen your positioning", icon: "✦", tint: "var(--ac-fill)", action: go("/") });
+  list.push({ tag: "GTM", text: "Draft hero messaging for a GTM record", icon: "◈", tint: "var(--vl-fill)", action: go("/gtm") });
+  if (stats.signals7d === 0)
+    list.push({ tag: "Signals", text: "Connect a signal source to start informing your agents", icon: "📡", tint: "var(--gn-fill)", action: go("/signals") });
+  return list.slice(0, 4);
 }

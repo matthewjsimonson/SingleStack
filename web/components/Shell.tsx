@@ -91,7 +91,7 @@ export default function Shell({
         <div style={{ flex: 1, overflowY: "auto", padding: "0 8px" }}>
           {/* Command center home */}
           <a href="/" style={{ ...itemStyle(isActive("/")), marginBottom: 14 }}>
-            <span>Overview</span>
+            <span>Homepage</span>
           </a>
 
           {GROUPS.map((g) => (

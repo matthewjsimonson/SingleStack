@@ -16,6 +16,18 @@ type Target = { kind: "product" | "gtm"; id: string };
 const UNGROUPED = "Details";
 const fk = (t: Target) => (t.kind === "product" ? "product_id" : "gtm_record_id");
 
+// Build lookups from the type's template so the editor can show the section's
+// guidance blurb and each field's prompt as prescriptive helper text.
+function guides(kind: "product" | "gtm") {
+  const sectionBlurb: Record<string, string> = {};
+  const fieldHint: Record<string, string> = {};
+  for (const s of templateFor(kind)) {
+    sectionBlurb[s.section] = s.blurb;
+    for (const f of s.fields) if (f.placeholder) fieldHint[f.label.toLowerCase()] = f.placeholder;
+  }
+  return { sectionBlurb, fieldHint };
+}
+
 export default function SectionedFields({ target }: { target: Target }) {
   const supabase = createClient();
   const [fields, setFields] = useState<Field[]>([]);
@@ -110,46 +122,77 @@ export default function SectionedFields({ target }: { target: Target }) {
     );
   }
 
+  const { sectionBlurb, fieldHint } = guides(target.kind);
+  const totalFilled = fields.filter((f) => f.value && f.value.trim()).length;
+  const overallPct = fields.length ? Math.round((totalFilled / fields.length) * 100) : 0;
+
   return (
     <div>
       <Banner>{error}</Banner>
+
+      {/* Prescriptive progress header — sets the expectation that the record
+          should be completed, and shows how far along it is. */}
+      <div className="card card-pad" style={{ marginBottom: "var(--sp-5)", display: "flex", alignItems: "center", gap: 16 }}>
+        <CompletionRing pct={overallPct} big />
+        <div style={{ flex: 1 }}>
+          <div style={{ fontSize: 14.5, fontWeight: 640 }}>
+            {overallPct === 100 ? "Record complete" : overallPct === 0 ? "Let's build out this record" : `${overallPct}% complete — keep going`}
+          </div>
+          <div className="t-sub t-muted" style={{ fontSize: 12.5 }}>
+            {totalFilled} of {fields.length} fields filled across {order.length} section{order.length === 1 ? "" : "s"}. A complete record makes your agents sharper.
+          </div>
+        </div>
+      </div>
+
       {order.map((sName) => {
         const items = bySection[sName];
         const filled = items.filter((f) => f.value && f.value.trim()).length;
         const pct = Math.round((filled / items.length) * 100);
+        const blurb = sectionBlurb[sName];
         return (
           <section className="section" key={sName}>
-            <div className="section-head">
-              <div className="row gap-2">
-                <span className="t-label">{sName}</span>
-                <CompletionRing pct={pct} />
-                <span className="t-sub t-muted" style={{ fontSize: 12 }}>{filled}/{items.length}</span>
+            <div className="section-head" style={{ alignItems: "flex-start" }}>
+              <div>
+                <div className="row gap-2">
+                  <span className="t-h2" style={{ fontSize: 14.5 }}>{sName}</span>
+                  <span className="chip" style={{ background: pct === 100 ? "var(--gn-fill)" : "var(--fill)", color: pct === 100 ? "var(--gn-text)" : "var(--ts)" }}>{filled}/{items.length}</span>
+                </div>
+                {blurb && <div className="t-sub t-muted" style={{ fontSize: 12.5, marginTop: 2 }}>{blurb}</div>}
               </div>
               {addingIn !== sName && <button className="btn btn-secondary btn-sm" onClick={() => { setAddingIn(sName); setNewLabel(""); }}>+ Field</button>}
             </div>
 
             <div className="card" style={{ overflow: "hidden" }}>
-              {items.map((f, i) => (
-                <div key={f.id} style={{ padding: "14px 18px", borderTop: i === 0 ? "none" : "1px solid var(--border)", background: f.value ? "transparent" : "var(--panel-2)" }}>
-                  <div className="row-between" style={{ marginBottom: 5 }}>
-                    <span className="t-label" style={{ color: f.value ? "var(--tm)" : "var(--ac-text)" }}>{f.label}</span>
-                    {editing !== f.id && <button className="btn btn-secondary btn-sm" onClick={() => { setEditing(f.id); setDraft(f.value ?? ""); }}>{f.value ? "Edit" : "Fill in"}</button>}
-                  </div>
-                  {editing === f.id ? (
-                    <div>
-                      <textarea className="textarea" rows={3} autoFocus value={draft} onChange={(e) => setDraft(e.target.value)} style={{ marginBottom: 8 }} />
+              {items.map((f, i) => {
+                const done = !!(f.value && f.value.trim());
+                const hint = fieldHint[f.label.toLowerCase()];
+                return (
+                  <div key={f.id} style={{ padding: "14px 18px", borderTop: i === 0 ? "none" : "1px solid var(--border)", background: done ? "transparent" : "var(--panel-2)" }}>
+                    <div className="row-between" style={{ marginBottom: done ? 5 : 2 }}>
                       <div className="row gap-2">
-                        <button className="btn btn-sm" onClick={() => save(f.id)}>Save</button>
-                        <button className="btn btn-secondary btn-sm" onClick={() => setEditing(null)}>Cancel</button>
+                        {/* checklist check — a visual, not a list bullet */}
+                        <Check done={done} />
+                        <span className="t-h2" style={{ fontSize: 13, fontWeight: 620 }}>{f.label}</span>
                       </div>
+                      {editing !== f.id && <button className={`btn btn-sm ${done ? "btn-secondary" : ""}`} onClick={() => { setEditing(f.id); setDraft(f.value ?? ""); }}>{done ? "Edit" : "Fill in"}</button>}
                     </div>
-                  ) : (
-                    <div className="t-body" style={{ lineHeight: 1.6, whiteSpace: "pre-wrap" }}>
-                      {f.value || <span className="t-muted" style={{ fontStyle: "italic" }}>Empty</span>}
-                    </div>
-                  )}
-                </div>
-              ))}
+                    {editing === f.id ? (
+                      <div style={{ marginLeft: 26 }}>
+                        {hint && <div className="t-sub t-muted" style={{ fontSize: 12, marginBottom: 6 }}>{hint}</div>}
+                        <textarea className="textarea" rows={3} autoFocus value={draft} onChange={(e) => setDraft(e.target.value)} placeholder={hint} style={{ marginBottom: 8 }} />
+                        <div className="row gap-2">
+                          <button className="btn btn-sm" onClick={() => save(f.id)}>Save</button>
+                          <button className="btn btn-secondary btn-sm" onClick={() => setEditing(null)}>Cancel</button>
+                        </div>
+                      </div>
+                    ) : (
+                      <div className="t-body" style={{ lineHeight: 1.6, whiteSpace: "pre-wrap", marginLeft: 26 }}>
+                        {done ? f.value : <span className="t-sub t-muted">{hint || "Not filled in yet."}</span>}
+                      </div>
+                    )}
+                  </div>
+                );
+              })}
               {addingIn === sName && (
                 <div style={{ padding: "12px 18px", borderTop: "1px solid var(--border)" }}>
                   <div className="row gap-2">
@@ -167,14 +210,36 @@ export default function SectionedFields({ target }: { target: Target }) {
   );
 }
 
-// Small SVG completion ring — a visual, not a static icon.
-function CompletionRing({ pct }: { pct: number }) {
-  const r = 7, c = 2 * Math.PI * r, off = c - (pct / 100) * c;
+// Checklist check mark — filled green when done, hollow when not.
+function Check({ done }: { done: boolean }) {
+  return (
+    <span style={{
+      width: 18, height: 18, borderRadius: 999, flexShrink: 0,
+      display: "inline-flex", alignItems: "center", justifyContent: "center",
+      background: done ? "var(--gn)" : "transparent",
+      border: done ? "none" : "1.5px solid var(--border-strong)",
+      color: "#fff", fontSize: 11, fontWeight: 800,
+    }}>{done ? "✓" : ""}</span>
+  );
+}
+
+// SVG completion ring — a visual, not a static icon. `big` renders a larger
+// ring with the percentage label inside, for the record progress header.
+function CompletionRing({ pct, big }: { pct: number; big?: boolean }) {
+  const size = big ? 52 : 18;
+  const sw = big ? 4 : 2.5;
+  const cx = size / 2, r = cx - sw;
+  const c = 2 * Math.PI * r, off = c - (pct / 100) * c;
   const color = pct === 100 ? "var(--gn)" : pct > 0 ? "var(--ac)" : "var(--border-strong)";
   return (
-    <svg width="18" height="18" viewBox="0 0 18 18" style={{ transform: "rotate(-90deg)" }}>
-      <circle cx="9" cy="9" r={r} fill="none" stroke="var(--fill-2)" strokeWidth="2.5" />
-      <circle cx="9" cy="9" r={r} fill="none" stroke={color} strokeWidth="2.5" strokeDasharray={c} strokeDashoffset={off} strokeLinecap="round" />
-    </svg>
+    <span style={{ position: "relative", width: size, height: size, flexShrink: 0, display: "inline-block" }}>
+      <svg width={size} height={size} viewBox={`0 0 ${size} ${size}`} style={{ transform: "rotate(-90deg)" }}>
+        <circle cx={cx} cy={cx} r={r} fill="none" stroke="var(--fill-2)" strokeWidth={sw} />
+        <circle cx={cx} cy={cx} r={r} fill="none" stroke={color} strokeWidth={sw} strokeDasharray={c} strokeDashoffset={off} strokeLinecap="round" />
+      </svg>
+      {big && (
+        <span style={{ position: "absolute", inset: 0, display: "flex", alignItems: "center", justifyContent: "center", fontSize: 13, fontWeight: 700, color: "var(--tp)" }}>{pct}%</span>
+      )}
+    </span>
   );
 }
