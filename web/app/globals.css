@@ -1,69 +1,63 @@
 /* ============================================================================
-   SingleStack design tokens + base styles.
-   Ported from the v1 prototype (SingleStack - 5/SingleStack v1) so the real app
-   shares the prototype's exact look: cream canvas, Inter/Fraunces type, the
-   blue accent + "Lyra" agent color, soft card borders. Keep this the single
-   source of truth for color/spacing; components reference the variables.
+   SingleStack design system.
+   Tokens + a small, consistent component layer. Screens compose these classes
+   instead of ad-hoc inline styles, so the product reads as one coherent thing.
    ============================================================================ */
 
 :root {
-  /* surfaces — neutral, modern (near-white canvas, crisp cards) */
-  --bg: #FAFAFA;        /* app canvas */
-  --tb: #FFFFFF;        /* top bar / white surfaces */
-  --tbb: #ECECEC;       /* top bar border */
-  --cb: #FFFFFF;        /* card background */
-  --cbr: #EAEAEA;       /* card border (light, hairline) */
-  --s2: #F4F4F5;        /* subtle fill */
-  --s3: #ECECEE;        /* subtle fill, stronger */
+  /* surfaces — neutral, modern */
+  --bg: #FAFAFA;
+  --panel: #FFFFFF;
+  --border: #ECECEE;
+  --border-strong: #DEDEE1;
+  --fill: #F4F4F5;
+  --fill-2: #ECECEE;
 
-  /* sidebar (dark, refined) */
-  --sb: #111113;
-  --sbb: #232326;
-  --sbl: #6B6B72;
-  --sbt: #A1A1A8;
-  --sa: #1C1C20;
-  --sat: #6E8BFF;
+  /* sidebar (near-black) */
+  --sb: #0E0E10;
+  --sb-border: #232326;
+  --sb-fill: #1A1A1D;
+  --sb-text: #A1A1A8;
+  --sb-text-dim: #6B6B72;
 
   /* text */
-  --tp: #18181B;        /* primary */
-  --ts: #5B5B63;        /* secondary */
-  --tm: #9A9AA2;        /* muted */
+  --tp: #18181B;
+  --ts: #52525B;
+  --tm: #9A9AA2;
 
-  /* accent (blue) */
-  --ac: #4F6BFF;
-  --al: #EEF1FF;
-  --at: #3A52CC;
+  /* accent (indigo/blue) */
+  --ac: #4F46E5;
+  --ac-fill: #EEF0FE;
+  --ac-text: #4338CA;
 
-  /* amber / warning */
-  --am: #C97A1B;
-  --aml: #FAF3E7;
-  --amt: #7A4A0F;
-
-  /* red / danger */
-  --rd: #D14343;
-  --rdl: #FBEAEA;
-  --rdt: #8A2727;
-
-  /* violet (proposals) */
-  --vl: #6B6FE0;
-  --vll: #EDEEFB;
-  --vlt: #4044A8;
+  /* violet (GTM / proposals) */
+  --vl: #7C3AED;
+  --vl-fill: #F3EEFE;
+  --vl-text: #6D28D9;
 
   /* green (success / accepted) */
-  --gn: #3A8F66;
-  --gnl: #E6F2EB;
-  --gnt: #1F5C3B;
+  --gn: #16A34A;
+  --gn-fill: #E8F6EE;
+  --gn-text: #15803D;
 
-  /* Lyra (agent) */
-  --lyra: #5E8AFF;
-  --lyra-bg: #EEF2FF;
-  --lyra-bd: #CBD7FF;
+  /* amber */
+  --am-fill: #FBF3E4;
+  --am-text: #92600A;
+
+  /* red */
+  --rd-fill: #FCEDED;
+  --rd-text: #B42318;
 
   --radius: 10px;
+  --radius-sm: 7px;
+  --radius-lg: 14px;
 
-  /* type scale — clean, restrained */
-  --t-page: 20px;       /* page titles (no decorative serif) */
-  --t-section: 12px;    /* section labels (uppercase, tracked) */
+  /* spacing scale (4px base) */
+  --sp-1: 4px;  --sp-2: 8px;  --sp-3: 12px;  --sp-4: 16px;
+  --sp-5: 20px; --sp-6: 24px; --sp-8: 32px;  --sp-10: 40px;
+
+  --shadow-sm: 0 1px 2px rgba(16, 16, 20, 0.04);
+  --shadow-md: 0 1px 3px rgba(16, 16, 20, 0.06), 0 6px 16px rgba(16, 16, 20, 0.05);
 }
 
 * { box-sizing: border-box; margin: 0; padding: 0; }
@@ -72,98 +66,104 @@ html, body {
   font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
   background: var(--bg);
   color: var(--tp);
-  font-size: 15px;
-  font-feature-settings: 'cv11', 'ss01', 'ss03';
+  font-size: 14px;
+  line-height: 1.5;
   -webkit-font-smoothing: antialiased;
-  letter-spacing: -0.005em;
+  letter-spacing: -0.006em;
   min-height: 100%;
 }
 
-.tabular { font-variant-numeric: tabular-nums; }
-.mono { font-family: 'JetBrains Mono', monospace; }
-.serif { font-family: 'Fraunces', Georgia, serif; }
-
+.mono { font-family: 'JetBrains Mono', ui-monospace, monospace; }
 a { color: inherit; text-decoration: none; }
 button { font-family: inherit; cursor: pointer; }
 
-/* ---- reusable primitives (ported from prototype component styles) ---- */
+/* ---- typography ---------------------------------------------------------- */
+.t-page    { font-size: 22px; font-weight: 680; letter-spacing: -0.025em; color: var(--tp); }
+.t-h2      { font-size: 16px; font-weight: 640; letter-spacing: -0.015em; color: var(--tp); }
+.t-label   { font-size: 11px; font-weight: 600; letter-spacing: 0.06em; text-transform: uppercase; color: var(--tm); }
+.t-body    { font-size: 14px; color: var(--tp); }
+.t-sub     { font-size: 13px; color: var(--ts); }
+.t-muted   { color: var(--tm); }
+.t-mono-xs { font-family: 'JetBrains Mono', monospace; font-size: 11px; color: var(--tm); }
 
+/* ---- card ---------------------------------------------------------------- */
 .card {
-  background: var(--cb);
-  border: 1px solid var(--cbr);
+  background: var(--panel);
+  border: 1px solid var(--border);
   border-radius: var(--radius);
 }
-.card-hover { transition: border-color 0.12s ease, box-shadow 0.12s ease; }
-.card-hover:hover {
-  border-color: #DADADA;
-  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.04), 0 4px 12px rgba(0, 0, 0, 0.03);
-}
+.card-pad { padding: var(--sp-5); }
+.card-link { display: block; transition: border-color 0.12s ease, box-shadow 0.12s ease, transform 0.06s ease; }
+.card-link:hover { border-color: var(--border-strong); box-shadow: var(--shadow-md); }
+.card-link:active { transform: translateY(0.5px); }
 
-/* page title — clean Inter, not serif */
-.page-title { font-size: var(--t-page); font-weight: 650; letter-spacing: -0.02em; color: var(--tp); }
-
-/* section label — small, uppercase, tracked */
-.section-label {
-  font-size: var(--t-section); font-weight: 600; letter-spacing: 0.06em;
-  text-transform: uppercase; color: var(--tm);
-}
-
+/* ---- buttons ------------------------------------------------------------- */
 .btn {
-  background: var(--tp);
-  color: #fff;
-  border: none;
-  border-radius: 8px;
-  padding: 8px 15px;
-  font-size: 13px;
-  font-weight: 600;
-  letter-spacing: -0.005em;
-  transition: opacity 0.12s ease, transform 0.04s ease;
+  display: inline-flex; align-items: center; justify-content: center; gap: 6px;
+  background: var(--tp); color: #fff; border: 1px solid var(--tp);
+  border-radius: var(--radius-sm); padding: 8px 14px;
+  font-size: 13px; font-weight: 600; letter-spacing: -0.005em;
+  transition: opacity 0.12s ease, transform 0.04s ease, background 0.12s ease;
+  white-space: nowrap;
 }
 .btn:hover { opacity: 0.9; }
 .btn:active { transform: translateY(0.5px); }
 .btn:disabled { opacity: 0.4; cursor: not-allowed; }
 
-.btn-ghost {
-  background: transparent;
-  color: var(--tp);
-  border: 1px solid var(--cbr);
-  border-radius: 7px;
-  padding: 7px 13px;
-  font-size: 13px;
-  font-weight: 500;
-}
-.btn-ghost:hover { background: var(--s2); }
+.btn-secondary { background: var(--panel); color: var(--tp); border: 1px solid var(--border-strong); }
+.btn-secondary:hover { background: var(--fill); opacity: 1; }
 
-.btn-accent { background: var(--at); }
-.btn-green { background: var(--gnt); }
+.btn-accent { background: var(--ac); border-color: var(--ac); }
+.btn-success { background: var(--gn); border-color: var(--gn); }
 
+.btn-sm { padding: 5px 10px; font-size: 12px; }
+.btn-icon { padding: 6px 8px; }
+
+/* ---- chips / badges ------------------------------------------------------ */
 .chip {
-  display: inline-flex;
-  align-items: center;
-  gap: 5px;
-  border-radius: 999px;
-  padding: 3px 10px;
-  font-size: 11.5px;
-  font-weight: 600;
-  background: var(--s2);
-  color: var(--ts);
+  display: inline-flex; align-items: center; gap: 5px;
+  border-radius: 999px; padding: 3px 9px;
+  font-size: 11px; font-weight: 600; letter-spacing: 0.01em;
+  background: var(--fill); color: var(--ts);
 }
-.chip-accent { background: var(--al); color: var(--at); }
-.chip-violet { background: var(--vll); color: var(--vlt); }
-.chip-green { background: var(--gnl); color: var(--gnt); }
-.chip-amber { background: var(--aml); color: var(--amt); }
+.chip-accent { background: var(--ac-fill); color: var(--ac-text); }
+.chip-violet { background: var(--vl-fill); color: var(--vl-text); }
+.chip-green  { background: var(--gn-fill); color: var(--gn-text); }
+.chip-amber  { background: var(--am-fill); color: var(--am-text); }
+.chip-dot::before { content: ""; width: 5px; height: 5px; border-radius: 999px; background: currentColor; opacity: 0.7; }
 
-.input {
-  width: 100%;
-  background: #fff;
-  border: 1px solid var(--cbr);
-  border-radius: 7px;
-  padding: 9px 12px;
-  font-family: inherit;
-  font-size: 14px;
-  color: var(--tp);
+/* ---- inputs -------------------------------------------------------------- */
+.input, .textarea, .select {
+  width: 100%; background: #fff; border: 1px solid var(--border-strong);
+  border-radius: var(--radius-sm); padding: 9px 12px;
+  font-family: inherit; font-size: 14px; color: var(--tp);
+  transition: border-color 0.12s ease, box-shadow 0.12s ease;
 }
-.input:focus { outline: none; border-color: var(--ac); box-shadow: 0 0 0 3px var(--al); }
+.input:focus, .textarea:focus, .select:focus {
+  outline: none; border-color: var(--ac); box-shadow: 0 0 0 3px var(--ac-fill);
+}
+.textarea { resize: vertical; line-height: 1.5; }
 
-.muted { color: var(--tm); }
-.secondary { color: var(--ts); }
+.field { display: block; margin-bottom: var(--sp-4); }
+.field > .t-label { display: block; margin-bottom: 6px; }
+
+/* ---- layout helpers ------------------------------------------------------ */
+.row { display: flex; align-items: center; }
+.row-between { display: flex; align-items: center; justify-content: space-between; }
+.gap-2 { gap: var(--sp-2); } .gap-3 { gap: var(--sp-3); }
+.grid-cards { display: grid; gap: var(--sp-3); grid-template-columns: repeat(auto-fill, minmax(280px, 1fr)); }
+.stack-3 > * + * { margin-top: var(--sp-3); }
+
+/* ---- banners ------------------------------------------------------------- */
+.banner { border-radius: var(--radius-sm); padding: 10px 13px; font-size: 13px; }
+.banner-error { background: var(--rd-fill); color: var(--rd-text); }
+
+/* ---- empty state --------------------------------------------------------- */
+.empty {
+  border: 1px dashed var(--border-strong); border-radius: var(--radius);
+  padding: var(--sp-10) var(--sp-6); text-align: center; background: var(--panel);
+}
+
+/* ---- section ------------------------------------------------------------- */
+.section { margin-bottom: var(--sp-8); }
+.section-head { display: flex; align-items: center; justify-content: space-between; margin-bottom: var(--sp-3); }
