@@ -121,7 +121,7 @@ export default function RecordView({ recordId }: { recordId: string }) {
   const resolved = proposals.filter((p) => p.status !== "pending");
 
   return (
-    <div style={{ maxWidth: 920 }}>
+    <div>
       <a href="/" className="btn-ghost" style={{ display: "inline-block", marginBottom: 18 }}>← Records</a>
       <h1 className="serif" style={{ fontSize: 26, fontWeight: 600, marginBottom: 4 }}>{record.name}</h1>
       <p className="muted mono" style={{ fontSize: 11, marginBottom: 22 }}>{record.id}</p>

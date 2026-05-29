@@ -99,7 +99,13 @@ export default function Shell({
         >
           <span style={{ fontSize: 13.5, fontWeight: 600 }}>{title}</span>
         </header>
-        <main style={{ flex: 1, overflowY: "auto", padding: 28 }}>{children}</main>
+        <main style={{ flex: 1, overflowY: "auto", padding: "28px 24px" }}>
+          {/* Centered, responsive content column — reflows with the window. */}
+          <div style={{ maxWidth: 960, margin: "0 auto", width: "100%" }}>
+            {children}
+          </div>
+        </main>
+
       </div>
     </div>
   );
