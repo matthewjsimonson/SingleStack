@@ -1,7 +1,7 @@
-// Home: records (products + GTM), with in-app creation of either type.
+// Foundation — the landing/overview. The big-picture view of the whole model.
 import { createClient } from "@/lib/supabase/server";
 import Shell from "@/components/Shell";
-import RecordsView from "./RecordsView";
+import FoundationView from "./FoundationView";
 
 export default async function HomePage() {
   const supabase = await createClient();
@@ -10,8 +10,8 @@ export default async function HomePage() {
   } = await supabase.auth.getUser();
 
   return (
-    <Shell email={user?.email} active="records">
-      <RecordsView />
+    <Shell email={user?.email} crumbs={[{ label: "Foundation" }]}>
+      <FoundationView />
     </Shell>
   );
 }

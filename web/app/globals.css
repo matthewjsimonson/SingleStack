@@ -5,59 +5,60 @@
    ============================================================================ */
 
 :root {
-  /* surfaces — neutral, modern */
-  --bg: #FAFAFA;
+  /* surfaces — more depth/contrast than the previous airy version */
+  --bg: #F2F3F5;          /* app canvas (cooler, slightly darker) */
   --panel: #FFFFFF;
-  --border: #ECECEE;
-  --border-strong: #DEDEE1;
-  --fill: #F4F4F5;
-  --fill-2: #ECECEE;
+  --panel-2: #F7F8FA;     /* nested/secondary panel */
+  --border: #E2E4E9;
+  --border-strong: #CFD2DA;
+  --fill: #EFF1F4;
+  --fill-2: #E6E8EE;
 
-  /* sidebar (near-black) */
-  --sb: #0E0E10;
-  --sb-border: #232326;
-  --sb-fill: #1A1A1D;
-  --sb-text: #A1A1A8;
-  --sb-text-dim: #6B6B72;
+  /* sidebar (true near-black, crisp) */
+  --sb: #0B0C0E;
+  --sb-border: #26272B;
+  --sb-fill: #1B1C20;
+  --sb-fill-2: #141518;
+  --sb-text: #B4B6BD;
+  --sb-text-dim: #6E7077;
 
-  /* text */
-  --tp: #18181B;
-  --ts: #52525B;
-  --tm: #9A9AA2;
+  /* text — slightly deeper for contrast */
+  --tp: #131417;
+  --ts: #4B4D55;
+  --tm: #8B8E97;
 
-  /* accent (indigo/blue) */
+  /* accent (indigo) */
   --ac: #4F46E5;
-  --ac-fill: #EEF0FE;
+  --ac-fill: #ECEEFE;
   --ac-text: #4338CA;
 
   /* violet (GTM / proposals) */
   --vl: #7C3AED;
-  --vl-fill: #F3EEFE;
+  --vl-fill: #F2ECFE;
   --vl-text: #6D28D9;
 
-  /* green (success / accepted) */
+  /* green */
   --gn: #16A34A;
-  --gn-fill: #E8F6EE;
+  --gn-fill: #E6F5EC;
   --gn-text: #15803D;
 
   /* amber */
-  --am-fill: #FBF3E4;
+  --am-fill: #FAF1E0;
   --am-text: #92600A;
 
   /* red */
-  --rd-fill: #FCEDED;
+  --rd-fill: #FBEBEB;
   --rd-text: #B42318;
 
   --radius: 10px;
   --radius-sm: 7px;
   --radius-lg: 14px;
 
-  /* spacing scale (4px base) */
   --sp-1: 4px;  --sp-2: 8px;  --sp-3: 12px;  --sp-4: 16px;
   --sp-5: 20px; --sp-6: 24px; --sp-8: 32px;  --sp-10: 40px;
 
-  --shadow-sm: 0 1px 2px rgba(16, 16, 20, 0.04);
-  --shadow-md: 0 1px 3px rgba(16, 16, 20, 0.06), 0 6px 16px rgba(16, 16, 20, 0.05);
+  --shadow-sm: 0 1px 2px rgba(11, 12, 14, 0.06);
+  --shadow-md: 0 1px 2px rgba(11, 12, 14, 0.06), 0 8px 24px rgba(11, 12, 14, 0.07);
 }
 
 * { box-sizing: border-box; margin: 0; padding: 0; }
@@ -91,7 +92,13 @@ button { font-family: inherit; cursor: pointer; }
   background: var(--panel);
   border: 1px solid var(--border);
   border-radius: var(--radius);
+  box-shadow: var(--shadow-sm);
 }
+
+/* big-picture stat tiles (foundation overview) */
+.stat { display: flex; flex-direction: column; gap: 3px; }
+.stat-num { font-size: 22px; font-weight: 700; letter-spacing: -0.03em; color: var(--tp); font-variant-numeric: tabular-nums; }
+.stat-label { font-size: 11px; font-weight: 600; letter-spacing: 0.04em; text-transform: uppercase; color: var(--tm); }
 .card-pad { padding: var(--sp-5); }
 .card-link { display: block; transition: border-color 0.12s ease, box-shadow 0.12s ease, transform 0.06s ease; }
 .card-link:hover { border-color: var(--border-strong); box-shadow: var(--shadow-md); }

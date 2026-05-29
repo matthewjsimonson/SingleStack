@@ -17,7 +17,7 @@ export default async function RecordPage({
   } = await supabase.auth.getUser();
 
   return (
-    <Shell email={user?.email} active="records">
+    <Shell email={user?.email} crumbs={[{ label: "Foundation", href: "/" }, { label: "Product" }]}>
       <RecordView recordId={id} />
     </Shell>
   );
