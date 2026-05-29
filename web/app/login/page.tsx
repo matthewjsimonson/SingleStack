@@ -54,8 +54,22 @@ export default function LoginPage() {
     >
       <div className="card" style={{ width: 380, padding: 32 }}>
         <div
-          className="serif"
-          style={{ fontSize: 26, fontWeight: 600, marginBottom: 4 }}
+          style={{
+            fontSize: 11,
+            fontWeight: 700,
+            letterSpacing: "0.04em",
+            color: "#fff",
+            background: "#16a34a",
+            borderRadius: 6,
+            padding: "4px 9px",
+            display: "inline-block",
+            marginBottom: 14,
+          }}
+        >
+          BUILD v3 · GTM
+        </div>
+        <div
+          style={{ fontSize: 26, fontWeight: 650, letterSpacing: "-0.02em", marginBottom: 4 }}
         >
           SingleStack
         </div>
