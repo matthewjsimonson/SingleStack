@@ -103,7 +103,7 @@ export default function AgentsView() {
   return (
     <div style={{ maxWidth: 760, margin: "0 auto" }}>
       <div style={{ display: "flex", alignItems: "baseline", justifyContent: "space-between", marginBottom: 8 }}>
-        <h1 className="serif" style={{ fontSize: 24, fontWeight: 600 }}>Agents</h1>
+        <h1 className="page-title">Agents</h1>
         {editing === null && <button className="btn" onClick={startNew}>+ New agent</button>}
       </div>
       <p className="secondary" style={{ fontSize: 13.5, marginBottom: 20 }}>
