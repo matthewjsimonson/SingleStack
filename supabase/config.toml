@@ -52,3 +52,7 @@ verify_jwt = true
 # Requires a valid JWT (the user's session) so the agent's data reads are
 # org-scoped by RLS. Same posture as agent-propose.
 verify_jwt = true
+
+[functions.synthesize-signals]
+# Requires a valid JWT so signal reads + theme writes are org-scoped by RLS.
+verify_jwt = true
