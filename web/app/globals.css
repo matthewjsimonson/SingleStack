@@ -171,6 +171,14 @@ button { font-family: inherit; cursor: pointer; }
   padding: var(--sp-10) var(--sp-6); text-align: center; background: var(--panel);
 }
 
+/* ---- agent pop card (command center) ------------------------------------ */
+.pop {
+  transition: transform 0.16s cubic-bezier(0.34, 1.56, 0.64, 1), box-shadow 0.16s ease, border-color 0.16s ease;
+  cursor: pointer;
+}
+.pop:hover { transform: translateY(-4px) scale(1.02); box-shadow: var(--shadow-md); border-color: var(--border-strong); }
+.pop:active { transform: translateY(-1px) scale(0.99); }
+
 /* ---- section ------------------------------------------------------------- */
 .section { margin-bottom: var(--sp-8); }
 .section-head { display: flex; align-items: center; justify-content: space-between; margin-bottom: var(--sp-3); }

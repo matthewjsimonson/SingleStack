@@ -25,6 +25,27 @@ const GROUPS: Group[] = [
       { label: "GTM records", href: "/gtm" },
     ],
   },
+  {
+    label: "Intelligence",
+    items: [
+      { label: "Signals", href: "/signals", soon: true },
+      { label: "Competitors", href: "/competitors", soon: true },
+    ],
+  },
+  {
+    label: "Build",
+    items: [
+      { label: "Roadmap", href: "/roadmap", soon: true },
+      { label: "Ship", href: "/ship", soon: true },
+    ],
+  },
+  {
+    label: "Go-to-market",
+    items: [
+      { label: "Content", href: "/content", soon: true },
+      { label: "Enablement", href: "/enablement", soon: true },
+    ],
+  },
 ];
 
 export default function Shell({
