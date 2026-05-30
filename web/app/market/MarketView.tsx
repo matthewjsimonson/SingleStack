@@ -13,6 +13,7 @@ import { createClient } from "@/lib/supabase/client";
 import { getOrgId } from "@/lib/org";
 import { PageHeader, Section, Chip, Banner, Confidence, SubTabs } from "@/components/ui";
 import TrackingTopics from "@/components/TrackingTopics";
+import SourceManager from "@/components/SourceManager";
 
 type Signal = { id: string; title: string; why: string | null; conf_label: string | null; conf_level: number | null; observed_at: string | null; metadata: { domain?: string; lens?: string } | null; source_id: string | null };
 type Tab = "overview" | "analysts" | "industry" | "personas";
@@ -85,11 +86,12 @@ export default function MarketView() {
 
       <SubTabs<Tab> tabs={[{ key: "overview", label: "Overview" }, { key: "analysts", label: "Analysts" }, { key: "industry", label: "Industry & tech" }, { key: "personas", label: "Personas" }]} active={tab} onChange={setTab} />
 
+      <SourceManager scope={tab === "overview" ? {} : { marketLens: tab }} title={tab === "overview" ? "Market sources" : `${tab} sources`} />
       <TrackingTopics category="market" suggestions={LENS_SUGGEST[tab]} />
 
       <Section label={tab === "overview" ? "All market signals" : `${tab[0].toUpperCase()}${tab.slice(1)} signals`}>
         {loading ? <div className="t-sub t-muted">Loading…</div>
-          : feed.length === 0 ? <div className="t-sub t-muted">Nothing here yet. Log intel above (tagged to this lens) or connect external sources in Settings.</div>
+          : feed.length === 0 ? <div className="t-sub t-muted">Nothing here yet. Log intel above (tagged to this lens) or add sources above.</div>
           : (
             <div className="stack-3">
               {feed.map((s) => (

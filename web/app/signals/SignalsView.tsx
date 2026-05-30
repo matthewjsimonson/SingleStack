@@ -12,6 +12,7 @@ import { createClient } from "@/lib/supabase/client";
 import { getOrgId } from "@/lib/org";
 import { PageHeader, Section, Chip, Banner, Confidence } from "@/components/ui";
 import TrackingTopics from "@/components/TrackingTopics";
+import SourceManager from "@/components/SourceManager";
 
 type Source = { id: string; label: string; icon: string; origin: string };
 type Signal = {
@@ -108,7 +109,7 @@ export default function SignalsView() {
       <PageHeader
         title="Signals"
         meta="Your intelligence dashboard — internal & external intel, synthesized into what to do next."
-        actions={<><a className="btn btn-secondary" href="/settings">Manage sources</a><button className="btn" onClick={() => setLogging((v) => !v)}>{logging ? "Close" : "+ Log signal"}</button></>}
+        actions={<button className="btn" onClick={() => setLogging((v) => !v)}>{logging ? "Close" : "+ Log signal"}</button>}
       />
       <Banner>{error}</Banner>
 
@@ -133,6 +134,7 @@ export default function SignalsView() {
         </form>
       )}
 
+      <SourceManager title="Signal sources" />
       <TrackingTopics category="signals" suggestions={["Recurring onboarding friction", "Feature requests by segment", "Churn signals from usage", "Support ticket themes"]} />
 
       {/* Tabs */}

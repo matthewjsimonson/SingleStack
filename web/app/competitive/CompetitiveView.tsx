@@ -10,6 +10,7 @@ import { createClient } from "@/lib/supabase/client";
 import { getOrgId } from "@/lib/org";
 import { PageHeader, Section, Chip, Banner, Confidence, SubTabs } from "@/components/ui";
 import TrackingTopics from "@/components/TrackingTopics";
+import SourceManager from "@/components/SourceManager";
 
 type Competitor = { id: string; name: string; relationship: string; website: string | null; notes: string | null };
 type Capability = { id: string; name: string; category: string | null };
@@ -119,7 +120,10 @@ function Dashboard({ competitors, capabilities, scores, reload, setError }: {
                 <div className="t-label" style={{ marginBottom: 8 }}>{label as string} · {(list as Competitor[]).length}</div>
                 <div className="stack-3">
                   {(list as Competitor[]).map((c) => (
-                    <div key={c.id} className="card card-pad row-between"><span style={{ fontSize: 14, fontWeight: 600 }}>{c.name}</span><Chip tone={tone as "accent" | "violet"}>{c.relationship}</Chip></div>
+                    <a key={c.id} href={`/competitive/${c.id}`} className="card card-link card-pad row-between">
+                      <span style={{ fontSize: 14, fontWeight: 600 }}>{c.name}</span>
+                      <span className="row gap-2"><Chip tone={tone as "accent" | "violet"}>{c.relationship}</Chip><span className="t-sub" style={{ color: "var(--ac-text)", fontWeight: 600, fontSize: 12 }}>Open →</span></span>
+                    </a>
                   ))}
                   {(list as Competitor[]).length === 0 && <div className="t-sub t-muted" style={{ fontSize: 12.5 }}>None</div>}
                 </div>
@@ -169,6 +173,9 @@ function Dashboard({ competitors, capabilities, scores, reload, setError }: {
           </div>
         )}
       </Section>
+
+      {/* Org-wide competitive sources (cross-competitor) */}
+      <SourceManager title="Competitive sources (all competitors)" />
     </div>
   );
 }
@@ -235,9 +242,10 @@ function Feed({ signals }: { signals: Signal[] }) {
   const feed = signals.filter((s) => s.metadata?.domain === "competitive");
   return (
     <div>
+      <SourceManager title="Competitive sources" />
       <TrackingTopics category="competitive" suggestions={["Competitor pricing & packaging changes", "New competitor launches", "Win/loss themes vs top rivals", "Competitor messaging shifts"]} />
       <Section label="Competitive signals">
-        {feed.length === 0 ? <div className="t-sub t-muted">No competitive signals yet. Log intel (it'll appear here) or connect external sources in Settings.</div> : (
+        {feed.length === 0 ? <div className="t-sub t-muted">No competitive signals yet. Log intel (it'll appear here) or add sources above.</div> : (
           <div className="stack-3">
             {feed.map((s) => (
               <div key={s.id} className="card card-pad">
