@@ -11,6 +11,7 @@ import { useEffect, useState, useCallback } from "react";
 import { createClient } from "@/lib/supabase/client";
 import { getOrgId } from "@/lib/org";
 import { PageHeader, Section, Chip, Banner, Confidence } from "@/components/ui";
+import TrackingTopics from "@/components/TrackingTopics";
 
 type Source = { id: string; label: string; icon: string; origin: string };
 type Signal = {
@@ -131,6 +132,8 @@ export default function SignalsView() {
           <div className="row gap-2"><button className="btn" type="submit" disabled={busy}>{busy ? "Logging…" : "Log signal"}</button><button className="btn btn-secondary" type="button" onClick={() => setLogging(false)}>Cancel</button></div>
         </form>
       )}
+
+      <TrackingTopics category="signals" suggestions={["Recurring onboarding friction", "Feature requests by segment", "Churn signals from usage", "Support ticket themes"]} />
 
       {/* Tabs */}
       <div className="row gap-2" style={{ marginBottom: "var(--sp-5)", borderBottom: "1px solid var(--border)" }}>
