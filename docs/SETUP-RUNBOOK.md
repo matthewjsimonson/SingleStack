@@ -29,15 +29,14 @@ ACCESS TOKEN (sbp_...): ____
 4. Click **"Create new project"**. Wait ~2 min.
 
 ### 🧑 1.2 Copy 3 values (dev)
-1. Click the green **"Connect"** button in the **top bar** (next to the project
-   name) → **"App Frameworks"** tab. It lists both values as env vars:
-   - `NEXT_PUBLIC_SUPABASE_URL=https://xxxx.supabase.co` → notes `DEV URL`
-   - `NEXT_PUBLIC_SUPABASE_ANON_KEY=...` → notes `DEV ANON KEY`
-2. Left **gear icon (Project Settings)** → **"General"** → **Reference ID** →
-   notes `DEV PROJECT REF`. *(The URL is also always
-   `https://<DEV PROJECT REF>.supabase.co`.)*
-   - Alt for the key only: Project Settings → **"API Keys"** → **anon /
-     publishable**. (This page does NOT show the Project URL — use Connect.)
+1. **DEV PROJECT REF** = the string in the browser address bar after
+   `/project/` (e.g. `…/dashboard/project/abcdwxyz/…` → `abcdwxyz`). Same value
+   appears in Project Settings → **General** as **Project ID / Reference ID**.
+2. **DEV URL** = `https://<DEV PROJECT REF>.supabase.co` (the ref from step 1
+   with `https://` prefix and `.supabase.co` suffix — this is exactly the URL the
+   client library uses; there is no separate field to hunt for).
+3. **DEV ANON KEY** = Project Settings → **API Keys** → the **anon / publishable**
+   key.
 
 ### 🧑 1.3 Add the Anthropic key (dev)
 > SAME key the demo project uses — NOT a new one. Pasted here because secrets
@@ -49,8 +48,8 @@ ACCESS TOKEN (sbp_...): ____
 
 ### 🧑 1.4 Get the demo project's values
 1. Top-left project dropdown → open **`pzulufyoqvqevjrmtmfj`**.
-2. Top-bar **"Connect"** → **"App Frameworks"** tab → copy `DEMO URL`
-   (`https://pzulufyoqvqevjrmtmfj.supabase.co`) and `DEMO ANON KEY`.
+2. `DEMO URL` = `https://pzulufyoqvqevjrmtmfj.supabase.co` (ref already known).
+   `DEMO ANON KEY` = Project Settings → **API Keys** → **anon / publishable**.
 3. Gear → **Database** → **Database password** → if unknown, **Reset database
    password** (letters+numbers) → notes `DEMO DB PASSWORD`.
 4. Gear → **Edge Functions → Secrets** → confirm `ANTHROPIC_API_KEY` exists (add
