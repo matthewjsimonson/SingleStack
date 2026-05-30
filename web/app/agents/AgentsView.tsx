@@ -25,10 +25,6 @@ export default function AgentsView() {
   useEffect(() => { load(); }, [load]);
 
   function startNew() { setForm(BLANK); setEditing("new"); setError(null); }
-  function startEdit(a: Agent) {
-    setForm({ key: a.key, name: a.name, role: a.role ?? "", model: a.model ?? "claude-opus-4-8", system_prompt: a.system_prompt ?? "", is_active: a.is_active });
-    setEditing(a.id); setError(null);
-  }
 
   async function save(e: React.FormEvent) {
     e.preventDefault(); setBusy(true); setError(null);
@@ -100,7 +96,7 @@ export default function AgentsView() {
         ) : (
           <div className="stack-3">
             {agents.map((a) => (
-              <div key={a.id} className="card card-pad row-between" style={{ gap: 12 }}>
+              <a key={a.id} href={`/agents/${a.id}`} className="card card-link card-pad row-between" style={{ gap: 12 }}>
                 <div style={{ minWidth: 0 }}>
                   <div className="row gap-2">
                     <span style={{ fontSize: 15, fontWeight: 620 }}>{a.name}</span>
@@ -112,11 +108,8 @@ export default function AgentsView() {
                     <span className="t-mono-xs" style={{ marginLeft: 8 }}>{a.model}</span>
                   </div>
                 </div>
-                <div className="row gap-2">
-                  <a className="btn btn-secondary btn-sm" href={`/agents/${a.id}`}>Open</a>
-                  <button className="btn btn-secondary btn-sm" onClick={() => startEdit(a)}>Edit</button>
-                </div>
-              </div>
+                <span className="t-sub" style={{ color: "var(--ac-text)", fontWeight: 600, fontSize: 13 }}>Configure →</span>
+              </a>
             ))}
           </div>
         )}
