@@ -34,13 +34,15 @@ tier's* DB and triggers *that tier's* Vercel deploy. Code flows forward.
 
 ### 1. Supabase — create ONE new project
 1. Create **`singlestack-dev`** (keep the existing `pzulufyoqvqevjrmtmfj` as
-   **demo**). Use **West US (Oregon) = us-west-2** so the pooler host in the
-   workflow matches; if you pick another region, tell me and I'll update
-   `aws-0-us-west-2` in the workflow's `db push` URL.
-2. Set a **database password that is alphanumeric only** (the workflow puts it
-   inline in the connection URL — no special chars).
-3. Settings → API → copy the **Project URL** and **anon** key (for Vercel), and
-   note the **project ref** (the subdomain).
+   **demo**). Any region is fine — the workflow maps each project to its own
+   Session pooler host (see Troubleshooting), so a new region just needs its
+   host added to the `case` in `deploy-supabase.yml`.
+2. Set any **database password** you like — the workflow URL-encodes it, so
+   special characters are safe.
+3. **Connect** (top bar) → **App Frameworks**/connection info → copy the
+   **Project URL** and **anon** key (for Vercel). The **project ref** is the
+   subdomain of the URL / the string after `/project/` in the dashboard address
+   bar, also shown under Settings → General.
 4. Add the Edge Function secret **`ANTHROPIC_API_KEY`** (Project → Edge Functions
    → Secrets) — functions are per-project, so dev needs its own.
 5. Confirm the existing **demo** project already has `ANTHROPIC_API_KEY` and note
@@ -53,7 +55,7 @@ GitHub → repo → Settings → **Environments** → New environment. Create
 | Secret | `development` | `demo` |
 |---|---|---|
 | `SUPABASE_PROJECT_REF` | dev project ref | `pzulufyoqvqevjrmtmfj` |
-| `SUPABASE_DB_PASSWORD` | dev DB password (alphanumeric) | demo DB password |
+| `SUPABASE_DB_PASSWORD` | dev DB password | demo DB password |
 | `SUPABASE_ACCESS_TOKEN` | the `sbp_…` token | the same `sbp_…` token |
 
 > The old repo-level `SUPABASE_*` secrets can be deleted once both Environments
@@ -88,3 +90,34 @@ pushing/merging to `main` deploys Demo.
   the other — they're separate databases.
 - When a real **Production** tier is added later, `main` becomes prod and a new
   `staging` branch becomes demo; the workflow comment block notes this.
+
+## Troubleshooting deploys
+
+The migration step connects through the project's **Session pooler** (port
+5432), because GitHub Actions runners are IPv4-only and direct DB connections
+are IPv6-only on newer projects.
+
+**`FATAL: tenant/user postgres.<ref> not found`** — the pooler host is wrong for
+that project. Each project lives on a specific pooler cluster + region (e.g.
+`aws-1-us-west-1`), and it is **not derivable from the ref**. Get the real host
+from the dashboard: **Connect → Session pooler** (the URI ending in `:5432`),
+then add/fix the project's line in the `case "$PROJECT_REF"` block in
+`deploy-supabase.yml`. Current map:
+
+| Project | Tier | Session pooler host |
+|---|---|---|
+| `fthnutnmpoymcrbvijku` | dev | `aws-1-us-west-1.pooler.supabase.com` |
+| `pzulufyoqvqevjrmtmfj` | demo | `aws-0-us-west-2.pooler.supabase.com` |
+
+**`FATAL: password authentication failed (28P01)`** — usually **not** a wrong
+password. A special character (`@ : / # % ?`) in the password truncates the
+inline connection URL. The workflow now URL-encodes the password, so this is
+handled; if it still appears, the `SUPABASE_DB_PASSWORD` secret for that
+Environment genuinely doesn't match — reset the DB password in Supabase and
+paste the exact value into the GitHub Environment secret (watch for a trailing
+space/newline).
+
+> Note: `SUPABASE_PROJECT_REF` and `SUPABASE_DB_PASSWORD` are read from the
+> GitHub **Environment** for the branch's tier; a stale **repo-level** secret of
+> the same name is a silent fallback, so delete repo-level copies once the
+> Environment secrets exist.
