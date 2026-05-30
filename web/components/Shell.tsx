@@ -36,15 +36,15 @@ const GROUPS: Group[] = [
   {
     label: "Build",
     items: [
-      { label: "Roadmap", href: "/roadmap", soon: true },
-      { label: "Ship", href: "/ship", soon: true },
+      { label: "Roadmap", href: "/roadmap" },
+      { label: "Ship", href: "/ship" },
     ],
   },
   {
     label: "Go-to-market",
     items: [
-      { label: "Content", href: "/content", soon: true },
-      { label: "Enablement", href: "/enablement", soon: true },
+      { label: "Content", href: "/content" },
+      { label: "Enablement", href: "/enablement" },
     ],
   },
 ];
