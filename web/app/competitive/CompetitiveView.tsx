@@ -185,30 +185,53 @@ function Battlecards({ competitors, cards, reload, setError }: {
   competitors: Competitor[]; cards: Card[]; reload: () => void; setError: (s: string | null) => void;
 }) {
   const supabase = createClient();
-  const [scope, setScope] = useState<string>("general"); // competitor id or 'general'
-  const [adding, setAdding] = useState<string | null>(null); // kind being added
+  const [scope, setScope] = useState<string | null>(null); // selected competitor id; null = picker
+  const [adding, setAdding] = useState<string | null>(null);
   const [form, setForm] = useState({ title: "", detail: "" });
 
   const KINDS = [["win", "Why we win", "green"], ["lose", "Why we lose", "amber"], ["objection", "Objections", "default"], ["trap", "Traps to set", "violet"]] as const;
-  const scopeId = scope === "general" ? null : scope;
-  const cardsFor = (kind: string) => cards.filter((c) => c.kind === kind && (c.competitor_id ?? "general") === (scopeId ?? "general"));
+  const cardsFor = (kind: string) => cards.filter((c) => c.kind === kind && c.competitor_id === scope);
+  const countFor = (compId: string) => cards.filter((c) => c.competitor_id === compId).length;
+  const selected = competitors.find((c) => c.id === scope);
 
   async function add(kind: string) {
-    if (!form.title.trim()) return;
+    if (!form.title.trim() || !scope) return;
     const orgId = await getOrgId(); if (!orgId) return;
-    const { error } = await supabase.from("battlecard_items").insert({ org_id: orgId, competitor_id: scopeId, kind, title: form.title.trim(), detail: form.detail.trim() || null });
+    const { error } = await supabase.from("battlecard_items").insert({ org_id: orgId, competitor_id: scope, kind, title: form.title.trim(), detail: form.detail.trim() || null });
     if (error) setError(error.message); else { setAdding(null); setForm({ title: "", detail: "" }); reload(); }
   }
   async function remove(id: string) { setError(null); await supabase.from("battlecard_items").delete().eq("id", id); reload(); }
 
+  // Competitor picker — battlecards are per-competitor, so choose one first.
+  if (!scope) {
+    return (
+      <Section label="Choose a competitor">
+        {competitors.length === 0 ? (
+          <div className="t-sub t-muted">No competitors yet. Add direct/adjacent competitors on the Dashboard, then build their battlecards here.</div>
+        ) : (
+          <div className="grid-cards">
+            {competitors.map((c) => (
+              <button key={c.id} className="card card-link card-pad" style={{ textAlign: "left" }} onClick={() => setScope(c.id)}>
+                <div className="row-between" style={{ marginBottom: 8 }}>
+                  <span style={{ fontSize: 15, fontWeight: 620 }}>{c.name}</span>
+                  <Chip tone={c.relationship === "direct" ? "accent" : "violet"}>{c.relationship}</Chip>
+                </div>
+                <div className="t-sub t-muted" style={{ fontSize: 12.5 }}>{countFor(c.id)} battlecard item{countFor(c.id) === 1 ? "" : "s"} · open →</div>
+              </button>
+            ))}
+          </div>
+        )}
+      </Section>
+    );
+  }
+
   return (
     <div>
-      <div className="row gap-2" style={{ marginBottom: "var(--sp-5)", flexWrap: "wrap" }}>
-        <button className={`chip ${scope === "general" ? "" : ""}`} onClick={() => setScope("general")} style={{ cursor: "pointer", background: scope === "general" ? "var(--tp)" : "var(--fill)", color: scope === "general" ? "#fff" : "var(--ts)" }}>General</button>
-        {competitors.map((c) => (
-          <button key={c.id} className="chip" onClick={() => setScope(c.id)} style={{ cursor: "pointer", background: scope === c.id ? "var(--tp)" : "var(--fill)", color: scope === c.id ? "#fff" : "var(--ts)" }}>{c.name}</button>
-        ))}
-        {competitors.length === 0 && <span className="t-sub t-muted" style={{ fontSize: 12.5 }}>Tip: add competitors on the Dashboard to make competitor-specific cards.</span>}
+      <div className="row-between" style={{ marginBottom: "var(--sp-5)" }}>
+        <button className="t-sub" style={{ display: "inline-flex", alignItems: "center", gap: 5, fontWeight: 600, background: "none", border: "none", cursor: "pointer" }} onClick={() => { setScope(null); setAdding(null); }}>
+          <span style={{ fontSize: 15 }}>‹</span> All competitors
+        </button>
+        <div className="row gap-2"><span className="t-h2" style={{ fontSize: 15 }}>{selected?.name}</span>{selected && <Chip tone={selected.relationship === "direct" ? "accent" : "violet"}>{selected.relationship}</Chip>}</div>
       </div>
 
       <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "var(--sp-4)" }}>
