@@ -115,3 +115,21 @@ export function ComingSoon({ title, blurb }: { title: string; blurb: string }) {
   );
 }
 
+// Horizontal sub-tabs within a module.
+export function SubTabs<T extends string>({ tabs, active, onChange }: {
+  tabs: { key: T; label: string }[];
+  active: T;
+  onChange: (k: T) => void;
+}) {
+  return (
+    <div className="row gap-2" style={{ marginBottom: "var(--sp-5)", borderBottom: "1px solid var(--border)" }}>
+      {tabs.map((t) => (
+        <button key={t.key} onClick={() => onChange(t.key)}
+          style={{ background: "none", border: "none", borderBottom: active === t.key ? "2px solid var(--ac)" : "2px solid transparent", color: active === t.key ? "var(--tp)" : "var(--ts)", fontWeight: 640, fontSize: 13.5, padding: "8px 14px", cursor: "pointer", marginBottom: -1 }}>
+          {t.label}
+        </button>
+      ))}
+    </div>
+  );
+}
+
