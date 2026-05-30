@@ -158,38 +158,39 @@ export default function SectionedFields({ target }: { target: Target }) {
 
   const { sectionBlurb, fieldHint } = guides(target.kind);
   const totalFilled = fields.filter((f) => f.value && f.value.trim()).length;
+  const toGo = fields.length - totalFilled;
   const overallPct = fields.length ? Math.round((totalFilled / fields.length) * 100) : 0;
 
   return (
     <div>
       <Banner>{error}</Banner>
 
-      {/* Prescriptive progress header — sets the expectation that the record
-          should be completed, and shows how far along it is. */}
-      <div className="card card-pad" style={{ marginBottom: "var(--sp-5)", display: "flex", alignItems: "center", gap: 16 }}>
-        <CompletionRing pct={overallPct} big />
-        <div style={{ flex: 1 }}>
-          <div style={{ fontSize: 14.5, fontWeight: 640 }}>
-            {overallPct === 100 ? "Record complete" : overallPct === 0 ? "Let's build out this record" : `${overallPct}% complete — keep going`}
-          </div>
-          <div className="t-sub t-muted" style={{ fontSize: 12.5 }}>
-            {totalFilled} of {fields.length} fields filled across {order.length} section{order.length === 1 ? "" : "s"}. A complete record makes your agents sharper.
-          </div>
-        </div>
-      </div>
-
-      {/* Adopt the fuller recommended structure (for records that predate it) */}
-      {missingFieldCount > 0 && (
-        <div className="card card-pad" style={{ marginBottom: "var(--sp-5)", display: "flex", alignItems: "center", gap: 14, background: "var(--ac-fill)", borderColor: "var(--ac)" }}>
+      {/* Persistent progress guide — stays until the record is 100% complete.
+          Shows fields left to fill, and (if recommended structure is missing)
+          an inline button to add it WITHOUT collapsing the guide. */}
+      <div className="card card-pad" style={{ marginBottom: "var(--sp-5)" }}>
+        <div style={{ display: "flex", alignItems: "center", gap: 16 }}>
+          <CompletionRing pct={overallPct} big />
           <div style={{ flex: 1 }}>
-            <div style={{ fontSize: 13.5, fontWeight: 640, color: "var(--ac-text)" }}>Recommended structure available</div>
-            <div className="t-sub" style={{ fontSize: 12.5, color: "var(--ac-text)" }}>
-              Add {missingFieldCount} recommended field{missingFieldCount === 1 ? "" : "s"} across {missing.length} section{missing.length === 1 ? "" : "s"} ({missing.map((m) => m.section).join(", ")}) to fully define this {target.kind === "product" ? "product" : "GTM record"}.
+            <div style={{ fontSize: 14.5, fontWeight: 640 }}>
+              {overallPct === 100 ? "Record complete ✓" : `${toGo} field${toGo === 1 ? "" : "s"} left to fill`}
+            </div>
+            <div className="t-sub t-muted" style={{ fontSize: 12.5 }}>
+              {totalFilled} of {fields.length} filled across {order.length} section{order.length === 1 ? "" : "s"}. A complete record makes your agents sharper.
             </div>
           </div>
-          <button className="btn btn-accent" disabled={scaffolding} onClick={() => addMissing(missing)}>{scaffolding ? "Adding…" : "Add sections"}</button>
+          {missingFieldCount > 0 && (
+            <button className="btn btn-accent btn-sm" disabled={scaffolding} onClick={() => addMissing(missing)} style={{ flexShrink: 0 }}>
+              {scaffolding ? "Adding…" : `+ ${missingFieldCount} recommended`}
+            </button>
+          )}
         </div>
-      )}
+        {missingFieldCount > 0 && (
+          <div className="t-sub" style={{ fontSize: 12, color: "var(--ac-text)", marginTop: 10, paddingTop: 10, borderTop: "1px solid var(--border)" }}>
+            Recommended structure available: {missing.map((m) => m.section).join(", ")}.
+          </div>
+        )}
+      </div>
 
       {order.map((sName) => {
         const items = bySection[sName];
