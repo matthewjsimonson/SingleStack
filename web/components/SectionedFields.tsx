@@ -1,9 +1,10 @@
 "use client";
 
-// Structured, visually-grouped field editor. Fields are grouped by their
-// `section` into panels (Overview, Technical, Personas, …) instead of a flat
-// list. Each panel shows a completeness ring; empty records can scaffold the
-// type's template in one click. Inline-edit any value; add fields/sections.
+// Structured field editor. Key behavior: the LIST shows only FILLED fields,
+// grouped into section panels. Recommended-but-unfilled fields never clutter
+// the list — they live in a persistent banner ("+N recommended") that opens an
+// inline fill panel. You fill what you want; only filled fields join the list.
+// Filling a field that already has an (empty) row updates it; otherwise inserts.
 import { useEffect, useState, useCallback } from "react";
 import { createClient } from "@/lib/supabase/client";
 import { getOrgId } from "@/lib/org";
@@ -16,8 +17,6 @@ type Target = { kind: "product" | "gtm"; id: string };
 const UNGROUPED = "Details";
 const fk = (t: Target) => (t.kind === "product" ? "product_id" : "gtm_record_id");
 
-// Build lookups from the type's template so the editor can show the section's
-// guidance blurb and each field's prompt as prescriptive helper text.
 function guides(kind: "product" | "gtm") {
   const sectionBlurb: Record<string, string> = {};
   const fieldHint: Record<string, string> = {};
@@ -35,11 +34,16 @@ export default function SectionedFields({ target }: { target: Target }) {
   const [error, setError] = useState<string | null>(null);
   const [editing, setEditing] = useState<string | null>(null);
   const [draft, setDraft] = useState("");
-  const [scaffolding, setScaffolding] = useState(false);
 
-  // add field within a section
+  // recommended fill panel: open + per-field drafts keyed by template key
+  const [panelOpen, setPanelOpen] = useState(false);
+  const [recDrafts, setRecDrafts] = useState<Record<string, string>>({});
+  const [saving, setSaving] = useState(false);
+
+  // ad-hoc field add within a section
   const [addingIn, setAddingIn] = useState<string | null>(null);
   const [newLabel, setNewLabel] = useState("");
+  const [newVal, setNewVal] = useState("");
 
   const load = useCallback(async () => {
     const { data } = await supabase
@@ -51,57 +55,40 @@ export default function SectionedFields({ target }: { target: Target }) {
 
   useEffect(() => { load(); }, [load]);
 
-  async function scaffold() {
-    setScaffolding(true); setError(null);
-    try {
-      const orgId = await getOrgId();
-      if (!orgId) throw new Error("Could not resolve your organization.");
-      const rows: Record<string, unknown>[] = [];
-      let pos = 0;
-      for (const s of templateFor(target.kind)) {
-        for (const f of s.fields) {
-          rows.push({ org_id: orgId, [fk(target)]: target.id, field_key: f.key, label: f.label, section: s.section, value: null, position: pos++ });
-        }
-      }
-      const { error } = await supabase.from("record_fields").insert(rows);
-      if (error) throw error;
-      await load();
-    } catch (e) { setError(e instanceof Error ? e.message : "Could not scaffold."); }
-    finally { setScaffolding(false); }
-  }
-
-  // Add only the recommended sections/fields this record is MISSING, so an
-  // existing (pre-template) record can adopt the fuller structure without
-  // duplicating what it already has.
-  async function addMissing(missing: { section: string; fields: { key: string; label: string }[] }[]) {
-    setScaffolding(true); setError(null);
-    try {
-      const orgId = await getOrgId();
-      if (!orgId) throw new Error("Could not resolve your organization.");
-      const existingKeys = new Set(fields.map((f) => f.field_key));
-      let pos = fields.length;
-      const rows: Record<string, unknown>[] = [];
-      for (const s of missing) {
-        for (const f of s.fields) {
-          if (existingKeys.has(f.key)) continue;
-          rows.push({ org_id: orgId, [fk(target)]: target.id, field_key: f.key, label: f.label, section: s.section, value: null, position: pos++ });
-        }
-      }
-      if (rows.length) {
-        const { error } = await supabase.from("record_fields").insert(rows);
-        if (error) throw error;
-      }
-      await load();
-    } catch (e) { setError(e instanceof Error ? e.message : "Could not add sections."); }
-    finally { setScaffolding(false); }
-  }
-
   async function save(id: string) {
     setError(null);
     const { error } = await supabase.from("record_fields").update({ value: draft }).eq("id", id);
     if (error) setError(error.message);
     setEditing(null);
     await load();
+  }
+
+  // Save the recommended fields the user filled in the panel. For each filled
+  // draft: update the existing row if one exists for that key, else insert.
+  async function saveRecommended(missing: { section: string; fields: { key: string; label: string }[] }[]) {
+    setSaving(true); setError(null);
+    try {
+      const orgId = await getOrgId();
+      if (!orgId) throw new Error("Could not resolve your organization.");
+      const byKey = new Map(fields.map((f) => [f.field_key, f]));
+      const inserts: Record<string, unknown>[] = [];
+      const updates: { id: string; value: string }[] = [];
+      let pos = fields.length;
+      for (const s of missing) {
+        for (const f of s.fields) {
+          const v = (recDrafts[f.key] ?? "").trim();
+          if (!v) continue; // only persist what was actually filled
+          const existing = byKey.get(f.key);
+          if (existing) updates.push({ id: existing.id, value: v });
+          else inserts.push({ org_id: orgId, [fk(target)]: target.id, field_key: f.key, label: f.label, section: s.section, value: v, position: pos++ });
+        }
+      }
+      if (inserts.length) { const { error } = await supabase.from("record_fields").insert(inserts); if (error) throw error; }
+      for (const u of updates) { const { error } = await supabase.from("record_fields").update({ value: u.value }).eq("id", u.id); if (error) throw error; }
+      setPanelOpen(false); setRecDrafts({});
+      await load();
+    } catch (e) { setError(e instanceof Error ? e.message : "Could not save."); }
+    finally { setSaving(false); }
   }
 
   async function addField(sectionName: string) {
@@ -114,165 +101,149 @@ export default function SectionedFields({ target }: { target: Target }) {
       const key = label.toLowerCase().replace(/[^a-z0-9]+/g, "_").replace(/^_|_$/g, "") || `field_${Date.now()}`;
       const { error } = await supabase.from("record_fields").insert({
         org_id: orgId, [fk(target)]: target.id, field_key: key, label,
-        section: sectionName === UNGROUPED ? null : sectionName, value: null, position: fields.length,
+        section: sectionName === UNGROUPED ? null : sectionName, value: newVal.trim() || null, position: fields.length,
       });
       if (error) throw error;
-      setAddingIn(null); setNewLabel("");
+      setAddingIn(null); setNewLabel(""); setNewVal("");
       await load();
     } catch (e) { setError(e instanceof Error ? e.message : "Could not add field."); }
   }
 
   if (loading) return <div className="t-sub t-muted">Loading…</div>;
 
-  // group by section, preserving first-seen order
+  const { sectionBlurb, fieldHint } = guides(target.kind);
+
+  // Only FILLED fields appear in the list.
+  const filledFields = fields.filter((f) => f.value && f.value.trim());
+  const filledKeys = new Set(filledFields.map((f) => f.field_key));
+
+  // group filled fields by section, preserving template order then first-seen
   const order: string[] = [];
   const bySection: Record<string, Field[]> = {};
-  for (const f of fields) {
+  for (const f of filledFields) {
     const s = f.section || UNGROUPED;
     if (!bySection[s]) { bySection[s] = []; order.push(s); }
     bySection[s].push(f);
   }
 
-  // What recommended structure is this record MISSING? (so existing records can
-  // adopt the fuller template without duplicating what they have)
-  const existingKeys = new Set(fields.map((f) => f.field_key));
+  // Recommended = template fields not yet filled (regardless of empty rows).
   const missing = templateFor(target.kind)
-    .map((s) => ({ section: s.section, fields: s.fields.filter((f) => !existingKeys.has(f.key)) }))
+    .map((s) => ({ section: s.section, blurb: sectionBlurb[s.section], fields: s.fields.filter((f) => !filledKeys.has(f.key)) }))
     .filter((s) => s.fields.length > 0);
-  const missingFieldCount = missing.reduce((n, s) => n + s.fields.length, 0);
-
-  if (fields.length === 0) {
-    return (
-      <Section label="Content">
-        <Banner>{error}</Banner>
-        <div className="empty">
-          <div className="t-body" style={{ fontWeight: 600, marginBottom: 6 }}>Set up this record</div>
-          <div className="t-sub" style={{ maxWidth: 460, marginInline: "auto", marginBottom: 16 }}>
-            Scaffold a structured starting point for a {target.kind === "product" ? "product" : "GTM"} record — sections and prompts you can fill in and tailor.
-          </div>
-          <button className="btn" onClick={scaffold} disabled={scaffolding}>{scaffolding ? "Setting up…" : "Scaffold structure"}</button>
-        </div>
-      </Section>
-    );
-  }
-
-  const { sectionBlurb, fieldHint } = guides(target.kind);
-  const totalFilled = fields.filter((f) => f.value && f.value.trim()).length;
-  const toGo = fields.length - totalFilled;
-  const overallPct = fields.length ? Math.round((totalFilled / fields.length) * 100) : 0;
+  const missingCount = missing.reduce((n, s) => n + s.fields.length, 0);
+  const totalTemplate = templateFor(target.kind).reduce((n, s) => n + s.fields.length, 0);
+  const filledTemplate = totalTemplate - missingCount;
+  const pct = totalTemplate ? Math.round((filledTemplate / totalTemplate) * 100) : 0;
 
   return (
     <div>
       <Banner>{error}</Banner>
 
-      {/* Persistent progress guide — stays until the record is 100% complete.
-          Shows fields left to fill, and (if recommended structure is missing)
-          an inline button to add it WITHOUT collapsing the guide. */}
-      <div className="card card-pad" style={{ marginBottom: "var(--sp-5)" }}>
-        <div style={{ display: "flex", alignItems: "center", gap: 16 }}>
-          <CompletionRing pct={overallPct} big />
-          <div style={{ flex: 1 }}>
-            <div style={{ fontSize: 14.5, fontWeight: 640 }}>
-              {overallPct === 100 ? "Record complete ✓" : `${toGo} field${toGo === 1 ? "" : "s"} left to fill`}
+      {/* Persistent recommended-structure banner. Empty fields never enter the
+          list — they're represented here until filled via the panel. */}
+      {missingCount > 0 && (
+        <div className="card card-pad" style={{ marginBottom: "var(--sp-5)" }}>
+          <div style={{ display: "flex", alignItems: "center", gap: 16 }}>
+            <CompletionRing pct={pct} big />
+            <div style={{ flex: 1 }}>
+              <div style={{ fontSize: 14.5, fontWeight: 640 }}>{missingCount} recommended field{missingCount === 1 ? "" : "s"} to capture</div>
+              <div className="t-sub t-muted" style={{ fontSize: 12.5 }}>
+                {filledTemplate} of {totalTemplate} captured across {missing.map((m) => m.section).join(", ")}. A complete record makes your agents sharper.
+              </div>
             </div>
-            <div className="t-sub t-muted" style={{ fontSize: 12.5 }}>
-              {totalFilled} of {fields.length} filled across {order.length} section{order.length === 1 ? "" : "s"}. A complete record makes your agents sharper.
-            </div>
-          </div>
-          {missingFieldCount > 0 && (
-            <button className="btn btn-accent btn-sm" disabled={scaffolding} onClick={() => addMissing(missing)} style={{ flexShrink: 0 }}>
-              {scaffolding ? "Adding…" : `+ ${missingFieldCount} recommended`}
+            <button className="btn btn-accent btn-sm" onClick={() => setPanelOpen((v) => !v)} style={{ flexShrink: 0 }}>
+              {panelOpen ? "Hide" : `+ ${missingCount} recommended`}
             </button>
+          </div>
+
+          {/* fill panel — type values; only filled ones persist into the list */}
+          {panelOpen && (
+            <div style={{ marginTop: 14, paddingTop: 14, borderTop: "1px solid var(--border)" }}>
+              {missing.map((s) => (
+                <div key={s.section} style={{ marginBottom: 16 }}>
+                  <div className="t-label" style={{ marginBottom: 8 }}>{s.section}</div>
+                  <div className="stack-3">
+                    {s.fields.map((f) => {
+                      const hint = fieldHint[f.label.toLowerCase()];
+                      return (
+                        <div key={f.key}>
+                          <div className="t-h2" style={{ fontSize: 13, fontWeight: 620, marginBottom: 4 }}>{f.label}</div>
+                          <textarea className="textarea" rows={2} placeholder={hint} value={recDrafts[f.key] ?? ""}
+                            onChange={(e) => setRecDrafts({ ...recDrafts, [f.key]: e.target.value })} />
+                        </div>
+                      );
+                    })}
+                  </div>
+                </div>
+              ))}
+              <div className="row gap-2">
+                <button className="btn" disabled={saving} onClick={() => saveRecommended(missing)}>{saving ? "Saving…" : "Save filled fields"}</button>
+                <button className="btn btn-secondary" onClick={() => { setPanelOpen(false); setRecDrafts({}); }}>Cancel</button>
+              </div>
+            </div>
           )}
         </div>
-        {missingFieldCount > 0 && (
-          <div className="t-sub" style={{ fontSize: 12, color: "var(--ac-text)", marginTop: 10, paddingTop: 10, borderTop: "1px solid var(--border)" }}>
-            Recommended structure available: {missing.map((m) => m.section).join(", ")}.
-          </div>
-        )}
-      </div>
+      )}
 
-      {order.map((sName) => {
-        const items = bySection[sName];
-        const filled = items.filter((f) => f.value && f.value.trim()).length;
-        const pct = Math.round((filled / items.length) * 100);
-        const blurb = sectionBlurb[sName];
-        return (
-          <section className="section" key={sName}>
-            <div className="section-head" style={{ alignItems: "flex-start" }}>
-              <div>
-                <div className="row gap-2">
-                  <span className="t-h2" style={{ fontSize: 14.5 }}>{sName}</span>
-                  <span className="chip" style={{ background: pct === 100 ? "var(--gn-fill)" : "var(--fill)", color: pct === 100 ? "var(--gn-text)" : "var(--ts)" }}>{filled}/{items.length}</span>
+      {/* The list — filled fields only, grouped by section */}
+      {filledFields.length === 0 && !panelOpen ? (
+        <div className="empty">
+          <div className="t-body" style={{ fontWeight: 600, marginBottom: 6 }}>Nothing captured yet</div>
+          <div className="t-sub" style={{ maxWidth: 460, marginInline: "auto" }}>Use “+ recommended” above to fill in the structured fields for this {target.kind === "product" ? "product" : "GTM record"}.</div>
+        </div>
+      ) : (
+        order.map((sName) => {
+          const items = bySection[sName];
+          return (
+            <section className="section" key={sName}>
+              <div className="section-head" style={{ alignItems: "flex-start" }}>
+                <div>
+                  <div className="row gap-2"><span className="t-h2" style={{ fontSize: 14.5 }}>{sName}</span><span className="chip">{items.length}</span></div>
+                  {sectionBlurb[sName] && <div className="t-sub t-muted" style={{ fontSize: 12.5, marginTop: 2 }}>{sectionBlurb[sName]}</div>}
                 </div>
-                {blurb && <div className="t-sub t-muted" style={{ fontSize: 12.5, marginTop: 2 }}>{blurb}</div>}
+                {addingIn !== sName && <button className="btn btn-secondary btn-sm" onClick={() => { setAddingIn(sName); setNewLabel(""); setNewVal(""); }}>+ Field</button>}
               </div>
-              {addingIn !== sName && <button className="btn btn-secondary btn-sm" onClick={() => { setAddingIn(sName); setNewLabel(""); }}>+ Field</button>}
-            </div>
-
-            <div className="card" style={{ overflow: "hidden" }}>
-              {items.map((f, i) => {
-                const done = !!(f.value && f.value.trim());
-                const hint = fieldHint[f.label.toLowerCase()];
-                return (
-                  <div key={f.id} style={{ padding: "14px 18px", borderTop: i === 0 ? "none" : "1px solid var(--border)", background: done ? "transparent" : "var(--panel-2)" }}>
-                    <div className="row-between" style={{ marginBottom: done ? 5 : 2 }}>
-                      <div className="row gap-2">
-                        {/* checklist check — a visual, not a list bullet */}
-                        <Check done={done} />
-                        <span className="t-h2" style={{ fontSize: 13, fontWeight: 620 }}>{f.label}</span>
-                      </div>
-                      {editing !== f.id && <button className={`btn btn-sm ${done ? "btn-secondary" : ""}`} onClick={() => { setEditing(f.id); setDraft(f.value ?? ""); }}>{done ? "Edit" : "Fill in"}</button>}
+              <div className="card" style={{ overflow: "hidden" }}>
+                {items.map((f, i) => (
+                  <div key={f.id} style={{ padding: "14px 18px", borderTop: i === 0 ? "none" : "1px solid var(--border)" }}>
+                    <div className="row-between" style={{ marginBottom: 5 }}>
+                      <div className="row gap-2"><Check done /><span className="t-h2" style={{ fontSize: 13, fontWeight: 620 }}>{f.label}</span></div>
+                      {editing !== f.id && <button className="btn btn-secondary btn-sm" onClick={() => { setEditing(f.id); setDraft(f.value ?? ""); }}>Edit</button>}
                     </div>
                     {editing === f.id ? (
                       <div style={{ marginLeft: 26 }}>
-                        {hint && <div className="t-sub t-muted" style={{ fontSize: 12, marginBottom: 6 }}>{hint}</div>}
-                        <textarea className="textarea" rows={3} autoFocus value={draft} onChange={(e) => setDraft(e.target.value)} placeholder={hint} style={{ marginBottom: 8 }} />
-                        <div className="row gap-2">
-                          <button className="btn btn-sm" onClick={() => save(f.id)}>Save</button>
-                          <button className="btn btn-secondary btn-sm" onClick={() => setEditing(null)}>Cancel</button>
-                        </div>
+                        <textarea className="textarea" rows={3} autoFocus value={draft} onChange={(e) => setDraft(e.target.value)} style={{ marginBottom: 8 }} />
+                        <div className="row gap-2"><button className="btn btn-sm" onClick={() => save(f.id)}>Save</button><button className="btn btn-secondary btn-sm" onClick={() => setEditing(null)}>Cancel</button></div>
                       </div>
                     ) : (
-                      <div className="t-body" style={{ lineHeight: 1.6, whiteSpace: "pre-wrap", marginLeft: 26 }}>
-                        {done ? f.value : <span className="t-sub t-muted">{hint || "Not filled in yet."}</span>}
-                      </div>
+                      <div className="t-body" style={{ lineHeight: 1.6, whiteSpace: "pre-wrap", marginLeft: 26 }}>{f.value}</div>
                     )}
                   </div>
-                );
-              })}
-              {addingIn === sName && (
-                <div style={{ padding: "12px 18px", borderTop: "1px solid var(--border)" }}>
-                  <div className="row gap-2">
-                    <input className="input" autoFocus placeholder="New field label" value={newLabel} onChange={(e) => setNewLabel(e.target.value)} style={{ flex: 1 }} />
-                    <button className="btn btn-sm" onClick={() => addField(sName)}>Add</button>
-                    <button className="btn btn-secondary btn-sm" onClick={() => setAddingIn(null)}>Cancel</button>
+                ))}
+                {addingIn === sName && (
+                  <div style={{ padding: "12px 18px", borderTop: "1px solid var(--border)" }}>
+                    <div className="row gap-2" style={{ marginBottom: 8 }}>
+                      <input className="input" autoFocus placeholder="Field label" value={newLabel} onChange={(e) => setNewLabel(e.target.value)} style={{ flex: 1 }} />
+                    </div>
+                    <textarea className="textarea" rows={2} placeholder="Value" value={newVal} onChange={(e) => setNewVal(e.target.value)} style={{ marginBottom: 8 }} />
+                    <div className="row gap-2"><button className="btn btn-sm" onClick={() => addField(sName)}>Add</button><button className="btn btn-secondary btn-sm" onClick={() => setAddingIn(null)}>Cancel</button></div>
                   </div>
-                </div>
-              )}
-            </div>
-          </section>
-        );
-      })}
+                )}
+              </div>
+            </section>
+          );
+        })
+      )}
     </div>
   );
 }
 
-// Checklist check mark — filled green when done, hollow when not.
 function Check({ done }: { done: boolean }) {
   return (
-    <span style={{
-      width: 18, height: 18, borderRadius: 999, flexShrink: 0,
-      display: "inline-flex", alignItems: "center", justifyContent: "center",
-      background: done ? "var(--gn)" : "transparent",
-      border: done ? "none" : "1.5px solid var(--border-strong)",
-      color: "#fff", fontSize: 11, fontWeight: 800,
-    }}>{done ? "✓" : ""}</span>
+    <span style={{ width: 18, height: 18, borderRadius: 999, flexShrink: 0, display: "inline-flex", alignItems: "center", justifyContent: "center", background: done ? "var(--gn)" : "transparent", border: done ? "none" : "1.5px solid var(--border-strong)", color: "#fff", fontSize: 11, fontWeight: 800 }}>{done ? "✓" : ""}</span>
   );
 }
 
-// SVG completion ring — a visual, not a static icon. `big` renders a larger
-// ring with the percentage label inside, for the record progress header.
 function CompletionRing({ pct, big }: { pct: number; big?: boolean }) {
   const size = big ? 52 : 18;
   const sw = big ? 4 : 2.5;
@@ -285,9 +256,7 @@ function CompletionRing({ pct, big }: { pct: number; big?: boolean }) {
         <circle cx={cx} cy={cx} r={r} fill="none" stroke="var(--fill-2)" strokeWidth={sw} />
         <circle cx={cx} cy={cx} r={r} fill="none" stroke={color} strokeWidth={sw} strokeDasharray={c} strokeDashoffset={off} strokeLinecap="round" />
       </svg>
-      {big && (
-        <span style={{ position: "absolute", inset: 0, display: "flex", alignItems: "center", justifyContent: "center", fontSize: 13, fontWeight: 700, color: "var(--tp)" }}>{pct}%</span>
-      )}
+      {big && <span style={{ position: "absolute", inset: 0, display: "flex", alignItems: "center", justifyContent: "center", fontSize: 13, fontWeight: 700, color: "var(--tp)" }}>{pct}%</span>}
     </span>
   );
 }
