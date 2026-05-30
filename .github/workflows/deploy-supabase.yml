@@ -77,8 +77,21 @@ jobs:
         # which rejected auth here and is the wrong mode for migrations anyway.
         # Point db push at the SESSION pooler (5432) explicitly. NOTE: the DB
         # password must stay alphanumeric so it's safe inline in this URL.
+        #
+        # The pooler hostname is per-project (region + pooler cluster) and is
+        # NOT derivable from the ref, so map each project to its Session pooler
+        # host. Find a project's host in the dashboard: Connect → Session pooler.
         run: |
-          supabase db push --db-url "postgresql://postgres.${PROJECT_REF}:${SUPABASE_DB_PASSWORD}@aws-0-us-west-2.pooler.supabase.com:5432/postgres?sslmode=require"
+          case "$PROJECT_REF" in
+            fthnutnmpoymcrbvijku) POOLER_HOST="aws-1-us-west-1.pooler.supabase.com" ;;  # singlestack-dev
+            pzulufyoqvqevjrmtmfj) POOLER_HOST="aws-0-us-west-2.pooler.supabase.com" ;;  # demo
+            *)
+              echo "::error::No Session pooler host mapped for project ref '${PROJECT_REF}'. Add its host (Connect → Session pooler) to the case in deploy-supabase.yml."
+              exit 1
+              ;;
+          esac
+          echo "Using pooler host: ${POOLER_HOST}"
+          supabase db push --db-url "postgresql://postgres.${PROJECT_REF}:${SUPABASE_DB_PASSWORD}@${POOLER_HOST}:5432/postgres?sslmode=require"
 
       - name: Deploy Edge Functions
         # Deploys all functions if any exist; a no-op before the first function
