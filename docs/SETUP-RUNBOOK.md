@@ -29,10 +29,14 @@ ACCESS TOKEN (sbp_...): ____
 4. Click **"Create new project"**. Wait ~2 min.
 
 ### 🧑 1.2 Copy 3 values (dev)
-1. Left **gear icon (Project Settings)** → **"API"**.
-2. **Project URL** (`https://xxxxx.supabase.co`) → notes `DEV URL`.
-3. **Project API Keys → anon public** (`eyJ...`) → notes `DEV ANON KEY`.
-4. Settings → **"General"** → **Reference ID** → notes `DEV PROJECT REF`.
+1. Left **gear icon (Project Settings)** → **"General"** → **Reference ID** →
+   notes `DEV PROJECT REF`.
+2. **Project URL** → notes `DEV URL`. It is always
+   `https://<DEV PROJECT REF>.supabase.co` (just wrap the ref from step 1).
+   *(The dashboard no longer shows the URL on the API Keys page; if you want to
+   see it in the UI it's under Project Settings → **"Data API"**.)*
+3. Project Settings → **"API Keys"** → **anon public / publishable** (`eyJ...` or
+   `sb_publishable_...`) → notes `DEV ANON KEY`.
 
 ### 🧑 1.3 Add the Anthropic key (dev)
 > SAME key the demo project uses — NOT a new one. Pasted here because secrets
@@ -44,7 +48,8 @@ ACCESS TOKEN (sbp_...): ____
 
 ### 🧑 1.4 Get the demo project's values
 1. Top-left project dropdown → open **`pzulufyoqvqevjrmtmfj`**.
-2. Gear → **API** → copy `DEMO URL` and `DEMO ANON KEY`.
+2. `DEMO URL` = `https://pzulufyoqvqevjrmtmfj.supabase.co` (already known).
+   `DEMO ANON KEY` → Gear → **API Keys** → **anon public / publishable**.
 3. Gear → **Database** → **Database password** → if unknown, **Reset database
    password** (letters+numbers) → notes `DEMO DB PASSWORD`.
 4. Gear → **Edge Functions → Secrets** → confirm `ANTHROPIC_API_KEY` exists (add
