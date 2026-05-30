@@ -10,7 +10,7 @@ import { PageHeader, Section, Chip, Banner, BackLink, Empty } from "@/components
 
 type Agent = { id: string; key: string; name: string; role: string | null; model: string | null; system_prompt: string | null; is_active: boolean };
 type Skill = { id: string; key: string; name: string; description: string | null; category: string | null };
-type Connection = { id: string; kind: string; label: string; area: string | null; mcp_url: string | null; status: string };
+type Connection = { id: string; kind: string; label: string; area: string | null; mcp_url: string | null; status: string; config: { purpose?: string | null } | null };
 type Workflow = { id: string; name: string; description: string | null; trigger: string; target_type: string | null; is_active: boolean; last_run_at: string | null };
 
 type Tab = "overview" | "skills" | "connections" | "workflows";
@@ -38,7 +38,7 @@ export default function AgentDetail({ agentId }: { agentId: string }) {
     const [{ data: sk }, { data: as }, { data: cs }, { data: wf }] = await Promise.all([
       supabase.from("skills").select("id, key, name, description, category").order("name"),
       supabase.from("agent_skills").select("skill_id").eq("agent_id", agentId),
-      supabase.from("connections").select("id, kind, label, area, mcp_url, status").eq("agent_id", agentId).order("created_at"),
+      supabase.from("connections").select("id, kind, label, area, mcp_url, status, config").eq("agent_id", agentId).order("created_at"),
       supabase.from("workflows").select("id, name, description, trigger, target_type, is_active, last_run_at").eq("agent_id", agentId).order("created_at"),
     ]);
     setAgent(a); setSkills(sk ?? []); setAttached(new Set((as ?? []).map((x) => x.skill_id)));
@@ -189,7 +189,7 @@ function Skills({ agentId, skills, attached, reload, setError }: { agentId: stri
 // ---------- Connections ----------
 function Connections({ agentId, connections, reload, setError }: { agentId: string; connections: Connection[]; reload: () => void; setError: (s: string | null) => void }) {
   const supabase = createClient();
-  const [mcp, setMcp] = useState({ label: "", url: "" });
+  const [mcp, setMcp] = useState({ label: "", url: "", purpose: "" });
   const [busy, setBusy] = useState(false);
 
   const haveArea = (area: string) => connections.some((c) => c.kind === "internal" && c.area === area);
@@ -207,8 +207,11 @@ function Connections({ agentId, connections, reload, setError }: { agentId: stri
     try {
       const orgId = await getOrgId();
       if (!orgId) throw new Error("Could not resolve your organization.");
-      await supabase.from("connections").insert({ org_id: orgId, agent_id: agentId, kind: "mcp", label: mcp.label.trim(), mcp_url: mcp.url.trim(), status: "manual" });
-      setMcp({ label: "", url: "" }); reload();
+      await supabase.from("connections").insert({
+        org_id: orgId, agent_id: agentId, kind: "mcp", label: mcp.label.trim(), mcp_url: mcp.url.trim(),
+        status: "manual", config: { purpose: mcp.purpose.trim() || null },
+      });
+      setMcp({ label: "", url: "", purpose: "" }); reload();
     } catch (e) { setError(e instanceof Error ? e.message : "Could not add connection."); }
     finally { setBusy(false); }
   }
@@ -234,6 +237,8 @@ function Connections({ agentId, connections, reload, setError }: { agentId: stri
             <label className="field"><span className="t-label">Name</span><input className="input" value={mcp.label} onChange={(e) => setMcp({ ...mcp, label: e.target.value })} placeholder="e.g. Web search" /></label>
             <label className="field"><span className="t-label">MCP server URL</span><input className="input mono" value={mcp.url} onChange={(e) => setMcp({ ...mcp, url: e.target.value })} placeholder="https://…/mcp" /></label>
           </div>
+          <label className="field"><span className="t-label">What it does in SingleStack</span>
+            <input className="input" value={mcp.purpose} onChange={(e) => setMcp({ ...mcp, purpose: e.target.value })} placeholder="e.g. Pulls competitor releases into external signals; used by the CRO agent for battlecards." /></label>
           <button className="btn btn-sm" type="submit" disabled={busy}>{busy ? "Adding…" : "+ Add MCP connection"}</button>
         </form>
       </Section>
@@ -242,12 +247,15 @@ function Connections({ agentId, connections, reload, setError }: { agentId: stri
         {connections.length === 0 ? <div className="t-sub t-muted">No connections yet.</div> : (
           <div className="stack-3">
             {connections.map((c) => (
-              <div key={c.id} className="card card-pad row-between">
-                <div className="row gap-2">
-                  <Chip tone={c.kind === "internal" ? "accent" : "violet"}>{c.kind === "internal" ? "internal" : "MCP"}</Chip>
-                  <span style={{ fontSize: 14, fontWeight: 600 }}>{c.label}</span>
-                  {c.mcp_url && <span className="mono t-muted" style={{ fontSize: 11 }}>{c.mcp_url}</span>}
-                  <Chip tone={c.status === "connected" ? "green" : "default"}>{c.status === "connected" ? "live" : "declared"}</Chip>
+              <div key={c.id} className="card card-pad row-between" style={{ alignItems: "flex-start" }}>
+                <div style={{ minWidth: 0 }}>
+                  <div className="row gap-2">
+                    <Chip tone={c.kind === "internal" ? "accent" : "violet"}>{c.kind === "internal" ? "internal" : "MCP"}</Chip>
+                    <span style={{ fontSize: 14, fontWeight: 600 }}>{c.label}</span>
+                    <Chip tone={c.status === "connected" ? "green" : "default"}>{c.status === "connected" ? "live" : "declared"}</Chip>
+                  </div>
+                  {c.mcp_url && <div className="mono t-muted" style={{ fontSize: 11, marginTop: 4 }}>{c.mcp_url}</div>}
+                  {c.config?.purpose && <div className="t-sub" style={{ fontSize: 12.5, marginTop: 4 }}>{c.config.purpose}</div>}
                 </div>
                 <button className="btn btn-secondary btn-sm" onClick={() => remove(c.id)}>Remove</button>
               </div>
