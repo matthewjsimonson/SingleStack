@@ -75,8 +75,7 @@ jobs:
       - name: Push migrations (via session pooler, port 5432)
         # The CLI's default pooler selection lands on transaction mode (6543),
         # which rejected auth here and is the wrong mode for migrations anyway.
-        # Point db push at the SESSION pooler (5432) explicitly. NOTE: the DB
-        # password must stay alphanumeric so it's safe inline in this URL.
+        # Point db push at the SESSION pooler (5432) explicitly.
         #
         # The pooler hostname is per-project (region + pooler cluster) and is
         # NOT derivable from the ref, so map each project to its Session pooler
@@ -91,7 +90,14 @@ jobs:
               ;;
           esac
           echo "Using pooler host: ${POOLER_HOST}"
-          supabase db push --db-url "postgresql://postgres.${PROJECT_REF}:${SUPABASE_DB_PASSWORD}@${POOLER_HOST}:5432/postgres?sslmode=require"
+          # URL-encode the password so ANY character (@ : / # % ? ...) is safe
+          # inline in the connection URL. An un-encoded special char silently
+          # truncates the password and yields a misleading 28P01 "password
+          # authentication failed" — even when the stored password is correct.
+          # Strip a stray trailing newline a pasted secret may carry, too.
+          RAW_PW="${SUPABASE_DB_PASSWORD%$'\n'}"
+          ENC_PW="$(printf '%s' "$RAW_PW" | jq -sRr @uri)"
+          supabase db push --db-url "postgresql://postgres.${PROJECT_REF}:${ENC_PW}@${POOLER_HOST}:5432/postgres?sslmode=require"
 
       - name: Deploy Edge Functions
         # Deploys all functions if any exist; a no-op before the first function
