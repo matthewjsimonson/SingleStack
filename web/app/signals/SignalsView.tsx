@@ -1,16 +1,15 @@
 "use client";
 
-// Signals — a tabbed intelligence area:
-//   • Homepage  — the dynamic dashboard. AI synthesizes ALL signals into THEMES,
-//                 split Product vs GTM, each with a prescriptive recommendation.
-//                 "Synthesize" runs the synthesize-signals function (real Claude).
-//   • Internal  — raw signal stream from your own tools/subscriptions.
-//   • External  — raw signal stream from market/web resources.
-// Sources are managed in Settings; agents primarily run from the Homepage.
+// Signals — the INTEL HOMEPAGE. Less form, more briefing:
+//   • Home tab = a situation room: status strip + synthesize, threat/opportunity
+//     callouts, a live activity ticker, and the synthesized theme grid.
+//   • Internal / External = the raw streams.
+// Setup (log a signal, manage sources, tracking topics) lives in modals/compact
+// rows so the page is for SHOWING intel, not housing forms.
 import { useEffect, useState, useCallback } from "react";
 import { createClient } from "@/lib/supabase/client";
 import { getOrgId } from "@/lib/org";
-import { PageHeader, Section, Chip, Banner, Confidence } from "@/components/ui";
+import { PageHeader, Section, Chip, Banner, Confidence, Modal, SubTabs } from "@/components/ui";
 import TrackingTopics from "@/components/TrackingTopics";
 import SourceManager from "@/components/SourceManager";
 
@@ -44,7 +43,8 @@ export default function SignalsView() {
   const [tab, setTab] = useState<Tab>("home");
   const [synth, setSynth] = useState(false);
 
-  const [logging, setLogging] = useState(false);
+  const [logOpen, setLogOpen] = useState(false);
+  const [trackOpen, setTrackOpen] = useState(false);
   const [form, setForm] = useState({ title: "", why: "", conf: "0.7", source_id: "" });
   const [busy, setBusy] = useState(false);
 
@@ -94,27 +94,54 @@ export default function SignalsView() {
         observed_at: new Date().toISOString(), source_id: form.source_id || null,
       });
       if (error) throw error;
-      setLogging(false); setForm({ title: "", why: "", conf: "0.7", source_id: "" });
+      setLogOpen(false); setForm({ title: "", why: "", conf: "0.7", source_id: "" });
       await load();
     } catch (e) { setError(e instanceof Error ? e.message : "Could not log signal."); }
     finally { setBusy(false); }
   }
 
   const stream = signals.filter((s) => tab === "internal" ? isInternal(s) : tab === "external" ? !isInternal(s) : true);
+  const internalCount = signals.filter(isInternal).length;
+  const externalCount = signals.length - internalCount;
   const productThemes = themes.filter((t) => t.category === "product");
   const gtmThemes = themes.filter((t) => t.category === "gtm");
+  const highSignals = signals.filter((s) => (s.conf_level ?? 0) >= 0.75);
 
   return (
     <div>
       <PageHeader
         title="Signals"
         meta="Your intelligence dashboard — internal & external intel, synthesized into what to do next."
-        actions={<button className="btn" onClick={() => setLogging((v) => !v)}>{logging ? "Close" : "+ Log signal"}</button>}
+        actions={
+          <>
+            <button className="btn btn-secondary" onClick={() => setTrackOpen(true)}>Tracking</button>
+            <button className="btn" onClick={() => setLogOpen(true)}>+ Log signal</button>
+          </>
+        }
       />
       <Banner>{error}</Banner>
 
-      {logging && (
-        <form onSubmit={logSignal} className="card card-pad" style={{ marginBottom: "var(--sp-6)" }}>
+      <SubTabs<Tab>
+        tabs={[{ key: "home", label: "Homepage" }, { key: "internal", label: `Internal · ${internalCount}` }, { key: "external", label: `External · ${externalCount}` }]}
+        active={tab} onChange={setTab}
+      />
+
+      {loading ? <div className="t-sub t-muted">Loading…</div> : tab === "home" ? (
+        <Home
+          signals={signals} themes={themes} productThemes={productThemes} gtmThemes={gtmThemes}
+          highSignals={highSignals} sources={sources} internalCount={internalCount} externalCount={externalCount}
+          sourceById={sourceById} synth={synth} onSynthesize={synthesize}
+        />
+      ) : (
+        <>
+          <SourceManager title={tab === "internal" ? "Internal sources" : "External sources"} />
+          <Stream stream={stream} sourceById={sourceById} kind={tab} />
+        </>
+      )}
+
+      {/* Log signal — modal */}
+      <Modal open={logOpen} onClose={() => setLogOpen(false)} title="Log a signal">
+        <form onSubmit={logSignal}>
           <label className="field"><span className="t-label">What's the signal?</span>
             <input className="input" autoFocus value={form.title} onChange={(e) => setForm({ ...form, title: e.target.value })} placeholder="e.g. Buyers stall on pricing after demo" /></label>
           <label className="field"><span className="t-label">Why it matters</span>
@@ -130,60 +157,97 @@ export default function SignalsView() {
                 {sources.map((s) => <option key={s.id} value={s.id}>{s.icon} {s.label}</option>)}
               </select></label>
           </div>
-          <div className="row gap-2"><button className="btn" type="submit" disabled={busy}>{busy ? "Logging…" : "Log signal"}</button><button className="btn btn-secondary" type="button" onClick={() => setLogging(false)}>Cancel</button></div>
+          <div className="row gap-2"><button className="btn" type="submit" disabled={busy}>{busy ? "Logging…" : "Log signal"}</button><button className="btn btn-secondary" type="button" onClick={() => setLogOpen(false)}>Cancel</button></div>
         </form>
-      )}
+      </Modal>
 
-      <SourceManager title="Signal sources" />
-      <TrackingTopics category="signals" suggestions={["Recurring onboarding friction", "Feature requests by segment", "Churn signals from usage", "Support ticket themes"]} />
+      {/* Tracking topics — modal */}
+      <Modal open={trackOpen} onClose={() => setTrackOpen(false)} title="What you're tracking">
+        <TrackingTopics category="signals" suggestions={["Recurring onboarding friction", "Feature requests by segment", "Churn signals from usage", "Support ticket themes"]} />
+      </Modal>
+    </div>
+  );
+}
 
-      {/* Tabs */}
-      <div className="row gap-2" style={{ marginBottom: "var(--sp-5)", borderBottom: "1px solid var(--border)" }}>
-        {([["home", "Homepage"], ["internal", "Internal"], ["external", "External"]] as [Tab, string][]).map(([k, label]) => (
-          <button key={k} onClick={() => setTab(k)}
-            style={{ background: "none", border: "none", borderBottom: tab === k ? "2px solid var(--ac)" : "2px solid transparent", color: tab === k ? "var(--tp)" : "var(--ts)", fontWeight: 640, fontSize: 13.5, padding: "8px 14px", cursor: "pointer", marginBottom: -1 }}>
-            {label}{k === "internal" ? ` · ${signals.filter(isInternal).length}` : k === "external" ? ` · ${signals.filter((s) => !isInternal(s)).length}` : ""}
-          </button>
-        ))}
+// ---------- Intel homepage ----------
+function Home({ signals, themes, productThemes, gtmThemes, highSignals, sources, internalCount, externalCount, sourceById, synth, onSynthesize }: {
+  signals: Signal[]; themes: Theme[]; productThemes: Theme[]; gtmThemes: Theme[]; highSignals: Signal[];
+  sources: Source[]; internalCount: number; externalCount: number;
+  sourceById: (id: string | null) => Source | null; synth: boolean; onSynthesize: () => void;
+}) {
+  return (
+    <div>
+      {/* Situation strip */}
+      <div className="card card-pad" style={{ marginBottom: "var(--sp-5)", display: "flex", alignItems: "center", gap: 20 }}>
+        <div style={{ display: "grid", gridTemplateColumns: "repeat(4, auto)", gap: 28, flex: 1 }}>
+          <Stat n={signals.length} label="Signals tracked" />
+          <Stat n={internalCount} label="Internal" />
+          <Stat n={externalCount} label="External" />
+          <Stat n={themes.length} label="Themes" accent={themes.length > 0} />
+        </div>
+        <button className="btn btn-accent" disabled={synth || signals.length === 0} onClick={onSynthesize}>
+          {synth ? "Synthesizing…" : themes.length ? "Re-synthesize" : "Synthesize intel"}
+        </button>
       </div>
 
-      {loading ? <div className="t-sub t-muted">Loading…</div> : tab === "home" ? (
-        <HomeTab themes={themes} productThemes={productThemes} gtmThemes={gtmThemes} signals={signals} synth={synth} onSynthesize={synthesize} />
+      {signals.length === 0 ? (
+        <div className="empty">
+          <div className="t-body" style={{ fontWeight: 600, marginBottom: 6 }}>Your situation room is empty</div>
+          <div className="t-sub" style={{ maxWidth: 460, marginInline: "auto" }}>Log signals (top right) or connect sources on the Internal/External tabs, then synthesize to see the patterns and what to do.</div>
+        </div>
       ) : (
-        <Stream stream={stream} sourceById={sourceById} kind={tab} />
+        <>
+          {/* Callouts: synthesized themes as threat/opportunity briefs */}
+          {themes.length > 0 && (
+            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "var(--sp-5)", alignItems: "start", marginBottom: "var(--sp-6)" }}>
+              <ThemeColumn title="Product intelligence" tone="accent" themes={productThemes} />
+              <ThemeColumn title="Go-to-market intelligence" tone="violet" themes={gtmThemes} />
+            </div>
+          )}
+
+          <div style={{ display: "grid", gridTemplateColumns: "1.4fr 1fr", gap: "var(--sp-6)", alignItems: "start" }}>
+            {/* Activity ticker */}
+            <Section label="Live activity">
+              <div className="card">
+                {signals.slice(0, 8).map((s, i) => {
+                  const src = sourceById(s.source_id);
+                  return (
+                    <div key={s.id} style={{ padding: "11px 14px", borderTop: i === 0 ? "none" : "1px solid var(--border)", display: "flex", alignItems: "center", gap: 10 }}>
+                      <span style={{ width: 6, height: 6, borderRadius: 999, flexShrink: 0, background: (s.conf_level ?? 0) >= 0.75 ? "var(--gn)" : (s.conf_level ?? 0) >= 0.5 ? "var(--am-text)" : "var(--border-strong)" }} />
+                      <span style={{ flex: 1, fontSize: 13.5, fontWeight: 600, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{s.title}</span>
+                      {src && <span className="chip" style={{ flexShrink: 0 }}>{src.icon}</span>}
+                      <span className="t-mono-xs" style={{ flexShrink: 0 }}>{ago(s.observed_at)}</span>
+                    </div>
+                  );
+                })}
+              </div>
+            </Section>
+
+            {/* High-confidence watch list */}
+            <Section label="High-confidence">
+              {highSignals.length === 0 ? <div className="t-sub t-muted" style={{ fontSize: 12.5 }}>No high-confidence signals yet.</div> : (
+                <div className="stack-3">
+                  {highSignals.slice(0, 5).map((s) => (
+                    <div key={s.id} className="card card-pad" style={{ borderLeft: "2px solid var(--gn)", padding: "12px 14px" }}>
+                      <div style={{ fontSize: 13.5, fontWeight: 620, marginBottom: 3 }}>{s.title}</div>
+                      <Confidence label={s.conf_label} level={s.conf_level} />
+                    </div>
+                  ))}
+                </div>
+              )}
+            </Section>
+          </div>
+        </>
       )}
     </div>
   );
 }
 
-function HomeTab({ themes, productThemes, gtmThemes, signals, synth, onSynthesize }: {
-  themes: Theme[]; productThemes: Theme[]; gtmThemes: Theme[]; signals: Signal[]; synth: boolean; onSynthesize: () => void;
-}) {
+function Stat({ n, label, accent }: { n: number; label: string; accent?: boolean }) {
   return (
-    <div>
-      <div className="card card-pad" style={{ marginBottom: "var(--sp-6)", display: "flex", alignItems: "center", gap: 16 }}>
-        <div style={{ flex: 1 }}>
-          <div style={{ fontSize: 14.5, fontWeight: 640 }}>Intelligence synthesis</div>
-          <div className="t-sub t-muted" style={{ fontSize: 12.5 }}>
-            {themes.length > 0 ? `${themes.length} themes across ${signals.length} signals. Re-synthesize when new intel lands.` : `Synthesize ${signals.length} signal${signals.length === 1 ? "" : "s"} into actionable themes.`}
-          </div>
-        </div>
-        <button className="btn btn-accent" disabled={synth || signals.length === 0} onClick={onSynthesize}>{synth ? "Synthesizing…" : themes.length ? "Re-synthesize" : "Synthesize"}</button>
-      </div>
-
-      {themes.length === 0 ? (
-        <div className="empty">
-          <div className="t-body" style={{ fontWeight: 600, marginBottom: 6 }}>No themes yet</div>
-          <div className="t-sub" style={{ maxWidth: 460, marginInline: "auto" }}>
-            {signals.length === 0 ? "Log signals or connect sources, then synthesize to see the patterns across them." : "Click Synthesize — AI will read every signal and surface the product & GTM themes worth acting on."}
-          </div>
-        </div>
-      ) : (
-        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "var(--sp-5)", alignItems: "start" }}>
-          <ThemeColumn title="Product themes" tone="accent" themes={productThemes} />
-          <ThemeColumn title="Go-to-market themes" tone="violet" themes={gtmThemes} />
-        </div>
-      )}
+    <div className="stat">
+      <span className="stat-num" style={{ color: accent ? "var(--ac-text)" : undefined }}>{n}</span>
+      <span className="stat-label">{label}</span>
     </div>
   );
 }
@@ -217,7 +281,7 @@ function ThemeColumn({ title, tone, themes }: { title: string; tone: "accent" | 
 }
 
 function Stream({ stream, sourceById, kind }: { stream: Signal[]; sourceById: (id: string | null) => Source | null; kind: "internal" | "external" }) {
-  if (stream.length === 0) return <div className="t-sub t-muted">No {kind} signals yet. {kind === "internal" ? "Connect your tools in Settings, or log one." : "Add external sources in Settings, or log one."}</div>;
+  if (stream.length === 0) return <div className="t-sub t-muted">No {kind} signals yet. Add sources above, or log one.</div>;
   return (
     <div className="stack-3">
       {stream.map((s) => {

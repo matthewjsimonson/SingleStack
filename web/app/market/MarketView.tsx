@@ -121,7 +121,7 @@ export default function MarketView() {
                   </div>
                 )}
                 <div style={{ marginTop: "var(--sp-3)" }}>
-                  <SourceManager scope={{ marketLens: lane.key }} title={`${lane.label} sources`} compact />
+                  <SourceManager scope={{ marketLens: lane.key }} title={`${lane.label} sources`} />
                 </div>
               </div>
             );
