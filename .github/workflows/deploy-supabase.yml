@@ -1,33 +1,35 @@
 name: Deploy to Supabase
 
 # ============================================================================
-# Branch-aware migration deploy. One workflow, three isolated tiers — each git
-# branch maps to its own GitHub Environment, which holds that tier's Supabase
-# secrets. The code is identical across tiers; only the target project differs.
+# Branch-aware migration deploy. One workflow, two isolated tiers (free-tier
+# friendly: 2 Supabase projects). Each git branch maps to its own GitHub
+# Environment, which holds that tier's Supabase secrets. The code is identical
+# across tiers; only the target project differs.
 #
 #   branch     →  GitHub Environment  →  Supabase project (via env secrets)
 #   ------------------------------------------------------------------------
-#   develop    →  development         →  singlestack-dev   (throwaway data)
-#   staging    →  demo                →  singlestack-demo  (curated demo data)
-#   main       →  production          →  singlestack-prod  (real data)
+#   develop    →  development         →  singlestack-dev          (throwaway data)
+#   main       →  demo                →  pzulufyoqvqevjrmtmfj     (demo data)
+#
+# (A third "production" tier can be added later — create a prod project, add a
+# `staging`/`main` split + a `production` Environment. Left out for now to fit
+# the free tier's 2-project limit.)
 #
 # Each Environment (GitHub → Settings → Environments) defines three secrets:
 #   SUPABASE_PROJECT_REF   — the project ref, e.g. abcdwxyz12345678
 #   SUPABASE_DB_PASSWORD   — that project's database password (alphanumeric)
 #   SUPABASE_ACCESS_TOKEN  — a personal access token for the Supabase account
-# Production can also carry a required-reviewer protection rule, so a merge to
-# main never auto-touches prod without an explicit approval click.
 # ============================================================================
 
 on:
   push:
-    branches: [develop, staging, main]
+    branches: [develop, main]
   workflow_dispatch:
     inputs:
       tier:
         description: "Tier to deploy (manual run)"
         type: choice
-        options: [development, demo, production]
+        options: [development, demo]
         default: development
 
 jobs:
@@ -35,11 +37,12 @@ jobs:
     runs-on: ubuntu-latest
     # Pick the Environment from the branch (push) or the chosen tier (manual).
     # The Environment scopes which set of secrets this run can read.
+    #   main    → demo        (the existing project)
+    #   develop → development  (the new dev project)
     environment: >-
       ${{
         github.event_name == 'workflow_dispatch' && inputs.tier
-        || github.ref_name == 'main' && 'production'
-        || github.ref_name == 'staging' && 'demo'
+        || github.ref_name == 'main' && 'demo'
         || 'development'
       }}
     env:
