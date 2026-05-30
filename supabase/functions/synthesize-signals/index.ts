@@ -43,8 +43,22 @@ const SCHEMA = {
         required: ["category", "title", "summary", "recommendation", "conf_level", "signal_indices"],
       },
     },
+    // Per-signal lens classification: what each input signal INFORMS. Applied
+    // only to signals the user hasn't already categorized by hand.
+    signal_categories: {
+      type: "array",
+      items: {
+        type: "object",
+        additionalProperties: false,
+        properties: {
+          index: { type: "integer" },
+          category: { type: "string", enum: ["product", "gtm", "both"] },
+        },
+        required: ["index", "category"],
+      },
+    },
   },
-  required: ["themes"],
+  required: ["themes", "signal_categories"],
 };
 
 Deno.serve(async (req: Request) => {
@@ -69,7 +83,7 @@ Deno.serve(async (req: Request) => {
 
     const { data: signals } = await supabase
       .from("signals")
-      .select("id, title, why, conf_level, scope, observed_at, sources(label, origin)")
+      .select("id, title, why, conf_level, scope, category, origin, observed_at, sources(label, origin)")
       .order("observed_at", { ascending: false, nullsFirst: false })
       .limit(200);
 
@@ -81,16 +95,17 @@ Deno.serve(async (req: Request) => {
 
     const list = signals.map((s, i) => {
       // deno-lint-ignore no-explicit-any
-      const src = (s as any).sources;
-      const origin = src?.origin ?? "internal";
-      const label = src?.label ?? "unattributed";
+      const sig = s as any;
+      const origin = sig.origin ?? sig.sources?.origin ?? "internal";
+      const label = sig.sources?.label ?? "unattributed";
       return `[${i}] (${origin} · ${label} · scope:${s.scope}) ${s.title}${s.why ? " — " + s.why : ""}`;
     }).join("\n");
 
     const system = [
       "You are the intelligence synthesis engine for SingleStack, an AI-native product & go-to-market platform.",
-      "You receive an organization's raw signals (internal tool data + external market intel). Find the recurring PATTERNS worth acting on — not a restatement of each signal, but the themes that emerge across them.",
-      "For each theme: categorize it as 'product' (informs the product record/strategy — usage, tech, roadmap) or 'gtm' (informs go-to-market — messaging, positioning, buyers, competition); write a tight plain-English summary of the pattern; give a prescriptive recommendation (the concrete 'so do this'); set conf_level 0..1 based on how strongly the signals support it; and list signal_indices (the [n] indices) that back the theme.",
+      "You receive an organization's raw signals (internal tool data + external market intel). You do two jobs.",
+      "JOB 1 — Classify each signal's lens. For EVERY input signal, decide what it INFORMS: 'product' (how you build/update the product — usage, adoption, feature requests, technical & product-competitive moves), 'gtm' (how you go to market — messaging, positioning, pricing, sales objections, buyers, competitive selling), or 'both'. Return one entry per signal in signal_categories with its [n] index.",
+      "JOB 2 — Synthesize themes. Find the recurring PATTERNS worth acting on — not a restatement of each signal, but the themes that emerge across them. For each theme: categorize it as 'product' or 'gtm'; write a tight plain-English summary of the pattern; give a prescriptive recommendation (the concrete 'so do this'); set conf_level 0..1 based on how strongly the signals support it; and list signal_indices (the [n] indices) that back it.",
       "Aim for 3–6 high-quality themes. Prefer themes supported by multiple signals. Be specific and useful, not generic.",
     ].join("\n");
 
@@ -109,7 +124,24 @@ Deno.serve(async (req: Request) => {
     if (!block || block.type !== "text") throw new Error("no synthesis returned");
     const parsed = JSON.parse(block.text) as {
       themes: { category: string; title: string; summary: string; recommendation: string; conf_level: number; signal_indices: number[] }[];
+      signal_categories?: { index: number; category: string }[];
     };
+
+    // Apply the lens classification — but ONLY to signals the user hasn't sorted
+    // by hand. Group the AI's picks by category and update in batches.
+    // deno-lint-ignore no-explicit-any
+    const unsorted = new Set(signals.filter((s) => !(s as any).category).map((s) => s.id));
+    const byCategory: Record<string, string[]> = { product: [], gtm: [], both: [] };
+    for (const c of parsed.signal_categories ?? []) {
+      const id = signals[c.index]?.id;
+      if (id && unsorted.has(id) && byCategory[c.category]) byCategory[c.category].push(id);
+    }
+    let categorized = 0;
+    for (const [category, ids] of Object.entries(byCategory)) {
+      if (!ids.length) continue;
+      const { error } = await supabase.from("signals").update({ category }).in("id", ids);
+      if (!error) categorized += ids.length;
+    }
 
     // Replace prior themes with the fresh set.
     await supabase.from("signal_themes").delete().eq("org_id", orgId);
@@ -128,7 +160,7 @@ Deno.serve(async (req: Request) => {
       if (error) throw error;
     }
 
-    return json({ themes: rows.length });
+    return json({ themes: rows.length, categorized });
   } catch (e) {
     return json({ error: e instanceof Error ? e.message : String(e) }, 500);
   }
