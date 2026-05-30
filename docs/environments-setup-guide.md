@@ -18,6 +18,71 @@ as three fully isolated environments. Follow top to bottom. Budget ~45–60 min.
 >   Prod   main         Production     singlestack-prod  (new)       real
 > ```
 
+---
+
+## READ FIRST — how Git, GitHub, Supabase, and Vercel connect
+
+This is the part that's easy to get wrong. Read it before clicking anything.
+
+### There is ONE GitHub repository for everything
+All three tiers live in the **single repo `matthewjsimonson/SingleStack`**. You
+do **not** create a repo per environment. The tiers are **git branches** in this
+one repo:
+
+```
+  repo: matthewjsimonson/SingleStack
+    ├── branch develop   → Dev   tier
+    ├── branch staging   → Demo  tier
+    └── branch main      → Prod  tier
+```
+
+Vercel connects to this one repo and deploys each branch to its environment.
+The GitHub Actions workflow in this repo runs migrations to the right Supabase
+project based on the branch. Supabase projects are the **databases** — they are
+not separate code repos.
+
+### CRITICAL: pick ONE migration-deploy mechanism, not two
+Supabase migrations can be deployed two different ways, and **only one may be
+active** or they fight each other (double-deploys, race conditions):
+
+- **Option 1 — GitHub Actions (what this repo uses). ✅ Chosen.**
+  The `.github/workflows/deploy-supabase.yml` workflow runs the Supabase CLI and
+  applies migrations to the correct project per branch, with a production
+  approval gate and Edge Function deploys. Configured by **GitHub Environment
+  secrets** (Part B). Nothing is configured on the Supabase side.
+
+- **Option 2 — Supabase's native GitHub integration. ❌ Do NOT use.**
+  A connection set up *inside the Supabase dashboard* (Project → Integrations →
+  GitHub) where Supabase itself watches the repo and runs migrations. It has no
+  production approval gate and doesn't deploy our Edge Functions. The existing
+  demo project (`pzulufyoqvqevjrmtmfj`) was originally wired this way — that's
+  what the `supabase/migrations/...deploy_trigger.sql` marker was a hack for.
+  (That migration is now just a harmless schema comment — it applies cleanly to
+  all three projects and needs no action. Leave it.)
+
+**Therefore, the Git-wiring rules are:**
+
+| Project | Connect to GitHub in the Supabase dashboard? |
+|---|---|
+| `singlestack-dev` (new) | **No.** Never connect it. |
+| `singlestack-prod` (new) | **No.** Never connect it. |
+| `pzulufyoqvqevjrmtmfj` (demo, existing) | **Disconnect** it — see Part A0 below. |
+
+So to answer the question directly: **you do NOT connect your new Supabase
+projects to Git.** Supabase deploys are driven entirely by the GitHub Actions
+workflow using the access token + project refs you put in GitHub Environment
+secrets. The only Supabase↔GitHub link you touch is **removing** the old one on
+the demo project.
+
+### Who connects to GitHub, and how
+| System | Connects to the repo? | How |
+|---|---|---|
+| **Vercel** | **Yes** — one Git connection | Vercel dashboard → Import/Link the `matthewjsimonson/SingleStack` repo (Part C0). Deploys branches automatically. |
+| **GitHub Actions** | It *is* in the repo | Runs on push; reaches Supabase via the access token + refs in Environment secrets. |
+| **Supabase** | **No** | Never connect a project to GitHub. It's a passive database the Actions workflow pushes to. |
+
+---
+
 You'll keep a scratchpad of values as you go. Here's the template — fill it in:
 
 ```
@@ -39,6 +104,20 @@ Supabase ACCESS TOKEN (one, account-level): sbp_______________
 ---
 
 ## PART A — Supabase: create the two new projects
+
+### A0. FIRST — disconnect the demo project's native GitHub integration
+The existing project was wired to deploy via Supabase's own GitHub integration.
+Leaving it on would make it fight the GitHub Actions workflow. Turn it off:
+1. Open the **`pzulufyoqvqevjrmtmfj`** (demo) project in the Supabase dashboard.
+2. **Settings → Integrations** (some dashboards: **Project Settings → GitHub**).
+3. If a GitHub repo connection is shown, click **Disconnect / Remove**.
+   - If you don't see one, it may already be off (or was using "Database
+     Migrations via GitHub Actions" already) — fine, nothing to do.
+4. Do **not** reconnect it, and do **not** connect the new dev/prod projects.
+   From here, all migrations flow only through GitHub Actions.
+
+> Why: see "pick ONE migration-deploy mechanism" above. Two active deployers =
+> double-runs and races.
 
 ### A1. Create `singlestack-dev`
 1. Go to **https://supabase.com/dashboard** → click **New project**.
@@ -137,6 +216,19 @@ For **each** environment, open it and under **Environment secrets** →
 ## PART C — Vercel: one project, three environments
 
 Vercel keeps one project; you scope the Supabase keys per environment.
+
+### C0. Connect Vercel to the repo (if not already)
+1. Vercel → your **SingleStack** project → **Settings → Git**.
+2. Confirm **Connected Git Repository** = `matthewjsimonson/SingleStack`.
+   - If no project exists yet: Vercel dashboard → **Add New → Project** →
+     **Import** `matthewjsimonson/SingleStack` → **Root Directory = `web`**
+     (the Next.js app lives in `web/`, not the repo root) → Deploy.
+   - If a project exists but points at a different/old repo, relink it here.
+3. Framework preset: **Next.js** (auto-detected). Root Directory must be `web`.
+
+> Vercel is the ONLY tool you connect to GitHub. It watches the repo and creates
+> a Production deploy for `main`, and Preview deploys for `develop`, `staging`,
+> and PRs.
 
 ### C1. Production branch
 1. Vercel → your **SingleStack** project → **Settings → Git**.
