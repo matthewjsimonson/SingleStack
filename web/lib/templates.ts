@@ -119,3 +119,63 @@ export const GTM_TEMPLATE: TemplateSection[] = [
 export function templateFor(kind: "product" | "gtm") {
   return kind === "product" ? PRODUCT_TEMPLATE : GTM_TEMPLATE;
 }
+
+// ---- BUILD ITEM (Ship initiative): Why / What / How / Proof ----------------
+// A build item is not a title + description. It carries the reasoning to build
+// from and the evidence that justifies it. Sections are data (stored on
+// initiative_fields.section), so this is a rich default, fully editable, and
+// AI-draftable field by field.
+export const BUILD_ITEM_TEMPLATE: TemplateSection[] = [
+  {
+    section: "Why",
+    blurb: "The reason this exists — the bet and the evidence behind it.",
+    fields: [
+      { key: "hypothesis", label: "Hypothesis", placeholder: "If we build this, then ___ — the bet in one sentence." },
+      { key: "problem", label: "Problem / opportunity", placeholder: "The user/market problem, and why it matters now." },
+      { key: "thesis", label: "Thesis it advances", placeholder: "The longer-horizon bet about where the product/market is going that this serves." },
+      { key: "evidence", label: "Evidence", placeholder: "The signals/decision that justify this (cited as links, summarized here)." },
+    ],
+  },
+  {
+    section: "What",
+    blurb: "The shape of the work — scoped and testable.",
+    fields: [
+      { key: "jtbd", label: "Jobs-to-be-done", placeholder: "What the user is trying to accomplish." },
+      { key: "scope_in", label: "In scope", placeholder: "What this explicitly includes." },
+      { key: "scope_out", label: "Out of scope", placeholder: "What this explicitly does NOT include (so it can ship)." },
+      { key: "acceptance", label: "Acceptance criteria", placeholder: "Testable conditions that mean 'done'. One per line." },
+      { key: "surfaces", label: "Modules / features touched", placeholder: "Where in the product this lands." },
+    ],
+  },
+  {
+    section: "How",
+    blurb: "The plan to build it and what could go wrong.",
+    fields: [
+      { key: "approach", label: "Technical approach", placeholder: "High-level approach and key decisions." },
+      { key: "dependencies", label: "Dependencies", placeholder: "Other items, teams, or systems this needs." },
+      { key: "risks", label: "Risks & unknowns", placeholder: "What could derail this and what we're unsure about." },
+      { key: "effort", label: "Effort / confidence", placeholder: "Rough size and how confident we are in it." },
+    ],
+  },
+  {
+    section: "Proof",
+    blurb: "How we'll know it worked — the prediction to validate.",
+    fields: [
+      { key: "success_metric", label: "Success metric", placeholder: "The number this should move — the prediction we validate after shipping." },
+      { key: "test_plan", label: "Test plan", placeholder: "How it's verified before ship (QA, eval, beta)." },
+      { key: "rollout", label: "Rollout", placeholder: "Flag, phased %, or full — how it reaches users." },
+      { key: "validation", label: "Validation result", placeholder: "After ship: did the metric move? Becomes a new signal." },
+    ],
+  },
+];
+
+// Pipeline gates: a build_stage can't be advanced past until these field_keys
+// are filled. This is the "configurable workflow" — gates are data, enforced in
+// the workspace UI. Keyed by the stage you are LEAVING.
+export const BUILD_STAGE_GATES: Record<string, string[]> = {
+  spec: ["hypothesis", "acceptance", "success_metric"],
+  prototype: ["approach"],
+  build: ["test_plan"],
+  test: ["rollout"],
+  shipped: ["validation"],
+};

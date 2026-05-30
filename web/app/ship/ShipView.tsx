@@ -6,6 +6,7 @@
 // vibecoding; items can attach to a roadmap release. This is where building
 // actually happens (Roadmap is what's coming).
 import { useEffect, useState, useCallback } from "react";
+import Link from "next/link";
 import { createClient } from "@/lib/supabase/client";
 import { getOrgId } from "@/lib/org";
 import { PageHeader, Chip, Banner } from "@/components/ui";
@@ -108,7 +109,7 @@ export default function ShipView() {
                   {col.map((it) => (
                     <div key={it.id} className="card card-pad" style={{ padding: 12 }}>
                       <div className="row-between" style={{ alignItems: "flex-start", marginBottom: 6 }}>
-                        <span style={{ fontSize: 13, fontWeight: 620, lineHeight: 1.3 }}>{it.title}</span>
+                        <Link href={`/ship/${it.id}`} style={{ fontSize: 13, fontWeight: 620, lineHeight: 1.3, color: "inherit", textDecoration: "none" }} title="Open build item">{it.title}</Link>
                         <button className="t-muted" onClick={() => remove(it.id)} style={{ background: "none", border: "none", cursor: "pointer", fontSize: 14, flexShrink: 0 }}>×</button>
                       </div>
                       <div className="row gap-2" style={{ flexWrap: "wrap", marginBottom: 8 }}>
