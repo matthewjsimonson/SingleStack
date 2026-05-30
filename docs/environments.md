@@ -83,6 +83,42 @@ pushing/merging to `main` deploys Demo.
 2. Merge → dev DB migrates, dev Preview deploys. Verify with throwaway data.
 3. PR `develop` → `main`. Merge → demo DB migrates, Production (demo) deploys.
 
+## Promoting dev → demo
+
+Dev and demo update **independently**, on purpose: `develop` deploys to dev on
+every push, but **demo only changes when you deliberately merge `develop` →
+`main`**. Let changes pile up on `develop`, then promote a reviewed batch when
+it's demo-ready — you don't promote change-by-change.
+
+This is automated so it's one click:
+
+- **`promote-to-demo.yml`** keeps a single **`develop → main` PR** open whenever
+  `develop` is ahead of `main`, pre-filled with a safety checklist
+  (`.github/promotion-pr-body.md`). It only opens the PR — it never deploys.
+- When the batch is ready, **merge that PR**. `deploy-supabase.yml` then runs the
+  demo deploy (migrations against `pzulufyoqvqevjrmtmfj` + Vercel Production).
+
+### Keep demo data safe (the one real footgun)
+CI runs `supabase db push`, which applies **migrations only** — `seed.sql` runs
+only on a local `db reset`, never in CI. Migrations are tracked and **run
+exactly once** per database. So:
+
+- **Schema migrations** (tables/columns/indexes, forward-only, additive) are
+  safe to promote — they apply once to each tier and never re-run.
+- **Data-mutating migrations are permanent on demo.** A migration that
+  deletes/edits rows (like the one-time `clean_slate_demo_data`) will alter the
+  demo project's real content the moment it's promoted, and you can't "un-run"
+  it. Avoid data migrations unless the demo-content change is intentional.
+- Never edit an **already-applied** migration file — it breaks the CLI's
+  migration checksums. Add a new migration instead.
+
+### Recommended: protect `main` (manual, one-time)
+So demo can only change through a reviewed promotion PR, add a branch protection
+rule: GitHub → **Settings → Branches → Add branch ruleset/rule** for `main` →
+enable **"Require a pull request before merging."** (Optionally require the
+**Deploy to Supabase** check on the dev side first.) This blocks accidental
+direct pushes to `main`/demo.
+
 ## Guardrails
 - **Migrations are forward-only and additive** by convention, so the same files
   apply cleanly to both DBs regardless of which data each holds.

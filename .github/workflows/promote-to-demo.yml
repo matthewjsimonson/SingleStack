@@ -1,0 +1,51 @@
+name: Promotion PR (develop → main)
+
+# Keeps a single "develop → main" pull request open whenever develop is ahead
+# of main, so promoting dev work to the demo tier is a one-click merge with a
+# safety checklist. Demo NEVER deploys from this workflow — it only opens/keeps
+# the PR; the actual demo deploy happens in deploy-supabase.yml when you MERGE.
+#
+#   develop (dev tier)  --[this PR]-->  main (demo tier)
+#
+# The PR auto-updates with each new develop push; merging it closes the loop.
+
+on:
+  push:
+    branches: [develop]
+
+permissions:
+  contents: read
+  pull-requests: write
+
+jobs:
+  promotion-pr:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5  # needed so --body-file can read the template
+
+      - name: Open or refresh the develop → main PR
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+        run: |
+          # Already an open promotion PR? GitHub auto-updates its diff on push,
+          # so there's nothing to do.
+          existing="$(gh pr list --repo "$REPO" --base main --head develop \
+            --state open --json number --jq '.[0].number // empty')"
+          if [ -n "$existing" ]; then
+            echo "Promotion PR #${existing} already open — it auto-updates with this push."
+            exit 0
+          fi
+
+          # Only open a PR if develop actually has commits ahead of main
+          # (avoids an empty PR right after a merge syncs the branches).
+          ahead="$(gh api "repos/${REPO}/compare/main...develop" --jq '.ahead_by')"
+          if [ "${ahead:-0}" -eq 0 ]; then
+            echo "develop is not ahead of main — nothing to promote."
+            exit 0
+          fi
+
+          echo "develop is ${ahead} commit(s) ahead of main — opening promotion PR."
+          gh pr create --repo "$REPO" --base main --head develop \
+            --title "Promote develop → main (deploy to demo)" \
+            --body-file .github/promotion-pr-body.md
