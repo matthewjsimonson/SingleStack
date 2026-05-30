@@ -2,6 +2,46 @@
 // instead of bespoke inline styles. Keep these minimal and presentational.
 import type { ReactNode } from "react";
 
+// Centered modal dialog. Setup/forms live here so pages can be for SHOWING
+// information, not housing forms. Click scrim or Close to dismiss.
+export function Modal({
+  open,
+  onClose,
+  title,
+  children,
+  width = 560,
+}: {
+  open: boolean;
+  onClose: () => void;
+  title: ReactNode;
+  children: ReactNode;
+  width?: number;
+}) {
+  if (!open) return null;
+  return (
+    <div
+      onClick={onClose}
+      style={{
+        position: "fixed", inset: 0, zIndex: 50, background: "rgba(11,12,14,0.42)",
+        display: "flex", alignItems: "flex-start", justifyContent: "center", padding: "60px 20px", overflowY: "auto",
+      }}
+    >
+      <div
+        onClick={(e) => e.stopPropagation()}
+        className="card"
+        style={{ width, maxWidth: "100%", boxShadow: "var(--shadow-md)", display: "flex", flexDirection: "column", maxHeight: "calc(100vh - 120px)" }}
+      >
+        <div className="row-between" style={{ padding: "16px 20px", borderBottom: "1px solid var(--border)" }}>
+          <span className="t-h2" style={{ fontSize: 15 }}>{title}</span>
+          <button className="btn btn-secondary btn-sm" onClick={onClose}>Close</button>
+        </div>
+        <div style={{ padding: 20, overflowY: "auto" }}>{children}</div>
+      </div>
+    </div>
+  );
+}
+
+
 export function PageHeader({
   title,
   meta,
