@@ -29,7 +29,8 @@ const GROUPS: Group[] = [
     label: "Intelligence",
     items: [
       { label: "Signals", href: "/signals" },
-      { label: "Competitors", href: "/competitors", soon: true },
+      { label: "Competitive intel", href: "/competitive" },
+      { label: "Market intel", href: "/market" },
     ],
   },
   {
