@@ -1,44 +1,86 @@
 name: Deploy to Supabase
 
-# Deploys supabase/migrations (the schema) and supabase/functions (Edge
-# Functions) to the connected project. Runs on GitHub's servers, pulling
-# straight from the repo (no copy-paste).
-# Requires two repo secrets: SUPABASE_ACCESS_TOKEN and SUPABASE_DB_PASSWORD.
+# ============================================================================
+# Branch-aware migration deploy. One workflow, three isolated tiers — each git
+# branch maps to its own GitHub Environment, which holds that tier's Supabase
+# secrets. The code is identical across tiers; only the target project differs.
+#
+#   branch     →  GitHub Environment  →  Supabase project (via env secrets)
+#   ------------------------------------------------------------------------
+#   develop    →  development         →  singlestack-dev   (throwaway data)
+#   staging    →  demo                →  singlestack-demo  (curated demo data)
+#   main       →  production          →  singlestack-prod  (real data)
+#
+# Each Environment (GitHub → Settings → Environments) defines three secrets:
+#   SUPABASE_PROJECT_REF   — the project ref, e.g. abcdwxyz12345678
+#   SUPABASE_DB_PASSWORD   — that project's database password (alphanumeric)
+#   SUPABASE_ACCESS_TOKEN  — a personal access token for the Supabase account
+# Production can also carry a required-reviewer protection rule, so a merge to
+# main never auto-touches prod without an explicit approval click.
+# ============================================================================
 
 on:
   push:
-    branches: [main]
+    branches: [develop, staging, main]
   workflow_dispatch:
+    inputs:
+      tier:
+        description: "Tier to deploy (manual run)"
+        type: choice
+        options: [development, demo, production]
+        default: development
 
 jobs:
   deploy:
     runs-on: ubuntu-latest
+    # Pick the Environment from the branch (push) or the chosen tier (manual).
+    # The Environment scopes which set of secrets this run can read.
+    environment: >-
+      ${{
+        github.event_name == 'workflow_dispatch' && inputs.tier
+        || github.ref_name == 'main' && 'production'
+        || github.ref_name == 'staging' && 'demo'
+        || 'development'
+      }}
     env:
       SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}
       SUPABASE_DB_PASSWORD: ${{ secrets.SUPABASE_DB_PASSWORD }}
-      PROJECT_REF: pzulufyoqvqevjrmtmfj
+      PROJECT_REF: ${{ secrets.SUPABASE_PROJECT_REF }}
       # Opt JS actions into Node 24 ahead of the June 2026 forced cutover
       # (clears the Node 20 deprecation warning).
       FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: "true"
     steps:
       - uses: actions/checkout@v5
+
+      - name: Guard — required secrets present
+        # Fail loudly (not silently against the wrong DB) if an Environment
+        # hasn't been configured yet.
+        run: |
+          if [ -z "$PROJECT_REF" ] || [ -z "$SUPABASE_DB_PASSWORD" ] || [ -z "$SUPABASE_ACCESS_TOKEN" ]; then
+            echo "::error::Missing Supabase secrets for this Environment. Set SUPABASE_PROJECT_REF, SUPABASE_DB_PASSWORD, and SUPABASE_ACCESS_TOKEN on the GitHub Environment for this tier."
+            exit 1
+          fi
+          echo "Deploying to project ref: ${PROJECT_REF}"
+
       - uses: supabase/setup-cli@v1
         with:
           version: latest
+
       - name: Link to the project
         run: supabase link --project-ref "$PROJECT_REF"
+
       - name: Push migrations (via session pooler, port 5432)
         # The CLI's default pooler selection lands on transaction mode (6543),
         # which rejected auth here and is the wrong mode for migrations anyway.
-        # Point db push at the SESSION pooler (5432) explicitly — the connection
-        # verified to authenticate. NOTE: the DB password must stay alphanumeric
-        # so it's safe inline in this URL (no URL-encoding needed).
+        # Point db push at the SESSION pooler (5432) explicitly. NOTE: the DB
+        # password must stay alphanumeric so it's safe inline in this URL.
         run: |
           supabase db push --db-url "postgresql://postgres.${PROJECT_REF}:${SUPABASE_DB_PASSWORD}@aws-0-us-west-2.pooler.supabase.com:5432/postgres?sslmode=require"
+
       - name: Deploy Edge Functions
         # Deploys all functions if any exist; a no-op before the first function
-        # lands, so merging this PR won't fail. Functions read their own secrets
-        # (e.g. ANTHROPIC_API_KEY) set in the Supabase dashboard.
+        # lands. Functions read their own secrets (e.g. ANTHROPIC_API_KEY) set
+        # per-project in the Supabase dashboard.
         run: |
           if [ -d supabase/functions ] && [ -n "$(ls -A supabase/functions 2>/dev/null)" ]; then
             supabase functions deploy --project-ref "$PROJECT_REF"
