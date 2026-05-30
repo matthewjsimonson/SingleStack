@@ -110,9 +110,9 @@ export default function MarketView() {
                   </form>
                 )}
                 {items.length === 0 ? <div className="t-sub t-muted" style={{ fontSize: 12.5 }}>No signals in this lane yet.</div> : (
-                  <div style={{ display: "flex", gap: "var(--sp-3)", overflowX: "auto", paddingBottom: 4 }}>
+                  <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(240px, 1fr))", gap: "var(--sp-3)" }}>
                     {items.map((s) => (
-                      <button key={s.id} onClick={() => setOpen(s)} className="card card-link card-pad" style={{ minWidth: 240, maxWidth: 240, textAlign: "left", flexShrink: 0 }}>
+                      <button key={s.id} onClick={() => setOpen(s)} className="card card-link card-pad" style={{ textAlign: "left" }}>
                         <div className="row-between" style={{ marginBottom: 6 }}><Confidence label={s.conf_label} level={s.conf_level} />{s.observed_at && <span className="t-mono-xs">{ago(s.observed_at)}</span>}</div>
                         <div style={{ fontSize: 13.5, fontWeight: 620, lineHeight: 1.35, marginBottom: 4 }}>{s.title}</div>
                         {s.why && <div className="t-sub t-muted" style={{ fontSize: 12, lineHeight: 1.4, display: "-webkit-box", WebkitLineClamp: 3, WebkitBoxOrient: "vertical", overflow: "hidden" }}>{s.why}</div>}
