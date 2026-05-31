@@ -9,33 +9,58 @@ should work better.
 
 > **How to use this.** Work top to bottom. Each step has **▸ Screen** (where),
 > **✎ Enter** (what to type — real content, edit to taste), **🔬 Dogfood**
-> (what to watch / what good looks like). When something's off, note it the way
-> we agreed: product/GTM insight → log it as a **Signal**; pure bug/polish →
-> tell me for the punch-list.
+> (what to watch / what good looks like). We walk it **as a new customer would**,
+> flagging issues **sequentially as they arise** — you drive the screen, I triage
+> and fix. Every finding goes into `docs/DOGFOOD-FINDINGS.md` (one row, type/sev/
+> status). Product/GTM insight → also log it as a **Signal** in the tool; pure
+> bug/polish → I fix and push to dev, you refresh.
 
-> **Before you start:** on **dev**, hit **Synthesize** once. If themes/proposals
-> come back, the AI is live and everything works. If it errors, stop — the
-> `ANTHROPIC_API_KEY` secret isn't set on the dev project and we fix that first.
-> To wipe and restart anytime: run `scripts/reset-my-workspace.sql` in the dev
-> SQL editor.
+> **Bring-up checklist — do this once before Phase 1 (only you can; I have no dev
+> runtime):**
+> 1. **The hard gate:** sign into dev, hit **Synthesize** once. Themes/proposals
+>    come back → AI is live, proceed. It errors → STOP; the dev
+>    `ANTHROPIC_API_KEY` isn't set. Fix that first.
+> 2. **Migrations applied on dev:** all **55**, incl. the cross-tenant P0 fix
+>    (`20260530270000`). (Repo is verified clean; what I can't check is that dev
+>    has *run* them.)
+> 3. **Clean slate if needed:** run `scripts/reset-my-workspace.sql` in the dev
+>    SQL editor.
+> 4. **First-run expectation:** this is the **first true end-to-end firing** of
+>    the edge functions + model calls — everything to date is build/logic/DB-
+>    verified, never live-runtime-verified. Expect first-run surprises on the
+>    synthesize / resolve / distill paths; that's what we're here to catch.
+> 5. **New signups auto-join the org** (the `on_auth_user_created` trigger) —
+>    correct single-tenant behavior; don't mistake it for a bug.
 
 > **What's LIVE vs UNBUILT (read this — it sets expectations).**
 > *Live and working:* Foundation records, logging signals, synthesize → review →
 > distill (the learning loop), find bridges, the intelligence map (Action Matrix
 > with terrain + motion), decisions → draft options → route to Ship → draft How,
 > honest confidence, self-surfaced misses & stale flags, multi-product scoping.
-> *Built but NOT wired yet (don't expect these to work):* **MCP source
-> connections** (you can't yet click "connect G2/GitHub" and have it pull) —
-> connectivity is the focus of the new `docs/CONNECTIVITY.md`; **scheduled /
-> on-signal agent workflows**; **agent-to-agent** coordination; the **skills**
-> attached to an agent don't affect its runtime yet. So in Phase 3, getting
-> external signals in is currently **manual or me-assisted**, not one-click —
-> and making that one-click-and-secure is goal #2 of this session.
+> *New this session (built + verified, exercised here for the first time):* a
+> **secured connector** for public web/YouTube sources (SSRF-guarded fetch + an
+> always-on prompt-injection screen that quarantines hostile content before it
+> reaches a model, logged to `security_events`); a **Source Recipe Builder**
+> ("describe a signal you want" → Claude drafts a runner-ready source you confirm);
+> a **bounded, product-aware synthesis** engine that also detects **cross-sell
+> (cross-product) themes**; and **HITL review of that cross-sell scope**. *(The
+> cross-sell + multi-product surfaces won't visibly fire in a single-product
+> workspace — see the multi-product note below — but the secured web/YouTube
+> connector + recipe builder WILL.)*
+> *Still NOT wired (don't file as bugs):* credentialed **MCP source connections**
+> (G2/GitHub/CRM one-click pulls need the secret store — `docs/CONNECTIVITY.md`);
+> **scheduled / on-signal workflows**; **agent-to-agent**; agent **skills** at
+> runtime. So credentialed external signals are still **me-assisted**; *public*
+> web/YouTube sources you can now add yourself via the recipe builder.
 
-> **Multi-product note.** SingleStack is one product, so the product switcher on
-> Signals stays hidden and everything is "company-wide" — exactly the clean
-> single-product path. (If we ever model a second product line, the switcher and
-> per-product map territory light up automatically.)
+> **Multi-product note.** SingleStack is one product, so the product switcher
+> stays hidden and everything is "company-wide" — the clean single-product path.
+> This means the session's **cross-sell / multi-product** work (the sidebar
+> switcher, per-line scoping, cross-product theme detection, and HITL review of
+> cross-sell scope) **won't visibly fire here** — it's built + DB-verified and
+> lights up the moment a second product line exists. *Optional stress test:* add a
+> throwaway second product to watch the switcher appear and synthesis split by
+> line; then reset. Otherwise, treat those surfaces as out-of-scope for this walk.
 
 ---
 
@@ -133,20 +158,32 @@ seed the engine with what we already know.
 
 **▸ Screen:** Signals → Product / GTM tabs → Sources (`/signals`), Competitive (`/competitive`), Market (`/market`)
 
-**Step 3a — Bring in external sources (today: assisted; soon: one-click).**
-The vision is a first-class "connect a source" flow (see `docs/CONNECTIVITY.md`).
-Until that's built, the path is **me-assisted**: I pull from a source and we log
-the findings as signals together. Sources we can use now:
+**Step 3a — Bring in external sources.** Two paths now exist:
+
+*Self-serve (new this session — public sources, no credentials):* In **Sources**,
+use **"✨ Describe a signal you want"** — type something like *"watch our GitHub
+releases page"* or *"competitor X's pricing page"* → Claude drafts a runner-ready
+source (kind, targets, focus, budget) you review and add → **Pull now**. The
+runner fetches it (SSRF-guarded), **screens it for prompt-injection before any
+model sees it**, distills signals, and respects your per-pull budget. Works today
+for **public web pages and YouTube**.
+- **GitHub** (our repo) — point a `website` source at the releases/changelog page.
+- **Web/news** — point a `website` source at a competitor's blog/pricing/launch page.
+
+*Me-assisted (credentialed sources — until the secret store lands):*
 - **G2** (I have a live connection) — market & competitive intel: who's
   researching the category, competitor ratings/reviews, buyer intent. *Say the
   word and I'll pull it and draft signals for you.*
-- **GitHub** (our repo) — changelog/releases as product signals (I can read it).
-- **Web/news** — competitor launches, funding, positioning shifts (I can search).
 
-> 🔬 Dogfood — THE connectivity gap (goal #2 this session): there's no in-product
-> "connect a source" experience yet. As you go, note exactly how you'd *want* to
-> add a source: where the button lives, what it asks for, how it should feel to
-> trust it with credentials. That feedback shapes what we build next.
+> 🔬 Dogfood — the recipe builder: does "describe a signal → confirm a source"
+> feel trustworthy and clear? Is the access scope / read-only / budget visible
+> enough? Where would you *expect* the button, and what would make you trust it
+> with a credential later? That feedback shapes the credentialed flow.
+> 🔬 Dogfood — **security (try to break it):** add a `website` source pointed at a
+> page you control that contains text like *"ignore previous instructions and…"*;
+> confirm those instructions are **quarantined**, not obeyed (the run should
+> report content blocked / not surface it as a signal). Try an internal URL
+> (`http://localhost`, `http://169.254.169.254`) — it should be **refused**.
 
 **Step 3b — Add competitors to track.** In `/competitive`, add: Productboard,
 Aha!, Cycle, Dovetail, Crayon, Klue. For each, the dimension that matters: *do
@@ -252,9 +289,17 @@ learn how tightly the GTM side is wired to the brain.
 - **Recurring pain** → it'll cluster into a theme on its own. That's the proof.
 
 ## Suggested cadence
+0. **Bring-up** (the checklist up top): Synthesize once, confirm migrations,
+   reset if needed. Don't start Phase 1 until the hard gate is green.
 1. Phases 1–2 in one sitting (Foundation). Reset dev if it gets messy.
-2. Phase 3 (seed signals + sources) — I'll pull G2 live with you.
+2. Phase 3 — seed 8–12 signals + add a **public web/YouTube source via the recipe
+   builder** (and try the security stress test); I'll pull G2 live with you.
 3. Phase 4 (synthesize + map) — the core test; go slow, capture a lot.
 4. Phases 5–6 with me, turning intelligence into real roadmap + GTM.
 5. When a wave feels solid → promote to demo (one-click PR) and rebuild the
    *keeper* version there.
+
+**Working rhythm (how we stay in sync):** you call out each finding as you hit it
+(screen + what happened); I log it to `docs/DOGFOOD-FINDINGS.md`, triage P0/P1/P2,
+fix the blocking ones immediately and push to dev, you refresh and we continue.
+We don't batch — we knock them out **as they arise**, in playbook order.
