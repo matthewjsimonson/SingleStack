@@ -20,7 +20,7 @@ import TrackingTopics from "@/components/TrackingTopics";
 import SourceManager from "@/components/SourceManager";
 import IntelReview from "./IntelReview";
 import Bridges from "./Bridges";
-import IntelMap from "./IntelMap";
+import MapView from "./MapView";
 
 type Source = { id: string; label: string; icon: string; origin: string };
 type Signal = {
@@ -179,7 +179,7 @@ export default function SignalsView() {
       />
 
       {loading ? <div className="t-sub t-muted">Loading…</div> : tab === "map" ? (
-        <IntelMap />
+        <MapView />
       ) : tab === "home" ? (
         <Home
           signals={signals} themes={themes} productThemes={productThemes} gtmThemes={gtmThemes}
