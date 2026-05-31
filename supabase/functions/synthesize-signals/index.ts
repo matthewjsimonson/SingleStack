@@ -25,6 +25,7 @@
 
 import Anthropic from "npm:@anthropic-ai/sdk@0.69.0";
 import { createClient, type SupabaseClient } from "npm:@supabase/supabase-js@2";
+import { inferScope } from "../_shared/synthesis.ts"; // tested scope logic (single source of truth)
 
 const MODEL = "claude-opus-4-8";
 const CORS = {
@@ -277,16 +278,10 @@ Deno.serve(async (req: Request) => {
     //   (cross-sell): a primary + co_product_ids. This is where evidence spanning
     //   two lines becomes a first-class cross-product theme rather than a muddled
     //   company-wide NULL (docs/architecture/cross-sell-and-scope.md).
-    const productOfSignal = new Map(candidates.map((s) => [s.id, (s as { product_id?: string | null }).product_id ?? null]));
-    const inferScope = (sigIds: string[]): { product_id: string | null; co_product_ids: string[] } => {
-      const lines = [...new Set(sigIds.map((id) => productOfSignal.get(id) ?? null).filter((p): p is string => !!p))];
-      if (lines.length === 0) return { product_id: null, co_product_ids: [] };   // company-wide
-      if (lines.length === 1) return { product_id: lines[0], co_product_ids: [] }; // one line
-      return { product_id: lines[0], co_product_ids: lines.slice(1) };            // cross-product
-    };
+    const productOfSignal = new Map<string, string | null>(candidates.map((s) => [s.id, (s as { product_id?: string | null }).product_id ?? null]));
     for (const t of diff.new_themes ?? []) {
       const sigIds = (t.signal_indices ?? []).map(sigIdAt).filter(Boolean);
-      const sc = inferScope(sigIds);
+      const sc = inferScope(sigIds, productOfSignal);
       const xLines = sc.co_product_ids.length;
       queued.push({ org_id: orgId, kind: "new_theme", theme_id: null,
         payload: { category: t.category === "gtm" ? "gtm" : "product", title: t.title, summary: t.summary, recommendation: t.recommendation, conf_level: Math.min(1, Math.max(0, Number(t.conf_level) || 0)), signal_ids: sigIds, product_id: sc.product_id, co_product_ids: sc.co_product_ids },
