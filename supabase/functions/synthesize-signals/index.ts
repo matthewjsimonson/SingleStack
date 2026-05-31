@@ -167,6 +167,14 @@ Deno.serve(async (req: Request) => {
       `{id:${t.id}} [${t.category}/${t.state}] ${t.title} — ${t.summary ?? ""}`
     ).join("\n") || "(no existing themes)";
 
+    // Active distilled lessons from past human feedback — injected so the engine
+    // applies what this org has taught it. The compounding loop, made real.
+    const { data: lessons } = await supabase
+      .from("agent_lessons").select("lesson").eq("scope", "synthesis").eq("status", "active")
+      .order("derived_count", { ascending: false }).limit(20);
+    const lessonText = (lessons ?? []).map((l, i) => `${i + 1}. ${l.lesson}`).join("\n");
+    const appliedLessons = (lessons ?? []).length;
+
     const system = [
       "You are the compounding intelligence engine for SingleStack, an AI-native product & GTM platform.",
       "Themes are LIVING entities with stable ids and a lifecycle (emerging|active|escalating|steady|fading|dormant). You RECONCILE — you never wipe and rebuild.",
@@ -178,7 +186,8 @@ Deno.serve(async (req: Request) => {
       "• new_themes: genuinely NEW patterns not covered by any existing theme, each with supporting signal_indices.",
       "Also classify each unsorted signal's lens in signal_categories: product | gtm | both.",
       "Be conservative: only create a new theme when no existing theme fits. Prefer accretion. Set conf_level 0..1 by evidence strength.",
-    ].join("\n");
+      lessonText ? `\nLESSONS FROM THIS ORG'S PAST FEEDBACK — follow these, they reflect how this team wants intelligence synthesized:\n${lessonText}` : "",
+    ].filter(Boolean).join("\n");
 
     const anthropic = new Anthropic({ apiKey: key });
     const resp = (await anthropic.messages.create({
@@ -206,7 +215,7 @@ Deno.serve(async (req: Request) => {
     const validId = (id: string) => themeById.has(id);
     const sigIdAt = (i: number) => candidates[i]?.id;
     const now = new Date().toISOString();
-    let attached = 0, created = 0, escalated = 0, merged = 0, decayed = 0;
+    let attached = 0;
 
     // Helper: attach signals to a theme via theme_signals (idempotent), log event.
     async function attachSignals(themeId: string, signalIds: string[]) {
@@ -224,57 +233,45 @@ Deno.serve(async (req: Request) => {
       await attachSignals(a.theme_id, (a.signal_indices ?? []).map(sigIdAt));
     }
 
-    // 2) updates (state / summary / recommendation)
+    // High-judgment deltas are NOT applied here — they QUEUE into intel_updates
+    // for human review (with context that becomes the learning corpus). Only the
+    // low-judgment maintenance above (attach evidence) and momentum below auto-
+    // apply. Resolving a queued update (accept/edit/reject) is what applies it.
+    const queued: { org_id: string; kind: string; theme_id: string | null; payload: Record<string, unknown>; summary: string }[] = [];
+    const titleOf = (id: string) => themeById.get(id)?.title ?? "a theme";
+
     for (const u of diff.updates ?? []) {
       if (!validId(u.theme_id)) continue;
       const cur = themeById.get(u.theme_id)!;
-      const patch: Record<string, unknown> = {};
-      if (u.state && u.state !== cur.state) { patch.state = u.state; }
-      if (u.summary && u.summary !== cur.summary) patch.summary = u.summary;
-      if (u.recommendation && u.recommendation !== cur.recommendation) patch.recommendation = u.recommendation;
-      if (Object.keys(patch).length === 0) continue;
-      await supabase.from("signal_themes").update(patch).eq("id", u.theme_id);
-      if (patch.state) { await ev(u.theme_id, "state_changed", { from: cur.state, to: patch.state }, orgId); if (patch.state === "escalating") escalated++; }
-      if (patch.summary || patch.recommendation) await ev(u.theme_id, patch.recommendation ? "recommendation_changed" : "summary_updated", {}, orgId);
+      const p: Record<string, unknown> = {};
+      if (u.state && u.state !== cur.state) p.state = u.state;
+      if (u.summary && u.summary !== cur.summary) p.summary = u.summary;
+      if (u.recommendation && u.recommendation !== cur.recommendation) p.recommendation = u.recommendation;
+      if (Object.keys(p).length === 0) continue;
+      const kind = p.state === "escalating" ? "escalate" : "restate";
+      const bits = [p.state ? `state → ${p.state}` : "", p.summary ? "refine summary" : "", p.recommendation ? "update recommendation" : ""].filter(Boolean).join(", ");
+      queued.push({ org_id: orgId, kind, theme_id: u.theme_id, payload: { ...p, from_state: cur.state }, summary: `${titleOf(u.theme_id)}: ${bits}` });
     }
-
-    // 3) merges — re-point evidence, log on the survivor, dissolve the source.
     for (const m of diff.merges ?? []) {
       if (!validId(m.into) || !validId(m.from) || m.into === m.from) continue;
-      const { data: fromLinks } = await supabase.from("theme_signals").select("signal_id").eq("theme_id", m.from);
-      await attachSignals(m.into, (fromLinks ?? []).map((l) => l.signal_id));
-      await ev(m.into, "merged_in", { from: m.from, from_title: themeById.get(m.from)?.title }, orgId);
-      await supabase.from("signal_themes").delete().eq("id", m.from); // dissolve the duplicate (its events cascade)
-      merged++;
+      queued.push({ org_id: orgId, kind: "merge", theme_id: m.into, payload: { into: m.into, from: m.from, from_title: titleOf(m.from) }, summary: `Merge "${titleOf(m.from)}" into "${titleOf(m.into)}"` });
     }
-
-    // 4) decays
     for (const id of diff.decays ?? []) {
       if (!validId(id)) continue;
       const cur = themeById.get(id)!;
       if (cur.state === "fading" || cur.state === "dormant") continue;
-      await supabase.from("signal_themes").update({ state: "fading" }).eq("id", id);
-      await ev(id, "state_changed", { from: cur.state, to: "fading", reason: "no recent evidence" }, orgId);
-      decayed++;
+      queued.push({ org_id: orgId, kind: "decay", theme_id: id, payload: { from_state: cur.state }, summary: `Let "${titleOf(id)}" fade — no recent evidence` });
     }
-
-    // 5) new themes
     for (const t of diff.new_themes ?? []) {
       const sigIds = (t.signal_indices ?? []).map(sigIdAt).filter(Boolean);
-      const { data: row, error } = await supabase.from("signal_themes").insert({
-        org_id: orgId,
-        category: t.category === "gtm" ? "gtm" : "product",
-        title: t.title, summary: t.summary, recommendation: t.recommendation,
-        conf_level: Math.min(1, Math.max(0, Number(t.conf_level) || 0)),
-        state: "emerging", momentum: "accelerating",
-        first_seen_at: now, last_evidence_at: now,
-        signal_ids: sigIds, position: 0,
-      }).select("id").single();
-      if (error || !row) continue;
-      created++;
-      await ev(row.id, "created", { signals: sigIds.length }, orgId);
-      if (sigIds.length) await attachSignals(row.id, sigIds);
+      queued.push({ org_id: orgId, kind: "new_theme", theme_id: null,
+        payload: { category: t.category === "gtm" ? "gtm" : "product", title: t.title, summary: t.summary, recommendation: t.recommendation, conf_level: Math.min(1, Math.max(0, Number(t.conf_level) || 0)), signal_ids: sigIds },
+        summary: `New ${t.category} theme: "${t.title}" (${sigIds.length} signal${sigIds.length === 1 ? "" : "s"})` });
     }
+    if (queued.length) {
+      await supabase.from("intel_updates").insert(queued.map((q) => ({ ...q, scope: "synthesis", status: "pending" })));
+    }
+    const proposed = queued.length;
 
     // 6) lens classification for unsorted signals (only those the user hasn't set).
     const unsorted = new Set(candidates.filter((s) => !s.category).map((s) => s.id));
@@ -306,7 +303,9 @@ Deno.serve(async (req: Request) => {
 
     return json({
       themes: (liveThemes ?? []).length,
-      attached, created, escalated, merged, decayed, categorized,
+      attached, categorized,
+      proposed,          // high-judgment changes queued for review
+      appliedLessons,    // lessons from past feedback applied this run
     });
   } catch (e) {
     return json({ error: e instanceof Error ? e.message : String(e) }, 500);

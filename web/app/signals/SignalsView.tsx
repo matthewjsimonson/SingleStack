@@ -18,6 +18,7 @@ import { momentumGlyph, stateTone } from "@/lib/themeLife";
 import { PageHeader, Section, Chip, Banner, Confidence, Modal, SubTabs } from "@/components/ui";
 import TrackingTopics from "@/components/TrackingTopics";
 import SourceManager from "@/components/SourceManager";
+import IntelReview from "./IntelReview";
 
 type Source = { id: string; label: string; icon: string; origin: string };
 type Signal = {
@@ -179,6 +180,7 @@ export default function SignalsView() {
           signals={signals} themes={themes} productThemes={productThemes} gtmThemes={gtmThemes}
           highSignals={highSignals} unsorted={unsorted} internalCount={internalCount} externalCount={externalCount}
           sourceById={sourceById} synth={synth} onSynthesize={synthesize} setCategory={setCategory} goLens={setTab}
+          reload={load}
         />
       ) : (
         <LensTab
@@ -232,11 +234,11 @@ export default function SignalsView() {
 }
 
 // ---------- Intel homepage ----------
-function Home({ signals, themes, productThemes, gtmThemes, highSignals, unsorted, internalCount, externalCount, sourceById, synth, onSynthesize, setCategory, goLens }: {
+function Home({ signals, themes, productThemes, gtmThemes, highSignals, unsorted, internalCount, externalCount, sourceById, synth, onSynthesize, setCategory, goLens, reload }: {
   signals: Signal[]; themes: Theme[]; productThemes: Theme[]; gtmThemes: Theme[]; highSignals: Signal[]; unsorted: Signal[];
   internalCount: number; externalCount: number;
   sourceById: (id: string | null) => Source | null; synth: boolean; onSynthesize: () => void;
-  setCategory: (id: string, c: string | null) => void; goLens: (l: Lens) => void;
+  setCategory: (id: string, c: string | null) => void; goLens: (l: Lens) => void; reload: () => void;
 }) {
   return (
     <div>
@@ -261,6 +263,9 @@ function Home({ signals, themes, productThemes, gtmThemes, highSignals, unsorted
         </div>
       ) : (
         <>
+          {/* Review queue + learning — the HITL feedback loop */}
+          <IntelReview onApplied={reload} />
+
           {/* Callouts: synthesized themes as product/gtm intelligence briefs */}
           {themes.length > 0 && (
             <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "var(--sp-5)", alignItems: "start", marginBottom: "var(--sp-6)" }}>
