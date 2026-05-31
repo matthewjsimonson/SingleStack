@@ -21,7 +21,10 @@ type Source = {
   focus: string | null; include_terms: string | null; exclude_terms: string | null;
   max_per_pull: number | null; cadence: string; auth_mode: string; access_scope: string | null;
   config: { url?: string } | null; last_pull_at: string | null; last_pull_count: number | null;
+  targets: { type?: string; ref: string; label?: string }[] | null; guidance: string | null;
 };
+
+const LIVE_PULL_KINDS = new Set(["website", "youtube"]); // run for real today (no creds)
 
 type Scope = { competitorId?: string; marketLens?: string };
 
@@ -35,10 +38,13 @@ export default function SourceManager({ scope = {}, title = "Sources" }: { scope
   const [open, setOpen] = useState(false);
   // connect flow: pick a type, then configure it
   const [picked, setPicked] = useState<SourceDef | null>(null);
-  const [cfg, setCfg] = useState({ label: "", url: "", focus: "" as "" | "product" | "gtm" | "both", include: "", exclude: "", maxPerPull: "", cadence: "manual" });
+  const [cfg, setCfg] = useState({ label: "", url: "", focus: "" as "" | "product" | "gtm" | "both", include: "", exclude: "", maxPerPull: "", cadence: "manual", targets: "", guidance: "" });
+  // per-source pull state: id -> running | result message
+  const [pulling, setPulling] = useState<Record<string, boolean>>({});
+  const [pullMsg, setPullMsg] = useState<Record<string, string>>({});
 
   const load = useCallback(async () => {
-    let q = supabase.from("sources").select("id, label, icon, origin, kind, status, rules, competitor_id, market_lens, focus, include_terms, exclude_terms, max_per_pull, cadence, auth_mode, access_scope, config, last_pull_at, last_pull_count");
+    let q = supabase.from("sources").select("id, label, icon, origin, kind, status, rules, competitor_id, market_lens, focus, include_terms, exclude_terms, max_per_pull, cadence, auth_mode, access_scope, config, last_pull_at, last_pull_count, targets, guidance");
     if (scope.competitorId) q = q.eq("competitor_id", scope.competitorId);
     else if (scope.marketLens) q = q.eq("market_lens", scope.marketLens);
     else q = q.is("competitor_id", null).is("market_lens", null);
@@ -50,7 +56,28 @@ export default function SourceManager({ scope = {}, title = "Sources" }: { scope
 
   function pick(def: SourceDef) {
     setPicked(def);
-    setCfg({ label: def.label, url: "", focus: def.defaultFocus ?? "", include: "", exclude: "", maxPerPull: String(def.defaultMaxPerPull), cadence: "manual" });
+    setCfg({ label: def.label, url: "", focus: def.defaultFocus ?? "", include: "", exclude: "", maxPerPull: String(def.defaultMaxPerPull), cadence: "manual", targets: "", guidance: "" });
+  }
+
+  // Parse the "what to look at" textarea — one URL/ref per line — into the
+  // structured pointing-context array the runner consumes.
+  function parseTargets(raw: string): { type: string; ref: string }[] {
+    return raw.split("\n").map((l) => l.trim()).filter(Boolean).map((ref) => ({ type: "url", ref }));
+  }
+
+  // Pull now — invoke the connector runner for a live-kind source, show result.
+  async function pullNow(s: Source) {
+    setPulling((p) => ({ ...p, [s.id]: true }));
+    setPullMsg((m) => ({ ...m, [s.id]: "" }));
+    try {
+      const { data, error } = await supabase.functions.invoke("connector-runner", { body: { source_id: s.id } });
+      if (error) throw new Error((data as { error?: string })?.error || error.message);
+      const d = data as { created: number; fetched: number; dropped: number };
+      setPullMsg((m) => ({ ...m, [s.id]: `Pulled ${d.fetched} page${d.fetched === 1 ? "" : "s"} → ${d.created} signal${d.created === 1 ? "" : "s"}${d.dropped ? ` (${d.dropped} below the bar)` : ""}.` }));
+      await load();
+    } catch (e) {
+      setPullMsg((m) => ({ ...m, [s.id]: e instanceof Error ? e.message : "Pull failed." }));
+    } finally { setPulling((p) => ({ ...p, [s.id]: false })); }
   }
 
   async function connect() {
@@ -68,6 +95,7 @@ export default function SourceManager({ scope = {}, title = "Sources" }: { scope
         focus: cfg.focus || null, include_terms: cfg.include.trim() || null, exclude_terms: cfg.exclude.trim() || null,
         max_per_pull: isNaN(max) ? picked.defaultMaxPerPull : Math.min(100, Math.max(1, max)),
         cadence: cfg.cadence,
+        targets: parseTargets(cfg.targets), guidance: cfg.guidance.trim() || null,  // pointing context: where to look
         config: cfg.url.trim() ? { url: cfg.url.trim() } : null,   // never secrets — only the public locator
         competitor_id: scope.competitorId ?? null, market_lens: scope.marketLens ?? null,
       });
@@ -133,6 +161,14 @@ export default function SourceManager({ scope = {}, title = "Sources" }: { scope
             <label className="field"><span className="t-label">Max new signals per pull (the budget — so it never floods you)</span>
               <input className="input" type="number" min={1} max={100} value={cfg.maxPerPull} onChange={(e) => setCfg({ ...cfg, maxPerPull: e.target.value })} /></label>
 
+            {/* Pointing context — where to look. The difference between a
+                connection and a USEFUL one (esp. for MCP: which reports/accounts). */}
+            <div className="t-label" style={{ marginTop: 4 }}>Where to look — point it at specifics</div>
+            <label className="field"><span className="t-label">Targets (one URL or reference per line)</span>
+              <textarea className="input" rows={3} value={cfg.targets} placeholder={picked.kind === "website" || picked.kind === "youtube" ? "https://competitor.com/pricing\nhttps://competitor.com/blog" : "e.g. report: Win/loss by competitor\naccount: Acme Corp"} onChange={(e) => setCfg({ ...cfg, targets: e.target.value })} /></label>
+            <label className="field"><span className="t-label">Guidance (plain words — what to prioritize / ignore)</span>
+              <input className="input" value={cfg.guidance} placeholder="e.g. focus on enterprise pricing & SSO; ignore careers" onChange={(e) => setCfg({ ...cfg, guidance: e.target.value })} /></label>
+
             <div className="row gap-2" style={{ marginTop: 4 }}>
               <button className="btn btn-sm" onClick={connect}>{picked.live ? "Connect" : "Add source"}</button>
               <button className="btn btn-secondary btn-sm" onClick={() => setPicked(null)}>Back</button>
@@ -156,18 +192,28 @@ export default function SourceManager({ scope = {}, title = "Sources" }: { scope
                               <Chip tone={s.status === "connected" ? "green" : "default"}>{s.status === "connected" ? "live" : "manual"}</Chip>
                               {s.focus && <Chip tone={s.focus === "gtm" ? "violet" : "accent"}>{s.focus}</Chip>}
                             </div>
-                            <button className="t-muted" onClick={() => remove(s.id)} style={{ background: "none", border: "none", cursor: "pointer", fontSize: 15 }}>×</button>
+                            <div className="row gap-2">
+                              {LIVE_PULL_KINDS.has(s.kind) && (
+                                <button className="btn btn-sm" disabled={pulling[s.id]} onClick={() => pullNow(s)} style={{ padding: "2px 10px", fontSize: 12 }}>
+                                  {pulling[s.id] ? "Pulling…" : "Pull now"}
+                                </button>
+                              )}
+                              <button className="t-muted" onClick={() => remove(s.id)} style={{ background: "none", border: "none", cursor: "pointer", fontSize: 15 }}>×</button>
+                            </div>
                           </div>
                           <div className="t-mono-xs" style={{ marginTop: 5, color: "var(--tm)" }}>
                             🔒 {s.access_scope ?? AUTH_LABEL[s.auth_mode] ?? "read-only"}
                             {s.max_per_pull ? ` · ≤${s.max_per_pull}/pull` : ""}{s.cadence !== "manual" ? ` · ${s.cadence}` : ""}
                             {s.last_pull_at ? ` · last pull ${new Date(s.last_pull_at).toLocaleDateString()} (${s.last_pull_count ?? 0})` : ""}
                           </div>
-                          {(s.include_terms || s.exclude_terms) && (
+                          {(s.include_terms || s.exclude_terms || (s.targets?.length ?? 0) > 0 || s.guidance) && (
                             <div className="t-sub t-muted" style={{ fontSize: 11.5, marginTop: 3 }}>
                               {s.include_terms ? `only: ${s.include_terms}` : ""}{s.include_terms && s.exclude_terms ? " · " : ""}{s.exclude_terms ? `ignore: ${s.exclude_terms}` : ""}
+                              {(s.targets?.length ?? 0) > 0 ? `${s.include_terms || s.exclude_terms ? " · " : ""}${s.targets!.length} target${s.targets!.length === 1 ? "" : "s"}` : ""}
+                              {s.guidance ? ` · “${s.guidance}”` : ""}
                             </div>
                           )}
+                          {pullMsg[s.id] && <div className="t-sub" style={{ fontSize: 11.5, marginTop: 4, color: "var(--accent)" }}>{pullMsg[s.id]}</div>}
                         </div>
                       ))}
                     </div>

@@ -82,19 +82,35 @@ This is the part we will not cut corners on. Principles:
 6. **Revocable & transparent.** One click to disconnect; clear "last synced /
    what it pulled" on every source. Disconnect must stop the runner immediately.
 
+## Pointing context — the primitive that makes a connection USEFUL
+A connection is not useful until it knows **where to look**. Connecting Salesforce
+(or a website, or a GitHub org) is a firehose with no aim; the value is in saying
+"consult *these* reports, *these* accounts, *these* opportunities / *these* pages
+/ *these* repos." So both `sources` and `connections` carry:
+- **`targets`** (jsonb) — structured `[{type, ref, label, note}]` pointers.
+- **`guidance`** (text) — freeform "where to look / what matters" in plain words.
+The runner fetches/consults exactly these (plus a source's `config.url`), nothing
+wider — aim, not a firehose. Agent MCP connections use the same primitive, so
+"point the CRO agent at Salesforce" means listing the reports it should read.
+
 ## What to build, in order (slices)
-1. **Connect-a-source UI (Tier 0/1 made first-class).** A real "Add source" flow
-   on Signals/Competitive/Market: pick a type, name it, write a tracking topic
-   ("track Productboard's positioning + pricing changes"). For now it queues for
-   *assisted* pull; this makes the manual/assisted path feel like a product, and
-   captures the user's intent as data.
+1. ✅ **Connect-a-source UI (Tier 0/1 made first-class).** Real "Connect a source"
+   flow on Signals/Competitive/Market: pick a type, name it, set tailoring
+   (focus, include/exclude, per-pull budget), pointing context (targets +
+   guidance), and see the read-only access scope. Built.
 2. **Secret store + connection plumbing.** Vault-backed secret handles;
-   `connections` gains a secret reference; the security model above, enforced.
-3. **MCP runner (Tier 2 core).** A server-side function that, given a connection
-   + tracking_topics, calls MCP tools, normalizes → signals, logs the run,
-   respects allowlist/egress/untrusted-data rules. Start read-only, scheduled.
-4. **Source health + audit UI.** Last sync, items pulled, errors, revoke — on
-   every source. Trust is a feature.
+   `secret_ref` references them; the security model above, enforced. (Schema +
+   the no-secrets-in-config DB constraint exist; the vault itself is next.)
+3. 🛠️ **Connector runner (Tier 2 core) — `supabase/functions/connector-runner`.**
+   Given a source, it fetches (the source url + its url-targets), distills with
+   Claude (fetched bytes treated as UNTRUSTED — prompt-injection defense), gates
+   by the per-pull **budget** + **relevance floor**, writes signals, and logs a
+   `connector_runs` audit row. **Runs for real today for no-auth kinds (`website`,
+   `youtube`)** via a "Pull now" button. SSRF guard (https-only, blocks
+   localhost/private/link-local/metadata IPs, size+time capped) is unit-tested.
+   Auth/MCP kinds return a clear "connect first" until slice #2 lands their creds.
+4. 🟨 **Source health + audit UI.** `last_pull_at`/`last_pull_count` shown on every
+   source; `connector_runs` records each pull. A fuller history view is next.
 5. **Tier 3 native intake** (webhook/email/CSV) for high-value MCP-less sources.
 
 ## Kickstart for the dogfood (what we do TODAY)
