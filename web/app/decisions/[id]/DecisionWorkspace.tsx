@@ -10,6 +10,7 @@ import { useRouter } from "next/navigation";
 import { createClient } from "@/lib/supabase/client";
 import { getOrgId } from "@/lib/org";
 import { PageHeader, Section, Chip, Banner, BackLink, Spinner } from "@/components/ui";
+import { useAgentRun, AgentProgress } from "@/components/AgentProgress";
 
 type Decision = {
   id: string; title: string; question: string | null; status: string; scope: string;
@@ -26,7 +27,7 @@ export default function DecisionWorkspace({ id }: { id: string }) {
   const [evidence, setEvidence] = useState<Evidence[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  const [drafting, setDrafting] = useState(false);
+  const optionsRun = useAgentRun("draftDecision");
   const [routing, setRouting] = useState(false);
   const [addingOpt, setAddingOpt] = useState(false);
   const [optForm, setOptForm] = useState({ title: "", detail: "", tradeoffs: "" });
@@ -54,22 +55,23 @@ export default function DecisionWorkspace({ id }: { id: string }) {
 
   async function draftOptions() {
     if (!d?.theme_id) { setError("This decision isn't linked to a theme, so AI can't draft from one. Add options manually, or start the decision from a theme."); return; }
-    setDrafting(true); setError(null);
+    setError(null);
     try {
-      const { data, error: fnErr } = await supabase.functions.invoke("draft-decision", { body: { theme_id: d.theme_id } });
-      if (fnErr) throw fnErr;
-      if (data?.error) throw new Error(data.message || data.error);
-      const orgId = await getOrgId(); if (!orgId) throw new Error("Could not resolve your organization.");
-      if (data?.question && !d.question) await supabase.from("decisions").update({ question: data.question }).eq("id", id);
-      const opts = (data?.options ?? []) as { title: string; detail: string; tradeoffs: string; recommended: boolean }[];
-      if (opts.length) {
-        await supabase.from("decision_options").insert(opts.map((o, i) => ({
-          org_id: orgId, decision_id: id, title: o.title, detail: o.detail, tradeoffs: o.tradeoffs, recommended: !!o.recommended, position: options.length + i,
-        })));
-      }
-      await load();
+      await optionsRun.go(async () => {
+        const { data, error: fnErr } = await supabase.functions.invoke("draft-decision", { body: { theme_id: d.theme_id } });
+        if (fnErr) throw fnErr;
+        if (data?.error) throw new Error(data.message || data.error);
+        const orgId = await getOrgId(); if (!orgId) throw new Error("Could not resolve your organization.");
+        if (data?.question && !d.question) await supabase.from("decisions").update({ question: data.question }).eq("id", id);
+        const opts = (data?.options ?? []) as { title: string; detail: string; tradeoffs: string; recommended: boolean }[];
+        if (opts.length) {
+          await supabase.from("decision_options").insert(opts.map((o, i) => ({
+            org_id: orgId, decision_id: id, title: o.title, detail: o.detail, tradeoffs: o.tradeoffs, recommended: !!o.recommended, position: options.length + i,
+          })));
+        }
+        await load();
+      });
     } catch (e) { setError(e instanceof Error ? e.message : "Could not draft options."); }
-    finally { setDrafting(false); }
   }
 
   async function addOption(e: React.FormEvent) {
@@ -136,7 +138,7 @@ export default function DecisionWorkspace({ id }: { id: string }) {
           <Section
             label="Options"
             action={<div className="row gap-2">
-              {d.theme_id && <button className="btn btn-accent btn-sm" disabled={drafting} onClick={draftOptions}>{drafting ? "Drafting…" : "✨ Draft options"}</button>}
+              {d.theme_id && (optionsRun.active ? <AgentProgress run={optionsRun} compact /> : <button className="btn btn-accent btn-sm" onClick={draftOptions}>✨ Draft options</button>)}
               <button className="btn btn-secondary btn-sm" onClick={() => setAddingOpt((v) => !v)}>{addingOpt ? "Cancel" : "+ Option"}</button>
             </div>}
           >

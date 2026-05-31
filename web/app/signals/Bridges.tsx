@@ -10,6 +10,7 @@ import Link from "next/link";
 import { createClient } from "@/lib/supabase/client";
 import { getOrgId } from "@/lib/org";
 import { Section, Chip, Banner, Confidence } from "@/components/ui";
+import { useAgentRun, AgentProgress } from "@/components/AgentProgress";
 
 type Bridge = {
   bridge_id: string; title: string; insight: string | null; recommendation: string | null; state: string;
@@ -22,8 +23,8 @@ export default function Bridges({ onChange }: { onChange?: () => void }) {
   const supabase = createClient();
   const [bridges, setBridges] = useState<Bridge[]>([]);
   const [error, setError] = useState<string | null>(null);
-  const [finding, setFinding] = useState(false);
   const [busy, setBusy] = useState<string | null>(null);
+  const bridgeRun = useAgentRun("bridges");
 
   const load = useCallback(async () => {
     const { data } = await supabase.from("bridge_strength")
@@ -35,18 +36,19 @@ export default function Bridges({ onChange }: { onChange?: () => void }) {
   useEffect(() => { load(); }, [load]);
 
   async function find() {
-    setFinding(true); setError(null);
+    setError(null);
     try {
-      const { data: s } = await supabase.auth.getSession();
-      const token = s.session?.access_token;
-      const { data, error } = await supabase.functions.invoke("propose-bridges", {
-        body: {}, headers: token ? { Authorization: `Bearer ${token}` } : undefined,
+      await bridgeRun.go(async () => {
+        const { data: s } = await supabase.auth.getSession();
+        const token = s.session?.access_token;
+        const { data, error } = await supabase.functions.invoke("propose-bridges", {
+          body: {}, headers: token ? { Authorization: `Bearer ${token}` } : undefined,
+        });
+        if (error) throw error;
+        if (data?.error) throw new Error(data.error);
+        await load();
       });
-      if (error) throw error;
-      if (data?.error) throw new Error(data.error);
-      await load();
     } catch (e) { setError(e instanceof Error ? e.message : "Could not find bridges."); }
-    finally { setFinding(false); }
   }
 
   async function setState(b: Bridge, next: "active" | "dismissed") {
@@ -66,7 +68,9 @@ export default function Bridges({ onChange }: { onChange?: () => void }) {
       <Banner>{error}</Banner>
       <Section
         label={`Bridges${active.length ? ` · ${active.length}` : ""}`}
-        action={<button className="btn btn-accent btn-sm" disabled={finding} onClick={find}>{finding ? "Finding…" : "✨ Find bridges"}</button>}
+        action={bridgeRun.active
+          ? <AgentProgress run={bridgeRun} compact />
+          : <button className="btn btn-accent btn-sm" onClick={find}>✨ Find bridges</button>}
       >
         <div className="t-sub t-muted" style={{ marginBottom: "var(--sp-3)" }}>
           Where a product pattern and a go-to-market pattern are one reality. A bridge is only as strong as its weaker side.

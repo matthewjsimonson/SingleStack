@@ -21,6 +21,7 @@ import SourceManager from "@/components/SourceManager";
 import IntelReview from "./IntelReview";
 import Bridges from "./Bridges";
 import MapView from "./MapView";
+import { useAgentRun, AgentProgress, type AgentRun } from "@/components/AgentProgress";
 
 type Source = { id: string; label: string; icon: string; origin: string };
 type Signal = {
@@ -75,7 +76,7 @@ export default function SignalsView() {
   const [error, setError] = useState<string | null>(null);
   const [tab, setTab] = useState<Tab>("home");
   const [originFilter, setOriginFilter] = useState<OriginFilter>("all");
-  const [synth, setSynth] = useState(false);
+  const synthRun = useAgentRun("synthesize");
 
   const [logOpen, setLogOpen] = useState(false);
   const [trackOpen, setTrackOpen] = useState(false);
@@ -103,18 +104,19 @@ export default function SignalsView() {
   const sourceById = (id: string | null) => sources.find((s) => s.id === id) ?? null;
 
   async function synthesize() {
-    setSynth(true); setError(null);
+    setError(null);
     try {
-      const { data: s } = await supabase.auth.getSession();
-      const token = s.session?.access_token;
-      const { data, error } = await supabase.functions.invoke("synthesize-signals", {
-        body: {}, headers: token ? { Authorization: `Bearer ${token}` } : undefined,
+      await synthRun.go(async () => {
+        const { data: s } = await supabase.auth.getSession();
+        const token = s.session?.access_token;
+        const { data, error } = await supabase.functions.invoke("synthesize-signals", {
+          body: {}, headers: token ? { Authorization: `Bearer ${token}` } : undefined,
+        });
+        if (error) throw error;
+        if (data?.error) throw new Error(data.error);
+        await load();
       });
-      if (error) throw error;
-      if (data?.error) throw new Error(data.error);
-      await load();
     } catch (e) { setError(e instanceof Error ? e.message : "Synthesis failed."); }
-    finally { setSynth(false); }
   }
 
   async function logSignal(e: React.FormEvent) {
@@ -184,7 +186,7 @@ export default function SignalsView() {
         <Home
           signals={signals} themes={themes} productThemes={productThemes} gtmThemes={gtmThemes}
           highSignals={highSignals} unsorted={unsorted} internalCount={internalCount} externalCount={externalCount}
-          sourceById={sourceById} synth={synth} onSynthesize={synthesize} setCategory={setCategory} goLens={setTab}
+          sourceById={sourceById} synthRun={synthRun} onSynthesize={synthesize} setCategory={setCategory} goLens={setTab}
           reload={load}
         />
       ) : (
@@ -239,10 +241,10 @@ export default function SignalsView() {
 }
 
 // ---------- Intel homepage ----------
-function Home({ signals, themes, productThemes, gtmThemes, highSignals, unsorted, internalCount, externalCount, sourceById, synth, onSynthesize, setCategory, goLens, reload }: {
+function Home({ signals, themes, productThemes, gtmThemes, highSignals, unsorted, internalCount, externalCount, sourceById, synthRun, onSynthesize, setCategory, goLens, reload }: {
   signals: Signal[]; themes: Theme[]; productThemes: Theme[]; gtmThemes: Theme[]; highSignals: Signal[]; unsorted: Signal[];
   internalCount: number; externalCount: number;
-  sourceById: (id: string | null) => Source | null; synth: boolean; onSynthesize: () => void;
+  sourceById: (id: string | null) => Source | null; synthRun: AgentRun; onSynthesize: () => void;
   setCategory: (id: string, c: string | null) => void; goLens: (l: Lens) => void; reload: () => void;
 }) {
   return (
@@ -256,9 +258,11 @@ function Home({ signals, themes, productThemes, gtmThemes, highSignals, unsorted
           <Stat n={unsorted.length} label="Unsorted" accent={unsorted.length > 0} />
           <Stat n={themes.length} label="Themes" accent={themes.length > 0} />
         </div>
-        <button className="btn btn-accent" disabled={synth || signals.length === 0} onClick={onSynthesize}>
-          {synth ? "Synthesizing…" : themes.length ? "Re-synthesize" : "Synthesize intel"}
-        </button>
+        {synthRun.active
+          ? <div style={{ display: "flex", alignItems: "center", paddingInline: 6 }}><AgentProgress run={synthRun} /></div>
+          : <button className="btn btn-accent" disabled={signals.length === 0} onClick={onSynthesize}>
+              {themes.length ? "Re-synthesize" : "Synthesize intel"}
+            </button>}
       </div>
 
       {signals.length === 0 ? (

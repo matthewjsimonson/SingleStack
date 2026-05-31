@@ -11,6 +11,7 @@ import { useEffect, useState, useCallback } from "react";
 import { createClient } from "@/lib/supabase/client";
 import { getOrgId } from "@/lib/org";
 import { Section, Chip, Banner } from "@/components/ui";
+import { useAgentRun, AgentProgress } from "@/components/AgentProgress";
 
 type Update = {
   id: string; kind: string; summary: string | null; theme_id: string | null;
@@ -37,7 +38,7 @@ export default function IntelReview({ onApplied }: { onApplied?: () => void }) {
   const [openId, setOpenId] = useState<string | null>(null);
   const [draft, setDraft] = useState<{ rationale: string; tags: string[]; edit: string }>({ rationale: "", tags: [], edit: "" });
   const [busy, setBusy] = useState(false);
-  const [distilling, setDistilling] = useState(false);
+  const distillRun = useAgentRun("distill");
   const [misses, setMisses] = useState<Miss[]>([]);
 
   const load = useCallback(async () => {
@@ -83,18 +84,19 @@ export default function IntelReview({ onApplied }: { onApplied?: () => void }) {
   }
 
   async function distill() {
-    setDistilling(true); setError(null);
+    setError(null);
     try {
-      const { data: s } = await supabase.auth.getSession();
-      const token = s.session?.access_token;
-      const { data, error } = await supabase.functions.invoke("distill-lessons", {
-        body: {}, headers: token ? { Authorization: `Bearer ${token}` } : undefined,
+      await distillRun.go(async () => {
+        const { data: s } = await supabase.auth.getSession();
+        const token = s.session?.access_token;
+        const { data, error } = await supabase.functions.invoke("distill-lessons", {
+          body: {}, headers: token ? { Authorization: `Bearer ${token}` } : undefined,
+        });
+        if (error) throw error;
+        if (data?.error) throw new Error(data.error);
+        await load();
       });
-      if (error) throw error;
-      if (data?.error) throw new Error(data.error);
-      await load();
     } catch (e) { setError(e instanceof Error ? e.message : "Could not distill lessons."); }
-    finally { setDistilling(false); }
   }
 
   async function dismissLesson(id: string) {
@@ -191,7 +193,7 @@ export default function IntelReview({ onApplied }: { onApplied?: () => void }) {
       {(lessons.length > 0 || acceptRate || updates.length === 0) && (
         <Section
           label="Learning"
-          action={<button className="btn btn-secondary btn-sm" disabled={distilling} onClick={distill}>{distilling ? "Distilling…" : "Distill lessons"}</button>}
+          action={distillRun.active ? <AgentProgress run={distillRun} compact /> : <button className="btn btn-secondary btn-sm" onClick={distill}>Distill lessons</button>}
         >
           <div className="t-sub t-muted" style={{ marginBottom: "var(--sp-3)" }}>
             {acceptRate ? `${acceptRate.rate}% of proposals accepted · ${acceptRate.n} reviewed.` : "No reviewed proposals yet."} What the engine has learned from your feedback:

@@ -12,6 +12,7 @@ import { createClient } from "@/lib/supabase/client";
 import { getOrgId } from "@/lib/org";
 import { PageHeader, Section, Chip, Banner, BackLink, Spinner } from "@/components/ui";
 import { BUILD_ITEM_TEMPLATE, BUILD_STAGE_GATES } from "@/lib/templates";
+import { useAgentRun, AgentProgress } from "@/components/AgentProgress";
 
 type Item = {
   id: string; title: string; description: string | null; kind: string | null;
@@ -33,7 +34,7 @@ export default function BuildItemWorkspace({ id }: { id: string }) {
   const [editing, setEditing] = useState<string | null>(null); // field_key being edited
   const [draft, setDraft] = useState("");
   const [openRec, setOpenRec] = useState<Record<string, boolean>>({}); // section -> recommended panel open
-  const [drafting, setDrafting] = useState(false);
+  const howRun = useAgentRun("draftHow");
   const [howDrafts, setHowDrafts] = useState<{ key: string; label: string; value: string; cites: string[] }[]>([]);
   const [caps, setCaps] = useState<{ id: string; title: string; content: string }[]>([]);
   const [capForm, setCapForm] = useState({ title: "", content: "" });
@@ -110,18 +111,20 @@ export default function BuildItemWorkspace({ id }: { id: string }) {
 
   // Call the build-architect agent to draft the How, grounded in capabilities.
   async function draftHow() {
-    setDrafting(true); setError(null); setHowDrafts([]);
+    setError(null); setHowDrafts([]);
     try {
-      const { data, error: fnErr } = await supabase.functions.invoke("draft-how", { body: { initiative_id: id } });
-      if (fnErr) throw fnErr;
-      if (data?.error === "no_capabilities") { setError(data.message); return; }
-      if (data?.error) throw new Error(data.message || data.error);
-      const drafts = data?.drafts ?? [];
-      setHowDrafts(drafts);
-      if (!drafts.length) setError("The architect returned no drafts — add more 'What' detail and try again.");
+      await howRun.go(async () => {
+        const { data, error: fnErr } = await supabase.functions.invoke("draft-how", { body: { initiative_id: id } });
+        if (fnErr) throw fnErr;
+        if (data?.error === "no_capabilities") { setError(data.message); return; }
+        if (data?.error) throw new Error(data.message || data.error);
+        const drafts = data?.drafts ?? [];
+        setHowDrafts(drafts);
+        if (!drafts.length) setError("The architect returned no drafts — add more 'What' detail and try again.");
+      });
     } catch (e) {
       setError(e instanceof Error ? e.message : "Could not draft the How.");
-    } finally { setDrafting(false); }
+    }
   }
   async function acceptDraft(d: { key: string; label: string; value: string }) {
     await saveField("How", d.key, d.label, d.value);
@@ -164,9 +167,9 @@ export default function BuildItemWorkspace({ id }: { id: string }) {
             const empty = sec.fields.filter((f) => !isFilled(f.key));
             const recOpen = !!openRec[sec.section];
             return (
-              <Section key={sec.section} label={sec.section} action={sec.section === "How" ? (
-                <button className="btn btn-accent btn-sm" disabled={drafting} onClick={draftHow}>{drafting ? "Drafting…" : "✨ Draft How with AI"}</button>
-              ) : undefined}>
+              <Section key={sec.section} label={sec.section} action={sec.section === "How"
+                ? (howRun.active ? <AgentProgress run={howRun} compact /> : <button className="btn btn-accent btn-sm" onClick={draftHow}>✨ Draft How with AI</button>)
+                : undefined}>
                 <div className="t-sub t-muted" style={{ marginBottom: "var(--sp-3)" }}>{sec.blurb}</div>
                 {sec.section === "How" && howDrafts.length > 0 && (
                   <div style={{ display: "grid", gap: "var(--sp-2)", marginBottom: "var(--sp-3)" }}>
