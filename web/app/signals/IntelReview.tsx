@@ -18,7 +18,7 @@ type Update = {
   payload: Record<string, unknown>; status: string;
 };
 type Lesson = { id: string; lesson: string; derived_count: number; source: string };
-type Miss = { theme_id: string; title: string; category: string; new_support_signals: number; new_support_sources: number };
+type Miss = { theme_id: string; title: string; category: string; new_support_signals: number; new_support_sources: number; product_id: string | null };
 
 const REASON_TAGS = ["evidence_thin", "wrong_lens", "not_actionable", "tone", "duplicate", "other"];
 const TAG_LABEL: Record<string, string> = {
@@ -29,7 +29,7 @@ const KIND_TONE: Record<string, "default" | "accent" | "violet" | "amber" | "gre
   new_theme: "accent", escalate: "amber", merge: "violet", decay: "default", restate: "default",
 };
 
-export default function IntelReview({ onApplied }: { onApplied?: () => void }) {
+export default function IntelReview({ onApplied, productFilter = "all" }: { onApplied?: () => void; productFilter?: string }) {
   const supabase = createClient();
   const [updates, setUpdates] = useState<Update[]>([]);
   const [lessons, setLessons] = useState<Lesson[]>([]);
@@ -46,17 +46,19 @@ export default function IntelReview({ onApplied }: { onApplied?: () => void }) {
       supabase.from("intel_updates").select("id, kind, summary, theme_id, payload, status").eq("status", "pending").order("created_at", { ascending: false }),
       supabase.from("agent_lessons").select("id, lesson, derived_count, source").eq("scope", "synthesis").eq("status", "active").order("derived_count", { ascending: false }),
       supabase.from("intel_updates").select("status").neq("status", "pending"),
-      supabase.from("theme_misses").select("theme_id, title, category, new_support_signals, new_support_sources").order("new_support_sources", { ascending: false }),
+      supabase.from("theme_misses").select("theme_id, title, category, new_support_signals, new_support_sources, product_id").order("new_support_sources", { ascending: false }),
     ]);
     setUpdates(ups ?? []);
     setLessons(les ?? []);
-    setMisses(mis ?? []);
+    const missScoped = (mis ?? []).filter((m: { product_id?: string | null }) =>
+      productFilter === "all" ? true : productFilter === "company" ? !m.product_id : m.product_id === productFilter);
+    setMisses(missScoped);
     const d = decided ?? [];
     if (d.length) {
       const accepted = d.filter((x) => x.status === "accepted" || x.status === "edited").length;
       setAcceptRate({ rate: Math.round((accepted / d.length) * 100), n: d.length });
     } else setAcceptRate(null);
-  }, [supabase]);
+  }, [supabase, productFilter]);
   useEffect(() => { load(); }, [load]);
 
   function openItem(u: Update) {

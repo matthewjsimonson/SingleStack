@@ -214,7 +214,7 @@ export default function SignalsView() {
           signals={signalsScoped} themes={themesScoped} productThemes={productThemes} gtmThemes={gtmThemes}
           highSignals={highSignals} unsorted={unsorted} internalCount={internalCount} externalCount={externalCount}
           sourceById={sourceById} synthRun={synthRun} onSynthesize={synthesize} setCategory={setCategory} goLens={setTab}
-          reload={load}
+          reload={load} productFilter={productFilter}
         />
       ) : (
         <LensTab
@@ -275,11 +275,11 @@ export default function SignalsView() {
 }
 
 // ---------- Intel homepage ----------
-function Home({ signals, themes, productThemes, gtmThemes, highSignals, unsorted, internalCount, externalCount, sourceById, synthRun, onSynthesize, setCategory, goLens, reload }: {
+function Home({ signals, themes, productThemes, gtmThemes, highSignals, unsorted, internalCount, externalCount, sourceById, synthRun, onSynthesize, setCategory, goLens, reload , productFilter }: {
   signals: Signal[]; themes: Theme[]; productThemes: Theme[]; gtmThemes: Theme[]; highSignals: Signal[]; unsorted: Signal[];
   internalCount: number; externalCount: number;
   sourceById: (id: string | null) => Source | null; synthRun: AgentRun; onSynthesize: () => void;
-  setCategory: (id: string, c: string | null) => void; goLens: (l: Lens) => void; reload: () => void;
+  setCategory: (id: string, c: string | null) => void; goLens: (l: Lens) => void; reload: () => void; productFilter: string;
 }) {
   return (
     <div>
@@ -307,10 +307,10 @@ function Home({ signals, themes, productThemes, gtmThemes, highSignals, unsorted
       ) : (
         <>
           {/* Review queue + learning — the HITL feedback loop */}
-          <IntelReview onApplied={reload} />
+          <IntelReview onApplied={reload} productFilter={productFilter} />
 
           {/* Bridges — cross-lens Product↔GTM insight (the differentiated brief) */}
-          <Bridges onChange={reload} />
+          <Bridges onChange={reload} productFilter={productFilter} />
 
           {/* Callouts: synthesized themes as product/gtm intelligence briefs */}
           {themes.length > 0 && (

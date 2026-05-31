@@ -14,12 +14,13 @@ import { useAgentRun, AgentProgress } from "@/components/AgentProgress";
 
 type Bridge = {
   bridge_id: string; title: string; insight: string | null; recommendation: string | null; state: string;
-  product_theme_id: string; product_theme_title: string; product_conf: number | null;
-  gtm_theme_id: string; gtm_theme_title: string; gtm_conf: number | null;
+  product_id: string | null;
+  product_theme_id: string; product_theme_title: string; product_theme_product: string | null; product_conf: number | null;
+  gtm_theme_id: string; gtm_theme_title: string; gtm_theme_product: string | null; gtm_conf: number | null;
   bridge_conf: number | null;
 };
 
-export default function Bridges({ onChange }: { onChange?: () => void }) {
+export default function Bridges({ onChange, productFilter = "all" }: { onChange?: () => void; productFilter?: string }) {
   const supabase = createClient();
   const [bridges, setBridges] = useState<Bridge[]>([]);
   const [error, setError] = useState<string | null>(null);
@@ -28,11 +29,17 @@ export default function Bridges({ onChange }: { onChange?: () => void }) {
 
   const load = useCallback(async () => {
     const { data } = await supabase.from("bridge_strength")
-      .select("bridge_id, title, insight, recommendation, state, product_theme_id, product_theme_title, product_conf, gtm_theme_id, gtm_theme_title, gtm_conf, bridge_conf")
+      .select("bridge_id, title, insight, recommendation, state, product_id, product_theme_id, product_theme_title, product_theme_product, product_conf, gtm_theme_id, gtm_theme_title, gtm_theme_product, gtm_conf, bridge_conf")
       .neq("state", "dismissed");
+    // Product scope: a bridge belongs to a product if its product_id is set OR
+    // either leg is in that product; company-wide = no product on the bridge.
+    const inScope = (b: Bridge) =>
+      productFilter === "all" ? true
+      : productFilter === "company" ? !b.product_id && !b.product_theme_product && !b.gtm_theme_product
+      : b.product_id === productFilter || b.product_theme_product === productFilter || b.gtm_theme_product === productFilter;
     // strongest first (by weaker-leg confidence)
-    setBridges((data ?? []).sort((a, b) => (b.bridge_conf ?? 0) - (a.bridge_conf ?? 0)));
-  }, [supabase]);
+    setBridges((data ?? []).filter(inScope).sort((a, b) => (b.bridge_conf ?? 0) - (a.bridge_conf ?? 0)));
+  }, [supabase, productFilter]);
   useEffect(() => { load(); }, [load]);
 
   async function find() {
