@@ -15,9 +15,12 @@ type Decision = { id: string; title: string; question: string | null; status: st
 const STATUS_TONE: Record<string, "default" | "accent" | "green"> = { open: "accent", decided: "default", routed: "green" };
 const STATUS_GROUPS: [string, string][] = [["open", "Open — awaiting a call"], ["decided", "Decided"], ["routed", "Routed to Ship"]];
 
+type Stale = { decision_id: string; new_contradictions: number; cited_theme_faded: boolean; min_cited_confidence: number | null };
+
 export default function DecisionsView() {
   const supabase = createClient();
   const [decisions, setDecisions] = useState<Decision[]>([]);
+  const [staleness, setStaleness] = useState<Record<string, Stale>>({});
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [creating, setCreating] = useState(false);
@@ -25,8 +28,14 @@ export default function DecisionsView() {
   const [busy, setBusy] = useState(false);
 
   const load = useCallback(async () => {
-    const { data, error } = await supabase.from("decisions").select("id, title, question, status, scope, owner, theme_id, created_at").order("created_at", { ascending: false });
+    const [{ data, error }, { data: stale }] = await Promise.all([
+      supabase.from("decisions").select("id, title, question, status, scope, owner, theme_id, created_at").order("created_at", { ascending: false }),
+      supabase.from("decision_staleness").select("decision_id, new_contradictions, cited_theme_faded, min_cited_confidence"),
+    ]);
     if (error) setError(error.message);
+    const byId: Record<string, Stale> = {};
+    for (const s of stale ?? []) byId[s.decision_id] = s;
+    setStaleness(byId);
     setDecisions(data ?? []); setLoading(false);
   }, [supabase]);
   useEffect(() => { load(); }, [load]);
@@ -79,6 +88,15 @@ export default function DecisionsView() {
                         <Chip tone={STATUS_TONE[d.status] ?? "default"}>{d.status}</Chip>
                       </div>
                       {d.question && <div className="t-sub t-muted" style={{ fontSize: 12.5, marginTop: 4 }}>{d.question}</div>}
+                      {staleness[d.id] && (
+                        <div className="t-sub" style={{ fontSize: 12, marginTop: 8, color: "var(--am-text)", background: "var(--am-fill)", borderRadius: 6, padding: "6px 9px" }}>
+                          ⚠ Worth revisiting — {[
+                            staleness[d.id].new_contradictions > 0 ? `${staleness[d.id].new_contradictions} new contradiction${staleness[d.id].new_contradictions === 1 ? "" : "s"} since you decided` : "",
+                            staleness[d.id].cited_theme_faded ? "a cited theme has faded" : "",
+                            (staleness[d.id].min_cited_confidence ?? 1) < 0.4 ? "cited evidence is now weak" : "",
+                          ].filter(Boolean).join(" · ")}
+                        </div>
+                      )}
                       <div className="row gap-2" style={{ marginTop: 8 }}>
                         <Chip>{d.scope}</Chip>
                         {d.theme_id && <Chip tone="violet">from theme</Chip>}

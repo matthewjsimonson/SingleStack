@@ -17,6 +17,7 @@ type Update = {
   payload: Record<string, unknown>; status: string;
 };
 type Lesson = { id: string; lesson: string; derived_count: number; source: string };
+type Miss = { theme_id: string; title: string; category: string; new_support_signals: number; new_support_sources: number };
 
 const REASON_TAGS = ["evidence_thin", "wrong_lens", "not_actionable", "tone", "duplicate", "other"];
 const TAG_LABEL: Record<string, string> = {
@@ -37,15 +38,18 @@ export default function IntelReview({ onApplied }: { onApplied?: () => void }) {
   const [draft, setDraft] = useState<{ rationale: string; tags: string[]; edit: string }>({ rationale: "", tags: [], edit: "" });
   const [busy, setBusy] = useState(false);
   const [distilling, setDistilling] = useState(false);
+  const [misses, setMisses] = useState<Miss[]>([]);
 
   const load = useCallback(async () => {
-    const [{ data: ups }, { data: les }, { data: decided }] = await Promise.all([
+    const [{ data: ups }, { data: les }, { data: decided }, { data: mis }] = await Promise.all([
       supabase.from("intel_updates").select("id, kind, summary, theme_id, payload, status").eq("status", "pending").order("created_at", { ascending: false }),
       supabase.from("agent_lessons").select("id, lesson, derived_count, source").eq("scope", "synthesis").eq("status", "active").order("derived_count", { ascending: false }),
       supabase.from("intel_updates").select("status").neq("status", "pending"),
+      supabase.from("theme_misses").select("theme_id, title, category, new_support_signals, new_support_sources").order("new_support_sources", { ascending: false }),
     ]);
     setUpdates(ups ?? []);
     setLessons(les ?? []);
+    setMisses(mis ?? []);
     const d = decided ?? [];
     if (d.length) {
       const accepted = d.filter((x) => x.status === "accepted" || x.status === "edited").length;
@@ -99,12 +103,40 @@ export default function IntelReview({ onApplied }: { onApplied?: () => void }) {
     await load();
   }
 
+  // Reconsider a miss: bring a faded theme back to active and log it.
+  async function reconsider(m: Miss) {
+    setError(null);
+    const orgId = await getOrgId(); if (!orgId) return;
+    await supabase.from("signal_themes").update({ state: "active" }).eq("id", m.theme_id);
+    await supabase.from("theme_events").insert({ org_id: orgId, theme_id: m.theme_id, kind: "state_changed", detail: { from: "fading", to: "active", reason: "reconsidered — new evidence" }, actor: "human" });
+    await load(); onApplied?.();
+  }
+
   // Nothing to show at all — stay quiet.
-  if (updates.length === 0 && lessons.length === 0 && !acceptRate) return null;
+  if (updates.length === 0 && lessons.length === 0 && !acceptRate && misses.length === 0) return null;
 
   return (
     <div style={{ display: "grid", gap: "var(--sp-5)", marginBottom: "var(--sp-6)" }}>
       <Banner>{error}</Banner>
+
+      {misses.length > 0 && (
+        <Section label={`Worth reconsidering · ${misses.length}`}>
+          <div className="t-sub t-muted" style={{ marginBottom: "var(--sp-3)" }}>
+            You let these fade — but fresh, independent evidence has come in since. The system flags its own misses.
+          </div>
+          <div className="stack-3">
+            {misses.map((m) => (
+              <div key={m.theme_id} className="card card-pad row-between" style={{ alignItems: "flex-start", gap: 10, borderLeft: "2px solid var(--am-text)" }}>
+                <div style={{ minWidth: 0 }}>
+                  <a href={`/signals/themes/${m.theme_id}`} style={{ fontSize: 13.5, fontWeight: 640, color: "inherit", textDecoration: "none" }}>{m.title}</a>
+                  <div className="t-mono-xs" style={{ marginTop: 3 }}>+{m.new_support_signals} signal{m.new_support_signals === 1 ? "" : "s"} across {m.new_support_sources} independent source{m.new_support_sources === 1 ? "" : "s"} since it faded</div>
+                </div>
+                <button className="btn btn-sm" style={{ flexShrink: 0 }} onClick={() => reconsider(m)}>Reconsider</button>
+              </div>
+            ))}
+          </div>
+        </Section>
+      )}
 
       {updates.length > 0 && (
         <Section label={`Review intelligence updates · ${updates.length}`}>

@@ -84,7 +84,7 @@ export default function DecisionWorkspace({ id }: { id: string }) {
 
   async function choose(optId: string) {
     setError(null);
-    await supabase.from("decisions").update({ chosen_option_id: optId, status: "decided", rationale: rationale.trim() || null }).eq("id", id);
+    await supabase.from("decisions").update({ chosen_option_id: optId, status: "decided", rationale: rationale.trim() || null, decided_at: new Date().toISOString() }).eq("id", id);
     await load();
   }
 
