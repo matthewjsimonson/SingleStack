@@ -23,7 +23,7 @@ person at the keyboard and Claude.
 
 | # | Phase | Screen | Type | Sev | What happened | Status |
 |---|-------|--------|------|-----|---------------|--------|
-| _e.g._ | 1 | `/products` empty | UX | P1 | _no guidance on what a product record is for_ | open |
+| 1 | bring-up | `/signals` | UX | P1 | Checklist said "hit Synthesize as the hard gate" but the button is `disabled` until ≥1 signal exists (`SignalsView.tsx:285`) — impossible on an empty workspace. Sequencing bug in the playbook. Fixed: bring-up now says seed 2–3 signals first, then Synthesize. | fixed `7d343ef→` |
 
 ---
 

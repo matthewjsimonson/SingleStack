@@ -17,19 +17,24 @@ should work better.
 
 > **Bring-up checklist — do this once before Phase 1 (only you can; I have no dev
 > runtime):**
-> 1. **The hard gate:** sign into dev, hit **Synthesize** once. Themes/proposals
->    come back → AI is live, proceed. It errors → STOP; the dev
->    `ANTHROPIC_API_KEY` isn't set. Fix that first.
-> 2. **Migrations applied on dev:** all **55**, incl. the cross-tenant P0 fix
+> 1. **Sign in & load:** the homepage and `/signals` render with no console/RLS
+>    errors. (Confirms migrations are applied + auth works.)
+> 2. **Seed first, THEN gate.** The **Synthesize** button is disabled until at
+>    least one signal exists (nothing to synthesize on an empty workspace). So:
+>    log **2–3 quick signals** (Signals → **Log signal**, top right — any real
+>    one-liner), *then* hit **Synthesize** once.
+>    - Proposals/themes come back → AI is live, proceed. ✅ *the real gate*
+>    - It errors → STOP; the dev `ANTHROPIC_API_KEY` isn't set. Fix that first.
+> 3. **Migrations applied on dev:** all **55**, incl. the cross-tenant P0 fix
 >    (`20260530270000`). (Repo is verified clean; what I can't check is that dev
->    has *run* them.)
-> 3. **Clean slate if needed:** run `scripts/reset-my-workspace.sql` in the dev
->    SQL editor.
-> 4. **First-run expectation:** this is the **first true end-to-end firing** of
+>    has *run* them — if step 1 loaded cleanly, you're current.)
+> 4. **Clean slate if needed:** run `scripts/reset-my-workspace.sql` in the dev
+>    SQL editor (e.g. to clear the throwaway seed signals before Phase 1 proper).
+> 5. **First-run expectation:** this is the **first true end-to-end firing** of
 >    the edge functions + model calls — everything to date is build/logic/DB-
 >    verified, never live-runtime-verified. Expect first-run surprises on the
 >    synthesize / resolve / distill paths; that's what we're here to catch.
-> 5. **New signups auto-join the org** (the `on_auth_user_created` trigger) —
+> 6. **New signups auto-join the org** (the `on_auth_user_created` trigger) —
 >    correct single-tenant behavior; don't mistake it for a bug.
 
 > **What's LIVE vs UNBUILT (read this — it sets expectations).**
