@@ -134,11 +134,15 @@ computed from `ratifications`, never stored.
 1. **Build-item substrate + workspace** — `initiative_fields` (migration), a
    `BUILD_ITEM_TEMPLATE` (Why/What/How/Proof), the `/ship/[id]` workspace with
    sectioned fields + the gated pipeline rail. *Human depth first; no AI yet.*
-2. **AI-in-the-loop on the build item** — agent drafts fields as inline proposals;
-   accept/edit/reject + ratification trail on the workspace.
-3. **Decisions** — `decisions`/`options`/`evidence`, theme→decision, decision→
+2. **Capability-aware How (AI-owned) + inline proposals** — a capability KB
+   (ingest changelogs/docs as sources→RAG) and a **build-architect agent** that
+   drafts the How section as proposals, citing the capability used; accept/edit/
+   reject + ratification trail on the workspace. Re-steers when capabilities change.
+3. **AI on the rest of the build item** — agent drafts Why/What/Proof fields as
+   inline proposals (acceptance criteria from hypothesis+signals, success metric).
+4. **Decisions** — `decisions`/`options`/`evidence`, theme→decision, decision→
    build-item routing (pre-fills Why). Intelligence visibly steers Ship.
-4. **Theses & validation** — theses layer; build-item `Validated` gate emits an
+5. **Theses & validation** — theses layer; build-item `Validated` gate emits an
    outcome signal; the loop closes.
 
 Slice 1 starts now.
