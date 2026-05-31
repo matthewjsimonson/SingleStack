@@ -1,6 +1,11 @@
 # Cross-sell & the scope vocabulary — architecture design
 
-Status: **proposed (for review)** · No implementation yet · Owner: SingleStack
+Status: **Phase 1 shipped** (vocabulary + additive columns) · Phases 2–4 proposed · Owner: SingleStack
+Phase 1 lives in `supabase/migrations/20260530280000_cross_product_scope.sql`
+(`co_product_ids[]`, `gtm_records.motion_type`, `bridges.span`, the
+`spans_product()` helper, GIN indexes, and demote-not-destroy triggers — all
+verified on a 3-product Postgres: cross-sell authoring, CHECK invariants,
+`spans_product` queries, and primary/secondary product deletion).
 Builds on `multi-product-foundation.md` (which establishes per-product separation
 + org roll-up). This doc adds the missing axis: **products and GTM motions that
 sometimes run solo and sometimes run together** (cross-sell / co-sell / bundles).
