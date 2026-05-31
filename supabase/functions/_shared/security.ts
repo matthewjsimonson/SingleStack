@@ -30,6 +30,40 @@ export const SECURITY = {
 // ---- SSRF guard ------------------------------------------------------------
 // https-only; refuse hosts in private/loopback/link-local/metadata space by
 // their literal form. Defense at the URL layer; the platform adds egress control.
+
+// Normalize a numeric host to canonical dotted-quad (inet_aton semantics) so
+// blocklist-bypass encodings don't slip through: decimal (2130706433), hex
+// (0x7f000001), octal (0177.0.0.1), and short forms (127.1). Returns null for
+// anything that isn't a numeric IPv4 literal (i.e. a real hostname).
+function toCanonicalIPv4(host: string): string | null {
+  const parts = host.split(".");
+  if (parts.length === 0 || parts.length > 4) return null;
+  const nums: number[] = [];
+  for (const p of parts) {
+    let n: number;
+    if (/^0x[0-9a-f]+$/i.test(p)) n = parseInt(p, 16);
+    else if (/^0[0-7]+$/.test(p)) n = parseInt(p, 8);
+    else if (/^(0|[1-9][0-9]*)$/.test(p)) n = parseInt(p, 10);
+    else return null;                       // non-numeric part → it's a hostname
+    if (!Number.isFinite(n) || n < 0) return null;
+    nums.push(n);
+  }
+  // inet_aton: the final part fills all remaining low-order bytes.
+  let value: number;
+  if (nums.length === 1) {
+    value = nums[0];
+  } else {
+    for (let i = 0; i < nums.length - 1; i++) if (nums[i] > 255) return null;
+    const last = nums[nums.length - 1];
+    if (last >= 256 ** (4 - (nums.length - 1))) return null;
+    value = last;
+    for (let i = 0; i < nums.length - 1; i++) value += nums[i] * 256 ** (3 - i);
+  }
+  if (value > 0xffffffff) return null;
+  value = value >>> 0;
+  return [(value >>> 24) & 255, (value >>> 16) & 255, (value >>> 8) & 255, value & 255].join(".");
+}
+
 export function assertSafeUrl(raw: string): URL {
   let u: URL;
   try { u = new URL(raw); } catch { throw new Error(`Not a valid URL: ${raw}`); }
@@ -38,7 +72,9 @@ export function assertSafeUrl(raw: string): URL {
   if (host === "localhost" || host.endsWith(".localhost") || host.endsWith(".internal") || host.endsWith(".local")) {
     throw new Error(`Refusing internal host: ${host}`);
   }
-  const m = host.match(/^(\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})$/);
+  // Canonicalize any numeric IPv4 encoding before the range check (anti-bypass).
+  const canon = toCanonicalIPv4(host);
+  const m = (canon ?? host).match(/^(\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})$/);
   if (m) {
     const [a, b] = [Number(m[1]), Number(m[2])];
     const priv =
@@ -47,7 +83,7 @@ export function assertSafeUrl(raw: string): URL {
       (a === 192 && b === 168) ||
       (a === 172 && b >= 16 && b <= 31) ||
       a >= 224;                                   // multicast/reserved
-    if (priv) throw new Error(`Refusing private/reserved IP: ${host}`);
+    if (priv) throw new Error(`Refusing private/reserved IP: ${host}${canon && canon !== host ? ` (= ${canon})` : ""}`);
   }
   if (host === "::1" || host.startsWith("fc") || host.startsWith("fd") || host.startsWith("fe80")) {
     throw new Error(`Refusing internal IPv6 host: ${host}`);
