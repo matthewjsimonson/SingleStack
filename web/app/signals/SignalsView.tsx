@@ -20,6 +20,7 @@ import TrackingTopics from "@/components/TrackingTopics";
 import SourceManager from "@/components/SourceManager";
 import IntelReview from "./IntelReview";
 import Bridges from "./Bridges";
+import IntelMap from "./IntelMap";
 
 type Source = { id: string; label: string; icon: string; origin: string };
 type Signal = {
@@ -34,7 +35,7 @@ type Theme = {
 };
 
 type Lens = "product" | "gtm";
-type Tab = "home" | Lens;
+type Tab = "home" | "map" | Lens;
 type OriginFilter = "all" | "internal" | "external";
 
 // Best-practice scaffolding so a fresh org sees the intended SHAPE of each lens,
@@ -170,13 +171,16 @@ export default function SignalsView() {
       <SubTabs<Tab>
         tabs={[
           { key: "home", label: "Homepage" },
+          { key: "map", label: "Map" },
           { key: "product", label: `Product · ${signals.filter((s) => inLens(s, "product")).length}` },
           { key: "gtm", label: `GTM · ${signals.filter((s) => inLens(s, "gtm")).length}` },
         ]}
         active={tab} onChange={setTab}
       />
 
-      {loading ? <div className="t-sub t-muted">Loading…</div> : tab === "home" ? (
+      {loading ? <div className="t-sub t-muted">Loading…</div> : tab === "map" ? (
+        <IntelMap />
+      ) : tab === "home" ? (
         <Home
           signals={signals} themes={themes} productThemes={productThemes} gtmThemes={gtmThemes}
           highSignals={highSignals} unsorted={unsorted} internalCount={internalCount} externalCount={externalCount}
