@@ -287,18 +287,24 @@ Deno.serve(async (req: Request) => {
       if (!error) categorized += ids.length;
     }
 
-    // 7) recompute momentum + last_evidence + keep signal_ids[] in sync, per theme.
+    // 7) recompute momentum + last_evidence + signal_ids[] sync + HONEST conf.
+    // conf_level is derived from theme_confidence() (independent-source
+    // corroboration, dampened by contradiction) — NOT trusted from the model and
+    // NOT a function of raw signal count. Defeats evidence laundering.
     const { data: liveThemes } = await supabase.from("signal_themes").select("id");
     for (const t of liveThemes ?? []) {
       const { data: ts } = await supabase.from("theme_signals").select("signal_id, added_at").eq("theme_id", t.id);
       const rows = ts ?? [];
       const mo = momentumFor(rows.map((r) => r.added_at));
       const last = rows.length ? rows.map((r) => r.added_at).sort().slice(-1)[0] : null;
-      await supabase.from("signal_themes").update({
+      const { data: honest } = await supabase.rpc("theme_confidence", { p_theme_id: t.id });
+      const patch: Record<string, unknown> = {
         momentum: mo,
         last_evidence_at: last,
         signal_ids: rows.map((r) => r.signal_id),
-      }).eq("id", t.id);
+      };
+      if (honest !== null && honest !== undefined) patch.conf_level = honest;
+      await supabase.from("signal_themes").update(patch).eq("id", t.id);
     }
 
     return json({

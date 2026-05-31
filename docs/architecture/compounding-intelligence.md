@@ -44,6 +44,32 @@ for a **diff against stable theme IDs**:
 It **never deletes the set**. Applies deltas, writes `theme_events`, recomputes
 momentum, keeps `signal_ids[]` synced. (Kills the destructive DELETE.)
 
+## Anti-goals — do NOT let this regress to the mean (load-bearing)
+A compounding, feedback-learning system has five failure modes that are
+data-correct but make you *dumber*. These are explicit anti-goals:
+
+1. **Conformity trap.** Learning from ratifications can converge on "propose what
+   gets accepted" → suppresses the non-obvious correct call (a great PM's whole
+   value). Mitigation: lessons must be about *evidence quality*, not "surface
+   fewer contrarian themes"; the system surfaces its own MISSES (dismissed/faded
+   themes that later proved right), and accept-rate is a diagnostic, never an
+   optimization target.
+2. **Evidence laundering / false confidence.** Confidence must come from
+   INDEPENDENT corroboration, not signal *count*. 5 signals from one Gong call ≠
+   3 from 3 independent sources. Near-duplicate signals must not inflate.
+3. **Disconfirmation blindness.** Evidence must be able to CUT AGAINST a theme.
+   A `stance` (supports | contradicts) on evidence; confidence weighs confirming
+   vs disconfirming. A theme that survives disconfirmation is a real bet; one
+   that only accretes agreement is a bubble.
+4. **Stale conviction.** A decision/theme made on reality that has since been
+   contradicted must be flagged for revisit, not left to look authoritative.
+5. **Cold-start false confidence.** Three data points must not look like
+   battle-tested conviction. Confidence must reflect corroboration breadth +
+   age, and the UI must distinguish "emerging/thin" from "established".
+
+The "honest confidence" mechanism (independence-weighted, disconfirmation-aware)
+addresses 2+3 directly and is the core defense of the "push you to the best" thesis.
+
 ## Graduated HITL (the relationship, not button-press)
 - **Auto-applied (low judgment):** attach a new signal to a clearly-matching
   theme, bump `last_evidence_at`, recompute momentum. Keeps the body of
