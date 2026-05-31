@@ -31,6 +31,7 @@ export default function ShipView() {
   const [creating, setCreating] = useState(false);
   const [form, setForm] = useState({ title: "", description: "", kind: "feature", priority: "medium", product_id: "", release_id: "", signalIds: [] as string[] });
   const [busy, setBusy] = useState(false);
+  const [movingIds, setMovingIds] = useState<Set<string>>(new Set());
 
   const load = useCallback(async () => {
     const [{ data: its }, { data: prods }, { data: rel }, { data: sigs }] = await Promise.all([
@@ -60,10 +61,18 @@ export default function ShipView() {
     finally { setBusy(false); }
   }
   async function moveStage(id: string, dir: 1 | -1) {
+    if (movingIds.has(id)) return;                       // ignore double-clicks mid-move
     const it = items.find((x) => x.id === id); if (!it) return;
     const idx = STAGES.findIndex(([s]) => s === (it.build_stage ?? "spec"));
     const next = STAGES[Math.min(STAGES.length - 1, Math.max(0, idx + dir))][0];
-    setError(null); await supabase.from("initiatives").update({ build_stage: next }).eq("id", id); await load();
+    setError(null);
+    setMovingIds((m) => new Set(m).add(id));
+    try {
+      await supabase.from("initiatives").update({ build_stage: next }).eq("id", id);
+      await load();
+    } finally {
+      setMovingIds((m) => { const n = new Set(m); n.delete(id); return n; });
+    }
   }
   async function setPrototypeUrl(id: string, url: string) { setError(null); await supabase.from("initiatives").update({ prototype_url: url || null }).eq("id", id); await load(); }
   async function remove(id: string) { setError(null); await supabase.from("initiatives").delete().eq("id", id); await load(); }
@@ -123,8 +132,8 @@ export default function ShipView() {
                           style={{ fontSize: 11.5, padding: "6px 8px", marginBottom: 8 }} />
                       )}
                       <div className="row gap-2">
-                        {stage !== "spec" && <button className="btn btn-secondary btn-sm" style={{ padding: "3px 8px" }} onClick={() => moveStage(it.id, -1)}>←</button>}
-                        {stage !== "shipped" && <button className="btn btn-secondary btn-sm" style={{ padding: "3px 8px" }} onClick={() => moveStage(it.id, 1)}>→</button>}
+                        {stage !== "spec" && <button className="btn btn-secondary btn-sm" style={{ padding: "3px 8px" }} disabled={movingIds.has(it.id)} onClick={() => moveStage(it.id, -1)}>←</button>}
+                        {stage !== "shipped" && <button className="btn btn-secondary btn-sm" style={{ padding: "3px 8px" }} disabled={movingIds.has(it.id)} onClick={() => moveStage(it.id, 1)}>→</button>}
                       </div>
                     </div>
                   ))}

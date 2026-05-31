@@ -64,7 +64,7 @@ Deno.serve(async (req: Request) => {
       switch (upd.kind) {
         case "new_theme": {
           const sigIds = (p.signal_ids as string[] | undefined) ?? [];
-          const { data: row } = await supabase.from("signal_themes").insert({
+          const { data: row, error: insErr } = await supabase.from("signal_themes").insert({
             org_id: orgId, category: p.category === "gtm" ? "gtm" : "product",
             title: p.title, summary: p.summary, recommendation: p.recommendation,
             conf_level: Math.min(1, Math.max(0, Number(p.conf_level) || 0)),
@@ -72,16 +72,19 @@ Deno.serve(async (req: Request) => {
             signal_ids: sigIds, position: 0,
             product_id: (p.product_id as string | null) ?? null,   // theme inherits its signals' product
           }).select("id").single();
-          if (row) {
-            await ev(row.id, "created", { signals: sigIds.length });
-            if (sigIds.length) {
-              await supabase.from("theme_signals").upsert(
-                sigIds.map((sid) => ({ org_id: orgId, theme_id: row.id, signal_id: sid, added_at: now })),
-                { onConflict: "theme_id,signal_id", ignoreDuplicates: true },
-              );
-              await supabase.from("signal_themes").update({ last_evidence_at: now }).eq("id", row.id);
+          if (insErr || !row) throw new Error(`could not create theme: ${insErr?.message ?? "no row returned"}`);
+          if (sigIds.length) {
+            const { error: tsErr } = await supabase.from("theme_signals").upsert(
+              sigIds.map((sid) => ({ org_id: orgId, theme_id: row.id, signal_id: sid, added_at: now })),
+              { onConflict: "theme_id,signal_id", ignoreDuplicates: true },
+            );
+            if (tsErr) {
+              // Compensating cleanup: don't leave a theme with no evidence.
+              await supabase.from("signal_themes").delete().eq("id", row.id);
+              throw new Error(`could not attach evidence: ${tsErr.message}`);
             }
           }
+          await ev(row.id, "created", { signals: sigIds.length });
           break;
         }
         case "escalate":
@@ -102,16 +105,12 @@ Deno.serve(async (req: Request) => {
         case "merge": {
           const into = p.into as string, from = p.from as string;
           if (into && from && into !== from) {
-            const { data: fromLinks } = await supabase.from("theme_signals").select("signal_id").eq("theme_id", from);
-            const ids = (fromLinks ?? []).map((l) => l.signal_id);
-            if (ids.length) {
-              await supabase.from("theme_signals").upsert(
-                ids.map((sid) => ({ org_id: orgId, theme_id: into, signal_id: sid, added_at: now })),
-                { onConflict: "theme_id,signal_id", ignoreDuplicates: true },
-              );
-            }
-            await ev(into, "merged_in", { from, from_title: p.from_title });
-            await supabase.from("signal_themes").delete().eq("id", from);
+            // Atomic: move evidence + log + delete source + resync, in ONE
+            // transaction. No more "signals on both themes" on partial failure.
+            const { error: mErr } = await supabase.rpc("merge_themes", {
+              p_into: into, p_from: from, p_from_title: (p.from_title as string) ?? null, p_actor: decided_by,
+            });
+            if (mErr) throw new Error(`merge failed: ${mErr.message}`);
           }
           break;
         }

@@ -300,7 +300,11 @@ Deno.serve(async (req: Request) => {
 
     if (changeRows.length > 0) {
       const { error: changesErr } = await supabase.from("proposal_changes").insert(changeRows);
-      if (changesErr) throw new Error(`could not save changes: ${changesErr.message}`);
+      if (changesErr) {
+        // Compensating cleanup: don't leave an orphaned proposal with no changes.
+        await supabase.from("proposals").delete().eq("id", proposalId);
+        throw new Error(`could not save changes: ${changesErr.message}`);
+      }
     }
 
     // ---- close out the run --------------------------------------------------
