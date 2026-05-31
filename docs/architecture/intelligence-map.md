@@ -1,62 +1,76 @@
-# The Intelligence Map — a living battlefield you operate from
+# The Intelligence Map — a semantic, topographic strategy surface
 
-Status: **building (slice 1)** · Owner: SingleStack
+Status: **redesign (curated projections)** · Owner: SingleStack
+Supersedes the force-graph slice 1 as the primary model.
 
-## The idea
-Every "AI for product/GTM" tool renders intelligence as a feed or table — flat,
-one-thing-at-a-time, no sense of the whole. But our data is already a **graph**:
-signals → themes → bridges → decisions → build items, linked by relationships
-that carry *stance* (support vs contradict), *confidence*, *momentum*, *state*.
-We render it as a living, force-directed **map** you are IN — a geospatial view
-of the fronts you're fighting on. You navigate it, drill into nodes, trigger
-actions from it, and your **agents are commanders** standing on it, pointing at
-threats and opportunities.
+## The reframe
+A force-directed graph positions nodes by *connection* — the axes mean nothing,
+so it becomes a hairball at org scale (battle-tested: ~110 nodes = unreadable).
+The right model: **position carries meaning.** Where a thing sits *is* what it
+is — its lens, who it's for, how soon it matters, the bet it serves. A real
+battlefield map is semantic: territory, high ground, front lines. That model
+both expresses strategy AND fixes the hairball (semantic position is
+deterministic and filterable — no simulation crisscross).
 
-Discipline (anti-"theater"): **every visual property encodes a real variable**,
-and the map is where you DO things, not a screensaver.
+## Four orthogonal layers
+1. **Position = two chosen axes (the meaning).** A node lands where its
+   attributes put it.
+2. **Territory = belonging.** The surface is shaded into regions (product line,
+   team, owner, pillar) — "who/what it's for," made spatial.
+3. **Elevation = intensity (the topography).** A contour/heat field: high ground
+   = where high-confidence, accelerating intelligence concentrates; rifts =
+   contested ground (contradictions) or thin evidence. This makes it *terrain*.
+4. **Topology = connective tissue.** Bridges, contradicting edges, decision/build
+   provenance drawn on top of positioned nodes.
 
-## The graph (already in the schema)
-- **Nodes:** signals · themes (product/gtm) · bridges · decisions · build items
-- **Edges:** `theme_signals` (stance: support|contradict) · `bridges` (two legs)
-  · `decision_evidence` · `initiatives.decision_id`
+## CURATED projections, not a freeform axis-picker (the core principle)
+Freedom without guidance is a bad strategy. We do NOT ship X/Y dropdowns. We
+ship a deliberate, small set of named **Views**, each answering ONE strategic
+question. People PICK a View; they don't assemble one. Intentional > flexible.
 
-## Visual encoding (data → physics, nothing decorative)
-| Variable | Encoding |
-|---|---|
-| node type | shape/color family (signal · theme · bridge · decision · build) |
-| lens (product/gtm) | hue (accent vs violet) |
-| honest confidence | node **size / mass** |
-| momentum | pulse / subtle motion (accelerating pulses, fading dims) |
-| lifecycle state | opacity (emerging→active→escalating bright; fading/dormant faint) |
-| evidence stance | edge style: solid = supports, **red dashed = contradicts** (repulsive) |
-| bridge | a thick cross-lens link; its weaker-leg conf is its strength |
+Planned Views (each = a fixed axis pair + sensible territory + default filters):
+- **Action Matrix** — X = Confidence, Y = Momentum. Act-now / watch / retire.
+  *Buildable today (no new data).* The default for ICs and "what do I do now".
+- **Situational** — X = Lens (Product↔GTM), Y = Horizon (Now→Next→Future).
+  The strategist's map. *Needs `horizon`.*
+- **Accountability** — X = Owner/Team, Y = Strategic pillar. Whose front, which
+  objective. *Needs owner + objectives.*
 
-## Agents as commanders (the layer that makes it alive)
-Commanders are the org's standing intelligence, surfaced ON the map as callouts
-pinned to nodes — and they're powered by the anti-mediocrity engine we built:
-- **"Worth reconsidering"** (theme_misses) → a commander flag on a faded node
-  that's regaining evidence: *"you dropped this; it's back."*
-- **"Worth revisiting"** (decision_staleness) → a flag on a decision whose ground
-  shifted.
-- **Escalating / accelerating themes** → a commander marks a heating front.
-- **Strong bridges** → a commander marks where two fronts connect.
-Later: real agents (CPO/CRO-style) own regions and post their own callouts.
+Each View is opinionated: it knows its axes, its territory shading, what to
+collapse (e.g. signals fold into themes at altitude), and what its quadrants
+MEAN (labels: "Act now", "Contested", "Yesterday's truth").
 
-## Interaction
-- **Navigate:** pan, zoom, drag nodes (force layout settles around them).
-- **Drill in:** click a node → its detail (theme/bridge/decision pages we built).
-- **Act from the map:** click a commander callout → take the action (reconsider,
-  revisit, make a decision, find bridges).
-- Later: drag two themes together → propose a bridge.
+## New dimensions to capture (additive, independently valuable)
+These make intelligence *addressable* regardless of the map:
+- **owner/team** on themes (and optionally signals) — "who it's for".
+- **horizon** on themes — now | next | future.
+- **objectives/pillars** — a small table themes & decisions link to — "what bet
+  it serves".
 
-## Rendering
-SVG + a light custom force simulation (repulsion + edge springs + centering),
-no heavy deps. Fine for tens–hundreds of nodes at this data scale; crisp and on
--aesthetic. Canvas/WebGL only if scale demands it later.
+## Agents help shape the terrain (the intelligent-interface layer)
+Agents don't just live on the map — they CURATE the user's relationship to it:
+- **Recommend the View**: "3 themes just crossed into high-confidence +
+  accelerating — switch to the Action Matrix." The agent picks the projection
+  that surfaces what matters now.
+- **Propose dimension values**: suggest a theme's horizon, owner, or which
+  objective it serves (human ratifies — same graduated HITL as everywhere).
+- **Annotate territory**: flag a region heating up, a contested front, an
+  ownership gap ("no one owns this escalating front").
+This is the control/guidance that keeps freedom from becoming chaos: the system
+has a point of view about where you should be looking and why.
+
+## Anti-theater discipline (unchanged)
+Every visual property encodes a real variable. The map is where you work and
+drill in. Projections are few and meaningful. Agents guide, humans ratify.
 
 ## Slices
-1. **Graph + living map** (this slice): assemble nodes/edges with encodings; SVG
-   force map with pan/zoom/drag + click-to-drill; commander callouts from
-   misses/staleness/escalation/strong-bridges. A new "Map" view in Signals.
-2. **Act from the map:** inline actions on callouts; drag-to-bridge.
-3. **Real agent commanders:** agents own regions, post callouts, run on triggers.
+1. **Dimensions as data:** `horizon` + `owner` on themes; `objectives` table +
+   theme/decision links. Agent proposals for these (reuse the proposal/HITL
+   spine). No map change yet — dimensions are useful on their own.
+2. **Curated projection engine + Action Matrix View** (buildable on existing
+   data): deterministic positional layout, quadrant labels, territory shading,
+   signal-collapse at altitude. Replace the force map as primary; keep force as
+   an optional "constellation" view.
+3. **Situational + Accountability Views** once dimensions land; the View picker.
+4. **Elevation/contour field** (topography) — polish on correct position.
+5. **Agent curation:** recommend-a-View, propose dimensions, annotate territory.

@@ -121,6 +121,18 @@ Deno.serve(async (req: Request) => {
           }
           break;
         }
+        case "set_dimension": {
+          // Agent-proposed map dimension (horizon | owner_team | objective_id),
+          // ratified by a human. Whitelist the field so only dimensions are set.
+          if (upd.theme_id && typeof p.field === "string") {
+            const allowed: Record<string, true> = { horizon: true, owner_team: true, objective_id: true };
+            if (allowed[p.field]) {
+              await supabase.from("signal_themes").update({ [p.field]: p.value ?? null }).eq("id", upd.theme_id);
+              await ev(upd.theme_id as string, "summary_updated", { dimension: p.field, value: p.value_label ?? p.value });
+            }
+          }
+          break;
+        }
       }
       // Keep momentum/last_evidence/signal_ids[] consistent for any touched theme.
       const touched = upd.theme_id ?? (p.into as string | undefined);
