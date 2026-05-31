@@ -1,95 +1,116 @@
 // ============================================================================
-// draft-how — Edge Function. The "build-architect" agent for slice 2.
+// draft-how — Edge Function. The "build-architect" agent (slice 2).
+//
 // Plain English: given a build item's intent (its What), the product's technical
 // foundation, and the org's capability_notes (what's buildable right now), it
-// asks the LLM to draft the HOW — approach / dependencies / risks / effort —
-// each grounded in and CITING a capability note. It does NOT write anything: it
-// returns drafts the human accepts/edits/rejects in the workspace. Human in the
-// loop. The model id is read from a secret (DRAFT_MODEL) so no model identifier
-// lives in the repo and it stays configurable.
+// asks the model to draft the HOW — approach / dependencies / risks / effort —
+// each grounded in and CITING a capability note. It writes NOTHING: it returns
+// drafts the human accepts/edits/rejects in the workspace. Human in the loop.
+//
+// Runs as the caller (JWT forwarded) → RLS scopes reads to their org.
+// Secret: ANTHROPIC_API_KEY. Mirrors synthesize-signals conventions.
 // ============================================================================
 
-import { createClient } from "jsr:@supabase/supabase-js@2";
+import Anthropic from "npm:@anthropic-ai/sdk@0.69.0";
+import { createClient, type SupabaseClient } from "npm:@supabase/supabase-js@2";
 
-const cors = {
+const MODEL = "claude-opus-4-8";
+const CORS = {
   "Access-Control-Allow-Origin": "*",
-  "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type",
+  "Access-Control-Allow-Headers": "authorization, content-type",
   "Access-Control-Allow-Methods": "POST, OPTIONS",
 };
+const json = (b: unknown, s = 200) => new Response(JSON.stringify(b), { status: s, headers: { ...CORS, "content-type": "application/json" } });
 
-const json = (body: unknown, status = 200) =>
-  new Response(JSON.stringify(body), { status, headers: { ...cors, "Content-Type": "application/json" } });
-
-// The How fields the agent drafts (keys match BUILD_ITEM_TEMPLATE 'How').
-const HOW_FIELDS = [
+// The How fields the architect drafts (keys match BUILD_ITEM_TEMPLATE 'How').
+const HOW = [
   { key: "approach", label: "Technical approach" },
   { key: "dependencies", label: "Dependencies" },
   { key: "risks", label: "Risks & unknowns" },
   { key: "effort", label: "Effort / confidence" },
 ];
 
-Deno.serve(async (req) => {
-  if (req.method === "OPTIONS") return new Response("ok", { headers: cors });
+const SCHEMA = {
+  type: "object",
+  additionalProperties: false,
+  properties: {
+    fields: {
+      type: "array",
+      items: {
+        type: "object",
+        additionalProperties: false,
+        properties: {
+          key: { type: "string", enum: HOW.map((h) => h.key) },
+          value: { type: "string" },
+          cites: { type: "array", items: { type: "integer" } }, // indices into the capability list
+        },
+        required: ["key", "value", "cites"],
+      },
+    },
+  },
+  required: ["fields"],
+};
+
+Deno.serve(async (req: Request) => {
+  if (req.method === "OPTIONS") return new Response("ok", { headers: CORS });
+  if (req.method !== "POST") return json({ error: "POST only" }, 405);
+
+  const authHeader = req.headers.get("Authorization");
+  if (!authHeader) return json({ error: "missing Authorization header" }, 401);
+  const key = Deno.env.get("ANTHROPIC_API_KEY");
+  if (!key) return json({ error: "server missing ANTHROPIC_API_KEY" }, 500);
+
+  const supabase: SupabaseClient = createClient(
+    Deno.env.get("SUPABASE_URL")!,
+    Deno.env.get("SUPABASE_ANON_KEY")!,
+    { global: { headers: { Authorization: authHeader } } },
+  );
+
   try {
-    const authHeader = req.headers.get("Authorization") ?? "";
-    const supabase = createClient(
-      Deno.env.get("SUPABASE_URL")!,
-      Deno.env.get("SUPABASE_ANON_KEY")!,
-      { global: { headers: { Authorization: authHeader } } },
-    );
-
-    const { data: { user } } = await supabase.auth.getUser();
-    if (!user) return json({ error: "Unauthorized" }, 401);
-
-    const { data: mem } = await supabase.from("memberships").select("org_id").eq("user_id", user.id).limit(1).maybeSingle();
-    const orgId = mem?.org_id;
-    if (!orgId) return json({ error: "No org" }, 400);
-
-    const apiKey = Deno.env.get("ANTHROPIC_API_KEY");
-    const model = Deno.env.get("DRAFT_MODEL");
-    if (!apiKey) return json({ error: "ANTHROPIC_API_KEY secret is not set on this project." }, 500);
-    if (!model) return json({ error: "DRAFT_MODEL secret is not set. Add it (Edge Functions → Secrets) so the architect knows which model to use." }, 500);
-
     const { initiative_id } = await req.json().catch(() => ({}));
     if (!initiative_id) return json({ error: "initiative_id required" }, 400);
 
-    // Load the build item + its current fields (the What is the input to the How).
+    const { data: orgId } = await supabase.rpc("current_org_id");
+    if (!orgId) return json({ error: "could not resolve org" }, 400);
+
+    // The build item + its current fields (the What is the input to the How).
     const { data: item } = await supabase
       .from("initiatives").select("id, title, description, product_id")
       .eq("id", initiative_id).single();
     if (!item) return json({ error: "Build item not found" }, 404);
 
     const { data: fields } = await supabase
-      .from("initiative_fields").select("field_key, label, value, section")
-      .eq("initiative_id", initiative_id);
+      .from("initiative_fields").select("label, value, section").eq("initiative_id", initiative_id);
     const fieldText = (fields ?? [])
       .filter((f) => f.value && f.value.trim())
       .map((f) => `- ${f.label} (${f.section ?? "?"}): ${f.value}`)
       .join("\n") || "(no fields filled yet)";
 
-    // Product technical foundation — grounds the approach in the real stack.
+    // Product technical foundation grounds the approach in the real stack.
     let techText = "(no product technical context)";
     if (item.product_id) {
       const { data: pf } = await supabase
-        .from("record_fields").select("label, value")
-        .eq("product_id", item.product_id).eq("section", "Technical");
+        .from("record_fields").select("label, value").eq("product_id", item.product_id).eq("section", "Technical");
       const t = (pf ?? []).filter((f) => f.value && f.value.trim()).map((f) => `- ${f.label}: ${f.value}`).join("\n");
       if (t) techText = t;
     }
 
-    // Capability notes — what's buildable right now. The agent must cite these.
+    // Capabilities — what's buildable now. The architect must cite these by [n].
     const { data: caps } = await supabase
-      .from("capability_notes").select("title, content, category, observed_at")
-      .order("observed_at", { ascending: false }).limit(40);
+      .from("capability_notes").select("title, content").order("observed_at", { ascending: false }).limit(40);
     if (!caps || caps.length === 0) {
-      return json({ error: "no_capabilities", message: "No capability notes yet. Add a few (what's newly buildable) so the architect can ground and cite the How." }, 200);
+      return json({ error: "no_capabilities", message: "No capability notes yet. Add a few (what's newly buildable) so the architect can ground and cite the How." });
     }
-    const capText = caps.map((c, i) => `[C${i + 1}] ${c.title} — ${c.content}`).join("\n");
+    const capText = caps.map((c, i) => `[${i}] ${c.title} — ${c.content}`).join("\n");
 
-    const prompt = [
-      "You are a senior build architect. Draft the HOW for a build item: the technical approach, dependencies, risks, and a rough effort/confidence.",
-      "Ground every choice in the CAPABILITIES below — prefer the newest capability that makes the build simpler — and CITE which capability you leaned on by its [C#] tag.",
-      "",
+    const system = [
+      "You are a senior build architect for SingleStack, an AI-native product & GTM platform.",
+      "You draft the HOW of a build item: technical approach, dependencies, risks & unknowns, and a rough effort/confidence.",
+      "Ground every choice in the CAPABILITIES provided — prefer the newest capability that makes the build simpler — and CITE the capabilities you lean on by their [n] index in the 'cites' array.",
+      "Be concrete and concise. Return one entry per How field (approach, dependencies, risks, effort).",
+    ].join("\n");
+
+    const userMsg = [
       `BUILD ITEM: ${item.title}${item.description ? ` — ${item.description}` : ""}`,
       "",
       "WHAT (intent & scope):",
@@ -98,35 +119,28 @@ Deno.serve(async (req) => {
       "PRODUCT TECHNICAL FOUNDATION:",
       techText,
       "",
-      "CAPABILITIES (what's buildable now — cite these):",
+      "CAPABILITIES (what's buildable now — cite by [n]):",
       capText,
       "",
-      "Return STRICT JSON only, no prose, in this exact shape:",
-      `{"fields":[{"key":"approach","value":"...","cites":["C1"]},{"key":"dependencies","value":"...","cites":[]},{"key":"risks","value":"...","cites":[]},{"key":"effort","value":"...","cites":[]}]}`,
-      "Keep each value concise and concrete. 'cites' lists the [C#] tags (without brackets) you relied on.",
+      "Draft the How now.",
     ].join("\n");
 
-    const resp = await fetch("https://api.anthropic.com/v1/messages", {
-      method: "POST",
-      headers: { "x-api-key": apiKey, "anthropic-version": "2023-06-01", "content-type": "application/json" },
-      body: JSON.stringify({ model, max_tokens: 1500, messages: [{ role: "user", content: prompt }] }),
-    });
-    if (!resp.ok) return json({ error: `LLM error ${resp.status}`, detail: await resp.text() }, 502);
-    const data = await resp.json();
-    const raw: string = data?.content?.[0]?.text ?? "";
+    const anthropic = new Anthropic({ apiKey: key });
+    const resp = (await anthropic.messages.create({
+      model: MODEL,
+      max_tokens: 2500,
+      thinking: { type: "adaptive" },
+      output_config: { effort: "high", format: { type: "json_schema", schema: SCHEMA } },
+      system: [{ type: "text", text: system, cache_control: { type: "ephemeral" } }],
+      messages: [{ role: "user", content: userMsg }],
+      // deno-lint-ignore no-explicit-any
+    } as any)) as Anthropic.Message;
 
-    // Tolerant JSON extraction (strip code fences / surrounding prose).
-    let parsed: { fields?: { key: string; value: string; cites?: string[] }[] } = {};
-    try {
-      const match = raw.match(/\{[\s\S]*\}/);
-      parsed = match ? JSON.parse(match[0]) : {};
-    } catch { /* fall through to empty */ }
+    const block = resp.content.find((b) => b.type === "text");
+    if (!block || block.type !== "text") throw new Error("no draft returned");
+    const parsed = JSON.parse(block.text) as { fields?: { key: string; value: string; cites?: number[] }[] };
 
-    const labelOf = (k: string) => HOW_FIELDS.find((f) => f.key === k)?.label ?? k;
-    const capTitle = (tag: string) => {
-      const n = parseInt(tag.replace(/[^0-9]/g, ""), 10);
-      return Number.isFinite(n) && caps[n - 1] ? caps[n - 1].title : tag;
-    };
+    const labelOf = (k: string) => HOW.find((h) => h.key === k)?.label ?? k;
     const drafts = (parsed.fields ?? [])
       .filter((f) => f && f.key && f.value)
       .map((f) => ({
@@ -134,11 +148,11 @@ Deno.serve(async (req) => {
         label: labelOf(f.key),
         section: "How",
         value: f.value,
-        cites: (f.cites ?? []).map(capTitle),
+        cites: (f.cites ?? []).map((i) => caps[i]?.title).filter(Boolean),
       }));
 
     return json({ drafts });
   } catch (e) {
-    return json({ error: e instanceof Error ? e.message : "Unexpected error" }, 500);
+    return json({ error: e instanceof Error ? e.message : String(e) }, 500);
   }
 });
