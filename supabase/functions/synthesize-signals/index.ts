@@ -145,7 +145,7 @@ Deno.serve(async (req: Request) => {
     // Candidate signals to reconcile = those not yet attached to any theme.
     const { data: allSignals } = await supabase
       .from("signals")
-      .select("id, title, why, conf_level, scope, category, origin, observed_at, sources(label, origin)")
+      .select("id, title, why, conf_level, scope, category, origin, observed_at, product_id, sources(label, origin)")
       .order("observed_at", { ascending: false, nullsFirst: false })
       .limit(200);
     const candidates = (allSignals ?? []).filter((s) => !attachedIds.has(s.id));
@@ -262,10 +262,17 @@ Deno.serve(async (req: Request) => {
       if (cur.state === "fading" || cur.state === "dormant") continue;
       queued.push({ org_id: orgId, kind: "decay", theme_id: id, payload: { from_state: cur.state }, summary: `Let "${titleOf(id)}" fade — no recent evidence` });
     }
+    // Infer a new theme's product from its supporting signals: if they ALL share
+    // one product, the theme inherits it; mixed or none → company-wide (null).
+    const productOfSignal = new Map(candidates.map((s) => [s.id, (s as { product_id?: string | null }).product_id ?? null]));
+    const inferProduct = (sigIds: string[]): string | null => {
+      const prods = new Set(sigIds.map((id) => productOfSignal.get(id) ?? null));
+      return prods.size === 1 ? [...prods][0] : null;  // unanimous product, else company-wide
+    };
     for (const t of diff.new_themes ?? []) {
       const sigIds = (t.signal_indices ?? []).map(sigIdAt).filter(Boolean);
       queued.push({ org_id: orgId, kind: "new_theme", theme_id: null,
-        payload: { category: t.category === "gtm" ? "gtm" : "product", title: t.title, summary: t.summary, recommendation: t.recommendation, conf_level: Math.min(1, Math.max(0, Number(t.conf_level) || 0)), signal_ids: sigIds },
+        payload: { category: t.category === "gtm" ? "gtm" : "product", title: t.title, summary: t.summary, recommendation: t.recommendation, conf_level: Math.min(1, Math.max(0, Number(t.conf_level) || 0)), signal_ids: sigIds, product_id: inferProduct(sigIds) },
         summary: `New ${t.category} theme: "${t.title}" (${sigIds.length} signal${sigIds.length === 1 ? "" : "s"})` });
     }
     if (queued.length) {

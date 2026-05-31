@@ -27,12 +27,13 @@ type Source = { id: string; label: string; icon: string; origin: string };
 type Signal = {
   id: string; title: string; why: string | null; conf_label: string | null; conf_level: number | null;
   observed_at: string | null; scope: string; source_id: string | null; category: string | null; origin: string;
+  product_id: string | null;
 };
 type Theme = {
   id: string; category: string; title: string; summary: string | null;
   recommendation: string | null; conf_level: number | null; signal_ids: string[] | null;
   state: string | null; momentum: string | null; last_evidence_at: string | null;
-  newThisWeek?: number;
+  product_id: string | null; newThisWeek?: number;
 };
 
 type Lens = "product" | "gtm";
@@ -76,26 +77,29 @@ export default function SignalsView() {
   const [error, setError] = useState<string | null>(null);
   const [tab, setTab] = useState<Tab>("home");
   const [originFilter, setOriginFilter] = useState<OriginFilter>("all");
+  const [products, setProducts] = useState<{ id: string; name: string }[]>([]);
+  const [productFilter, setProductFilter] = useState<string>("all"); // "all" | "company" | <product_id>
   const synthRun = useAgentRun("synthesize");
 
   const [logOpen, setLogOpen] = useState(false);
   const [trackOpen, setTrackOpen] = useState(false);
-  const [form, setForm] = useState({ title: "", why: "", conf: "0.7", source_id: "", category: "", origin: "internal" });
+  const [form, setForm] = useState({ title: "", why: "", conf: "0.7", source_id: "", category: "", origin: "internal", product_id: "" });
   const [busy, setBusy] = useState(false);
 
   const load = useCallback(async () => {
     const weekAgo = new Date(Date.now() - 7 * 86400000).toISOString();
-    const [{ data: srcs }, { data: sigs }, { data: ths }, { data: recent }] = await Promise.all([
+    const [{ data: srcs }, { data: sigs }, { data: ths }, { data: recent }, { data: prods }] = await Promise.all([
       supabase.from("sources").select("id, label, icon, origin").order("created_at"),
-      supabase.from("signals").select("id, title, why, conf_label, conf_level, observed_at, scope, source_id, category, origin").order("observed_at", { ascending: false, nullsFirst: false }).order("created_at", { ascending: false }),
-      supabase.from("signal_themes").select("id, category, title, summary, recommendation, conf_level, signal_ids, state, momentum, last_evidence_at").order("position"),
+      supabase.from("signals").select("id, title, why, conf_label, conf_level, observed_at, scope, source_id, category, origin, product_id").order("observed_at", { ascending: false, nullsFirst: false }).order("created_at", { ascending: false }),
+      supabase.from("signal_themes").select("id, category, title, summary, recommendation, conf_level, signal_ids, state, momentum, last_evidence_at, product_id").order("position"),
       // Evidence added in the last 7d, for the "+N this week" delta on each theme.
       supabase.from("theme_signals").select("theme_id").gte("added_at", weekAgo),
+      supabase.from("product_records").select("id, name").order("created_at"),
     ]);
     const freshByTheme: Record<string, number> = {};
     for (const r of recent ?? []) freshByTheme[r.theme_id] = (freshByTheme[r.theme_id] ?? 0) + 1;
     const themesWithDelta = (ths ?? []).map((t) => ({ ...t, newThisWeek: freshByTheme[t.id] ?? 0 }));
-    setSources(srcs ?? []); setSignals(sigs ?? []); setThemes(themesWithDelta);
+    setSources(srcs ?? []); setSignals(sigs ?? []); setThemes(themesWithDelta); setProducts(prods ?? []);
     setLoading(false);
   }, [supabase]);
 
@@ -127,15 +131,19 @@ export default function SignalsView() {
       const orgId = await getOrgId();
       if (!orgId) throw new Error("Could not resolve your organization.");
       const lvl = parseFloat(form.conf);
+      // A signal tied to a product carries scope='product' + product_id (the
+      // constraint couples them); otherwise it's company-wide (scope='org').
+      const product = form.product_id || null;
       const { error } = await supabase.from("signals").insert({
-        org_id: orgId, scope: "org", title: form.title.trim(), why: form.why.trim() || null,
+        org_id: orgId, scope: product ? "product" : "org", product_id: product,
+        title: form.title.trim(), why: form.why.trim() || null,
         conf_level: isNaN(lvl) ? null : lvl,
         conf_label: isNaN(lvl) ? null : lvl >= 0.75 ? "High" : lvl >= 0.5 ? "Medium" : "Low",
         observed_at: new Date().toISOString(), source_id: form.source_id || null,
         category: form.category || null, origin: form.origin,
       });
       if (error) throw error;
-      setLogOpen(false); setForm({ title: "", why: "", conf: "0.7", source_id: "", category: "", origin: "internal" });
+      setLogOpen(false); setForm({ title: "", why: "", conf: "0.7", source_id: "", category: "", origin: "internal", product_id: "" });
       await load();
     } catch (e) { setError(e instanceof Error ? e.message : "Could not log signal."); }
     finally { setBusy(false); }
@@ -149,12 +157,21 @@ export default function SignalsView() {
     if (error) { setError(error.message); await load(); }
   }
 
-  const internalCount = signals.filter((s) => s.origin === "internal").length;
-  const externalCount = signals.filter((s) => s.origin === "external").length;
-  const unsorted = signals.filter((s) => !s.category);
-  const productThemes = themes.filter((t) => t.category === "product");
-  const gtmThemes = themes.filter((t) => t.category === "gtm");
-  const highSignals = signals.filter((s) => (s.conf_level ?? 0) >= 0.75);
+  // Product scope: "all" shows everything; "company" shows only cross-product
+  // (product_id null); a product id shows that product's intelligence. The
+  // switcher only appears when there's more than one product, so single-product
+  // orgs see no change.
+  const inProduct = <T extends { product_id?: string | null }>(x: T) =>
+    productFilter === "all" ? true : productFilter === "company" ? !x.product_id : x.product_id === productFilter;
+  const signalsScoped = signals.filter(inProduct);
+  const themesScoped = themes.filter(inProduct);
+
+  const internalCount = signalsScoped.filter((s) => s.origin === "internal").length;
+  const externalCount = signalsScoped.filter((s) => s.origin === "external").length;
+  const unsorted = signalsScoped.filter((s) => !s.category);
+  const productThemes = themesScoped.filter((t) => t.category === "product");
+  const gtmThemes = themesScoped.filter((t) => t.category === "gtm");
+  const highSignals = signalsScoped.filter((s) => (s.conf_level ?? 0) >= 0.75);
 
   return (
     <div>
@@ -170,28 +187,38 @@ export default function SignalsView() {
       />
       <Banner>{error}</Banner>
 
+      {/* Product scope — only when the org actually runs multiple products. */}
+      {products.length > 1 && (
+        <div className="row gap-2" style={{ marginBottom: "var(--sp-3)", flexWrap: "wrap", alignItems: "center" }}>
+          <span className="t-label" style={{ marginRight: 2 }}>Product</span>
+          {[{ id: "all", name: "All" }, { id: "company", name: "Company-wide" }, ...products].map((p) => (
+            <button key={p.id} className={productFilter === p.id ? "chip chip-accent" : "chip"} style={{ cursor: "pointer" }} onClick={() => setProductFilter(p.id)}>{p.name}</button>
+          ))}
+        </div>
+      )}
+
       <SubTabs<Tab>
         tabs={[
           { key: "home", label: "Homepage" },
           { key: "map", label: "Map" },
-          { key: "product", label: `Product · ${signals.filter((s) => inLens(s, "product")).length}` },
-          { key: "gtm", label: `GTM · ${signals.filter((s) => inLens(s, "gtm")).length}` },
+          { key: "product", label: `Product · ${signalsScoped.filter((s) => inLens(s, "product")).length}` },
+          { key: "gtm", label: `GTM · ${signalsScoped.filter((s) => inLens(s, "gtm")).length}` },
         ]}
         active={tab} onChange={setTab}
       />
 
       {loading ? <div className="t-sub t-muted">Loading…</div> : tab === "map" ? (
-        <MapView />
+        <MapView productFilter={productFilter} />
       ) : tab === "home" ? (
         <Home
-          signals={signals} themes={themes} productThemes={productThemes} gtmThemes={gtmThemes}
+          signals={signalsScoped} themes={themesScoped} productThemes={productThemes} gtmThemes={gtmThemes}
           highSignals={highSignals} unsorted={unsorted} internalCount={internalCount} externalCount={externalCount}
           sourceById={sourceById} synthRun={synthRun} onSynthesize={synthesize} setCategory={setCategory} goLens={setTab}
           reload={load}
         />
       ) : (
         <LensTab
-          lens={tab} signals={signals.filter((s) => inLens(s, tab))} originFilter={originFilter}
+          lens={tab} signals={signalsScoped.filter((s) => inLens(s, tab))} originFilter={originFilter}
           onOriginFilter={setOriginFilter} sourceById={sourceById} setCategory={setCategory}
         />
       )}
@@ -203,6 +230,13 @@ export default function SignalsView() {
             <input className="input" autoFocus value={form.title} onChange={(e) => setForm({ ...form, title: e.target.value })} placeholder="e.g. Buyers stall on pricing after demo" /></label>
           <label className="field"><span className="t-label">Why it matters</span>
             <textarea className="textarea" rows={2} value={form.why} onChange={(e) => setForm({ ...form, why: e.target.value })} placeholder="Context, evidence, implication." /></label>
+          {products.length > 1 && (
+            <label className="field"><span className="t-label">Product</span>
+              <select className="select" value={form.product_id} onChange={(e) => setForm({ ...form, product_id: e.target.value })}>
+                <option value="">Company-wide</option>
+                {products.map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}
+              </select></label>
+          )}
           <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "var(--sp-3)" }}>
             <label className="field"><span className="t-label">Informs</span>
               <select className="select" value={form.category} onChange={(e) => setForm({ ...form, category: e.target.value })}>

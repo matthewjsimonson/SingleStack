@@ -71,7 +71,7 @@ Deno.serve(async (req: Request) => {
 
     // Both lenses of living themes (skip dismissed/dormant — bridges need life).
     const { data: themes } = await supabase
-      .from("signal_themes").select("id, category, title, summary, recommendation, state")
+      .from("signal_themes").select("id, category, title, summary, recommendation, state, product_id")
       .neq("state", "dormant");
     const product = (themes ?? []).filter((t) => t.category === "product");
     const gtm = (themes ?? []).filter((t) => t.category === "gtm");
@@ -117,10 +117,16 @@ Deno.serve(async (req: Request) => {
     const rows = (parsed.bridges ?? [])
       .filter((b) => productIds.has(b.product_theme_id) && gtmIds.has(b.gtm_theme_id))
       .filter((b) => !seen.has(`${b.product_theme_id}|${b.gtm_theme_id}`))
-      .map((b) => ({
-        org_id: orgId, title: b.title, insight: b.insight, recommendation: b.recommendation,
-        state: "proposed", product_theme_id: b.product_theme_id, gtm_theme_id: b.gtm_theme_id,
-      }));
+      .map((b) => {
+        // A bridge inherits a product only when BOTH legs share one; else company-wide.
+        const pp = product.find((t) => t.id === b.product_theme_id)?.product_id ?? null;
+        const gp = gtm.find((t) => t.id === b.gtm_theme_id)?.product_id ?? null;
+        return {
+          org_id: orgId, title: b.title, insight: b.insight, recommendation: b.recommendation,
+          state: "proposed", product_theme_id: b.product_theme_id, gtm_theme_id: b.gtm_theme_id,
+          product_id: pp && gp && pp === gp ? pp : null,
+        };
+      });
 
     let created = 0;
     if (rows.length) {

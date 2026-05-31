@@ -70,6 +70,7 @@ Deno.serve(async (req: Request) => {
             conf_level: Math.min(1, Math.max(0, Number(p.conf_level) || 0)),
             state: "emerging", momentum: "accelerating", first_seen_at: now, last_evidence_at: now,
             signal_ids: sigIds, position: 0,
+            product_id: (p.product_id as string | null) ?? null,   // theme inherits its signals' product
           }).select("id").single();
           if (row) {
             await ev(row.id, "created", { signals: sigIds.length });

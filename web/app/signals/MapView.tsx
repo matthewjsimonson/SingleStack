@@ -20,7 +20,7 @@ const BG = "#0B0E14";
 const themeFill = (t: PTheme) => (t.lens === "gtm" ? "#8B8FF5" : "#5E8AFF");
 const themeOpacity = (t: PTheme) => (t.state === "fading" ? 0.5 : t.state === "dormant" ? 0.32 : t.state === "escalating" ? 1 : 0.9);
 
-export default function MapView() {
+export default function MapView({ productFilter = "all" }: { productFilter?: string }) {
   const supabase = createClient();
   const router = useRouter();
   const [themes, setThemes] = useState<PTheme[]>([]);
@@ -33,7 +33,7 @@ export default function MapView() {
   const load = useCallback(async () => {
     setError(null);
     const [{ data: ths }, { data: strength }, { data: tsig }, { data: misses }, { data: brs }] = await Promise.all([
-      supabase.from("signal_themes").select("id, title, category, state, momentum, horizon, owner_team").neq("state", "dormant"),
+      supabase.from("signal_themes").select("id, title, category, state, momentum, horizon, owner_team, product_id").neq("state", "dormant"),
       supabase.from("theme_evidence_strength").select("theme_id, honest_conf, contra_signals"),
       supabase.from("theme_signals").select("theme_id, stance"),
       supabase.from("theme_misses").select("theme_id"),
@@ -45,7 +45,9 @@ export default function MapView() {
     for (const t of tsig ?? []) sigCount[t.theme_id] = (sigCount[t.theme_id] ?? 0) + 1;
     const missSet = new Set((misses ?? []).map((m) => m.theme_id));
 
-    const list: PTheme[] = (ths ?? []).map((t) => ({
+    const scoped = (ths ?? []).filter((t) =>
+      productFilter === "all" ? true : productFilter === "company" ? !t.product_id : t.product_id === productFilter);
+    const list: PTheme[] = scoped.map((t) => ({
       id: t.id, title: t.title, lens: t.category as "product" | "gtm", conf: confBy[t.id] ?? 0,
       momentum: t.momentum, state: t.state, horizon: t.horizon, owner: t.owner_team,
       signalCount: sigCount[t.id] ?? 0, contraCount: contraBy[t.id] ?? 0,
@@ -55,7 +57,7 @@ export default function MapView() {
     setThemes(list);
     setBridges((brs ?? []).filter((b) => b.state !== "dismissed").map((b) => ({ source: b.product_theme_id, target: b.gtm_theme_id, conf: b.bridge_conf ?? 0 })));
     setLoading(false);
-  }, [supabase]);
+  }, [supabase, productFilter]);
   useEffect(() => { load(); }, [load]);
 
   const projection = useMemo(() => projectActionMatrix(themes, W, H, PAD), [themes]);
