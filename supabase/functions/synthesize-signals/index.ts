@@ -138,9 +138,17 @@ Deno.serve(async (req: Request) => {
 
     // Existing living themes + their attached signal ids (what reconciliation updates).
     const { data: themes } = await supabase
-      .from("signal_themes").select("id, title, summary, recommendation, category, state, conf_level");
+      .from("signal_themes").select("id, title, summary, recommendation, category, state, conf_level, product_id, co_product_ids");
     const { data: links } = await supabase.from("theme_signals").select("theme_id, signal_id, added_at");
     const attachedIds = new Set((links ?? []).map((l) => l.signal_id));
+
+    // Product lines — so synthesis stays product-AWARE: signals/themes are tagged
+    // with their line, and the engine is told not to mix lines (that's the
+    // "intelligence bleeds together" failure). A pattern that genuinely spans
+    // lines becomes a CROSS-PRODUCT theme (cross-sell), not a muddled one.
+    const { data: products } = await supabase.from("product_records").select("id, name");
+    const productName = new Map((products ?? []).map((p) => [p.id, p.name as string]));
+    const lineLabel = (pid: string | null | undefined) => (pid ? productName.get(pid) ?? "a product line" : "company-wide");
 
     // Candidate signals to reconcile = those not yet attached to any theme.
     const { data: allSignals } = await supabase
@@ -160,11 +168,11 @@ Deno.serve(async (req: Request) => {
       const sig = s as any;
       const origin = sig.origin ?? sig.sources?.origin ?? "internal";
       const label = sig.sources?.label ?? "unattributed";
-      return `[${i}] (${origin} · ${label} · scope:${s.scope}) ${s.title}${s.why ? " — " + s.why : ""}`;
+      return `[${i}] (${origin} · ${label} · scope:${s.scope} · line:${lineLabel(sig.product_id)}) ${s.title}${s.why ? " — " + s.why : ""}`;
     }).join("\n") || "(no new unattributed signals)";
 
     const themeList = (themes ?? []).map((t) =>
-      `{id:${t.id}} [${t.category}/${t.state}] ${t.title} — ${t.summary ?? ""}`
+      `{id:${t.id}} [${t.category}/${t.state} · line:${lineLabel((t as { product_id?: string | null }).product_id)}] ${t.title} — ${t.summary ?? ""}`
     ).join("\n") || "(no existing themes)";
 
     // Active distilled lessons from past human feedback — injected so the engine
@@ -185,6 +193,8 @@ Deno.serve(async (req: Request) => {
       "• decays: existing theme ids with no fresh evidence that should wind down.",
       "• new_themes: genuinely NEW patterns not covered by any existing theme, each with supporting signal_indices.",
       "Also classify each unsorted signal's lens in signal_categories: product | gtm | both.",
+      "PRODUCT LINES: every signal and theme is tagged with its line (or 'company-wide'). Different lines are different businesses — do NOT attach a signal to a theme of a different line, and do NOT merge themes across lines. Keep each new theme within one line.",
+      "CROSS-SELL EXCEPTION: if a pattern GENUINELY spans two lines (the same buyer need pulls two products together), that is valuable — create ONE new theme and include the supporting signals from BOTH lines. The system will record it as a cross-product theme.",
       "Be conservative: only create a new theme when no existing theme fits. Prefer accretion. Set conf_level 0..1 by evidence strength.",
       lessonText ? `\nLESSONS FROM THIS ORG'S PAST FEEDBACK — follow these, they reflect how this team wants intelligence synthesized:\n${lessonText}` : "",
     ].filter(Boolean).join("\n");
@@ -262,18 +272,25 @@ Deno.serve(async (req: Request) => {
       if (cur.state === "fading" || cur.state === "dormant") continue;
       queued.push({ org_id: orgId, kind: "decay", theme_id: id, payload: { from_state: cur.state }, summary: `Let "${titleOf(id)}" fade — no recent evidence` });
     }
-    // Infer a new theme's product from its supporting signals: if they ALL share
-    // one product, the theme inherits it; mixed or none → company-wide (null).
+    // Infer a new theme's SCOPE from its supporting signals' product lines:
+    //   0 distinct lines → company-wide; 1 → that line; ≥2 → CROSS-PRODUCT
+    //   (cross-sell): a primary + co_product_ids. This is where evidence spanning
+    //   two lines becomes a first-class cross-product theme rather than a muddled
+    //   company-wide NULL (docs/architecture/cross-sell-and-scope.md).
     const productOfSignal = new Map(candidates.map((s) => [s.id, (s as { product_id?: string | null }).product_id ?? null]));
-    const inferProduct = (sigIds: string[]): string | null => {
-      const prods = new Set(sigIds.map((id) => productOfSignal.get(id) ?? null));
-      return prods.size === 1 ? [...prods][0] : null;  // unanimous product, else company-wide
+    const inferScope = (sigIds: string[]): { product_id: string | null; co_product_ids: string[] } => {
+      const lines = [...new Set(sigIds.map((id) => productOfSignal.get(id) ?? null).filter((p): p is string => !!p))];
+      if (lines.length === 0) return { product_id: null, co_product_ids: [] };   // company-wide
+      if (lines.length === 1) return { product_id: lines[0], co_product_ids: [] }; // one line
+      return { product_id: lines[0], co_product_ids: lines.slice(1) };            // cross-product
     };
     for (const t of diff.new_themes ?? []) {
       const sigIds = (t.signal_indices ?? []).map(sigIdAt).filter(Boolean);
+      const sc = inferScope(sigIds);
+      const xLines = sc.co_product_ids.length;
       queued.push({ org_id: orgId, kind: "new_theme", theme_id: null,
-        payload: { category: t.category === "gtm" ? "gtm" : "product", title: t.title, summary: t.summary, recommendation: t.recommendation, conf_level: Math.min(1, Math.max(0, Number(t.conf_level) || 0)), signal_ids: sigIds, product_id: inferProduct(sigIds) },
-        summary: `New ${t.category} theme: "${t.title}" (${sigIds.length} signal${sigIds.length === 1 ? "" : "s"})` });
+        payload: { category: t.category === "gtm" ? "gtm" : "product", title: t.title, summary: t.summary, recommendation: t.recommendation, conf_level: Math.min(1, Math.max(0, Number(t.conf_level) || 0)), signal_ids: sigIds, product_id: sc.product_id, co_product_ids: sc.co_product_ids },
+        summary: `New ${t.category}${xLines ? " cross-product" : ""} theme: "${t.title}" (${sigIds.length} signal${sigIds.length === 1 ? "" : "s"}${xLines ? `, spans ${xLines + 1} lines` : ""})` });
     }
     if (queued.length) {
       await supabase.from("intel_updates").insert(queued.map((q) => ({ ...q, scope: "synthesis", status: "pending" })));

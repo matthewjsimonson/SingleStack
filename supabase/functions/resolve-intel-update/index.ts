@@ -71,6 +71,7 @@ Deno.serve(async (req: Request) => {
             state: "emerging", momentum: "accelerating", first_seen_at: now, last_evidence_at: now,
             signal_ids: sigIds, position: 0,
             product_id: (p.product_id as string | null) ?? null,   // theme inherits its signals' product
+            co_product_ids: (p.co_product_ids as string[] | undefined) ?? [],  // cross-product (cross-sell) lines, if evidence spans ≥2
           }).select("id").single();
           if (insErr || !row) throw new Error(`could not create theme: ${insErr?.message ?? "no row returned"}`);
           if (sigIds.length) {
