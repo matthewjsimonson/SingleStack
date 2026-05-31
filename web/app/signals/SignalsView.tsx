@@ -19,6 +19,7 @@ import { PageHeader, Section, Chip, Banner, Confidence, Modal, SubTabs } from "@
 import TrackingTopics from "@/components/TrackingTopics";
 import SourceManager from "@/components/SourceManager";
 import IntelReview from "./IntelReview";
+import Bridges from "./Bridges";
 
 type Source = { id: string; label: string; icon: string; origin: string };
 type Signal = {
@@ -265,6 +266,9 @@ function Home({ signals, themes, productThemes, gtmThemes, highSignals, unsorted
         <>
           {/* Review queue + learning — the HITL feedback loop */}
           <IntelReview onApplied={reload} />
+
+          {/* Bridges — cross-lens Product↔GTM insight (the differentiated brief) */}
+          <Bridges onChange={reload} />
 
           {/* Callouts: synthesized themes as product/gtm intelligence briefs */}
           {themes.length > 0 && (
