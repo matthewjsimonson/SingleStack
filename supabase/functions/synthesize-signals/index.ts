@@ -1,14 +1,25 @@
 // ============================================================================
-// synthesize-signals — turns an org's raw signals into themes.
+// synthesize-signals — RECONCILIATION engine for compounding intelligence.
 //
-// Plain English: this is the AI behind the Signals homepage. It loads all of
-// the org's signals (with their source + scope), asks Claude to find the
-// recurring patterns worth acting on, categorize each as product vs gtm, and
-// give each a plain-English summary + a prescriptive recommendation + a
-// confidence + which signals support it. It then replaces the org's
-// signal_themes with the fresh set. Re-runnable — it's a derived dashboard.
+// Plain English: themes are LIVING entities now. This no longer wipes and
+// regenerates — it reconciles. It loads the org's existing themes (with their
+// evidence) and the signals not yet attached to any theme, then asks the model
+// for a DIFF against stable theme IDs:
+//   • attach   — new signals that belong to an existing theme
+//   • escalate / restate — an existing theme's state or summary should change
+//   • merge    — two themes are really one
+//   • decay    — a theme has gone quiet (no recent evidence)
+//   • new      — genuinely new emerging themes
+// It also classifies each unsorted signal's lens (product/gtm/both), as before.
 //
-// Runs as the caller (JWT forwarded) → RLS scopes reads/writes to their org.
+// Graduated HITL: low-judgment maintenance (attach evidence, bump freshness,
+// recompute momentum) is APPLIED automatically to keep intelligence fresh.
+// High-judgment changes (new theme, escalation, merge, recommendation change)
+// are applied but logged as theme_events with actor='synthesis' so the UI can
+// surface them for review. Every change writes an append-only theme_event — the
+// theme's memory. Nothing is ever silently deleted.
+//
+// Runs as the caller (JWT forwarded) → RLS scopes everything to their org.
 // Secret: ANTHROPIC_API_KEY.
 // ============================================================================
 
@@ -23,43 +34,85 @@ const CORS = {
 };
 const json = (b: unknown, s = 200) => new Response(JSON.stringify(b), { status: s, headers: { ...CORS, "content-type": "application/json" } });
 
+// The reconciliation diff the model returns. Indices reference the input lists.
 const SCHEMA = {
   type: "object",
   additionalProperties: false,
   properties: {
-    themes: {
+    // Attach unsorted signals (by [n] index) to an EXISTING theme (by id).
+    attach: {
       type: "array",
       items: {
-        type: "object",
-        additionalProperties: false,
+        type: "object", additionalProperties: false,
+        properties: { theme_id: { type: "string" }, signal_indices: { type: "array", items: { type: "integer" } } },
+        required: ["theme_id", "signal_indices"],
+      },
+    },
+    // Update an existing theme's lifecycle state and/or summary/recommendation.
+    updates: {
+      type: "array",
+      items: {
+        type: "object", additionalProperties: false,
+        properties: {
+          theme_id: { type: "string" },
+          state: { type: "string", enum: ["emerging", "active", "escalating", "steady", "fading", "dormant"] },
+          summary: { type: "string" },
+          recommendation: { type: "string" },
+        },
+        required: ["theme_id"],
+      },
+    },
+    // Merge `from` theme into `into` theme (evidence re-pointed, `from` dissolved).
+    merges: {
+      type: "array",
+      items: {
+        type: "object", additionalProperties: false,
+        properties: { into: { type: "string" }, from: { type: "string" } },
+        required: ["into", "from"],
+      },
+    },
+    // Themes with no recent evidence that should decay (state -> fading/dormant).
+    decays: { type: "array", items: { type: "string" } },
+    // Genuinely NEW themes not covered by any existing theme.
+    new_themes: {
+      type: "array",
+      items: {
+        type: "object", additionalProperties: false,
         properties: {
           category: { type: "string", enum: ["product", "gtm"] },
           title: { type: "string" },
           summary: { type: "string" },
           recommendation: { type: "string" },
           conf_level: { type: "number" },
-          signal_indices: { type: "array", items: { type: "integer" } }, // indices into the input list
+          signal_indices: { type: "array", items: { type: "integer" } },
         },
         required: ["category", "title", "summary", "recommendation", "conf_level", "signal_indices"],
       },
     },
-    // Per-signal lens classification: what each input signal INFORMS. Applied
-    // only to signals the user hasn't already categorized by hand.
+    // Lens classification for unsorted signals (product/gtm/both), as before.
     signal_categories: {
       type: "array",
       items: {
-        type: "object",
-        additionalProperties: false,
-        properties: {
-          index: { type: "integer" },
-          category: { type: "string", enum: ["product", "gtm", "both"] },
-        },
+        type: "object", additionalProperties: false,
+        properties: { index: { type: "integer" }, category: { type: "string", enum: ["product", "gtm", "both"] } },
         required: ["index", "category"],
       },
     },
   },
-  required: ["themes", "signal_categories"],
+  required: ["attach", "updates", "merges", "decays", "new_themes", "signal_categories"],
 };
+
+// Momentum from evidence arrival rate: recent (7d) vs prior (8–30d).
+function momentumFor(addedAts: string[]): "accelerating" | "steady" | "fading" {
+  const now = Date.now();
+  const d = (iso: string) => (now - new Date(iso).getTime()) / 86400000;
+  const recent = addedAts.filter((a) => d(a) <= 7).length;
+  const prior = addedAts.filter((a) => d(a) > 7 && d(a) <= 30).length;
+  if (recent > prior) return "accelerating";
+  if (recent === 0 && prior === 0) return "fading"; // nothing in 30d
+  if (recent < prior) return "fading";
+  return "steady";
+}
 
 Deno.serve(async (req: Request) => {
   if (req.method === "OPTIONS") return new Response("ok", { headers: CORS });
@@ -76,37 +129,55 @@ Deno.serve(async (req: Request) => {
     { global: { headers: { Authorization: authHeader } } },
   );
 
+  const ev = (theme_id: string, kind: string, detail: Record<string, unknown>, orgId: string) =>
+    supabase.from("theme_events").insert({ org_id: orgId, theme_id, kind, detail, actor: "synthesis" });
+
   try {
-    // Resolve org (for writes) and load signals + their source labels.
     const { data: orgId } = await supabase.rpc("current_org_id");
     if (!orgId) return json({ error: "could not resolve org" }, 400);
 
-    const { data: signals } = await supabase
+    // Existing living themes + their attached signal ids (what reconciliation updates).
+    const { data: themes } = await supabase
+      .from("signal_themes").select("id, title, summary, recommendation, category, state, conf_level");
+    const { data: links } = await supabase.from("theme_signals").select("theme_id, signal_id, added_at");
+    const attachedIds = new Set((links ?? []).map((l) => l.signal_id));
+
+    // Candidate signals to reconcile = those not yet attached to any theme.
+    const { data: allSignals } = await supabase
       .from("signals")
       .select("id, title, why, conf_level, scope, category, origin, observed_at, sources(label, origin)")
       .order("observed_at", { ascending: false, nullsFirst: false })
       .limit(200);
+    const candidates = (allSignals ?? []).filter((s) => !attachedIds.has(s.id));
 
-    if (!signals || signals.length === 0) {
-      // nothing to synthesize — clear themes and return empty
-      await supabase.from("signal_themes").delete().eq("org_id", orgId);
+    // First run with no themes and no signals: nothing to do.
+    if ((themes ?? []).length === 0 && candidates.length === 0) {
       return json({ themes: 0, message: "No signals to synthesize yet." });
     }
 
-    const list = signals.map((s, i) => {
+    const sigList = candidates.map((s, i) => {
       // deno-lint-ignore no-explicit-any
       const sig = s as any;
       const origin = sig.origin ?? sig.sources?.origin ?? "internal";
       const label = sig.sources?.label ?? "unattributed";
       return `[${i}] (${origin} · ${label} · scope:${s.scope}) ${s.title}${s.why ? " — " + s.why : ""}`;
-    }).join("\n");
+    }).join("\n") || "(no new unattributed signals)";
+
+    const themeList = (themes ?? []).map((t) =>
+      `{id:${t.id}} [${t.category}/${t.state}] ${t.title} — ${t.summary ?? ""}`
+    ).join("\n") || "(no existing themes)";
 
     const system = [
-      "You are the intelligence synthesis engine for SingleStack, an AI-native product & go-to-market platform.",
-      "You receive an organization's raw signals (internal tool data + external market intel). You do two jobs.",
-      "JOB 1 — Classify each signal's lens. For EVERY input signal, decide what it INFORMS: 'product' (how you build/update the product — usage, adoption, feature requests, technical & product-competitive moves), 'gtm' (how you go to market — messaging, positioning, pricing, sales objections, buyers, competitive selling), or 'both'. Return one entry per signal in signal_categories with its [n] index.",
-      "JOB 2 — Synthesize themes. Find the recurring PATTERNS worth acting on — not a restatement of each signal, but the themes that emerge across them. For each theme: categorize it as 'product' or 'gtm'; write a tight plain-English summary of the pattern; give a prescriptive recommendation (the concrete 'so do this'); set conf_level 0..1 based on how strongly the signals support it; and list signal_indices (the [n] indices) that back it.",
-      "Aim for 3–6 high-quality themes. Prefer themes supported by multiple signals. Be specific and useful, not generic.",
+      "You are the compounding intelligence engine for SingleStack, an AI-native product & GTM platform.",
+      "Themes are LIVING entities with stable ids and a lifecycle (emerging|active|escalating|steady|fading|dormant). You RECONCILE — you never wipe and rebuild.",
+      "You receive the EXISTING themes (with ids) and NEW unattributed signals. Produce a DIFF:",
+      "• attach: new signals (by [n] index) that clearly belong to an EXISTING theme (by id). Prefer attaching over creating duplicates.",
+      "• updates: an existing theme whose state should change (e.g. escalate when evidence is mounting) and/or whose summary/recommendation should be refreshed.",
+      "• merges: two existing themes that are really the same pattern (keep the better-named as `into`).",
+      "• decays: existing theme ids with no fresh evidence that should wind down.",
+      "• new_themes: genuinely NEW patterns not covered by any existing theme, each with supporting signal_indices.",
+      "Also classify each unsorted signal's lens in signal_categories: product | gtm | both.",
+      "Be conservative: only create a new theme when no existing theme fits. Prefer accretion. Set conf_level 0..1 by evidence strength.",
     ].join("\n");
 
     const anthropic = new Anthropic({ apiKey: key });
@@ -116,51 +187,127 @@ Deno.serve(async (req: Request) => {
       thinking: { type: "adaptive" },
       output_config: { effort: "high", format: { type: "json_schema", schema: SCHEMA } },
       system: [{ type: "text", text: system, cache_control: { type: "ephemeral" } }],
-      messages: [{ role: "user", content: `Signals:\n${list}\n\nSynthesize the themes.` }],
+      messages: [{ role: "user", content: `EXISTING THEMES:\n${themeList}\n\nNEW SIGNALS:\n${sigList}\n\nReconcile.` }],
       // deno-lint-ignore no-explicit-any
     } as any)) as Anthropic.Message;
 
     const block = resp.content.find((b) => b.type === "text");
-    if (!block || block.type !== "text") throw new Error("no synthesis returned");
-    const parsed = JSON.parse(block.text) as {
-      themes: { category: string; title: string; summary: string; recommendation: string; conf_level: number; signal_indices: number[] }[];
+    if (!block || block.type !== "text") throw new Error("no reconciliation returned");
+    const diff = JSON.parse(block.text) as {
+      attach: { theme_id: string; signal_indices: number[] }[];
+      updates: { theme_id: string; state?: string; summary?: string; recommendation?: string }[];
+      merges: { into: string; from: string }[];
+      decays: string[];
+      new_themes: { category: string; title: string; summary: string; recommendation: string; conf_level: number; signal_indices: number[] }[];
       signal_categories?: { index: number; category: string }[];
     };
 
-    // Apply the lens classification — but ONLY to signals the user hasn't sorted
-    // by hand. Group the AI's picks by category and update in batches.
-    // deno-lint-ignore no-explicit-any
-    const unsorted = new Set(signals.filter((s) => !(s as any).category).map((s) => s.id));
-    const byCategory: Record<string, string[]> = { product: [], gtm: [], both: [] };
-    for (const c of parsed.signal_categories ?? []) {
-      const id = signals[c.index]?.id;
-      if (id && unsorted.has(id) && byCategory[c.category]) byCategory[c.category].push(id);
+    const themeById = new Map((themes ?? []).map((t) => [t.id, t]));
+    const validId = (id: string) => themeById.has(id);
+    const sigIdAt = (i: number) => candidates[i]?.id;
+    const now = new Date().toISOString();
+    let attached = 0, created = 0, escalated = 0, merged = 0, decayed = 0;
+
+    // Helper: attach signals to a theme via theme_signals (idempotent), log event.
+    async function attachSignals(themeId: string, signalIds: string[]) {
+      const ids = signalIds.filter(Boolean);
+      if (!ids.length) return;
+      await supabase.from("theme_signals")
+        .upsert(ids.map((sid) => ({ org_id: orgId, theme_id: themeId, signal_id: sid, added_at: now })), { onConflict: "theme_id,signal_id", ignoreDuplicates: true });
+      attached += ids.length;
+      await ev(themeId, "evidence_added", { added: ids.length }, orgId);
+    }
+
+    // 1) attach
+    for (const a of diff.attach ?? []) {
+      if (!validId(a.theme_id)) continue;
+      await attachSignals(a.theme_id, (a.signal_indices ?? []).map(sigIdAt));
+    }
+
+    // 2) updates (state / summary / recommendation)
+    for (const u of diff.updates ?? []) {
+      if (!validId(u.theme_id)) continue;
+      const cur = themeById.get(u.theme_id)!;
+      const patch: Record<string, unknown> = {};
+      if (u.state && u.state !== cur.state) { patch.state = u.state; }
+      if (u.summary && u.summary !== cur.summary) patch.summary = u.summary;
+      if (u.recommendation && u.recommendation !== cur.recommendation) patch.recommendation = u.recommendation;
+      if (Object.keys(patch).length === 0) continue;
+      await supabase.from("signal_themes").update(patch).eq("id", u.theme_id);
+      if (patch.state) { await ev(u.theme_id, "state_changed", { from: cur.state, to: patch.state }, orgId); if (patch.state === "escalating") escalated++; }
+      if (patch.summary || patch.recommendation) await ev(u.theme_id, patch.recommendation ? "recommendation_changed" : "summary_updated", {}, orgId);
+    }
+
+    // 3) merges — re-point evidence, log on the survivor, dissolve the source.
+    for (const m of diff.merges ?? []) {
+      if (!validId(m.into) || !validId(m.from) || m.into === m.from) continue;
+      const { data: fromLinks } = await supabase.from("theme_signals").select("signal_id").eq("theme_id", m.from);
+      await attachSignals(m.into, (fromLinks ?? []).map((l) => l.signal_id));
+      await ev(m.into, "merged_in", { from: m.from, from_title: themeById.get(m.from)?.title }, orgId);
+      await supabase.from("signal_themes").delete().eq("id", m.from); // dissolve the duplicate (its events cascade)
+      merged++;
+    }
+
+    // 4) decays
+    for (const id of diff.decays ?? []) {
+      if (!validId(id)) continue;
+      const cur = themeById.get(id)!;
+      if (cur.state === "fading" || cur.state === "dormant") continue;
+      await supabase.from("signal_themes").update({ state: "fading" }).eq("id", id);
+      await ev(id, "state_changed", { from: cur.state, to: "fading", reason: "no recent evidence" }, orgId);
+      decayed++;
+    }
+
+    // 5) new themes
+    for (const t of diff.new_themes ?? []) {
+      const sigIds = (t.signal_indices ?? []).map(sigIdAt).filter(Boolean);
+      const { data: row, error } = await supabase.from("signal_themes").insert({
+        org_id: orgId,
+        category: t.category === "gtm" ? "gtm" : "product",
+        title: t.title, summary: t.summary, recommendation: t.recommendation,
+        conf_level: Math.min(1, Math.max(0, Number(t.conf_level) || 0)),
+        state: "emerging", momentum: "accelerating",
+        first_seen_at: now, last_evidence_at: now,
+        signal_ids: sigIds, position: 0,
+      }).select("id").single();
+      if (error || !row) continue;
+      created++;
+      await ev(row.id, "created", { signals: sigIds.length }, orgId);
+      if (sigIds.length) await attachSignals(row.id, sigIds);
+    }
+
+    // 6) lens classification for unsorted signals (only those the user hasn't set).
+    const unsorted = new Set(candidates.filter((s) => !s.category).map((s) => s.id));
+    const byCat: Record<string, string[]> = { product: [], gtm: [], both: [] };
+    for (const c of diff.signal_categories ?? []) {
+      const id = sigIdAt(c.index);
+      if (id && unsorted.has(id) && byCat[c.category]) byCat[c.category].push(id);
     }
     let categorized = 0;
-    for (const [category, ids] of Object.entries(byCategory)) {
+    for (const [category, ids] of Object.entries(byCat)) {
       if (!ids.length) continue;
       const { error } = await supabase.from("signals").update({ category }).in("id", ids);
       if (!error) categorized += ids.length;
     }
 
-    // Replace prior themes with the fresh set.
-    await supabase.from("signal_themes").delete().eq("org_id", orgId);
-    const rows = (parsed.themes ?? []).map((t, i) => ({
-      org_id: orgId,
-      category: t.category === "gtm" ? "gtm" : "product",
-      title: t.title,
-      summary: t.summary,
-      recommendation: t.recommendation,
-      conf_level: Math.min(1, Math.max(0, Number(t.conf_level) || 0)),
-      signal_ids: (t.signal_indices ?? []).map((idx) => signals[idx]?.id).filter(Boolean),
-      position: i,
-    }));
-    if (rows.length) {
-      const { error } = await supabase.from("signal_themes").insert(rows);
-      if (error) throw error;
+    // 7) recompute momentum + last_evidence + keep signal_ids[] in sync, per theme.
+    const { data: liveThemes } = await supabase.from("signal_themes").select("id");
+    for (const t of liveThemes ?? []) {
+      const { data: ts } = await supabase.from("theme_signals").select("signal_id, added_at").eq("theme_id", t.id);
+      const rows = ts ?? [];
+      const mo = momentumFor(rows.map((r) => r.added_at));
+      const last = rows.length ? rows.map((r) => r.added_at).sort().slice(-1)[0] : null;
+      await supabase.from("signal_themes").update({
+        momentum: mo,
+        last_evidence_at: last,
+        signal_ids: rows.map((r) => r.signal_id),
+      }).eq("id", t.id);
     }
 
-    return json({ themes: rows.length, categorized });
+    return json({
+      themes: (liveThemes ?? []).length,
+      attached, created, escalated, merged, decayed, categorized,
+    });
   } catch (e) {
     return json({ error: e instanceof Error ? e.message : String(e) }, 500);
   }
