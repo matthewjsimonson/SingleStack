@@ -42,6 +42,10 @@ export default function SourceManager({ scope = {}, title = "Sources" }: { scope
   // per-source pull state: id -> running | result message
   const [pulling, setPulling] = useState<Record<string, boolean>>({});
   const [pullMsg, setPullMsg] = useState<Record<string, string>>({});
+  // Source Recipe Builder — describe a signal in plain English, Claude drafts it.
+  const [describe, setDescribe] = useState("");
+  const [building, setBuilding] = useState(false);
+  const [recipeNote, setRecipeNote] = useState<string | null>(null);
 
   const load = useCallback(async () => {
     let q = supabase.from("sources").select("id, label, icon, origin, kind, status, rules, competitor_id, market_lens, focus, include_terms, exclude_terms, max_per_pull, cadence, auth_mode, access_scope, config, last_pull_at, last_pull_count, targets, guidance");
@@ -55,7 +59,7 @@ export default function SourceManager({ scope = {}, title = "Sources" }: { scope
   useEffect(() => { load(); }, [load]);
 
   function pick(def: SourceDef) {
-    setPicked(def);
+    setPicked(def); setRecipeNote(null);
     setCfg({ label: def.label, url: "", focus: def.defaultFocus ?? "", include: "", exclude: "", maxPerPull: String(def.defaultMaxPerPull), cadence: "manual", targets: "", guidance: "" });
   }
 
@@ -63,6 +67,30 @@ export default function SourceManager({ scope = {}, title = "Sources" }: { scope
   // structured pointing-context array the runner consumes.
   function parseTargets(raw: string): { type: string; ref: string }[] {
     return raw.split("\n").map((l) => l.trim()).filter(Boolean).map((ref) => ({ type: "url", ref }));
+  }
+
+  // Source Recipe Builder — turn a plain-English description into a pre-filled
+  // connect form. Claude picks the kind + drafts targets/guidance/budget; the
+  // user reviews and confirms. They never touch config syntax (or build a server).
+  async function buildRecipe() {
+    if (describe.trim().length < 4) return;
+    setBuilding(true); setError(null); setRecipeNote(null);
+    try {
+      const { data, error } = await supabase.functions.invoke("source-recipe", { body: { description: describe.trim() } });
+      if (error) throw new Error((data as { error?: string })?.error || error.message);
+      const d = data as { recipe: { kind: string; label: string; url: string | null; targets: { ref: string }[]; guidance: string; include_terms: string; exclude_terms: string; focus: "product" | "gtm" | "both"; cadence: string; max_per_pull: number }; rationale: string; runs_now: boolean; followup?: string | null };
+      const def = SOURCE_CATALOG.find((s) => s.kind === d.recipe.kind) ?? SOURCE_CATALOG[0];
+      setPicked(def);
+      setCfg({
+        label: d.recipe.label || def.label, url: d.recipe.url ?? "", focus: d.recipe.focus ?? def.defaultFocus ?? "",
+        include: d.recipe.include_terms ?? "", exclude: d.recipe.exclude_terms ?? "",
+        maxPerPull: String(d.recipe.max_per_pull ?? def.defaultMaxPerPull), cadence: d.recipe.cadence ?? "manual",
+        targets: (d.recipe.targets ?? []).map((t) => t.ref).join("\n"), guidance: d.recipe.guidance ?? "",
+      });
+      setRecipeNote(`${d.rationale}${d.followup ? ` — ${d.followup}` : d.runs_now ? " · pulls today" : " · pulls once its connector lands"}`);
+      setDescribe("");
+    } catch (e) { setError(e instanceof Error ? e.message : "Could not build a recipe."); }
+    finally { setBuilding(false); }
   }
 
   // Pull now — invoke the connector runner for a live-kind source, show result.
@@ -126,6 +154,7 @@ export default function SourceManager({ scope = {}, title = "Sources" }: { scope
         {/* STEP 2 — configure the picked source (tailoring + budget + security) */}
         {picked ? (
           <div style={{ display: "grid", gap: 10 }}>
+            {recipeNote && <div className="banner" style={{ marginBottom: 2, fontSize: 12.5 }}>✨ {recipeNote}</div>}
             <div className="card" style={{ padding: "10px 12px", background: "var(--panel-2)" }}>
               <div className="t-sub" style={{ fontSize: 12.5 }}>{picked.icon} {picked.blurb}</div>
               <div className="t-mono-xs" style={{ marginTop: 6, display: "flex", gap: 8, flexWrap: "wrap" }}>
@@ -222,7 +251,19 @@ export default function SourceManager({ scope = {}, title = "Sources" }: { scope
               </div>
             )}
 
-            <div className="t-label" style={{ marginBottom: 8 }}>Connect a new source</div>
+            {/* Source Recipe Builder — describe it, Claude drafts the source. No
+                config syntax, no server-building. The non-technical path in. */}
+            <div className="card" style={{ padding: 12, marginBottom: 14, background: "var(--panel-2)" }}>
+              <div className="t-label" style={{ marginBottom: 6 }}>✨ Describe a signal you want</div>
+              <textarea className="input" rows={2} value={describe} placeholder="e.g. Tell me when Acme changes their pricing page or starts hiring senior sales reps"
+                onChange={(e) => setDescribe(e.target.value)} style={{ marginBottom: 8 }} />
+              <button className="btn btn-sm" disabled={building || describe.trim().length < 4} onClick={buildRecipe}>
+                {building ? "Drafting…" : "Draft it for me"}
+              </button>
+              <span className="t-sub t-muted" style={{ fontSize: 11.5, marginLeft: 10 }}>Claude picks the source type and tailors it — you review before adding.</span>
+            </div>
+
+            <div className="t-label" style={{ marginBottom: 8 }}>…or pick a source type</div>
             <div className="row gap-2" style={{ flexWrap: "wrap" }}>
               {SOURCE_CATALOG.filter((d) => d.kind !== "manual").map((d) => (
                 <button key={d.kind} className="btn btn-secondary btn-sm" onClick={() => pick(d)} title={`${d.blurb}\n🔒 ${d.accessScope}`}>

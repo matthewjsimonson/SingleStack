@@ -24,6 +24,7 @@
 
 import Anthropic from "npm:@anthropic-ai/sdk@0.69.0";
 import { createClient, type SupabaseClient } from "npm:@supabase/supabase-js@2";
+import { SECURITY, assertSafeUrl, fetchTextSafe, screenForInjection, wrapUntrusted } from "../_shared/security.ts";
 
 const MODEL = "claude-opus-4-8";
 const CORS = {
@@ -33,94 +34,16 @@ const CORS = {
 };
 const json = (b: unknown, s = 200) => new Response(JSON.stringify(b), { status: s, headers: { ...CORS, "content-type": "application/json" } });
 
-const FETCH_TIMEOUT_MS = 12_000;
-const MAX_BYTES = 1_500_000;          // cap fetched payload — no memory bombs
-const MAX_CHARS_TO_MODEL = 24_000;    // cap what we send to the model per item
+const MAX_CHARS_TO_MODEL = SECURITY.MAX_CHARS_TO_MODEL;
 const AUTH_KINDS_LIVE = new Set(["website", "youtube"]); // run for real, no creds
 
 // Source kinds we can fetch without credentials. Others need the secret store.
 const liveKind = (kind: string) => AUTH_KINDS_LIVE.has(kind);
 
-// ---- SSRF guard ------------------------------------------------------------
-// Only https. Block hosts that resolve to private/loopback/link-local/metadata
-// space by their literal form (defense at the URL layer; the platform adds
-// network egress controls). Anything off-policy is refused before we fetch.
-export function assertSafeUrl(raw: string): URL {
-  let u: URL;
-  try { u = new URL(raw); } catch { throw new Error(`Not a valid URL: ${raw}`); }
-  if (u.protocol !== "https:") throw new Error(`Only https:// is allowed (got ${u.protocol}//)`);
-  const host = u.hostname.toLowerCase().replace(/^\[|\]$/g, ""); // strip IPv6 brackets
-  if (host === "localhost" || host.endsWith(".localhost") || host.endsWith(".internal") || host.endsWith(".local")) {
-    throw new Error(`Refusing internal host: ${host}`);
-  }
-  // Literal IPv4 in private/loopback/link-local/metadata ranges.
-  const m = host.match(/^(\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})$/);
-  if (m) {
-    const [a, b] = [Number(m[1]), Number(m[2])];
-    const priv =
-      a === 10 || a === 127 || a === 0 ||
-      (a === 169 && b === 254) ||                 // link-local + 169.254.169.254 metadata
-      (a === 192 && b === 168) ||
-      (a === 172 && b >= 16 && b <= 31) ||
-      a >= 224;                                   // multicast/reserved
-    if (priv) throw new Error(`Refusing private/reserved IP: ${host}`);
-  }
-  // IPv6 loopback / unique-local / link-local.
-  if (host === "::1" || host.startsWith("fc") || host.startsWith("fd") || host.startsWith("fe80")) {
-    throw new Error(`Refusing internal IPv6 host: ${host}`);
-  }
-  return u;
-}
-
-// ---- HTML → text -----------------------------------------------------------
-// Strip scripts/styles/markup to plain text so the model sees content, not tags.
-export function htmlToText(html: string): string {
-  return html
-    .replace(/<script[\s\S]*?<\/script>/gi, " ")
-    .replace(/<style[\s\S]*?<\/style>/gi, " ")
-    .replace(/<noscript[\s\S]*?<\/noscript>/gi, " ")
-    .replace(/<!--[\s\S]*?-->/g, " ")
-    .replace(/<[^>]+>/g, " ")
-    .replace(/&nbsp;/gi, " ").replace(/&amp;/gi, "&").replace(/&lt;/gi, "<").replace(/&gt;/gi, ">").replace(/&quot;/gi, '"').replace(/&#39;/gi, "'")
-    .replace(/\s+/g, " ")
-    .trim();
-}
-
-async function fetchText(rawUrl: string): Promise<{ url: string; text: string }> {
-  const u = assertSafeUrl(rawUrl);
-  const ctrl = new AbortController();
-  const t = setTimeout(() => ctrl.abort(), FETCH_TIMEOUT_MS);
-  try {
-    const res = await fetch(u.toString(), {
-      redirect: "manual",                       // don't auto-follow redirects off-policy
-      signal: ctrl.signal,
-      headers: { "user-agent": "SingleStackConnector/1.0 (+read-only)", "accept": "text/html,application/json,text/plain" },
-    });
-    if (res.status >= 300 && res.status < 400) throw new Error(`Refusing redirect from ${u.hostname} (status ${res.status})`);
-    if (!res.ok) throw new Error(`Fetch failed (${res.status}) for ${u.hostname}`);
-    const reader = res.body?.getReader();
-    let received = 0; const chunks: Uint8Array[] = [];
-    if (reader) {
-      for (;;) {
-        const { done, value } = await reader.read();
-        if (done) break;
-        received += value.length;
-        if (received > MAX_BYTES) { await reader.cancel(); break; }
-        chunks.push(value);
-      }
-    }
-    const buf = new Uint8Array(received > MAX_BYTES ? MAX_BYTES : received);
-    let off = 0; for (const c of chunks) { if (off + c.length > buf.length) { buf.set(c.subarray(0, buf.length - off), off); break; } buf.set(c, off); off += c.length; }
-    const raw = new TextDecoder().decode(buf);
-    const ct = res.headers.get("content-type") ?? "";
-    const text = ct.includes("html") ? htmlToText(raw) : raw;
-    return { url: u.toString(), text: text.slice(0, MAX_CHARS_TO_MODEL) };
-  } finally { clearTimeout(t); }
-}
-
 // YouTube without auth: oEmbed gives title/author; we also pull the watch page
 // text (description/metadata). Honest v1 — full transcript extraction is the
-// next slice; this still yields a real, attributable signal.
+// next slice; this still yields a real, attributable signal. SSRF-guarded via
+// the shared module.
 async function fetchYouTube(rawUrl: string): Promise<{ url: string; text: string }> {
   const u = assertSafeUrl(rawUrl);
   let meta = "";
@@ -128,7 +51,7 @@ async function fetchYouTube(rawUrl: string): Promise<{ url: string; text: string
     const o = await fetch(`https://www.youtube.com/oembed?format=json&url=${encodeURIComponent(u.toString())}`, { headers: { "accept": "application/json" } });
     if (o.ok) { const j = await o.json(); meta = `Title: ${j.title ?? ""}\nChannel: ${j.author_name ?? ""}\n`; }
   } catch { /* oembed best-effort */ }
-  const page = await fetchText(u.toString()).catch(() => ({ text: "" }));
+  const page = await fetchTextSafe(u.toString()).catch(() => ({ text: "" }));
   return { url: u.toString(), text: (meta + page.text).slice(0, MAX_CHARS_TO_MODEL) };
 }
 
@@ -212,16 +135,43 @@ Deno.serve(async (req: Request) => {
     }
 
     // Fetch each (SSRF-guarded). Collect text; record per-item fetch outcome.
-    const fetcher = source.kind === "youtube" ? fetchYouTube : fetchText;
+    const fetcher = source.kind === "youtube" ? fetchYouTube : fetchTextSafe;
     const fetched: { label: string; url: string; text: string }[] = [];
     const fetchErrors: string[] = [];
+    let quarantined = 0;
+    const secEvents: Record<string, unknown>[] = [];
     for (const t of toFetch.slice(0, 8)) {            // cap breadth per pull
-      try { const r = await fetcher(t.ref); if (r.text.trim()) fetched.push({ label: t.label ?? r.url, url: r.url, text: r.text }); }
-      catch (e) { fetchErrors.push(`${t.ref}: ${e instanceof Error ? e.message : String(e)}`); }
+      try {
+        const r = await fetcher(t.ref);
+        if (!r.text.trim()) continue;
+        // AI-SECURITY FLOOR: screen every fetched doc for prompt-injection /
+        // tool-abuse BEFORE it reaches the model. 'block' is quarantined — never
+        // fed to a model — and recorded. 'warn' is fed but logged. (SECURITY.md)
+        const screen = screenForInjection(r.text);
+        if (screen.verdict !== "clean") {
+          secEvents.push({ org_id: orgId, surface: "connector", source_id: source.id, run_id: runId,
+            kind: screen.verdict === "block" ? "quarantine" : "injection_screen", verdict: screen.verdict,
+            risk: screen.score, flags: screen.flags, ref: r.url,
+            detail: { preview: r.text.slice(0, 240) } });
+        }
+        if (screen.verdict === "block") { quarantined++; continue; }    // do NOT feed to the model
+        fetched.push({ label: t.label ?? r.url, url: r.url, text: r.text });
+      }
+      catch (e) {
+        const msg = e instanceof Error ? e.message : String(e);
+        fetchErrors.push(`${t.ref}: ${msg}`);
+        // An SSRF refusal is a security event worth recording, not just an error.
+        if (/Refusing|Only https/i.test(msg)) {
+          secEvents.push({ org_id: orgId, surface: "connector", source_id: source.id, run_id: runId,
+            kind: "ssrf_block", verdict: "block", risk: 1, flags: ["ssrf"], ref: t.ref, detail: { reason: msg } });
+        }
+      }
     }
+    if (secEvents.length) await supabase.from("security_events").insert(secEvents);
     if (fetched.length === 0) {
-      await supabase.from("connector_runs").update({ status: "error", error: fetchErrors.join(" | ") || "Nothing fetched.", finished_at: new Date().toISOString() }).eq("id", runId!);
-      return json({ error: `Could not fetch: ${fetchErrors.join(" | ") || "no content"}`, fetchErrors }, 502);
+      const reason = quarantined > 0 ? `All fetched content was quarantined as unsafe (${quarantined} blocked).` : (fetchErrors.join(" | ") || "Nothing fetched.");
+      await supabase.from("connector_runs").update({ status: "error", error: reason, finished_at: new Date().toISOString() }).eq("id", runId!);
+      return json({ error: `Could not pull: ${reason}`, fetchErrors, quarantined }, quarantined > 0 ? 422 : 502);
     }
 
     const budget = Math.min(100, Math.max(1, source.max_per_pull ?? 8));
@@ -241,7 +191,7 @@ Deno.serve(async (req: Request) => {
       "Each signal: a crisp title, a one-line 'why it matters', a lens (product|gtm|both), and an honest conf_level 0..1.",
     ].filter(Boolean).join("\n");
 
-    const content = fetched.map((f, i) => `<<SOURCE ${i + 1}: ${f.label} (${f.url})>>\n${f.text}`).join("\n\n");
+    const content = fetched.map((f) => wrapUntrusted(f.label, f.url, f.text)).join("\n\n");
 
     const anthropic = new Anthropic({ apiKey: key });
     const resp = (await anthropic.messages.create({
@@ -291,7 +241,7 @@ Deno.serve(async (req: Request) => {
       signals_created: rows.length,
       items_dropped: dropped,
       error: fetchErrors.length ? `partial: ${fetchErrors.join(" | ")}` : null,
-      detail: { kept: kept.map((s) => ({ title: s.title, relevance: s.relevance, category: s.category })), floor, budget },
+      detail: { kept: kept.map((s) => ({ title: s.title, relevance: s.relevance, category: s.category })), floor, budget, quarantined },
       finished_at: now,
     }).eq("id", runId!);
 
@@ -300,6 +250,7 @@ Deno.serve(async (req: Request) => {
       fetched: fetched.length,
       created: rows.length,
       dropped,
+      quarantined,
       floor, budget,
       signals: kept.map((s) => ({ title: s.title, relevance: Number(s.relevance.toFixed(2)), category: s.category })),
       fetchErrors,
