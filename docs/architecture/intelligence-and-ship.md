@@ -75,6 +75,34 @@ Signals (the situation room) stay. We add the layer where intel becomes action:
   supporting/contradicting evidence; theses spawn the build bets meant to make
   that future arrive. This is the "predict & steer," not "address needs," layer.
 
+## The How is AI-owned and capability-aware (the key refinement)
+
+Why/What are human intent; Proof is human-defined success. **How is the AI's
+domain** — because the optimal way to build something changes faster than any
+human tracks (a coding capability shipped this week can collapse a two-week
+build into an afternoon). So How is not a box filled once; it's **AI-authored,
+capability-grounded, and re-derivable**.
+
+Honest constraint: the model has a training cutoff, so "this week's" capability
+must be **ingested as data**, not assumed. Currency comes from ingestion + the
+model reasoning over it — configurable beyond the prompt:
+
+- **Capability knowledge base** — ingest changelogs / release notes / docs
+  (Anthropic model + coding updates, frameworks, the org's own code patterns) as
+  `sources` → `rag_documents` / `document_chunks`. A `tracking_topic`
+  (e.g. *"AI coding capabilities"*) keeps it fed. Capability releases are just
+  another **signal stream** — external technical intel about what's now buildable.
+- **Build-architect agent** — given a build item's *What* + the product tech
+  foundation + retrieval over the capability KB, it drafts approach /
+  dependencies / risks / effort **as proposals**, and **cites the capability it
+  leans on** ("uses Claude's new X to do Y") so the human sees the basis.
+- **Re-steering on change** — a new capability signal lands → the agent
+  re-checks affected build items and proposes a better How; the old How is
+  **flagged stale, never silently overwritten**.
+
+This closes the loop: capability signals → re-derived How → possibly a new build
+approach, all through the same sense→decide→build engine.
+
 ## Configurability — the agent-workflow analogy, made real
 The *structure itself* is data, not hardcoded: a build item's sections, a
 decision's required evidence, the pipeline's gates are **templates an org edits**
