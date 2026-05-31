@@ -10,9 +10,11 @@
 // Setup (log a signal, sources, tracking) stays in modals / compact rows so the
 // page is for SHOWING intel, not housing forms.
 import { useEffect, useState, useCallback } from "react";
+import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { createClient } from "@/lib/supabase/client";
 import { getOrgId } from "@/lib/org";
+import { momentumGlyph, stateTone } from "@/lib/themeLife";
 import { PageHeader, Section, Chip, Banner, Confidence, Modal, SubTabs } from "@/components/ui";
 import TrackingTopics from "@/components/TrackingTopics";
 import SourceManager from "@/components/SourceManager";
@@ -25,6 +27,8 @@ type Signal = {
 type Theme = {
   id: string; category: string; title: string; summary: string | null;
   recommendation: string | null; conf_level: number | null; signal_ids: string[] | null;
+  state: string | null; momentum: string | null; last_evidence_at: string | null;
+  newThisWeek?: number;
 };
 
 type Lens = "product" | "gtm";
@@ -76,12 +80,18 @@ export default function SignalsView() {
   const [busy, setBusy] = useState(false);
 
   const load = useCallback(async () => {
-    const [{ data: srcs }, { data: sigs }, { data: ths }] = await Promise.all([
+    const weekAgo = new Date(Date.now() - 7 * 86400000).toISOString();
+    const [{ data: srcs }, { data: sigs }, { data: ths }, { data: recent }] = await Promise.all([
       supabase.from("sources").select("id, label, icon, origin").order("created_at"),
       supabase.from("signals").select("id, title, why, conf_label, conf_level, observed_at, scope, source_id, category, origin").order("observed_at", { ascending: false, nullsFirst: false }).order("created_at", { ascending: false }),
-      supabase.from("signal_themes").select("id, category, title, summary, recommendation, conf_level, signal_ids").order("position"),
+      supabase.from("signal_themes").select("id, category, title, summary, recommendation, conf_level, signal_ids, state, momentum, last_evidence_at").order("position"),
+      // Evidence added in the last 7d, for the "+N this week" delta on each theme.
+      supabase.from("theme_signals").select("theme_id").gte("added_at", weekAgo),
     ]);
-    setSources(srcs ?? []); setSignals(sigs ?? []); setThemes(ths ?? []);
+    const freshByTheme: Record<string, number> = {};
+    for (const r of recent ?? []) freshByTheme[r.theme_id] = (freshByTheme[r.theme_id] ?? 0) + 1;
+    const themesWithDelta = (ths ?? []).map((t) => ({ ...t, newThisWeek: freshByTheme[t.id] ?? 0 }));
+    setSources(srcs ?? []); setSignals(sigs ?? []); setThemes(themesWithDelta);
     setLoading(false);
   }, [supabase]);
 
@@ -434,10 +444,18 @@ function ThemeColumn({ title, tone, themes }: { title: string; tone: "accent" | 
       <div className="t-label" style={{ marginBottom: "var(--sp-3)" }}>{title}</div>
       {themes.length === 0 ? <div className="t-sub t-muted" style={{ fontSize: 12.5 }}>No themes in this category.</div> : (
         <div className="stack-3">
-          {themes.map((t) => (
+          {themes.map((t) => {
+            const mo = momentumGlyph(t.momentum);
+            const n = (t.signal_ids ?? []).length;
+            const fresh = t.newThisWeek ?? 0;
+            return (
             <div key={t.id} className="card card-pad" style={{ borderTop: `2px solid var(--${tone === "accent" ? "ac" : "vl"})` }}>
               <div className="row-between" style={{ gap: 10, alignItems: "flex-start", marginBottom: 6 }}>
-                <span style={{ fontSize: 14.5, fontWeight: 640 }}>{t.title}</span>
+                <Link href={`/signals/themes/${t.id}`} style={{ fontSize: 14.5, fontWeight: 640, color: "inherit", textDecoration: "none" }}>{t.title}</Link>
+                <span title={mo.label} style={{ color: mo.color, fontSize: 12, flexShrink: 0 }}>{mo.glyph}</span>
+              </div>
+              <div className="row gap-2" style={{ marginBottom: 8, flexWrap: "wrap" }}>
+                {t.state && <Chip tone={stateTone(t.state)}>{t.state}</Chip>}
                 <Confidence level={t.conf_level} label={t.conf_level != null ? (t.conf_level >= 0.75 ? "High" : t.conf_level >= 0.5 ? "Med" : "Low") : null} />
               </div>
               {t.summary && <p className="t-sub" style={{ lineHeight: 1.5, marginBottom: 10 }}>{t.summary}</p>}
@@ -448,13 +466,16 @@ function ThemeColumn({ title, tone, themes }: { title: string; tone: "accent" | 
                 </div>
               )}
               <div className="row-between" style={{ marginTop: 10, alignItems: "center" }}>
-                <span className="t-mono-xs">{(t.signal_ids ?? []).length} supporting signal{(t.signal_ids ?? []).length === 1 ? "" : "s"}</span>
+                <span className="t-mono-xs">
+                  {n} signal{n === 1 ? "" : "s"}{fresh > 0 ? ` · +${fresh} this week` : ""}{t.last_evidence_at ? ` · ${ago(t.last_evidence_at)}` : ""}
+                </span>
                 <button className="btn btn-secondary btn-sm" disabled={busyId === t.id} onClick={() => makeDecision(t)}>
                   {busyId === t.id ? "Creating…" : "Make a decision →"}
                 </button>
               </div>
             </div>
-          ))}
+            );
+          })}
         </div>
       )}
     </div>
