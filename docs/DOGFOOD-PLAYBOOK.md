@@ -71,28 +71,37 @@ of truth, or a form? (Note gaps as Signals.)
 ## Phase 2 — Foundation: the GTM Record (how we take it to market)
 Marketize the repo. This is the first draft of our story; signals will sharpen it.
 
-**▸ Screen:** GTM → New GTM record → open it (`/gtm`, `/records/[id]`)
+**▸ Screen:** GTM → New GTM record → open it (`/gtm`, `/records/[id]`).
+Fields below match the real GTM template (Company narrative / Product messaging
+/ Personas / Competitive).
 
-**✎ Enter — Overview**
-- **Positioning statement:** *For product & GTM leaders at AI-native companies who are tired of strategy that lives in stale docs, SingleStack is the compounding intelligence OS that turns your everyday signals into living strategy and shipped work — unlike roadmap boards and research repos, it learns from your judgment and pushes you to the best call.*
-- **Target market:** *AI-native software companies, seed–Series C, 10–200 people.*
-- **Personas:** (enter all three)
-  - *Maya — Founder/CEO (AI-native startup). Holds product + GTM in her head; needs one brain so the company stops re-deciding the same things. Wins when the team moves as one.*
-  - *Devin — Head of Product. Drowning in signals, deciding on gut, losing the "why" behind past calls. Wants evidence that compounds and a roadmap that traces to it.*
-  - *Priya — Product Marketing Lead. Positioning goes stale the moment the product moves. Wants product reality and messaging to stay in lockstep, with proof points she can trust.*
-- **Messaging pillars:**
-  1. *One brain for product + GTM — the seam disappears.*
-  2. *Intelligence that compounds — you never start from zero.*
-  3. *Honest confidence — pushes you to the best, not the mean.*
-  4. *Signal to shipped — one traceable thread.*
-- **Competitive landscape:** *(seed; Phase 3 enriches via G2)* Productboard, Aha!, Cycle (product mgmt/feedback); Dovetail (research); Crayon, Klue (competitive intel); Gong, Pendo (signal sources we could ingest, not compete with). Our wedge: none of them connect product↔GTM as one learning intelligence layer.*
-- **Pricing & packaging:** *(hypothesis)* Operator seats + workspace tier + AI usage.
-- **Channels:** *Founder-led + content (the dogfood story itself) + design-partner motion.*
-- **Launch motion:** *Design partners → public "build in the open" → category POV.*
-- **Metrics:** *Activation = first synthesis to first ratified theme; depth = themes with 3+ independent sources; the loop = decisions routed to Ship.*
-- **Objections & rebuttals:** *"Another PM tool?" → No — it's the learning layer between them. "We have Productboard." → That collects feedback; it doesn't compound intelligence or connect GTM.*
-- **Proof points:** *(build these as we go)* the dogfood workspace itself; honest-confidence demo; the map.
-- **Sales enablement:** *(Phase 6)* battlecards from /competitive, the live map as the demo.
+**✎ Enter — Company narrative**
+- **Narrative:** *Companies generate more signal than ever and turn less of it into good decisions. Product and GTM drift apart on stale docs; the "why" behind decisions evaporates; AI changes what's buildable weekly. SingleStack is the compounding intelligence layer that fixes this — one brain that gets smarter every time you use it.*
+- **Category POV:** *The category isn't "AI for PM." It's the compounding intelligence OS — the learning layer between product and go-to-market. Roadmap boards, research repos, and competitive-intel tools are point solutions; the value is in connecting them and making the connection learn.*
+- **Vision:** *Every strategic decision traceable from the signal that sparked it to the work that shipped — on a living map you operate from.*
+- **Differentiation:** *Living themes (not dead docs) · honest confidence (independent corroboration + disconfirmation) · cross-lens bridges · an intelligence map you fight from · learns from your ratifications and surfaces its own misses.*
+
+**✎ Enter — Product messaging**
+- **Value proposition:** *Turn the signals you already generate into living strategy and shipped work — with confidence you can actually trust.*
+- **Message pillars:** *(1) One brain for product + GTM. (2) Intelligence that compounds — never start from zero. (3) Honest confidence — pushed to the best, not the mean. (4) Signal to shipped — one traceable thread.*
+- **Proof points:** *(build as we go)* this dogfood workspace; the honest-confidence demo (3 independent sources beat 5 from one); the map.
+- **Elevator pitch:** *SingleStack is the compounding intelligence OS for AI-native companies. It turns scattered signals into living themes, connects product and GTM into one picture, and traces every decision to the evidence and the work — getting smarter each time you use it.*
+- **Tagline:** *(candidates to test as signals)* "The compounding intelligence OS." / "From signal to shipped." / "Strategy that learns."
+
+**✎ Enter — Personas** (the buying side)
+- **Primary persona:** *Devin — Head of Product at an AI-native company. Drowning in signals, deciding on gut, losing the "why" behind past calls. Wants evidence that compounds and a roadmap that traces to it.*
+- **Economic buyer:** *Maya — Founder/CEO. Feels the product↔GTM seam most; buys "one brain so we stop re-deciding the same things."*
+- **Buying committee:** *Founder/CEO (economic), Head of Product (champion/primary), Product Marketing Lead (Priya — positioning stays in lockstep with product), eng lead (the "How").*
+- **Objections & answers:** *"Another PM tool?" → No — the learning layer between them. "We have Productboard." → That collects feedback; it doesn't compound intelligence or connect GTM. "Is the AI trustworthy?" → Honest confidence + disconfirmation + it surfaces its own misses; it's built not to flatter you.*
+
+**✎ Enter — Competitive** *(seed now; Phase 3 enriches via G2)*
+- **Main competitors:** *Productboard, Aha!, Cycle (product mgmt/feedback); Dovetail (research); Crayon, Klue (competitive intel). Gong/Pendo are signal sources to ingest, not competitors.*
+- **Win themes:** *Cross-lens product↔GTM; intelligence that compounds; honest, disconfirmation-aware confidence; the map as the demo.*
+- **Loss themes:** *(hypotheses to validate)* "we already have a roadmap tool"; single-player vs. the team needing one source; early-stage trust in AI judgment.*
+- **Battlecard summary:** *Everyone else is a point solution that collects or displays. We're the connective layer that learns. Lead with the map + a bridge.*
+- **GTM motion:** *Founder-led + build-in-the-open content + design partners.*
+- **Channels:** *Founder network, content (the dogfood story), design-partner motion.*
+- **Active campaigns:** *(Phase 6)* "Build in the open" around the map + honest confidence.
 
 **🔬 Dogfood:** Can you express the *whole* story here, or do you reach for
 things the record can't hold? Does "marketizing the repo" feel natural? This is
