@@ -12,6 +12,7 @@ import { createClient } from "@/lib/supabase/client";
 import { getOrgId } from "@/lib/org";
 import { Section, Chip, Banner } from "@/components/ui";
 import { useAgentRun, AgentProgress } from "@/components/AgentProgress";
+import { useProductScope } from "@/lib/ProductContext";
 
 type Update = {
   id: string; kind: string; summary: string | null; theme_id: string | null;
@@ -29,17 +30,33 @@ const KIND_TONE: Record<string, "default" | "accent" | "violet" | "amber" | "gre
   new_theme: "accent", escalate: "amber", merge: "violet", decay: "default", restate: "default",
 };
 
+// Map a human-chosen set of product lines → the scope shape the data model uses
+// (matches inferScope + the co_products CHECK invariant): none → company-wide;
+// one → that line; ≥2 → cross-product (first selected is the primary).
+function scopeFromLines(lines: string[]): { product_id: string | null; co_product_ids: string[] } {
+  if (lines.length === 0) return { product_id: null, co_product_ids: [] };
+  return { product_id: lines[0], co_product_ids: lines.slice(1) };
+}
+// The lines a proposal currently spans (primary first), from its payload.
+function linesOf(payload: Record<string, unknown>): string[] {
+  const co = (payload.co_product_ids as string[] | undefined) ?? [];
+  return [payload.product_id as string | null, ...co].filter(Boolean) as string[];
+}
+const sameSet = (a: string[], b: string[]) => a.length === b.length && [...a].sort().join(",") === [...b].sort().join(",");
+
 export default function IntelReview({ onApplied, productFilter = "all" }: { onApplied?: () => void; productFilter?: string }) {
   const supabase = createClient();
+  const { products } = useProductScope(); // line names + the set the human can re-attribute a cross-sell theme across
   const [updates, setUpdates] = useState<Update[]>([]);
   const [lessons, setLessons] = useState<Lesson[]>([]);
   const [acceptRate, setAcceptRate] = useState<{ rate: number; n: number } | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [openId, setOpenId] = useState<string | null>(null);
-  const [draft, setDraft] = useState<{ rationale: string; tags: string[]; edit: string }>({ rationale: "", tags: [], edit: "" });
+  const [draft, setDraft] = useState<{ rationale: string; tags: string[]; edit: string; lines: string[] }>({ rationale: "", tags: [], edit: "", lines: [] });
   const [busy, setBusy] = useState(false);
   const distillRun = useAgentRun("distill");
   const [misses, setMisses] = useState<Miss[]>([]);
+  const lineName = (id: string) => products.find((p) => p.id === id)?.name ?? "a line";
 
   const load = useCallback(async () => {
     const [{ data: ups }, { data: les }, { data: decided }, { data: mis }] = await Promise.all([
@@ -63,23 +80,36 @@ export default function IntelReview({ onApplied, productFilter = "all" }: { onAp
 
   function openItem(u: Update) {
     setOpenId(u.id);
-    setDraft({ rationale: "", tags: [], edit: typeof u.payload?.recommendation === "string" ? (u.payload.recommendation as string) : "" });
+    // Seed the line attribution from the proposal so the human can confirm or
+    // correct WHICH lines a (possibly cross-sell) new theme spans.
+    setDraft({ rationale: "", tags: [], edit: typeof u.payload?.recommendation === "string" ? (u.payload.recommendation as string) : "", lines: linesOf(u.payload ?? {}) });
   }
   const toggleTag = (t: string) => setDraft((d) => ({ ...d, tags: d.tags.includes(t) ? d.tags.filter((x) => x !== t) : [...d.tags, t] }));
+  // Toggle a product line in the attribution; first selected stays the primary.
+  const toggleLine = (id: string) => setDraft((d) => ({ ...d, lines: d.lines.includes(id) ? d.lines.filter((x) => x !== id) : [...d.lines, id] }));
 
   async function resolve(u: Update, verdict: "accept" | "edit" | "reject") {
     setBusy(true); setError(null);
     try {
       const { data: s } = await supabase.auth.getSession();
       const token = s.session?.access_token;
-      const edited = verdict === "edit" && draft.edit.trim() ? { recommendation: draft.edit.trim() } : undefined;
+      // Assemble the human's corrections into edited_payload. Two things can be
+      // taught: a better recommendation, and — for a new theme — the right line
+      // attribution (confirm/correct which lines a cross-sell theme spans). If
+      // the human re-attributed lines, that scope rides along even on "accept".
+      const edited: Record<string, unknown> = {};
+      if (draft.edit.trim() && draft.edit.trim() !== (u.payload?.recommendation ?? "")) edited.recommendation = draft.edit.trim();
+      const linesChanged = u.kind === "new_theme" && !sameSet(draft.lines, linesOf(u.payload ?? {}));
+      if (linesChanged) Object.assign(edited, scopeFromLines(draft.lines));
+      const hasEdit = Object.keys(edited).length > 0;
+      const effectiveVerdict = verdict === "accept" && hasEdit ? "edit" : verdict;
       const { data, error } = await supabase.functions.invoke("resolve-intel-update", {
-        body: { update_id: u.id, verdict, rationale: draft.rationale.trim() || null, reason_tags: draft.tags, edited_payload: edited },
+        body: { update_id: u.id, verdict: effectiveVerdict, rationale: draft.rationale.trim() || null, reason_tags: draft.tags, edited_payload: hasEdit ? edited : undefined },
         headers: token ? { Authorization: `Bearer ${token}` } : undefined,
       });
       if (error) throw error;
       if (data?.error) throw new Error(data.error);
-      setOpenId(null); setDraft({ rationale: "", tags: [], edit: "" });
+      setOpenId(null); setDraft({ rationale: "", tags: [], edit: "", lines: [] });
       await load(); onApplied?.();
     } catch (e) { setError(e instanceof Error ? e.message : "Could not resolve."); }
     finally { setBusy(false); }
@@ -152,11 +182,48 @@ export default function IntelReview({ onApplied, productFilter = "all" }: { onAp
               <div key={u.id} className="card card-pad">
                 <div className="row-between" style={{ alignItems: "baseline", gap: 10 }}>
                   <span style={{ fontSize: 13.5, fontWeight: 600 }}>{u.summary}</span>
-                  <Chip tone={KIND_TONE[u.kind] ?? "default"}>{u.kind.replace("_", " ")}</Chip>
+                  <div className="row gap-2" style={{ flexShrink: 0 }}>
+                    {/* Scope is visible up front so the reviewer can supervise the
+                        line attribution — especially cross-sell themes. */}
+                    {u.kind === "new_theme" && (() => {
+                      const ls = linesOf(u.payload ?? {});
+                      return ls.length >= 2
+                        ? <Chip tone="green">cross-sell · {ls.map(lineName).join(" + ")}</Chip>
+                        : ls.length === 1
+                          ? <Chip tone="default">{lineName(ls[0])}</Chip>
+                          : <Chip tone="default">company-wide</Chip>;
+                    })()}
+                    <Chip tone={KIND_TONE[u.kind] ?? "default"}>{u.kind.replace("_", " ")}</Chip>
+                  </div>
                 </div>
 
                 {openId === u.id ? (
                   <div style={{ marginTop: 10, display: "grid", gap: 8 }}>
+                    {/* Line attribution — only for a new theme, and only when the
+                        org runs >1 line. Confirm or correct which lines it spans:
+                        none = company-wide, one = that line, ≥2 = cross-sell
+                        (first picked is the primary). The human owns this call. */}
+                    {u.kind === "new_theme" && products.length > 1 && (
+                      <div className="field">
+                        <span className="t-label">Which product line(s)? {draft.lines.length >= 2 && <span style={{ color: "var(--gr-text)" }}>· cross-sell</span>}</span>
+                        <div className="row gap-2" style={{ flexWrap: "wrap", marginTop: 4 }}>
+                          {products.map((p) => {
+                            const on = draft.lines.includes(p.id);
+                            const primary = draft.lines[0] === p.id && draft.lines.length >= 2;
+                            return (
+                              <button key={p.id} type="button" className="chip" onClick={() => toggleLine(p.id)}
+                                style={{ cursor: "pointer", background: on ? "var(--ac)" : "var(--fill)", color: on ? "#fff" : "var(--ts)" }}
+                                title={primary ? "primary line" : on ? "spanned line" : "not included"}>
+                                {primary ? "★ " : ""}{p.name}
+                              </button>
+                            );
+                          })}
+                        </div>
+                        <span className="t-mono-xs" style={{ marginTop: 4 }}>
+                          {draft.lines.length === 0 ? "company-wide (applies to all)" : draft.lines.length === 1 ? `${lineName(draft.lines[0])} only` : `cross-sell: ${draft.lines.map(lineName).join(" + ")}`}
+                        </span>
+                      </div>
+                    )}
                     {typeof u.payload?.recommendation === "string" && (
                       <label className="field"><span className="t-label">Recommendation (edit to teach a better one)</span>
                         <textarea className="textarea" rows={2} value={draft.edit} onChange={(e) => setDraft({ ...draft, edit: e.target.value })} /></label>
