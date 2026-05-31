@@ -9,7 +9,7 @@
 //   const run = useAgentRun("synthesize");
 //   await run(() => supabase.functions.invoke("synthesize-signals", {...}));
 // and render <AgentProgress run={run} /> where the spinner used to be.
-import { useCallback, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { AGENT_STAGES } from "@/lib/agentStages";
 
 export type AgentRun = {
@@ -24,6 +24,15 @@ export function useAgentRun(kind: keyof typeof AGENT_STAGES | string): AgentRun 
   const [active, setActive] = useState(false);
   const [index, setIndex] = useState(0);
   const timer = useRef<ReturnType<typeof setInterval> | null>(null);
+  const mounted = useRef(true);
+
+  // Guard against the component unmounting mid-run (e.g. the user drills into a
+  // node while an agent is working): stop the interval and never setState after
+  // unmount. No leak, no React warning.
+  useEffect(() => {
+    mounted.current = true;
+    return () => { mounted.current = false; if (timer.current) { clearInterval(timer.current); timer.current = null; } };
+  }, []);
 
   const go = useCallback(async <T,>(work: () => Promise<T>): Promise<T> => {
     setActive(true); setIndex(0);
@@ -31,14 +40,14 @@ export function useAgentRun(kind: keyof typeof AGENT_STAGES | string): AgentRun 
     // of the end and hold — the real result decides when we finish.
     const hold = stages.length - 1;
     timer.current = setInterval(() => {
+      if (!mounted.current) return;
       setIndex((i) => (i < hold ? i + 1 : i));
     }, 700);
     try {
-      const result = await work();
-      return result;
+      return await work();
     } finally {
       if (timer.current) { clearInterval(timer.current); timer.current = null; }
-      setActive(false); setIndex(0);
+      if (mounted.current) { setActive(false); setIndex(0); }
     }
   }, [stages.length]);
 
