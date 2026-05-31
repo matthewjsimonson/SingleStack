@@ -1,6 +1,12 @@
 # Cross-sell & the scope vocabulary — architecture design
 
-Status: **Phase 1 shipped** (vocabulary + additive columns) · Phases 2–4 proposed · Owner: SingleStack
+Status: **Phases 1, 2 & 4 shipped** · Phase 3 (authoring UI) proposed · Owner: SingleStack
+Phase 2 = scope-aware active-product context (`web/lib/ProductContext.tsx` + Shell
+switcher). Phase 4 = product-aware synthesis with cross-product detection
+(`inferScope`) AND a **bounded prompt** (`selectRelevantThemes`/`capCandidates` in
+`_shared/synthesis.ts`): synthesis reasons only over themes the new signals could
+plausibly touch — flat cost/latency as the org grows, no context-window cliff,
+cross-sell detection preserved. Logic verified 12/12 (real compiled module).
 Phase 1 lives in `supabase/migrations/20260530280000_cross_product_scope.sql`
 (`co_product_ids[]`, `gtm_records.motion_type`, `bridges.span`, the
 `spans_product()` helper, GIN indexes, and demote-not-destroy triggers — all

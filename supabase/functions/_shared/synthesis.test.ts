@@ -1,5 +1,8 @@
 // Deno tests for the pure synthesis building blocks — `deno test`.
-import { inferScope, partitionByLine, passOrder, COMPANY_WIDE, type LineId } from "./synthesis.ts";
+import {
+  inferScope, partitionByLine, passOrder, COMPANY_WIDE,
+  selectRelevantThemes, capCandidates, linesPresent, type LineId,
+} from "./synthesis.ts";
 
 function assert(c: boolean, m: string) { if (!c) throw new Error(m); }
 const pos = new Map<string, LineId>([["s1", "A"], ["s2", "A"], ["s3", "B"], ["s4", null], ["s5", "C"]]);
@@ -37,4 +40,55 @@ Deno.test("partitionByLine: buckets by line, null → company-wide", () => {
 Deno.test("passOrder: lines sorted, company-wide last", () => {
   const order = passOrder(["B", COMPANY_WIDE, "A"]);
   assert(JSON.stringify(order) === JSON.stringify(["A", "B", COMPANY_WIDE]), order.join(","));
+});
+
+// ---- bounded-prompt selection ----------------------------------------------
+const themes = [
+  { id: "tA", product_id: "A", last_evidence_at: "2026-05-01" },
+  { id: "tB", product_id: "B", last_evidence_at: "2026-05-02" },
+  { id: "tC", product_id: "C", last_evidence_at: "2026-05-03" },
+  { id: "tCW", product_id: null, last_evidence_at: "2026-04-01" },
+  { id: "tX_AB", product_id: "A", co_product_ids: ["B"], last_evidence_at: "2026-05-04" }, // cross-product A+B
+];
+
+Deno.test("selectRelevantThemes: only affected lines + always company-wide", () => {
+  // New signals only on line A → include tA, the cross-product tX_AB (touches A), and tCW; exclude tB, tC.
+  const ids = selectRelevantThemes(themes, new Set<LineId>(["A"])).map((t) => t.id).sort();
+  assert(JSON.stringify(ids) === JSON.stringify(["tA", "tCW", "tX_AB"]), ids.join(","));
+});
+
+Deno.test("selectRelevantThemes: cross-product theme pulled in via its co leg", () => {
+  // New signals only on line B → tB, tX_AB (co contains B), tCW; not tA/tC.
+  const ids = selectRelevantThemes(themes, new Set<LineId>(["B"])).map((t) => t.id).sort();
+  assert(JSON.stringify(ids) === JSON.stringify(["tB", "tCW", "tX_AB"]), ids.join(","));
+});
+
+Deno.test("selectRelevantThemes: company-wide candidates can extend cross-sell themes", () => {
+  const ids = selectRelevantThemes(themes, new Set<LineId>([null])).map((t) => t.id).sort();
+  // company-wide themes always + cross-product themes (co.length>0) → tCW, tX_AB
+  assert(ids.includes("tCW") && ids.includes("tX_AB"), ids.join(","));
+  assert(!ids.includes("tA") && !ids.includes("tB"), "single-line themes excluded: " + ids.join(","));
+});
+
+Deno.test("selectRelevantThemes: budget keeps most-recently-active", () => {
+  const many = Array.from({ length: 10 }, (_, i) => ({ id: `t${i}`, product_id: "A", last_evidence_at: `2026-05-${String(i + 1).padStart(2, "0")}` }));
+  const got = selectRelevantThemes(many, new Set<LineId>(["A"]), 3).map((t) => t.id);
+  assert(JSON.stringify(got) === JSON.stringify(["t9", "t8", "t7"]), got.join(",")); // newest 3
+});
+
+Deno.test("capCandidates: caps to newest-N by observed_at, nulls last", () => {
+  const sigs = [
+    { id: "old", observed_at: "2026-01-01" },
+    { id: "new", observed_at: "2026-05-01" },
+    { id: "mid", observed_at: "2026-03-01" },
+    { id: "nul", observed_at: null },
+  ];
+  const got = capCandidates(sigs, 2).map((s) => s.id);
+  assert(JSON.stringify(got) === JSON.stringify(["new", "mid"]), got.join(","));
+  assert(capCandidates(sigs, 99).length === 4, "no cap when under budget");
+});
+
+Deno.test("linesPresent: distinct lines incl. null for company-wide", () => {
+  const lp = linesPresent([{ product_id: "A" }, { product_id: "A" }, { product_id: null }, {}]);
+  assert(lp.has("A") && lp.has(null) && lp.size === 2, [...lp].join(","));
 });

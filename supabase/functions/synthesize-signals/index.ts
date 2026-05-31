@@ -25,7 +25,7 @@
 
 import Anthropic from "npm:@anthropic-ai/sdk@0.69.0";
 import { createClient, type SupabaseClient } from "npm:@supabase/supabase-js@2";
-import { inferScope } from "../_shared/synthesis.ts"; // tested scope logic (single source of truth)
+import { inferScope, selectRelevantThemes, capCandidates, linesPresent } from "../_shared/synthesis.ts"; // tested, bounded-prompt logic
 
 const MODEL = "claude-opus-4-8";
 const CORS = {
@@ -157,12 +157,20 @@ Deno.serve(async (req: Request) => {
       .select("id, title, why, conf_level, scope, category, origin, observed_at, product_id, sources(label, origin)")
       .order("observed_at", { ascending: false, nullsFirst: false })
       .limit(200);
-    const candidates = (allSignals ?? []).filter((s) => !attachedIds.has(s.id));
+    // Cap candidates so the prompt's signal half stays bounded (newest first).
+    const candidates = capCandidates((allSignals ?? []).filter((s) => !attachedIds.has(s.id)));
 
     // First run with no themes and no signals: nothing to do.
     if ((themes ?? []).length === 0 && candidates.length === 0) {
       return json({ themes: 0, message: "No signals to synthesize yet." });
     }
+
+    // BOUNDED PROMPT: reason only over themes the new signals could plausibly
+    // touch (their lines + all company-wide + cross-product themes on those
+    // lines), capped. Keeps cost/latency flat as the org grows and prevents the
+    // context-window cliff — without losing cross-product (cross-sell) detection.
+    // The model only sees, and may only reference, this subset.
+    const promptThemes = selectRelevantThemes(themes ?? [], linesPresent(candidates));
 
     const sigList = candidates.map((s, i) => {
       // deno-lint-ignore no-explicit-any
@@ -172,7 +180,7 @@ Deno.serve(async (req: Request) => {
       return `[${i}] (${origin} · ${label} · scope:${s.scope} · line:${lineLabel(sig.product_id)}) ${s.title}${s.why ? " — " + s.why : ""}`;
     }).join("\n") || "(no new unattributed signals)";
 
-    const themeList = (themes ?? []).map((t) =>
+    const themeList = promptThemes.map((t) =>
       `{id:${t.id}} [${t.category}/${t.state} · line:${lineLabel((t as { product_id?: string | null }).product_id)}] ${t.title} — ${t.summary ?? ""}`
     ).join("\n") || "(no existing themes)";
 
@@ -222,7 +230,9 @@ Deno.serve(async (req: Request) => {
       signal_categories?: { index: number; category: string }[];
     };
 
-    const themeById = new Map((themes ?? []).map((t) => [t.id, t]));
+    // Built from promptThemes only: the model can only act on themes it was
+    // shown, so any id outside the bounded set is rejected (no stale-id writes).
+    const themeById = new Map(promptThemes.map((t) => [t.id, t]));
     const validId = (id: string) => themeById.has(id);
     const sigIdAt = (i: number) => candidates[i]?.id;
     const now = new Date().toISOString();
@@ -331,6 +341,10 @@ Deno.serve(async (req: Request) => {
       attached, categorized,
       proposed,          // high-judgment changes queued for review
       appliedLessons,    // lessons from past feedback applied this run
+      // Bounded-prompt observability: how much the scoping pruned this run.
+      themesConsidered: promptThemes.length,
+      themesTotal: (themes ?? []).length,
+      candidatesConsidered: candidates.length,
     });
   } catch (e) {
     return json({ error: e instanceof Error ? e.message : String(e) }, 500);
