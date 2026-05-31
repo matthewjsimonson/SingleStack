@@ -407,6 +407,28 @@ function Stat({ n, label, accent }: { n: number; label: string; accent?: boolean
 }
 
 function ThemeColumn({ title, tone, themes }: { title: string; tone: "accent" | "violet"; themes: Theme[] }) {
+  const supabase = createClient();
+  const router = useRouter();
+  const [busyId, setBusyId] = useState<string | null>(null);
+
+  // Turn a synthesized theme into a decision: carry the theme (and its signals)
+  // as cited evidence, then open the decision workspace to weigh options.
+  async function makeDecision(t: Theme) {
+    setBusyId(t.id);
+    try {
+      const orgId = await getOrgId(); if (!orgId) throw new Error("no org");
+      const { data: dec, error } = await supabase.from("decisions").insert({
+        org_id: orgId, title: t.title, status: "open", scope: "org", theme_id: t.id,
+      }).select("id").single();
+      if (error) throw error;
+      const evidence: { org_id: string; decision_id: string; theme_id?: string; signal_id?: string }[] =
+        [{ org_id: orgId, decision_id: dec.id, theme_id: t.id }];
+      for (const sid of t.signal_ids ?? []) evidence.push({ org_id: orgId, decision_id: dec.id, signal_id: sid });
+      await supabase.from("decision_evidence").insert(evidence);
+      router.push(`/decisions/${dec.id}`);
+    } catch { setBusyId(null); }
+  }
+
   return (
     <div>
       <div className="t-label" style={{ marginBottom: "var(--sp-3)" }}>{title}</div>
@@ -425,7 +447,12 @@ function ThemeColumn({ title, tone, themes }: { title: string; tone: "accent" | 
                   <div className="t-body" style={{ fontSize: 13, lineHeight: 1.5 }}>{t.recommendation}</div>
                 </div>
               )}
-              <div className="t-mono-xs" style={{ marginTop: 8 }}>{(t.signal_ids ?? []).length} supporting signal{(t.signal_ids ?? []).length === 1 ? "" : "s"}</div>
+              <div className="row-between" style={{ marginTop: 10, alignItems: "center" }}>
+                <span className="t-mono-xs">{(t.signal_ids ?? []).length} supporting signal{(t.signal_ids ?? []).length === 1 ? "" : "s"}</span>
+                <button className="btn btn-secondary btn-sm" disabled={busyId === t.id} onClick={() => makeDecision(t)}>
+                  {busyId === t.id ? "Creating…" : "Make a decision →"}
+                </button>
+              </div>
             </div>
           ))}
         </div>
