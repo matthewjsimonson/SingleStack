@@ -9,9 +9,10 @@ import { useEffect, useState, useCallback } from "react";
 import Link from "next/link";
 import { createClient } from "@/lib/supabase/client";
 import { getOrgId } from "@/lib/org";
+import { useProductScope } from "@/lib/ProductContext";
 import { PageHeader, Chip, Banner } from "@/components/ui";
 
-type Item = { id: string; title: string; description: string | null; kind: string | null; build_stage: string | null; priority: string | null; product_id: string | null; release_id: string | null; prototype_url: string | null };
+type Item = { id: string; title: string; description: string | null; kind: string | null; build_stage: string | null; priority: string | null; product_id: string | null; co_product_ids: string[] | null; release_id: string | null; prototype_url: string | null };
 type Rec = { id: string; name: string };
 type Release = { id: string; name: string; version: string | null };
 type Signal = { id: string; title: string };
@@ -22,6 +23,7 @@ const KIND_TONE: Record<string, "default" | "accent" | "violet" | "amber" | "gre
 
 export default function ShipView() {
   const supabase = createClient();
+  const { matches } = useProductScope(); // scope build items to the active product line (incl. cross-sell)
   const [items, setItems] = useState<Item[]>([]);
   const [products, setProducts] = useState<Rec[]>([]);
   const [releases, setReleases] = useState<Release[]>([]);
@@ -35,7 +37,7 @@ export default function ShipView() {
 
   const load = useCallback(async () => {
     const [{ data: its }, { data: prods }, { data: rel }, { data: sigs }] = await Promise.all([
-      supabase.from("initiatives").select("id, title, description, kind, build_stage, priority, product_id, release_id, prototype_url").eq("lane", "ship").order("position").order("created_at"),
+      supabase.from("initiatives").select("id, title, description, kind, build_stage, priority, product_id, co_product_ids, release_id, prototype_url").eq("lane", "ship").order("position").order("created_at"),
       supabase.from("product_records").select("id, name"),
       supabase.from("releases").select("id, name, version").order("created_at"),
       supabase.from("signals").select("id, title").order("observed_at", { ascending: false, nullsFirst: false }).limit(30),
@@ -109,7 +111,7 @@ export default function ShipView() {
       {loading ? <div className="t-sub t-muted">Loading…</div> : (
         <div style={{ display: "grid", gridTemplateColumns: "repeat(5, 1fr)", gap: "var(--sp-3)" }}>
           {STAGES.map(([stage, label]) => {
-            const col = items.filter((i) => (i.build_stage ?? "spec") === stage);
+            const col = items.filter((i) => (i.build_stage ?? "spec") === stage && matches(i));
             return (
               <div key={stage}>
                 <div className="section-head"><span className="t-label">{label}</span><span className="chip">{col.length}</span></div>

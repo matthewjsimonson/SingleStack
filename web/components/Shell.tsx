@@ -11,6 +11,32 @@
 import { createClient } from "@/lib/supabase/client";
 import { useRouter, usePathname } from "next/navigation";
 import type { ReactNode } from "react";
+import { ProductProvider, useProductScope } from "@/lib/ProductContext";
+
+// Active-product switcher — the cross-module "which line am I in?" selector.
+// Hidden for single-product orgs (no clutter when there's nothing to switch).
+function ProductSwitcher() {
+  const { active, setActive, products } = useProductScope();
+  if (products.length < 2) return null;
+  return (
+    <div style={{ padding: "0 16px 14px" }}>
+      <label htmlFor="product-switcher" style={{ fontSize: 10.5, fontWeight: 700, letterSpacing: "0.07em", textTransform: "uppercase", color: "var(--sb-text-dim)", display: "block", marginBottom: 5 }}>Product line</label>
+      <select
+        id="product-switcher"
+        aria-label="Active product line"
+        value={active}
+        onChange={(e) => setActive(e.target.value)}
+        style={{ width: "100%", background: "var(--sb-fill)", color: "#fff", border: "1px solid var(--sb-border)", borderRadius: 7, padding: "6px 8px", fontSize: 12.5, fontWeight: 600 }}
+      >
+        <option value="all">All products</option>
+        <option value="company">Company-wide</option>
+        <optgroup label="Lines">
+          {products.map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}
+        </optgroup>
+      </select>
+    </div>
+  );
+}
 
 export type Crumb = { label: string; href?: string };
 
@@ -83,12 +109,15 @@ export default function Shell({
   });
 
   return (
+   <ProductProvider>
     <div style={{ display: "flex", height: "100vh", overflow: "hidden" }}>
       <aside style={{ width: 240, minWidth: 240, background: "var(--sb)", color: "var(--sb-text)", display: "flex", flexDirection: "column", padding: "16px 0" }}>
         <div style={{ padding: "0 16px 18px", display: "flex", alignItems: "center", gap: 9 }}>
           <span style={{ width: 22, height: 22, borderRadius: 6, background: "var(--ac)", display: "inline-flex", alignItems: "center", justifyContent: "center", color: "#fff", fontWeight: 800, fontSize: 13 }}>S</span>
           <span style={{ color: "#fff", fontSize: 15, fontWeight: 680, letterSpacing: "-0.02em" }}>SingleStack</span>
         </div>
+
+        <ProductSwitcher />
 
         <div style={{ flex: 1, overflowY: "auto", padding: "0 8px" }}>
           {/* Command center home */}
@@ -142,5 +171,6 @@ export default function Shell({
         </main>
       </div>
     </div>
+   </ProductProvider>
   );
 }

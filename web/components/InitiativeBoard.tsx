@@ -7,9 +7,10 @@
 import { useEffect, useState, useCallback } from "react";
 import { createClient } from "@/lib/supabase/client";
 import { getOrgId } from "@/lib/org";
+import { useProductScope } from "@/lib/ProductContext";
 import { PageHeader, Section, Chip, Banner } from "@/components/ui";
 
-type Initiative = { id: string; title: string; description: string | null; stage: string; priority: string | null; product_id: string | null; gtm_record_id: string | null; target_date: string | null };
+type Initiative = { id: string; title: string; description: string | null; stage: string; priority: string | null; product_id: string | null; co_product_ids: string[] | null; gtm_record_id: string | null; target_date: string | null };
 type Rec = { id: string; name: string };
 type Signal = { id: string; title: string };
 
@@ -20,6 +21,7 @@ export default function InitiativeBoard({ lane, title, meta, recordType }: {
   lane: string; title: string; meta: string; recordType: "product" | "gtm";
 }) {
   const supabase = createClient();
+  const { matches } = useProductScope(); // scope initiatives to the active product line (incl. cross-sell)
   const [items, setItems] = useState<Initiative[]>([]);
   const [products, setProducts] = useState<Rec[]>([]);
   const [gtm, setGtm] = useState<Rec[]>([]);
@@ -34,7 +36,7 @@ export default function InitiativeBoard({ lane, title, meta, recordType }: {
 
   const load = useCallback(async () => {
     const [{ data: its }, { data: prods }, { data: gtms }, { data: sigs }, { data: isl }] = await Promise.all([
-      supabase.from("initiatives").select("id, title, description, stage, priority, product_id, gtm_record_id, target_date").eq("lane", lane).order("position").order("created_at"),
+      supabase.from("initiatives").select("id, title, description, stage, priority, product_id, co_product_ids, gtm_record_id, target_date").eq("lane", lane).order("position").order("created_at"),
       supabase.from("product_records").select("id, name"),
       supabase.from("gtm_records").select("id, name"),
       supabase.from("signals").select("id, title").order("observed_at", { ascending: false, nullsFirst: false }).limit(40),
@@ -108,7 +110,7 @@ export default function InitiativeBoard({ lane, title, meta, recordType }: {
       {loading ? <div className="t-sub t-muted">Loading…</div> : (
         <div style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: "var(--sp-4)" }}>
           {STAGES.map(([stage, label]) => {
-            const col = items.filter((i) => i.stage === stage);
+            const col = items.filter((i) => i.stage === stage && matches(i));
             return (
               <div key={stage}>
                 <div className="section-head"><span className="t-label">{label}</span><span className="chip">{col.length}</span></div>

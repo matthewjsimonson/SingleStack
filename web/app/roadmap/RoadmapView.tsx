@@ -7,6 +7,7 @@
 import { useEffect, useState, useCallback } from "react";
 import { createClient } from "@/lib/supabase/client";
 import { getOrgId } from "@/lib/org";
+import { useProductScope } from "@/lib/ProductContext";
 import { PageHeader, Section, Chip, Banner } from "@/components/ui";
 
 type Release = { id: string; name: string; version: string | null; summary: string | null; stage: string; target_date: string | null; product_id: string | null };
@@ -17,6 +18,7 @@ const STAGE_TONE: Record<string, "default" | "violet" | "green"> = { planned: "d
 
 export default function RoadmapView() {
   const supabase = createClient();
+  const { matches } = useProductScope(); // scope releases to the active product line
   const [releases, setReleases] = useState<Release[]>([]);
   const [products, setProducts] = useState<Rec[]>([]);
   const [counts, setCounts] = useState<Record<string, number>>({});
@@ -78,10 +80,10 @@ export default function RoadmapView() {
         </form>
       )}
 
-      {loading ? <div className="t-sub t-muted">Loading…</div> : releases.length === 0 && !creating ? (
+      {loading ? <div className="t-sub t-muted">Loading…</div> : releases.filter(matches).length === 0 && !creating ? (
         <div className="empty"><div className="t-body" style={{ fontWeight: 600, marginBottom: 6 }}>No releases yet</div><div className="t-sub">Plan what's coming — create a release, then build its work in Ship.</div></div>
       ) : STAGES.map(([stage, label]) => {
-        const list = releases.filter((r) => r.stage === stage);
+        const list = releases.filter((r) => r.stage === stage && matches(r));
         if (list.length === 0) return null;
         return (
           <Section key={stage} label={`${label} · ${list.length}`}>

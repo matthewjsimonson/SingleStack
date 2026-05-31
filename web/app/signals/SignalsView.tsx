@@ -14,6 +14,7 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { createClient } from "@/lib/supabase/client";
 import { getOrgId } from "@/lib/org";
+import { useProductScope } from "@/lib/ProductContext";
 import { momentumGlyph, stateTone } from "@/lib/themeLife";
 import { PageHeader, Section, Chip, Banner, Confidence, Modal, SubTabs } from "@/components/ui";
 import TrackingTopics from "@/components/TrackingTopics";
@@ -33,7 +34,7 @@ type Theme = {
   id: string; category: string; title: string; summary: string | null;
   recommendation: string | null; conf_level: number | null; signal_ids: string[] | null;
   state: string | null; momentum: string | null; last_evidence_at: string | null;
-  product_id: string | null; newThisWeek?: number;
+  product_id: string | null; co_product_ids?: string[] | null; newThisWeek?: number;
 };
 
 type Lens = "product" | "gtm";
@@ -78,7 +79,7 @@ export default function SignalsView() {
   const [tab, setTab] = useState<Tab>("home");
   const [originFilter, setOriginFilter] = useState<OriginFilter>("all");
   const [products, setProducts] = useState<{ id: string; name: string }[]>([]);
-  const [productFilter, setProductFilter] = useState<string>("all"); // "all" | "company" | <product_id>
+  const { active, matches } = useProductScope(); // shared cross-module product scope (replaces the old local switcher)
   const synthRun = useAgentRun("synthesize");
 
   const [logOpen, setLogOpen] = useState(false);
@@ -91,7 +92,7 @@ export default function SignalsView() {
     const [{ data: srcs }, { data: sigs }, { data: ths }, { data: recent }, { data: prods }] = await Promise.all([
       supabase.from("sources").select("id, label, icon, origin").order("created_at"),
       supabase.from("signals").select("id, title, why, conf_label, conf_level, observed_at, scope, source_id, category, origin, product_id").order("observed_at", { ascending: false, nullsFirst: false }).order("created_at", { ascending: false }),
-      supabase.from("signal_themes").select("id, category, title, summary, recommendation, conf_level, signal_ids, state, momentum, last_evidence_at, product_id").order("position"),
+      supabase.from("signal_themes").select("id, category, title, summary, recommendation, conf_level, signal_ids, state, momentum, last_evidence_at, product_id, co_product_ids").order("position"),
       // Evidence added in the last 7d, for the "+N this week" delta on each theme.
       supabase.from("theme_signals").select("theme_id").gte("added_at", weekAgo),
       supabase.from("product_records").select("id, name").order("created_at"),
@@ -157,14 +158,11 @@ export default function SignalsView() {
     if (error) { setError(error.message); await load(); }
   }
 
-  // Product scope: "all" shows everything; "company" shows only cross-product
-  // (product_id null); a product id shows that product's intelligence. The
-  // switcher only appears when there's more than one product, so single-product
-  // orgs see no change.
-  const inProduct = <T extends { product_id?: string | null }>(x: T) =>
-    productFilter === "all" ? true : productFilter === "company" ? !x.product_id : x.product_id === productFilter;
-  const signalsScoped = signals.filter(inProduct);
-  const themesScoped = themes.filter(inProduct);
+  // Product scope now comes from the app-wide switcher (Shell → ProductContext),
+  // so Signals stays in sync with every other module. `matches` shows the active
+  // line's own intel PLUS cross-sell themes whose co_product_ids include it.
+  const signalsScoped = signals.filter(matches);
+  const themesScoped = themes.filter(matches);
 
   const internalCount = signalsScoped.filter((s) => s.origin === "internal").length;
   const externalCount = signalsScoped.filter((s) => s.origin === "external").length;
@@ -187,16 +185,6 @@ export default function SignalsView() {
       />
       <Banner>{error}</Banner>
 
-      {/* Product scope — only when the org actually runs multiple products. */}
-      {products.length > 1 && (
-        <div className="row gap-2" style={{ marginBottom: "var(--sp-3)", flexWrap: "wrap", alignItems: "center" }}>
-          <span className="t-label" style={{ marginRight: 2 }}>Product</span>
-          {[{ id: "all", name: "All" }, { id: "company", name: "Company-wide" }, ...products].map((p) => (
-            <button key={p.id} className={productFilter === p.id ? "chip chip-accent" : "chip"} style={{ cursor: "pointer" }} onClick={() => setProductFilter(p.id)}>{p.name}</button>
-          ))}
-        </div>
-      )}
-
       <SubTabs<Tab>
         tabs={[
           { key: "home", label: "Homepage" },
@@ -208,13 +196,13 @@ export default function SignalsView() {
       />
 
       {loading ? <div className="t-sub t-muted">Loading…</div> : tab === "map" ? (
-        <MapView productFilter={productFilter} />
+        <MapView productFilter={active} />
       ) : tab === "home" ? (
         <Home
           signals={signalsScoped} themes={themesScoped} productThemes={productThemes} gtmThemes={gtmThemes}
           highSignals={highSignals} unsorted={unsorted} internalCount={internalCount} externalCount={externalCount}
           sourceById={sourceById} synthRun={synthRun} onSynthesize={synthesize} setCategory={setCategory} goLens={setTab}
-          reload={load} productFilter={productFilter}
+          reload={load} productFilter={active}
         />
       ) : (
         <LensTab

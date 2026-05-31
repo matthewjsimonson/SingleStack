@@ -7,6 +7,7 @@
 import { useEffect, useState, useCallback } from "react";
 import { useRouter } from "next/navigation";
 import { createClient } from "@/lib/supabase/client";
+import { useProductScope } from "@/lib/ProductContext";
 import { PageHeader, Section } from "@/components/ui";
 import ExecutiveRow from "@/components/ExecutiveRow";
 import ReviewDrawer from "@/components/ReviewDrawer";
@@ -16,6 +17,7 @@ type Run = { id: string; status: string; started_at: string; cost_usd: number | 
 export default function FoundationView() {
   const router = useRouter();
   const supabase = createClient();
+  const { active } = useProductScope(); // product-scope the homepage stats
   const [stats, setStats] = useState({ pending: 0, runs7d: 0, signals7d: 0, fieldsCompletion: 0, cost30d: 0 });
   const [loading, setLoading] = useState(true);
   const [q, setQ] = useState("");
@@ -25,11 +27,18 @@ export default function FoundationView() {
     const now = Date.now();
     const d7 = new Date(now - 7 * 864e5).toISOString();
     const d30 = new Date(now - 30 * 864e5).toISOString();
+    // Product-aware: when a specific line is active, scope completeness + weekly
+    // signals to it (fixes the old org-wide average across all products). "All"
+    // and "Company-wide" keep the org roll-up.
+    const ofProduct = active !== "all" && active !== "company";
+    let fieldsQ = supabase.from("record_fields").select("value");
+    let sigQ = supabase.from("signals").select("id", { count: "exact", head: true }).gte("observed_at", d7);
+    if (ofProduct) { fieldsQ = fieldsQ.eq("product_id", active); sigQ = sigQ.eq("product_id", active); }
     const [{ count: pending }, { data: runs }, { count: sig7 }, { data: fields }, { data: cost }] = await Promise.all([
       supabase.from("proposals").select("id", { count: "exact", head: true }).eq("status", "pending"),
       supabase.from("agent_runs").select("id, status, started_at").gte("started_at", d7),
-      supabase.from("signals").select("id", { count: "exact", head: true }).gte("observed_at", d7),
-      supabase.from("record_fields").select("value"),
+      sigQ,
+      fieldsQ,
       supabase.from("agent_runs").select("cost_usd").gte("started_at", d30),
     ]);
     const filled = (fields ?? []).filter((f) => f.value && (f.value as string).trim()).length;
@@ -43,7 +52,7 @@ export default function FoundationView() {
       cost30d,
     });
     setLoading(false);
-  }, [supabase]);
+  }, [supabase, active]);
 
   useEffect(() => { load(); }, [load]);
 
