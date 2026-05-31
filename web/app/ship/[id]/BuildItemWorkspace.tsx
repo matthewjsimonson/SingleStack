@@ -33,6 +33,11 @@ export default function BuildItemWorkspace({ id }: { id: string }) {
   const [editing, setEditing] = useState<string | null>(null); // field_key being edited
   const [draft, setDraft] = useState("");
   const [openRec, setOpenRec] = useState<Record<string, boolean>>({}); // section -> recommended panel open
+  const [drafting, setDrafting] = useState(false);
+  const [howDrafts, setHowDrafts] = useState<{ key: string; label: string; value: string; cites: string[] }[]>([]);
+  const [caps, setCaps] = useState<{ id: string; title: string; content: string }[]>([]);
+  const [capForm, setCapForm] = useState({ title: "", content: "" });
+  const [addingCap, setAddingCap] = useState(false);
 
   const load = useCallback(async () => {
     const [{ data: it, error: itErr }, { data: fs }, { data: links }] = await Promise.all([
@@ -48,6 +53,8 @@ export default function BuildItemWorkspace({ id }: { id: string }) {
       const { data: sigs } = await supabase.from("signals").select("id, title").in("id", ids);
       setSignals(sigs ?? []);
     } else setSignals([]);
+    const { data: capRows } = await supabase.from("capability_notes").select("id, title, content").order("observed_at", { ascending: false }).limit(20);
+    setCaps(capRows ?? []);
     setLoading(false);
   }, [supabase, id]);
   useEffect(() => { load(); }, [load]);
@@ -101,6 +108,39 @@ export default function BuildItemWorkspace({ id }: { id: string }) {
     return key;
   }
 
+  // Call the build-architect agent to draft the How, grounded in capabilities.
+  async function draftHow() {
+    setDrafting(true); setError(null); setHowDrafts([]);
+    try {
+      const { data, error: fnErr } = await supabase.functions.invoke("draft-how", { body: { initiative_id: id } });
+      if (fnErr) throw fnErr;
+      if (data?.error === "no_capabilities") { setError(data.message); return; }
+      if (data?.error) throw new Error(data.message || data.error);
+      const drafts = data?.drafts ?? [];
+      setHowDrafts(drafts);
+      if (!drafts.length) setError("The architect returned no drafts — add more 'What' detail and try again.");
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Could not draft the How.");
+    } finally { setDrafting(false); }
+  }
+  async function acceptDraft(d: { key: string; label: string; value: string }) {
+    await saveField("How", d.key, d.label, d.value);
+    setHowDrafts((ds) => ds.filter((x) => x.key !== d.key));
+  }
+  const rejectDraft = (key: string) => setHowDrafts((ds) => ds.filter((x) => x.key !== key));
+
+  async function addCap(e: React.FormEvent) {
+    e.preventDefault();
+    if (!capForm.title.trim() || !capForm.content.trim()) return;
+    setError(null);
+    try {
+      const orgId = await getOrgId();
+      if (!orgId) throw new Error("Could not resolve your organization.");
+      await supabase.from("capability_notes").insert({ org_id: orgId, title: capForm.title.trim(), content: capForm.content.trim() });
+      setCapForm({ title: "", content: "" }); setAddingCap(false); await load();
+    } catch (e) { setError(e instanceof Error ? e.message : "Could not add capability."); }
+  }
+
   if (loading) return <Spinner label="Loading build item…" />;
   if (!item) return <Banner>Build item not found.</Banner>;
 
@@ -124,8 +164,32 @@ export default function BuildItemWorkspace({ id }: { id: string }) {
             const empty = sec.fields.filter((f) => !isFilled(f.key));
             const recOpen = !!openRec[sec.section];
             return (
-              <Section key={sec.section} label={sec.section}>
+              <Section key={sec.section} label={sec.section} action={sec.section === "How" ? (
+                <button className="btn btn-accent btn-sm" disabled={drafting} onClick={draftHow}>{drafting ? "Drafting…" : "✨ Draft How with AI"}</button>
+              ) : undefined}>
                 <div className="t-sub t-muted" style={{ marginBottom: "var(--sp-3)" }}>{sec.blurb}</div>
+                {sec.section === "How" && howDrafts.length > 0 && (
+                  <div style={{ display: "grid", gap: "var(--sp-2)", marginBottom: "var(--sp-3)" }}>
+                    {howDrafts.map((d) => (
+                      <div key={d.key} className="card card-pad" style={{ borderColor: "var(--ac)" }}>
+                        <div className="row-between" style={{ alignItems: "baseline" }}>
+                          <span className="t-label">{d.label} · AI proposed</span>
+                          <div className="row gap-2">
+                            <button className="btn btn-sm" onClick={() => acceptDraft(d)}>Accept</button>
+                            <button className="btn btn-secondary btn-sm" onClick={() => rejectDraft(d.key)}>Reject</button>
+                          </div>
+                        </div>
+                        <p style={{ margin: "6px 0 0", whiteSpace: "pre-wrap" }}>{d.value}</p>
+                        {d.cites.length > 0 && (
+                          <div className="row gap-2" style={{ flexWrap: "wrap", marginTop: 8 }}>
+                            <span className="t-sub t-muted" style={{ fontSize: 11 }}>Based on:</span>
+                            {d.cites.map((c, i) => <Chip key={i} tone="violet">{c}</Chip>)}
+                          </div>
+                        )}
+                      </div>
+                    ))}
+                  </div>
+                )}
                 {filled.length === 0 && !recOpen && (
                   <p className="t-muted" style={{ margin: "0 0 var(--sp-3)" }}>Nothing captured yet.</p>
                 )}
@@ -208,6 +272,24 @@ export default function BuildItemWorkspace({ id }: { id: string }) {
             ) : (
               <div className="row gap-2" style={{ flexWrap: "wrap" }}>
                 {signals.map((s) => <Chip key={s.id} tone="violet">{s.title}</Chip>)}
+              </div>
+            )}
+          </Section>
+
+          <Section label="Capabilities" action={<button className="btn btn-secondary btn-sm" onClick={() => setAddingCap((v) => !v)}>{addingCap ? "Cancel" : "+ Add"}</button>}>
+            <div className="t-sub t-muted" style={{ marginBottom: "var(--sp-3)" }}>What&apos;s buildable now — the architect grounds the How in these and cites them.</div>
+            {addingCap && (
+              <form onSubmit={addCap} style={{ display: "grid", gap: 6, marginBottom: "var(--sp-3)" }}>
+                <input className="input" placeholder="Capability title" value={capForm.title} onChange={(e) => setCapForm({ ...capForm, title: e.target.value })} />
+                <textarea className="textarea" rows={3} placeholder="What it enables (paste from a changelog / release notes)" value={capForm.content} onChange={(e) => setCapForm({ ...capForm, content: e.target.value })} />
+                <button className="btn btn-sm" type="submit">Save capability</button>
+              </form>
+            )}
+            {caps.length === 0 ? (
+              <p className="t-muted" style={{ margin: 0 }}>None yet — add what&apos;s newly buildable so AI can draft the How.</p>
+            ) : (
+              <div style={{ display: "grid", gap: 4 }}>
+                {caps.map((c) => <div key={c.id} className="t-sub" title={c.content}>• {c.title}</div>)}
               </div>
             )}
           </Section>
