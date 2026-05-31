@@ -10,6 +10,7 @@
 // Setup (log a signal, sources, tracking) stays in modals / compact rows so the
 // page is for SHOWING intel, not housing forms.
 import { useEffect, useState, useCallback } from "react";
+import { useRouter } from "next/navigation";
 import { createClient } from "@/lib/supabase/client";
 import { getOrgId } from "@/lib/org";
 import { PageHeader, Section, Chip, Banner, Confidence, Modal, SubTabs } from "@/components/ui";
