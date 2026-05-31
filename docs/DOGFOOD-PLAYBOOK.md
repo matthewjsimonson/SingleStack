@@ -19,6 +19,24 @@ should work better.
 > To wipe and restart anytime: run `scripts/reset-my-workspace.sql` in the dev
 > SQL editor.
 
+> **What's LIVE vs UNBUILT (read this — it sets expectations).**
+> *Live and working:* Foundation records, logging signals, synthesize → review →
+> distill (the learning loop), find bridges, the intelligence map (Action Matrix
+> with terrain + motion), decisions → draft options → route to Ship → draft How,
+> honest confidence, self-surfaced misses & stale flags, multi-product scoping.
+> *Built but NOT wired yet (don't expect these to work):* **MCP source
+> connections** (you can't yet click "connect G2/GitHub" and have it pull) —
+> connectivity is the focus of the new `docs/CONNECTIVITY.md`; **scheduled /
+> on-signal agent workflows**; **agent-to-agent** coordination; the **skills**
+> attached to an agent don't affect its runtime yet. So in Phase 3, getting
+> external signals in is currently **manual or me-assisted**, not one-click —
+> and making that one-click-and-secure is goal #2 of this session.
+
+> **Multi-product note.** SingleStack is one product, so the product switcher on
+> Signals stays hidden and everything is "company-wide" — exactly the clean
+> single-product path. (If we ever model a second product line, the switcher and
+> per-product map territory light up automatically.)
+
 ---
 
 ## Phase 0 — Frame the dogfood (5 min)
@@ -115,15 +133,20 @@ seed the engine with what we already know.
 
 **▸ Screen:** Signals → Product / GTM tabs → Sources (`/signals`), Competitive (`/competitive`), Market (`/market`)
 
-**Step 3a — Connect external sources (MCP).** We'll wire these as our ears:
-- **G2** (available now) — market & competitive intelligence: who's researching the
-  category, competitor ratings/reviews, buyer intent. *I can pull this live with
-  you and log the findings as signals.*
-- **GitHub** (our own repo) — our changelog/releases as internal-ish product signals.
-- **Web/news** — competitor launches, funding, positioning shifts.
+**Step 3a — Bring in external sources (today: assisted; soon: one-click).**
+The vision is a first-class "connect a source" flow (see `docs/CONNECTIVITY.md`).
+Until that's built, the path is **me-assisted**: I pull from a source and we log
+the findings as signals together. Sources we can use now:
+- **G2** (I have a live connection) — market & competitive intel: who's
+  researching the category, competitor ratings/reviews, buyer intent. *Say the
+  word and I'll pull it and draft signals for you.*
+- **GitHub** (our repo) — changelog/releases as product signals (I can read it).
+- **Web/news** — competitor launches, funding, positioning shifts (I can search).
 
-> 🔬 Dogfood: we don't yet have a first-class "connect an MCP source" flow for
-> arbitrary servers. Note how you *wish* this worked — it's likely a real gap.
+> 🔬 Dogfood — THE connectivity gap (goal #2 this session): there's no in-product
+> "connect a source" experience yet. As you go, note exactly how you'd *want* to
+> add a source: where the button lives, what it asks for, how it should feel to
+> trust it with credentials. That feedback shapes what we build next.
 
 **Step 3b — Add competitors to track.** In `/competitive`, add: Productboard,
 Aha!, Cycle, Dovetail, Crayon, Klue. For each, the dimension that matters: *do
@@ -160,10 +183,16 @@ Now make the engine earn its name.
    demo wows" (product) ↔ "buyers conflate us with boards until they see it"
    (gtm)"* → bridge: *the map is the wedge; lead GTM with it, invest product in
    it*). Check the weaker-leg confidence.
-4. **Open the Map.** Action Matrix: is the top-right ("act now") cluster the
-   thing you'd actually act on? Do contradictions show? Does it breathe? Does
-   high ground sit where your confident, accelerating themes are?
-5. **Check Worth-reconsidering / Worth-revisiting** if any surface.
+4. **Open the Map** (Signals → Map tab). It's the dark, topographic Action
+   Matrix: X = confidence (Watch → Act now), Y = momentum lanes (Accelerating /
+   Steady / Fading). Check: does the **high ground** (bright contour clusters)
+   sit on your confident+accelerating themes? Do **red contradiction dots** show
+   on contested themes? Does it **breathe** (subtle motion) — too much, too
+   little, just right? Click a node to drill into the theme. *Feel the pacing —
+   the breathing speed is tuned by me and is the one thing only you can judge
+   live.*
+5. **Check Worth-reconsidering / Worth-revisiting** if any surface (the system
+   flagging its own misses + decisions whose ground shifted).
 
 **🔬 Dogfood — this is the money moment.** Does the intelligence feel *smarter
 than the sum of the signals*? Does honest confidence match your gut? Is a bridge
