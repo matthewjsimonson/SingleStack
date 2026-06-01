@@ -100,10 +100,17 @@ function Dashboard({ competitors, capabilities, scores, reload, setError }: {
   async function cycleScore(capId: string, compId: string | null, current: number) {
     setError(null);
     const next = (current + 1) % 4; // 0→1→2→3→0
-    const existing = scores.find((s) => s.capability_id === capId && s.competitor_id === compId);
     const orgId = await getOrgId(); if (!orgId) return;
-    if (existing) await supabase.from("capability_scores").update({ score: next }).eq("id", existing.id);
-    else await supabase.from("capability_scores").insert({ org_id: orgId, capability_id: capId, competitor_id: compId, score: next });
+    // Check the DB for an existing cell — (capability_id, competitor_id) is unique,
+    // so a stale-state insert would throw a duplicate-key error. compId can be
+    // null ("us"), so use .is() for that case.
+    let q = supabase.from("capability_scores").select("id").eq("capability_id", capId);
+    q = compId === null ? q.is("competitor_id", null) : q.eq("competitor_id", compId);
+    const { data: existing } = await q.maybeSingle();
+    const { error } = existing?.id
+      ? await supabase.from("capability_scores").update({ score: next }).eq("id", existing.id)
+      : await supabase.from("capability_scores").insert({ org_id: orgId, capability_id: capId, competitor_id: compId, score: next });
+    if (error) { setError(error.message); return; }
     reload();
   }
 

@@ -70,20 +70,29 @@ export default function BuildItemWorkspace({ id }: { id: string }) {
     setError(null);
     try {
       const v = value.trim();
-      const existing = fields.find((f) => f.field_key === key);
-      if (existing) {
-        await supabase.from("initiative_fields").update({ value: v || null }).eq("id", existing.id);
+      // Decide update-vs-insert against the DB's current state, not stale client
+      // state — (initiative_id, field_key) is uniquely constrained, so inserting a
+      // key that already exists would throw a duplicate-key error.
+      const { data: live } = await supabase.from("initiative_fields")
+        .select("id").eq("initiative_id", id).eq("field_key", key).maybeSingle();
+      if (live?.id) {
+        const { error } = await supabase.from("initiative_fields").update({ value: v || null }).eq("id", live.id);
+        if (error) throw error;
       } else {
         const orgId = await getOrgId();
         if (!orgId) throw new Error("Could not resolve your organization.");
-        await supabase.from("initiative_fields").insert({
+        const { error } = await supabase.from("initiative_fields").insert({
           org_id: orgId, initiative_id: id, field_key: key, label, value: v || null,
           section: sectionName, position: fields.length,
         });
+        if (error) throw error;
       }
       setEditing(null); setDraft("");
       await load();
-    } catch (e) { setError(e instanceof Error ? e.message : "Could not save."); }
+    } catch (e) {
+      const o = e as { message?: string; details?: string; hint?: string; code?: string };
+      setError(o?.message ? `${[o.message, o.details, o.hint].filter(Boolean).join(" — ")}${o.code ? ` [${o.code}]` : ""}` : (e instanceof Error ? e.message : "Could not save."));
+    }
   }
 
   // Gate: leaving `stage` requires these keys filled.
