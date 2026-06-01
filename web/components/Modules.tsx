@@ -1,33 +1,31 @@
 "use client";
 
 // Modules → Features: the product's structural layer. Modules belong to a
-// product; features belong to a module. Expandable tree with inline create at
-// both levels — this is the "slice into structure while keeping the whole in
-// view" idea from the prototype, and the structure agents reason over.
+// product; features belong to a module. The main list stays clean (module name,
+// what-it-does, feature count); clicking a module opens a detail MODAL where you
+// manage its features — so you can get specific without the list turning into a
+// wall of nested boxes.
 import { useEffect, useState, useCallback } from "react";
 import { createClient } from "@/lib/supabase/client";
 import { getOrgId } from "@/lib/org";
-import { Section, Banner, ConfirmDialog } from "@/components/ui";
+import { Section, Banner, Modal, ConfirmDialog } from "@/components/ui";
 
 type Module = { id: string; name: string; description: string | null };
-type Feature = { id: string; module_id: string; name: string };
+type Feature = { id: string; module_id: string; name: string; description: string | null };
 
 export default function Modules({ productId }: { productId: string }) {
   const supabase = createClient();
   const [modules, setModules] = useState<Module[]>([]);
   const [features, setFeatures] = useState<Feature[]>([]);
-  const [open, setOpen] = useState<Record<string, boolean>>({});
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
   const [addingModule, setAddingModule] = useState(false);
   const [moduleName, setModuleName] = useState("");
   const [moduleDesc, setModuleDesc] = useState(""); // what the module does
-  const [addingFeatureFor, setAddingFeatureFor] = useState<string | null>(null);
-  const [featureName, setFeatureName] = useState("");
+  const [openModuleId, setOpenModuleId] = useState<string | null>(null); // detail modal
   // staged deletions → confirmed via in-app dialog (not a browser popup)
   const [delModule, setDelModule] = useState<Module | null>(null);
-  const [delFeature, setDelFeature] = useState<Feature | null>(null);
 
   // Surface the real PostgrestError (message+details+hint+code), not a generic
   // "Could not save" — the object Supabase throws isn't an Error instance.
@@ -45,7 +43,7 @@ export default function Modules({ productId }: { productId: string }) {
     if (mErr) { setError(errText(mErr, "Could not load modules.")); setLoading(false); return; }
     const ids = (mods ?? []).map((m) => m.id);
     const { data: feats } = ids.length
-      ? await supabase.from("features").select("id, module_id, name").in("module_id", ids).order("created_at")
+      ? await supabase.from("features").select("id, module_id, name, description").in("module_id", ids).order("created_at")
       : { data: [] as Feature[] };
     setModules(mods ?? []);
     setFeatures(feats ?? []);
@@ -69,33 +67,18 @@ export default function Modules({ productId }: { productId: string }) {
     } catch (e) { setError(errText(e, "Could not add module.")); }
   }
 
-  async function addFeature(e: React.FormEvent, moduleId: string) {
-    e.preventDefault(); setError(null);
-    if (!featureName.trim()) return;
-    try {
-      const orgId = await getOrgId();
-      if (!orgId) throw new Error("Could not resolve your organization.");
-      const { error } = await supabase.from("features").insert({ org_id: orgId, module_id: moduleId, name: featureName.trim() });
-      if (error) throw error;
-      setAddingFeatureFor(null); setFeatureName(""); setOpen((o) => ({ ...o, [moduleId]: true })); await load();
-    } catch (e) { setError(errText(e, "Could not add feature.")); }
-  }
-
   async function removeModule() {
     const m = delModule; if (!m) return;
     setDelModule(null); setError(null);
     // FK is ON DELETE CASCADE → this also removes the module's features.
     const { error } = await supabase.from("modules").delete().eq("id", m.id);
-    if (error) setError(errText(error, "Could not delete module.")); else await load();
-  }
-  async function removeFeature() {
-    const f = delFeature; if (!f) return;
-    setDelFeature(null); setError(null);
-    const { error } = await supabase.from("features").delete().eq("id", f.id);
-    if (error) setError(errText(error, "Could not delete feature.")); else await load();
+    if (error) { setError(errText(error, "Could not delete module.")); return; }
+    if (openModuleId === m.id) setOpenModuleId(null);
+    await load();
   }
 
   const featuresOf = (mid: string) => features.filter((f) => f.module_id === mid);
+  const openModule = modules.find((m) => m.id === openModuleId) ?? null;
 
   return (
     <Section label="Modules & features" action={!addingModule ? <button className="btn btn-secondary btn-sm" onClick={() => setAddingModule(true)}>+ Add module</button> : undefined}>
@@ -110,6 +93,99 @@ export default function Modules({ productId }: { productId: string }) {
           onCancel={() => setDelModule(null)}
         />
       )}
+
+      {addingModule && (
+        <form onSubmit={addModule} className="card card-pad" style={{ marginBottom: "var(--sp-3)" }}>
+          <label className="field" style={{ marginBottom: 8 }}><span className="t-label">Module name</span>
+            <input className="input" autoFocus placeholder="e.g. Intelligence" value={moduleName} onChange={(e) => setModuleName(e.target.value)} /></label>
+          <label className="field" style={{ marginBottom: 8 }}><span className="t-label">What it does</span>
+            <textarea className="textarea" rows={2} placeholder="What this module does and why it matters." value={moduleDesc} onChange={(e) => setModuleDesc(e.target.value)} /></label>
+          <div className="row gap-2"><button className="btn btn-sm" type="submit">Add</button><button className="btn btn-secondary btn-sm" type="button" onClick={() => { setAddingModule(false); setModuleName(""); setModuleDesc(""); }}>Cancel</button></div>
+        </form>
+      )}
+
+      {loading ? <div className="t-sub t-muted">Loading…</div>
+        : modules.length === 0 && !addingModule ? (
+          <div className="t-sub t-muted">No modules yet. Modules group the product&apos;s features — click one to add features.</div>
+        ) : (
+          <div className="stack-3">
+            {modules.map((m) => {
+              const n = featuresOf(m.id).length;
+              return (
+                <div key={m.id} className="card card-pad row-between" style={{ alignItems: "flex-start", gap: 12 }}>
+                  <button onClick={() => setOpenModuleId(m.id)} style={{ background: "none", border: "none", padding: 0, cursor: "pointer", textAlign: "left", flex: 1, minWidth: 0 }}>
+                    <span className="row gap-2" style={{ alignItems: "center" }}>
+                      <span style={{ fontSize: 14.5, fontWeight: 640 }}>{m.name}</span>
+                      <span className="chip">{n} feature{n === 1 ? "" : "s"}</span>
+                    </span>
+                    {m.description && <span className="t-sub t-muted" style={{ display: "block", fontSize: 12.5, marginTop: 3, lineHeight: 1.5 }}>{m.description}</span>}
+                    <span className="t-sub" style={{ display: "block", fontSize: 11.5, marginTop: 5, color: "var(--ac-text)", fontWeight: 600 }}>Open to manage features →</span>
+                  </button>
+                  <button onClick={() => setDelModule(m)} title={`Delete ${m.name}`} aria-label={`Delete module ${m.name}`}
+                    style={{ background: "none", border: "none", cursor: "pointer", fontSize: 16, lineHeight: 1, color: "var(--tm)", padding: "0 2px", flexShrink: 0 }}>×</button>
+                </div>
+              );
+            })}
+          </div>
+        )}
+
+      {/* Module detail — manage features in a focused modal so the list stays clean */}
+      {openModule && (
+        <ModuleDetail
+          module={openModule}
+          features={featuresOf(openModule.id)}
+          onClose={() => setOpenModuleId(null)}
+          reload={load}
+          errText={errText}
+          setError={setError}
+        />
+      )}
+    </Section>
+  );
+}
+
+// ---- The per-module feature manager (in a modal) ---------------------------
+function ModuleDetail({ module, features, onClose, reload, errText, setError }: {
+  module: Module;
+  features: Feature[];
+  onClose: () => void;
+  reload: () => Promise<void>;
+  errText: (e: unknown, fallback: string) => string;
+  setError: (s: string | null) => void;
+}) {
+  const supabase = createClient();
+  const [adding, setAdding] = useState(false);
+  const [name, setName] = useState("");
+  const [desc, setDesc] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [delFeature, setDelFeature] = useState<Feature | null>(null);
+
+  async function addFeature(e: React.FormEvent) {
+    e.preventDefault(); setError(null);
+    if (!name.trim()) return;
+    setBusy(true);
+    try {
+      const orgId = await getOrgId();
+      if (!orgId) throw new Error("Could not resolve your organization.");
+      const { error } = await supabase.from("features").insert({
+        org_id: orgId, module_id: module.id,
+        name: name.trim(), description: desc.trim() || null,
+      });
+      if (error) throw error;
+      setAdding(false); setName(""); setDesc(""); await reload();
+    } catch (e) { setError(errText(e, "Could not add feature.")); }
+    finally { setBusy(false); }
+  }
+
+  async function removeFeature() {
+    const f = delFeature; if (!f) return;
+    setDelFeature(null); setError(null);
+    const { error } = await supabase.from("features").delete().eq("id", f.id);
+    if (error) setError(errText(error, "Could not delete feature.")); else await reload();
+  }
+
+  return (
+    <Modal open onClose={onClose} title={module.name} width={620}>
       {delFeature && (
         <ConfirmDialog
           title="Delete feature?"
@@ -120,68 +196,39 @@ export default function Modules({ productId }: { productId: string }) {
         />
       )}
 
-      {addingModule && (
-        <form onSubmit={addModule} className="card card-pad" style={{ marginBottom: "var(--sp-3)" }}>
-          <label className="field" style={{ marginBottom: 8 }}><span className="t-label">Module name</span>
-            <input className="input" autoFocus placeholder="e.g. Signals" value={moduleName} onChange={(e) => setModuleName(e.target.value)} /></label>
+      {module.description && <p className="t-sub t-muted" style={{ marginTop: 0, marginBottom: 16, lineHeight: 1.55 }}>{module.description}</p>}
+
+      <div className="row-between" style={{ marginBottom: 10 }}>
+        <span className="t-label">Features · {features.length}</span>
+        {!adding && <button className="btn btn-sm" onClick={() => { setAdding(true); setName(""); setDesc(""); }}>+ Add feature</button>}
+      </div>
+
+      {adding && (
+        <form onSubmit={addFeature} className="card card-pad" style={{ marginBottom: 12 }}>
+          <label className="field" style={{ marginBottom: 8 }}><span className="t-label">Feature name</span>
+            <input className="input" autoFocus placeholder="e.g. Honest confidence engine" value={name} onChange={(e) => setName(e.target.value)} /></label>
           <label className="field" style={{ marginBottom: 8 }}><span className="t-label">What it does</span>
-            <textarea className="textarea" rows={2} placeholder="What this module does and why it matters." value={moduleDesc} onChange={(e) => setModuleDesc(e.target.value)} /></label>
-          <div className="row gap-2"><button className="btn btn-sm" type="submit">Add</button><button className="btn btn-secondary btn-sm" type="button" onClick={() => { setAddingModule(false); setModuleName(""); setModuleDesc(""); }}>Cancel</button></div>
+            <textarea className="textarea" rows={2} placeholder="What this feature does and why it matters." value={desc} onChange={(e) => setDesc(e.target.value)} /></label>
+          <div className="row gap-2"><button className="btn btn-sm" type="submit" disabled={busy}>{busy ? "Adding…" : "Add"}</button><button className="btn btn-secondary btn-sm" type="button" onClick={() => setAdding(false)}>Cancel</button></div>
         </form>
       )}
 
-      {loading ? <div className="t-sub t-muted">Loading…</div>
-        : modules.length === 0 && !addingModule ? (
-          <div className="t-sub t-muted">No modules yet. Modules group the product&apos;s features.</div>
-        ) : (
-          <div className="card">
-            {modules.map((m, i) => {
-              const feats = featuresOf(m.id);
-              const isOpen = open[m.id];
-              return (
-                <div key={m.id} style={{ borderTop: i === 0 ? "none" : "1px solid var(--border)" }}>
-                  <div className="row-between" style={{ padding: "12px 16px", alignItems: "flex-start" }}>
-                    <button onClick={() => setOpen((o) => ({ ...o, [m.id]: !o[m.id] }))}
-                      style={{ background: "none", border: "none", display: "flex", alignItems: "flex-start", gap: 8, cursor: "pointer", padding: 0, textAlign: "left" }}>
-                      <span className="t-muted" style={{ fontSize: 10, width: 10, marginTop: 4 }}>{feats.length ? (isOpen ? "▾" : "▸") : "·"}</span>
-                      <span>
-                        <span className="row gap-2" style={{ alignItems: "center" }}>
-                          <span style={{ fontSize: 14, fontWeight: 600 }}>{m.name}</span>
-                          <span className="chip">{feats.length} feature{feats.length === 1 ? "" : "s"}</span>
-                        </span>
-                        {m.description && <span className="t-sub t-muted" style={{ display: "block", fontSize: 12.5, marginTop: 3, lineHeight: 1.5 }}>{m.description}</span>}
-                      </span>
-                    </button>
-                    <div className="row gap-2" style={{ flexShrink: 0, alignItems: "center" }}>
-                      <button className="btn btn-secondary btn-sm" onClick={() => { setAddingFeatureFor(m.id); setFeatureName(""); setOpen((o) => ({ ...o, [m.id]: true })); }}>+ Feature</button>
-                      <button onClick={() => setDelModule(m)} title={`Delete ${m.name}`} aria-label={`Delete module ${m.name}`}
-                        style={{ background: "none", border: "none", cursor: "pointer", fontSize: 16, lineHeight: 1, color: "var(--tm)", padding: "0 2px" }}>×</button>
-                    </div>
-                  </div>
-                  {isOpen && (
-                    <div style={{ padding: "0 16px 12px 34px" }}>
-                      {feats.map((f) => (
-                        <div key={f.id} className="row-between t-body" style={{ padding: "6px 0", borderTop: "1px solid var(--border)", alignItems: "center" }}>
-                          <span>{f.name}</span>
-                          <button onClick={() => setDelFeature(f)} title={`Delete ${f.name}`} aria-label={`Delete feature ${f.name}`}
-                            style={{ background: "none", border: "none", cursor: "pointer", fontSize: 14, lineHeight: 1, color: "var(--tm)", padding: "0 2px", flexShrink: 0 }}>×</button>
-                        </div>
-                      ))}
-                      {addingFeatureFor === m.id && (
-                        <form onSubmit={(e) => addFeature(e, m.id)} className="row gap-2" style={{ marginTop: 8 }}>
-                          <input className="input" autoFocus placeholder="Feature name" value={featureName} onChange={(e) => setFeatureName(e.target.value)} style={{ flex: 1 }} />
-                          <button className="btn btn-sm" type="submit">Add</button>
-                          <button className="btn btn-secondary btn-sm" type="button" onClick={() => setAddingFeatureFor(null)}>Cancel</button>
-                        </form>
-                      )}
-                      {feats.length === 0 && addingFeatureFor !== m.id && <div className="t-sub t-muted" style={{ padding: "6px 0" }}>No features yet.</div>}
-                    </div>
-                  )}
-                </div>
-              );
-            })}
-          </div>
-        )}
-    </Section>
+      {features.length === 0 && !adding ? (
+        <div className="t-sub t-muted" style={{ padding: "8px 0" }}>No features yet. Add the specific features this module delivers.</div>
+      ) : (
+        <div className="card" style={{ overflow: "hidden" }}>
+          {features.map((f, i) => (
+            <div key={f.id} className="row-between" style={{ padding: "10px 14px", borderTop: i === 0 ? "none" : "1px solid var(--border)", alignItems: "flex-start", gap: 10 }}>
+              <div style={{ minWidth: 0 }}>
+                <div style={{ fontSize: 13.5, fontWeight: 620 }}>{f.name}</div>
+                {f.description && <div className="t-sub t-muted" style={{ fontSize: 12.5, marginTop: 2, lineHeight: 1.5 }}>{f.description}</div>}
+              </div>
+              <button onClick={() => setDelFeature(f)} title={`Delete ${f.name}`} aria-label={`Delete feature ${f.name}`}
+                style={{ background: "none", border: "none", cursor: "pointer", fontSize: 15, lineHeight: 1, color: "var(--tm)", padding: "0 2px", flexShrink: 0 }}>×</button>
+            </div>
+          ))}
+        </div>
+      )}
+    </Modal>
   );
 }
