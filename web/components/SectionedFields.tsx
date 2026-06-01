@@ -85,16 +85,23 @@ export default function SectionedFields({ target }: { target: Target }) {
     try {
       const orgId = await getOrgId();
       if (!orgId) throw new Error("Could not resolve your organization.");
-      const byKey = new Map(fields.map((f) => [f.field_key, f]));
+      // Decide insert-vs-update against the DB's CURRENT state, not possibly-stale
+      // client state. A row can already exist for a field_key (e.g. filled in an
+      // earlier session) and (product_id, field_key) is uniquely constrained —
+      // re-querying avoids a duplicate-key INSERT. (Can't use upsert: the unique
+      // index is partial, which ON CONFLICT can't target.)
+      const { data: live } = await supabase.from("record_fields")
+        .select("id, field_key").eq(fk(target), target.id);
+      const byKey = new Map((live ?? []).map((f) => [f.field_key, f.id]));
       const inserts: Record<string, unknown>[] = [];
       const updates: { id: string; value: string }[] = [];
-      let pos = fields.length;
+      let pos = (live ?? []).length;
       for (const s of missing) {
         for (const f of s.fields) {
           const v = (recDrafts[f.key] ?? "").trim();
           if (!v) continue; // only persist what was actually filled
-          const existing = byKey.get(f.key);
-          if (existing) updates.push({ id: existing.id, value: v });
+          const existingId = byKey.get(f.key);
+          if (existingId) updates.push({ id: existingId, value: v });
           else inserts.push({ org_id: orgId, [fk(target)]: target.id, field_key: f.key, label: f.label, section: s.section, value: v, position: pos++ });
         }
       }
@@ -113,7 +120,14 @@ export default function SectionedFields({ target }: { target: Target }) {
     try {
       const orgId = await getOrgId();
       if (!orgId) throw new Error("Could not resolve your organization.");
-      const key = label.toLowerCase().replace(/[^a-z0-9]+/g, "_").replace(/^_|_$/g, "") || `field_${Date.now()}`;
+      let key = label.toLowerCase().replace(/[^a-z0-9]+/g, "_").replace(/^_|_$/g, "") || `field_${Date.now()}`;
+      // (product_id, field_key) is unique. If a row with this derived key already
+      // exists (e.g. re-adding a label that matches an existing field), suffix the
+      // key so the add doesn't collide — the label can repeat, the key can't.
+      const { data: live } = await supabase.from("record_fields")
+        .select("field_key").eq(fk(target), target.id);
+      const taken = new Set((live ?? []).map((f) => f.field_key));
+      if (taken.has(key)) key = `${key}_${Date.now().toString(36)}`;
       const { error } = await supabase.from("record_fields").insert({
         org_id: orgId, [fk(target)]: target.id, field_key: key, label,
         section: sectionName === UNGROUPED ? null : sectionName,
@@ -121,7 +135,7 @@ export default function SectionedFields({ target }: { target: Target }) {
         metric_unit: newKind === "metric" ? (newUnit.trim() || null) : null,
         // a metric field carries no prose value — its data lives in record_metrics
         value: newKind === "metric" ? null : (newVal.trim() || null),
-        position: fields.length,
+        position: (live ?? []).length,
       });
       if (error) throw error;
       setAddingIn(null); setNewLabel(""); setNewVal(""); setNewKind("narrative"); setNewUnit("");
