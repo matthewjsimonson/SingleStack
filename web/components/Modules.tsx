@@ -38,7 +38,8 @@ export default function Modules({ productId }: { productId: string }) {
   }
 
   const load = useCallback(async () => {
-    const { data: mods } = await supabase.from("modules").select("id, name, description").eq("product_id", productId).order("position").order("created_at");
+    const { data: mods, error: mErr } = await supabase.from("modules").select("id, name, description").eq("product_id", productId).order("created_at");
+    if (mErr) { setError(errText(mErr, "Could not load modules.")); setLoading(false); return; }
     const ids = (mods ?? []).map((m) => m.id);
     const { data: feats } = ids.length
       ? await supabase.from("features").select("id, module_id, name").in("module_id", ids).order("created_at")
