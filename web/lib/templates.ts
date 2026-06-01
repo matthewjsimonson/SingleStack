@@ -44,15 +44,9 @@ export const PRODUCT_TEMPLATE: TemplateSection[] = [
       { key: "performance", label: "Performance & scale", placeholder: "Latency, throughput, reliability targets." },
     ],
   },
-  {
-    section: "Proof",
-    blurb: "Evidence the product delivers.",
-    fields: [
-      { key: "key_metrics", label: "Key metrics", placeholder: "The numbers that prove value (adoption, outcomes)." },
-      { key: "customers", label: "Reference customers", placeholder: "Named accounts and use cases." },
-      { key: "outcomes", label: "Customer outcomes", placeholder: "Concrete results customers achieve." },
-    ],
-  },
+  // Note: market-facing PROOF (metrics, reference customers, outcomes) lives on
+  // the GTM record — it's how the product is proven TO THE MARKET, not what it is.
+  // Per-ship product validation lives on Build items' "Proof" section.
 ];
 
 // ---- GTM RECORD: how the product goes to market ----------------------------
@@ -74,7 +68,6 @@ export const GTM_TEMPLATE: TemplateSection[] = [
     fields: [
       { key: "value_prop", label: "Value proposition", placeholder: "The core promise in one or two sentences." },
       { key: "pillars", label: "Message pillars", placeholder: "The 2–4 themes everything ladders up to." },
-      { key: "proof_points", label: "Proof points", placeholder: "Evidence that backs the claims." },
       { key: "elevator_pitch", label: "Elevator pitch", placeholder: "The 30-second version." },
       { key: "tagline", label: "Tagline", placeholder: "The one-liner." },
     ],
@@ -108,6 +101,16 @@ export const GTM_TEMPLATE: TemplateSection[] = [
       { key: "pricing_model", label: "Pricing model", placeholder: "How it's packaged and priced." },
       { key: "channels", label: "Channels", placeholder: "Where you reach buyers." },
       { key: "campaigns", label: "Active campaigns", placeholder: "What's running now." },
+    ],
+  },
+  {
+    section: "Proof",
+    blurb: "The evidence that backs the story — to the market.",
+    fields: [
+      { key: "proof_points", label: "Proof points", placeholder: "Evidence that backs the claims." },
+      { key: "key_metrics", label: "Key metrics", placeholder: "The numbers that prove value (adoption, outcomes)." },
+      { key: "customers", label: "Reference customers", placeholder: "Named accounts and use cases." },
+      { key: "outcomes", label: "Customer outcomes", placeholder: "Concrete results customers achieve." },
     ],
   },
 ];

@@ -26,6 +26,7 @@ person at the keyboard and Claude.
 | 1 | bring-up | `/signals` | UX | P1 | Checklist said "hit Synthesize as the hard gate" but the button is `disabled` until ≥1 signal exists (`SignalsView.tsx:285`) — impossible on an empty workspace. Sequencing bug in the playbook. Fixed: bring-up now says seed 2–3 signals first, then Synthesize. | fixed `7d343ef→` |
 | 2 | 1 | `/records/[id]` product → Market & positioning | SIGNAL | P1 | Product record's "Market & positioning" section (Category, Positioning, Differentiation, ICP, Pricing) is really GTM content & overlapped GTM record fields → duplication/drift risk. Decided: clean separation, one home per field. Done: Category→Product Overview; Positioning→GTM Company narrative; ICP→GTM "Personas & ICP"; Pricing→GTM Channels & motion; removed Product "Market & positioning" section. No data loss (SectionedFields renders all filled DB fields regardless of template). | fixed |
 | 3 | 1 | product record → Category field | BUG | P2 | Typo in entered content: "Product Leg Growth Platform" → should be "Product-Led Growth Platform". User-side fix on re-entry. | flagged |
+| 4 | 1 | product record → Proof section | SIGNAL | P1 | Same root as #2: Product's "Proof" section (Key metrics, Reference customers, Customer outcomes) is market-facing sales proof, not what-it-is. Moved to a consolidated GTM "Proof" section (also pulled `proof_points` out of GTM Product messaging into it — one proof home, no drift). Product per-ship validation stays on Build items' Proof section. | fixed |
 
 ---
 
