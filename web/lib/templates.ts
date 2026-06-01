@@ -15,21 +15,14 @@ export const PRODUCT_TEMPLATE: TemplateSection[] = [
       { key: "what_it_is", label: "What it is", placeholder: "A clear one-paragraph description of the product." },
       { key: "who_its_for", label: "Who it's for", placeholder: "Primary users and buyers, and the context they're in." },
       { key: "problem", label: "Problem it solves", placeholder: "The core problem and why it matters now." },
+      { key: "category", label: "Category", placeholder: "The market category it competes in." },
       { key: "strategic_intent", label: "Strategic intent", placeholder: "The bet — where this product takes the company." },
       { key: "vision", label: "Vision", placeholder: "The 2–3 year north star for the product." },
     ],
   },
-  {
-    section: "Market & positioning",
-    blurb: "Where it sits in the market and how it wins.",
-    fields: [
-      { key: "category", label: "Category", placeholder: "The market category it competes in." },
-      { key: "positioning", label: "Positioning", placeholder: "How it's positioned vs. alternatives." },
-      { key: "differentiation", label: "Differentiation", placeholder: "The defensible wedge — why it wins." },
-      { key: "icp", label: "Ideal customer profile", placeholder: "The accounts this is built for." },
-      { key: "pricing_model", label: "Pricing model", placeholder: "How it's packaged and priced." },
-    ],
-  },
+  // Note: market-facing fields (positioning, differentiation, ICP, pricing) live
+  // on the GTM record — single home per field, no cross-record drift. The product
+  // record stays the truth of what the product IS; GTM owns how it's sold.
   {
     section: "Capabilities",
     blurb: "What the product does — its modules and headline capabilities.",
@@ -71,6 +64,7 @@ export const GTM_TEMPLATE: TemplateSection[] = [
       { key: "narrative", label: "Narrative", placeholder: "The overarching story and worldview." },
       { key: "category_pov", label: "Category POV", placeholder: "Your point of view on where the category is going." },
       { key: "vision", label: "Vision", placeholder: "Where this is going and why it matters now." },
+      { key: "positioning", label: "Positioning", placeholder: "How it's positioned vs. alternatives." },
       { key: "differentiation", label: "Differentiation", placeholder: "What makes this defensibly different." },
     ],
   },
@@ -86,9 +80,10 @@ export const GTM_TEMPLATE: TemplateSection[] = [
     ],
   },
   {
-    section: "Personas",
-    blurb: "Who you're speaking to and what moves them.",
+    section: "Personas & ICP",
+    blurb: "Who you're built for, who you're speaking to, and what moves them.",
     fields: [
+      { key: "icp", label: "Ideal customer profile", placeholder: "The accounts this is built for." },
       { key: "primary_persona", label: "Primary persona", placeholder: "Role, goals, pains, what they care about." },
       { key: "economic_buyer", label: "Economic buyer", placeholder: "Who owns the budget and their priorities." },
       { key: "buying_committee", label: "Buying committee", placeholder: "Other roles involved in the decision." },
@@ -107,9 +102,10 @@ export const GTM_TEMPLATE: TemplateSection[] = [
   },
   {
     section: "Channels & motion",
-    blurb: "How it reaches and converts buyers.",
+    blurb: "How it reaches, prices, and converts buyers.",
     fields: [
       { key: "gtm_motion", label: "GTM motion", placeholder: "PLG, sales-led, partner — the motion that fits." },
+      { key: "pricing_model", label: "Pricing model", placeholder: "How it's packaged and priced." },
       { key: "channels", label: "Channels", placeholder: "Where you reach buyers." },
       { key: "campaigns", label: "Active campaigns", placeholder: "What's running now." },
     ],
