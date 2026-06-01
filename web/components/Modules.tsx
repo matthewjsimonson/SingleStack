@@ -7,7 +7,7 @@
 import { useEffect, useState, useCallback } from "react";
 import { createClient } from "@/lib/supabase/client";
 import { getOrgId } from "@/lib/org";
-import { Section, Banner } from "@/components/ui";
+import { Section, Banner, ConfirmDialog } from "@/components/ui";
 
 type Module = { id: string; name: string; description: string | null };
 type Feature = { id: string; module_id: string; name: string };
@@ -25,6 +25,9 @@ export default function Modules({ productId }: { productId: string }) {
   const [moduleDesc, setModuleDesc] = useState(""); // what the module does
   const [addingFeatureFor, setAddingFeatureFor] = useState<string | null>(null);
   const [featureName, setFeatureName] = useState("");
+  // staged deletions → confirmed via in-app dialog (not a browser popup)
+  const [delModule, setDelModule] = useState<Module | null>(null);
+  const [delFeature, setDelFeature] = useState<Feature | null>(null);
 
   // Surface the real PostgrestError (message+details+hint+code), not a generic
   // "Could not save" — the object Supabase throws isn't an Error instance.
@@ -78,11 +81,44 @@ export default function Modules({ productId }: { productId: string }) {
     } catch (e) { setError(errText(e, "Could not add feature.")); }
   }
 
+  async function removeModule() {
+    const m = delModule; if (!m) return;
+    setDelModule(null); setError(null);
+    // FK is ON DELETE CASCADE → this also removes the module's features.
+    const { error } = await supabase.from("modules").delete().eq("id", m.id);
+    if (error) setError(errText(error, "Could not delete module.")); else await load();
+  }
+  async function removeFeature() {
+    const f = delFeature; if (!f) return;
+    setDelFeature(null); setError(null);
+    const { error } = await supabase.from("features").delete().eq("id", f.id);
+    if (error) setError(errText(error, "Could not delete feature.")); else await load();
+  }
+
   const featuresOf = (mid: string) => features.filter((f) => f.module_id === mid);
 
   return (
     <Section label="Modules & features" action={!addingModule ? <button className="btn btn-secondary btn-sm" onClick={() => setAddingModule(true)}>+ Add module</button> : undefined}>
       <Banner>{error}</Banner>
+
+      {delModule && (
+        <ConfirmDialog
+          title="Delete module?"
+          message={<>Delete <b>{delModule.name}</b>{featuresOf(delModule.id).length > 0 ? <> and its {featuresOf(delModule.id).length} feature{featuresOf(delModule.id).length === 1 ? "" : "s"}</> : null}? This can&rsquo;t be undone.</>}
+          confirmLabel="Delete"
+          onConfirm={removeModule}
+          onCancel={() => setDelModule(null)}
+        />
+      )}
+      {delFeature && (
+        <ConfirmDialog
+          title="Delete feature?"
+          message={<>Delete <b>{delFeature.name}</b>? This can&rsquo;t be undone.</>}
+          confirmLabel="Delete"
+          onConfirm={removeFeature}
+          onCancel={() => setDelFeature(null)}
+        />
+      )}
 
       {addingModule && (
         <form onSubmit={addModule} className="card card-pad" style={{ marginBottom: "var(--sp-3)" }}>
@@ -116,12 +152,20 @@ export default function Modules({ productId }: { productId: string }) {
                         {m.description && <span className="t-sub t-muted" style={{ display: "block", fontSize: 12.5, marginTop: 3, lineHeight: 1.5 }}>{m.description}</span>}
                       </span>
                     </button>
-                    <button className="btn btn-secondary btn-sm" style={{ flexShrink: 0 }} onClick={() => { setAddingFeatureFor(m.id); setFeatureName(""); setOpen((o) => ({ ...o, [m.id]: true })); }}>+ Feature</button>
+                    <div className="row gap-2" style={{ flexShrink: 0, alignItems: "center" }}>
+                      <button className="btn btn-secondary btn-sm" onClick={() => { setAddingFeatureFor(m.id); setFeatureName(""); setOpen((o) => ({ ...o, [m.id]: true })); }}>+ Feature</button>
+                      <button onClick={() => setDelModule(m)} title={`Delete ${m.name}`} aria-label={`Delete module ${m.name}`}
+                        style={{ background: "none", border: "none", cursor: "pointer", fontSize: 16, lineHeight: 1, color: "var(--tm)", padding: "0 2px" }}>×</button>
+                    </div>
                   </div>
                   {isOpen && (
                     <div style={{ padding: "0 16px 12px 34px" }}>
                       {feats.map((f) => (
-                        <div key={f.id} className="t-body" style={{ padding: "6px 0", borderTop: "1px solid var(--border)" }}>{f.name}</div>
+                        <div key={f.id} className="row-between t-body" style={{ padding: "6px 0", borderTop: "1px solid var(--border)", alignItems: "center" }}>
+                          <span>{f.name}</span>
+                          <button onClick={() => setDelFeature(f)} title={`Delete ${f.name}`} aria-label={`Delete feature ${f.name}`}
+                            style={{ background: "none", border: "none", cursor: "pointer", fontSize: 14, lineHeight: 1, color: "var(--tm)", padding: "0 2px", flexShrink: 0 }}>×</button>
+                        </div>
                       ))}
                       {addingFeatureFor === m.id && (
                         <form onSubmit={(e) => addFeature(e, m.id)} className="row gap-2" style={{ marginTop: 8 }}>
