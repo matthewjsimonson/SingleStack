@@ -50,67 +50,49 @@ export const PRODUCT_TEMPLATE: TemplateSection[] = [
 ];
 
 // ---- GTM RECORD: how the product goes to market ----------------------------
+// 12 CORNERSTONE fields — the strategic INPUTS an AI needs to reason about GTM
+// and drive the loop (signals → strategy → battlecards/content/enablement).
+// Deliberately excludes:
+//   • AI-generated OUTPUTS (tagline, elevator pitch, battlecard summary) — derived
+//     from these inputs, not entered.
+//   • Things that are their own ENTITIES with dedicated screens (competitors →
+//     /competitive, campaigns → /campaigns) — not duplicated as record text.
+//   • DUPLICATES (narrative ≈ category POV; vision lives on the product record).
+//   • PROOF/metrics — now live, sourced metric fields, not static prose.
+//   • loss_themes — better captured as win-loss SIGNALS in the living loop.
 export const GTM_TEMPLATE: TemplateSection[] = [
   {
-    section: "Company narrative",
-    blurb: "The story and worldview the offering sits inside.",
+    section: "Positioning",
+    blurb: "Where you sit and why you win — the strategic frame.",
     fields: [
-      { key: "narrative", label: "Narrative", placeholder: "The overarching story and worldview." },
-      { key: "category_pov", label: "Category POV", placeholder: "Your point of view on where the category is going." },
-      { key: "vision", label: "Vision", placeholder: "Where this is going and why it matters now." },
-      { key: "positioning", label: "Positioning", placeholder: "How it's positioned vs. alternatives." },
-      { key: "differentiation", label: "Differentiation", placeholder: "What makes this defensibly different." },
+      { key: "category_pov", label: "Category POV", placeholder: "Your point of view on where the category is going and why now." },
+      { key: "positioning", label: "Positioning", placeholder: "How it's positioned vs. the alternatives a buyer is weighing." },
+      { key: "differentiation", label: "Differentiation", placeholder: "The defensible wedge — why you win when you win." },
     ],
   },
   {
-    section: "Product messaging",
-    blurb: "How the value is expressed to the market.",
+    section: "Messaging",
+    blurb: "The core promise and the themes everything ladders to.",
     fields: [
       { key: "value_prop", label: "Value proposition", placeholder: "The core promise in one or two sentences." },
-      { key: "pillars", label: "Message pillars", placeholder: "The 2–4 themes everything ladders up to." },
-      { key: "elevator_pitch", label: "Elevator pitch", placeholder: "The 30-second version." },
-      { key: "tagline", label: "Tagline", placeholder: "The one-liner." },
+      { key: "pillars", label: "Message pillars", placeholder: "The 2–4 themes all messaging ladders up to." },
     ],
   },
   {
-    section: "Personas & ICP",
-    blurb: "Who you're built for, who you're speaking to, and what moves them.",
+    section: "Buyer",
+    blurb: "Who it's for and the people who decide. Add a field per persona — champion, economic buyer, user, etc.",
     fields: [
-      { key: "icp", label: "Ideal customer profile", placeholder: "The accounts this is built for." },
-      { key: "primary_persona", label: "Primary persona", placeholder: "Role, goals, pains, what they care about." },
-      { key: "economic_buyer", label: "Economic buyer", placeholder: "Who owns the budget and their priorities." },
-      { key: "buying_committee", label: "Buying committee", placeholder: "Other roles involved in the decision." },
-      { key: "objections", label: "Objections & answers", placeholder: "Common objections and how to handle them." },
+      { key: "icp", label: "Ideal customer profile", placeholder: "The accounts this is built for — and how to qualify them." },
+      { key: "primary_persona", label: "Primary persona", placeholder: "The main person you speak to: role, goals, pains. Add more personas with '+ Field' (economic buyer, end user, …)." },
     ],
   },
   {
-    section: "Competitive",
-    blurb: "How you stack up and where you win.",
+    section: "Motion",
+    blurb: "How you win and how you reach and price the buyer.",
     fields: [
-      { key: "main_competitors", label: "Main competitors", placeholder: "Who you're most often up against." },
-      { key: "win_themes", label: "Win themes", placeholder: "Why you win when you win." },
-      { key: "loss_themes", label: "Loss themes", placeholder: "Why you lose when you lose — and the counter." },
-      { key: "battlecard", label: "Battlecard summary", placeholder: "The head-to-head talk track." },
-    ],
-  },
-  {
-    section: "Channels & motion",
-    blurb: "How it reaches, prices, and converts buyers.",
-    fields: [
-      { key: "gtm_motion", label: "GTM motion", placeholder: "PLG, sales-led, partner — the motion that fits." },
-      { key: "pricing_model", label: "Pricing model", placeholder: "How it's packaged and priced." },
-      { key: "channels", label: "Channels", placeholder: "Where you reach buyers." },
-      { key: "campaigns", label: "Active campaigns", placeholder: "What's running now." },
-    ],
-  },
-  {
-    section: "Proof",
-    blurb: "The evidence that backs the story — to the market.",
-    fields: [
-      { key: "proof_points", label: "Proof points", placeholder: "Evidence that backs the claims." },
-      { key: "key_metrics", label: "Key metrics", placeholder: "The numbers that prove value (adoption, outcomes)." },
-      { key: "customers", label: "Reference customers", placeholder: "Named accounts and use cases." },
-      { key: "outcomes", label: "Customer outcomes", placeholder: "Concrete results customers achieve." },
+      { key: "win_themes", label: "Win themes", placeholder: "The recurring reasons you win — the engine for battlecards & content." },
+      { key: "gtm_motion", label: "GTM motion", placeholder: "PLG, sales-led, partner — the motion that fits, and why." },
+      { key: "pricing_model", label: "Pricing model", placeholder: "How it's packaged and priced — and how that shapes the motion." },
     ],
   },
 ];

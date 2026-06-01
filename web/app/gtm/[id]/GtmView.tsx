@@ -83,7 +83,7 @@ export default function GtmView({ gtmId }: { gtmId: string }) {
 
   return (
     <div>
-      <BackLink href={product ? `/records/${product.id}` : "/gtm"} label={product ? product.name : "GTM records"} />
+      <BackLink href="/gtm" label="GTM records" />
       <div className="row gap-2" style={{ marginBottom: 6 }}>
         <Chip tone="violet">GTM record</Chip>
         {product && <span className="t-sub t-muted">under {product.name}</span>}
