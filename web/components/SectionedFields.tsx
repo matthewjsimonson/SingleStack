@@ -58,10 +58,22 @@ export default function SectionedFields({ target }: { target: Target }) {
 
   useEffect(() => { load(); }, [load]);
 
+  // Surface the REAL cause. Supabase throws a PostgrestError object (not an Error
+  // instance), so `e instanceof Error` was hiding everything behind "Could not
+  // save". Pull message + code + details/hint so failures are diagnosable.
+  function errText(e: unknown, fallback: string): string {
+    if (e && typeof e === "object") {
+      const o = e as { message?: string; code?: string; details?: string; hint?: string };
+      const parts = [o.message, o.details, o.hint].filter(Boolean);
+      if (parts.length) return `${parts.join(" — ")}${o.code ? ` [${o.code}]` : ""}`;
+    }
+    return e instanceof Error ? e.message : fallback;
+  }
+
   async function save(id: string) {
     setError(null);
     const { error } = await supabase.from("record_fields").update({ value: draft }).eq("id", id);
-    if (error) setError(error.message);
+    if (error) { setError(errText(error, "Could not save.")); return; }
     setEditing(null);
     await load();
   }
@@ -90,7 +102,7 @@ export default function SectionedFields({ target }: { target: Target }) {
       for (const u of updates) { const { error } = await supabase.from("record_fields").update({ value: u.value }).eq("id", u.id); if (error) throw error; }
       setPanelOpen(false); setRecDrafts({});
       await load();
-    } catch (e) { setError(e instanceof Error ? e.message : "Could not save."); }
+    } catch (e) { setError(errText(e, "Could not save.")); }
     finally { setSaving(false); }
   }
 
@@ -114,7 +126,7 @@ export default function SectionedFields({ target }: { target: Target }) {
       if (error) throw error;
       setAddingIn(null); setNewLabel(""); setNewVal(""); setNewKind("narrative"); setNewUnit("");
       await load();
-    } catch (e) { setError(e instanceof Error ? e.message : "Could not add field."); }
+    } catch (e) { setError(errText(e, "Could not add field.")); }
   }
 
   if (loading) return <div className="t-sub t-muted">Loading…</div>;
