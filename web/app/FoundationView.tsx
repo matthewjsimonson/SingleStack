@@ -8,6 +8,7 @@ import { useEffect, useState, useCallback } from "react";
 import { useRouter } from "next/navigation";
 import { createClient } from "@/lib/supabase/client";
 import { useProductScope } from "@/lib/ProductContext";
+import { templateFor } from "@/lib/templates";
 import { PageHeader, Section } from "@/components/ui";
 import ExecutiveRow from "@/components/ExecutiveRow";
 import ReviewDrawer from "@/components/ReviewDrawer";
@@ -31,24 +32,42 @@ export default function FoundationView() {
     // signals to it (fixes the old org-wide average across all products). "All"
     // and "Company-wide" keep the org roll-up.
     const ofProduct = active !== "all" && active !== "company";
-    let fieldsQ = supabase.from("record_fields").select("value");
+    // Completeness is measured against the TEMPLATE's expected fields per record
+    // (not just rows that happen to exist — those only get created when filled, so
+    // the old "filled/existing" ratio falsely read 100% on a near-empty workspace).
+    let fieldsQ = supabase.from("record_fields").select("value, field_kind");
     let sigQ = supabase.from("signals").select("id", { count: "exact", head: true }).gte("observed_at", d7);
-    if (ofProduct) { fieldsQ = fieldsQ.eq("product_id", active); sigQ = sigQ.eq("product_id", active); }
-    const [{ count: pending }, { data: runs }, { count: sig7 }, { data: fields }, { data: cost }] = await Promise.all([
+    let prodQ = supabase.from("product_records").select("id", { count: "exact", head: true });
+    let gtmQ = supabase.from("gtm_records").select("id", { count: "exact", head: true });
+    if (ofProduct) {
+      fieldsQ = fieldsQ.eq("product_id", active);
+      sigQ = sigQ.eq("product_id", active);
+      prodQ = prodQ.eq("id", active);
+      gtmQ = gtmQ.eq("product_id", active);
+    }
+    const [{ count: pending }, { data: runs }, { count: sig7 }, { data: fields }, { data: cost }, { count: prodCount }, { count: gtmCount }] = await Promise.all([
       supabase.from("proposals").select("id", { count: "exact", head: true }).eq("status", "pending"),
       supabase.from("agent_runs").select("id, status, started_at").gte("started_at", d7),
       sigQ,
       fieldsQ,
       supabase.from("agent_runs").select("cost_usd").gte("started_at", d30),
+      prodQ,
+      gtmQ,
     ]);
-    const filled = (fields ?? []).filter((f) => f.value && (f.value as string).trim()).length;
-    const total = (fields ?? []).length;
+    // Numerator: narrative fields that actually have content. (Metric fields are
+    // counted as filled only if they have readings — but readings live in another
+    // table, so for now narrative-only keeps completeness honest, not inflated.)
+    const filled = (fields ?? []).filter((f) => f.field_kind !== "metric" && f.value && (f.value as string).trim()).length;
+    // Denominator: expected template fields × the records that should have them.
+    const prodFields = templateFor("product").reduce((n, s) => n + s.fields.length, 0);
+    const gtmFields = templateFor("gtm").reduce((n, s) => n + s.fields.length, 0);
+    const expected = (prodCount ?? 0) * prodFields + (gtmCount ?? 0) * gtmFields;
     const cost30d = (cost ?? []).reduce((s, r) => s + (Number(r.cost_usd) || 0), 0);
     setStats({
       pending: pending ?? 0,
       runs7d: (runs ?? []).length,
       signals7d: sig7 ?? 0,
-      fieldsCompletion: total ? Math.round((filled / total) * 100) : 0,
+      fieldsCompletion: expected ? Math.min(100, Math.round((filled / expected) * 100)) : 0,
       cost30d,
     });
     setLoading(false);

@@ -8,7 +8,7 @@
 import { useEffect, useState, useCallback } from "react";
 import { createClient } from "@/lib/supabase/client";
 import { getOrgId } from "@/lib/org";
-import { PageHeader, Section, Chip, Banner, Confidence, SubTabs } from "@/components/ui";
+import { PageHeader, Section, Chip, Banner, Confidence, SubTabs, ConfirmDialog } from "@/components/ui";
 import TrackingTopics from "@/components/TrackingTopics";
 import SourceManager from "@/components/SourceManager";
 
@@ -67,6 +67,7 @@ function Dashboard({ competitors, capabilities, scores, reload, setError }: {
   const [comp, setComp] = useState({ name: "", relationship: "direct" });
   const [addingCap, setAddingCap] = useState(false);
   const [capName, setCapName] = useState("");
+  const [pendingDelete, setPendingDelete] = useState<Competitor | null>(null); // staged for in-app confirm
 
   const direct = competitors.filter((c) => c.relationship === "direct");
   const adjacent = competitors.filter((c) => c.relationship === "adjacent");
@@ -84,12 +85,15 @@ function Dashboard({ competitors, capabilities, scores, reload, setError }: {
     const { error } = await supabase.from("capabilities").insert({ org_id: orgId, name: capName.trim() });
     if (error) setError(error.message); else { setAddingCap(false); setCapName(""); reload(); }
   }
-  // Remove a competitor that shouldn't be tracked (e.g. not actually a competitor).
-  // Confirm first — destructive, and clears its capability scores + battlecards.
-  async function removeCompetitor(e: React.MouseEvent, c: Competitor) {
+  // Remove a competitor that shouldn't be tracked. The × button stages it; an
+  // in-app ConfirmDialog (not the browser popup) confirms the destructive delete.
+  function removeCompetitor(e: React.MouseEvent, c: Competitor) {
     e.preventDefault(); e.stopPropagation(); // the row is a link; don't navigate
-    if (!confirm(`Remove "${c.name}" from competitive intel? This deletes its scores and battlecards and can't be undone.`)) return;
-    setError(null);
+    setPendingDelete(c);
+  }
+  async function doRemove() {
+    const c = pendingDelete; if (!c) return;
+    setError(null); setPendingDelete(null);
     const { error } = await supabase.from("competitors").delete().eq("id", c.id);
     if (error) setError(error.message); else reload();
   }
@@ -108,6 +112,15 @@ function Dashboard({ competitors, capabilities, scores, reload, setError }: {
 
   return (
     <div>
+      {pendingDelete && (
+        <ConfirmDialog
+          title="Remove competitor?"
+          message={<>Remove <b>{pendingDelete.name}</b> from competitive intel? This deletes its capability scores and battlecards, and can&rsquo;t be undone.</>}
+          confirmLabel="Remove"
+          onConfirm={doRemove}
+          onCancel={() => setPendingDelete(null)}
+        />
+      )}
       {/* Competitors */}
       <Section label="Competitors" action={!addingComp ? <button className="btn btn-secondary btn-sm" onClick={() => setAddingComp(true)}>+ Competitor</button> : undefined}>
         {addingComp && (
