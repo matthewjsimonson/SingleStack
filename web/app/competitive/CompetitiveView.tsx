@@ -84,6 +84,15 @@ function Dashboard({ competitors, capabilities, scores, reload, setError }: {
     const { error } = await supabase.from("capabilities").insert({ org_id: orgId, name: capName.trim() });
     if (error) setError(error.message); else { setAddingCap(false); setCapName(""); reload(); }
   }
+  // Remove a competitor that shouldn't be tracked (e.g. not actually a competitor).
+  // Confirm first — destructive, and clears its capability scores + battlecards.
+  async function removeCompetitor(e: React.MouseEvent, c: Competitor) {
+    e.preventDefault(); e.stopPropagation(); // the row is a link; don't navigate
+    if (!confirm(`Remove "${c.name}" from competitive intel? This deletes its scores and battlecards and can't be undone.`)) return;
+    setError(null);
+    const { error } = await supabase.from("competitors").delete().eq("id", c.id);
+    if (error) setError(error.message); else reload();
+  }
   async function cycleScore(capId: string, compId: string | null, current: number) {
     setError(null);
     const next = (current + 1) % 4; // 0→1→2→3→0
@@ -122,7 +131,12 @@ function Dashboard({ competitors, capabilities, scores, reload, setError }: {
                   {(list as Competitor[]).map((c) => (
                     <a key={c.id} href={`/competitive/${c.id}`} className="card card-link card-pad row-between">
                       <span style={{ fontSize: 14, fontWeight: 600 }}>{c.name}</span>
-                      <span className="row gap-2"><Chip tone={tone as "accent" | "violet"}>{c.relationship}</Chip><span className="t-sub" style={{ color: "var(--ac-text)", fontWeight: 600, fontSize: 12 }}>Open →</span></span>
+                      <span className="row gap-2" style={{ alignItems: "center" }}>
+                        <Chip tone={tone as "accent" | "violet"}>{c.relationship}</Chip>
+                        <span className="t-sub" style={{ color: "var(--ac-text)", fontWeight: 600, fontSize: 12 }}>Open →</span>
+                        <button onClick={(e) => removeCompetitor(e, c)} title={`Remove ${c.name}`} aria-label={`Remove ${c.name}`}
+                          style={{ background: "none", border: "none", cursor: "pointer", fontSize: 16, lineHeight: 1, color: "var(--tm)", padding: "0 2px" }}>×</button>
+                      </span>
                     </a>
                   ))}
                   {(list as Competitor[]).length === 0 && <div className="t-sub t-muted" style={{ fontSize: 12.5 }}>None</div>}
