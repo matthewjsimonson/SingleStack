@@ -107,6 +107,16 @@ export default function SectionedFields({ target }: { target: Target }) {
       }
       if (inserts.length) { const { error } = await supabase.from("record_fields").insert(inserts); if (error) throw error; }
       for (const u of updates) { const { error } = await supabase.from("record_fields").update({ value: u.value }).eq("id", u.id); if (error) throw error; }
+      // If the panel was open with drafts but nothing was written, say so plainly
+      // instead of silently closing — surfaces a client-state bug as a real message.
+      if (inserts.length === 0 && updates.length === 0) {
+        const typed = Object.values(recDrafts).filter((v) => (v ?? "").trim()).length;
+        setSaving(false);
+        setError(typed > 0
+          ? `Nothing saved — ${typed} field(s) had text but weren't matched to the form (client-state issue). Tell Claude.`
+          : "Nothing to save — no fields were filled in. Type a value, then Save.");
+        return; // keep the panel open so typed text isn't lost
+      }
       setPanelOpen(false); setRecDrafts({});
       await load();
     } catch (e) { setError(errText(e, "Could not save.")); }
