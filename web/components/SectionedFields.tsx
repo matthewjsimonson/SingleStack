@@ -82,14 +82,6 @@ export default function SectionedFields({ target }: { target: Target }) {
   // draft: update the existing row if one exists for that key, else insert.
   async function saveRecommended(missing: { section: string; fields: { key: string; label: string }[] }[]) {
     setSaving(true); setError(null);
-    // TEMP diagnostic (finding #14): why does save write nothing? Logs the actual
-    // draft state at click time. Remove once root cause is confirmed.
-    console.log("[SectionedFields] saveRecommended click", {
-      recDrafts,
-      recDraftKeys: Object.keys(recDrafts),
-      filledCount: Object.values(recDrafts).filter((v) => (v ?? "").trim()).length,
-      missingFieldKeys: missing.flatMap((s) => s.fields.map((f) => f.key)),
-    });
     try {
       const orgId = await getOrgId();
       if (!orgId) throw new Error("Could not resolve your organization.");
@@ -113,7 +105,6 @@ export default function SectionedFields({ target }: { target: Target }) {
           else inserts.push({ org_id: orgId, [fk(target)]: target.id, field_key: f.key, label: f.label, section: s.section, value: v, position: pos++ });
         }
       }
-      console.log("[SectionedFields] save resolved", { inserts: inserts.length, updates: updates.length, liveKeys: [...byKey.keys()] });
       if (inserts.length) { const { error } = await supabase.from("record_fields").insert(inserts); if (error) throw error; }
       for (const u of updates) { const { error } = await supabase.from("record_fields").update({ value: u.value }).eq("id", u.id); if (error) throw error; }
       // If the panel was open with drafts but nothing was written, say so plainly
