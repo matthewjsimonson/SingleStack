@@ -1,7 +1,7 @@
 "use client";
 
 // Product record detail: header + workspace + the GTM records under it.
-import { useEffect, useState, useCallback } from "react";
+import { useEffect, useState, useCallback, useMemo } from "react";
 import { useRouter } from "next/navigation";
 import { createClient } from "@/lib/supabase/client";
 import { getOrgId } from "@/lib/org";
@@ -14,6 +14,9 @@ type Gtm = { id: string; name: string; created_at: string };
 export default function RecordView({ recordId }: { recordId: string }) {
   const supabase = createClient();
   const router = useRouter();
+  // Stable target — without useMemo this is a new object every render, which
+  // churns SectionedFields' load() effect and can drop in-progress draft state.
+  const target = useMemo(() => ({ kind: "product" as const, id: recordId }), [recordId]);
   const [record, setRecord] = useState<{ id: string; name: string } | null>(null);
   const [gtm, setGtm] = useState<Gtm[]>([]);
   const [loading, setLoading] = useState(true);
@@ -55,7 +58,7 @@ export default function RecordView({ recordId }: { recordId: string }) {
       <div className="row" style={{ marginBottom: 6 }}><Chip tone="accent">Product record</Chip></div>
       <h1 className="t-page" style={{ marginBottom: "var(--sp-6)" }}>{record.name}</h1>
 
-      <RecordWorkspace target={{ kind: "product", id: recordId }} />
+      <RecordWorkspace target={target} />
 
       <Modules productId={recordId} />
 
