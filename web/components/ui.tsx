@@ -41,6 +41,33 @@ export function Modal({
   );
 }
 
+// In-app confirm dialog (replaces the browser's confirm() popup) — built on the
+// real Modal (open/onClose/title/children; no footer prop) so it matches the
+// design system. Destructive by default styles the confirm action red.
+export function ConfirmDialog({ open = true, title, message, confirmLabel = "Confirm", cancelLabel = "Cancel", destructive = true, onConfirm, onCancel }: {
+  open?: boolean;
+  title: ReactNode;
+  message: ReactNode;
+  confirmLabel?: string;
+  cancelLabel?: string;
+  destructive?: boolean;
+  onConfirm: () => void;
+  onCancel: () => void;
+}) {
+  return (
+    <Modal open={open} onClose={onCancel} title={title} width={440}>
+      <div className="t-body" style={{ lineHeight: 1.55, marginBottom: 18 }}>{message}</div>
+      <div className="row gap-2" style={{ justifyContent: "flex-end" }}>
+        <button className="btn btn-secondary btn-sm" onClick={onCancel}>{cancelLabel}</button>
+        <button className="btn btn-sm" onClick={onConfirm}
+          style={destructive ? { background: "#b91c1c", borderColor: "#b91c1c", color: "#fff" } : undefined}>
+          {confirmLabel}
+        </button>
+      </div>
+    </Modal>
+  );
+}
+
 
 export function PageHeader({
   title,
