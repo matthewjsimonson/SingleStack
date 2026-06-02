@@ -49,7 +49,7 @@ export default function InitiativesView() {
   function Card({ i }: { i: Initiative }) {
     const b = prog(i.id, "build"), g = prog(i.id, "gtm");
     return (
-      <a href={`/ship/${i.id}`} className="card card-link card-pad" style={{ display: "block" }}>
+      <a href={`/initiatives/${i.id}`} className="card card-link card-pad" style={{ display: "block" }}>
         <div className="row-between" style={{ gap: 8, marginBottom: 6, alignItems: "flex-start" }}>
           <span style={{ fontSize: 14, fontWeight: 640 }}>{i.title}</span>
           <Chip tone={i.stage === "done" ? "green" : i.stage === "active" ? "accent" : "default"}>{i.stage}</Chip>
@@ -82,7 +82,7 @@ export default function InitiativesView() {
             <Section label={`Needs attention · ${flags.length}`}>
               <div className="stack-3">
                 {flags.map(({ i, why }) => (
-                  <a key={i.id} href={`/ship/${i.id}`} className="card card-link card-pad row-between" style={{ borderLeft: "3px solid var(--am-text)" }}>
+                  <a key={i.id} href={`/initiatives/${i.id}`} className="card card-link card-pad row-between" style={{ borderLeft: "3px solid var(--am-text)" }}>
                     <span style={{ fontSize: 13.5, fontWeight: 600 }}>{i.title}</span>
                     <Chip tone="amber">{why}</Chip>
                   </a>

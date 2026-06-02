@@ -121,12 +121,12 @@ export default function ThemeDrawer({ themeId, onClose, onChanged }: { themeId: 
       const orgId = await getOrgId(); if (!orgId) throw new Error("No org.");
       const { data: ini, error } = await supabase.from("initiatives").insert({
         org_id: orgId, lane: theme.category === "gtm" ? "enablement" : "ship", title: rec.name, description: rec.why || null, kind: "feature",
-        product_id: products[0]?.id ?? null, gtm_record_id: gtms[0]?.id ?? null, stage: "backlog", priority: "high",
+        scope: "both", lifecycle: "plan", product_id: products[0]?.id ?? null, gtm_record_id: gtms[0]?.id ?? null, stage: "backlog", priority: "high",
       }).select("id").single();
       if (error) throw error;
       await supabase.from("initiative_workstreams").insert([
-        { org_id: orgId, initiative_id: ini.id, area: "build", title: rec.build, stage: "backlog" },
-        { org_id: orgId, initiative_id: ini.id, area: "gtm", title: rec.gtm, stage: "backlog" },
+        { org_id: orgId, initiative_id: ini.id, area: "build", lifecycle_stage: "plan", title: rec.build, stage: "backlog" },
+        { org_id: orgId, initiative_id: ini.id, area: "gtm", lifecycle_stage: "plan", title: rec.gtm, stage: "backlog" },
       ]);
       const sids = theme.signal_ids ?? [];
       if (sids.length) await supabase.from("initiative_signals").insert(sids.map((sid) => ({ org_id: orgId, initiative_id: ini.id, signal_id: sid })));
@@ -182,7 +182,7 @@ export default function ThemeDrawer({ themeId, onClose, onChanged }: { themeId: 
           <div className="card card-pad" style={{ borderLeft: "3px solid var(--gn)" }}>
             <div className="t-label" style={{ color: "var(--tm)", marginBottom: 8 }}>Initiative (the PLG motion)</div>
             {recDone ? (
-              <div className="t-sub" style={{ fontSize: 12.5 }}>✓ Created, rooted in this theme&rsquo;s signals. <a href={`/ship/${recDone.id}`} style={{ color: "var(--ac-text)", fontWeight: 600 }}>Open workstreams →</a></div>
+              <div className="t-sub" style={{ fontSize: 12.5 }}>✓ Created, rooted in this theme&rsquo;s signals. <a href={`/initiatives/${recDone.id}`} style={{ color: "var(--ac-text)", fontWeight: 600 }}>Open workstreams →</a></div>
             ) : rec ? (
               <div className="stack-3">
                 <label className="field"><span className="t-label">Initiative</span><input className="input" value={rec.name} onChange={(e) => setRec({ ...rec, name: e.target.value })} /></label>
@@ -294,15 +294,15 @@ function DecisionCard({ d, theme, signalCount, routed, people, products, gtms, i
       const assignee = rt.assigneeId || null;
       let initiativeId = rt.target;
       if (rt.target === "new") {
-        const row: Record<string, unknown> = { org_id: orgId, lane, title: `Act: ${d.title}`, description: rationale || theme?.recommendation || null, decision_id: d.id, assignee_id: assignee, stage: "backlog", priority: "high" };
+        const row: Record<string, unknown> = { org_id: orgId, lane, scope: rt.recordType === "gtm" ? "gtm" : "product", lifecycle: "plan", title: `Act: ${d.title}`, description: rationale || theme?.recommendation || null, decision_id: d.id, assignee_id: assignee, stage: "backlog", priority: "high" };
         row[rt.recordType === "gtm" ? "gtm_record_id" : "product_id"] = rt.recordId || null;
         const { data: ini, error: ie } = await supabase.from("initiatives").insert(row).select("id").single(); if (ie) throw ie;
         initiativeId = ini.id;
       } else {
         const { error: ue } = await supabase.from("initiatives").update({ decision_id: d.id, assignee_id: assignee }).eq("id", rt.target); if (ue) throw ue;
       }
-      // seed the matching workstream so the effort is born cross-functional
-      await supabase.from("initiative_workstreams").insert({ org_id: orgId, initiative_id: initiativeId, area: wsArea, title: d.title, assignee_id: assignee, stage: "backlog" });
+      // seed the matching workstream so the effort is born with the right work
+      await supabase.from("initiative_workstreams").insert({ org_id: orgId, initiative_id: initiativeId, area: wsArea, lifecycle_stage: "plan", title: d.title, assignee_id: assignee, stage: "backlog" });
       await supabase.from("decisions").update({ status: "routed", decided_at: new Date().toISOString(), assignee_id: assignee }).eq("id", d.id);
       setRouting(false); await reload();
     } catch (e) { setErr(e instanceof Error ? e.message : "Could not route."); }

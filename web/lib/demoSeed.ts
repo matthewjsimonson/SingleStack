@@ -289,11 +289,11 @@ export async function loadDemoData(supabase: SupabaseClient, orgId: string): Pro
       const { data: exi } = await supabase.from("initiatives").select("id").eq("title", d.title).maybeSingle();
       if (exi) continue;
       const { data: ini, error } = await supabase.from("initiatives").insert({
-        org_id: orgId, lane: d.lane, title: d.title, kind: d.kind, lifecycle: d.lifecycle, objective_id: obj?.id ?? null,
+        org_id: orgId, lane: d.lane, title: d.title, kind: d.kind, lifecycle: d.lifecycle, scope: "both", objective_id: obj?.id ?? null,
         product_id: pid, gtm_record_id: d.gtm ? gtmId ?? null : null, assignee_id: d.assignee, stage: d.stage, priority: "high",
       }).select("id").single();
       if (error) throw error; made++;
-      await supabase.from("initiative_workstreams").insert(d.ws.map(([area, title, assignee], i) => ({ org_id: orgId, initiative_id: ini.id, area, title, assignee_id: assignee, stage: i === 0 && d.stage === "active" ? "active" : "backlog" })));
+      await supabase.from("initiative_workstreams").insert(d.ws.map(([area, title, assignee], i) => ({ org_id: orgId, initiative_id: ini.id, area, lifecycle_stage: d.lifecycle, title, assignee_id: assignee, stage: i === 0 && d.stage === "active" ? "active" : "backlog" })));
     }
     return made ? `+${made}` : "exist";
   });

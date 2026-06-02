@@ -74,7 +74,7 @@ export default function InitiativeLifecycleBoard() {
                 <div style={{ padding: 8, display: "flex", flexDirection: "column", gap: 8, minHeight: 90 }}>
                   {list.length === 0 ? <div className="t-sub t-muted" style={{ fontSize: 11.5, padding: "6px 4px" }}>—</div> : list.map((i) => (
                     <div key={i.id} className="card card-pad" style={{ padding: 10 }}>
-                      <a href={`/ship/${i.id}`} style={{ fontSize: 13, fontWeight: 620, color: "inherit", textDecoration: "none", display: "block", marginBottom: 6 }}>{i.title}</a>
+                      <a href={`/initiatives/${i.id}`} style={{ fontSize: 13, fontWeight: 620, color: "inherit", textDecoration: "none", display: "block", marginBottom: 6 }}>{i.title}</a>
                       <div className="row gap-2" style={{ flexWrap: "wrap", marginBottom: 6 }}>
                         {i.kind && <Chip tone={i.kind === "module" ? "accent" : "green"}>{i.kind}</Chip>}
                         {owner(i.assignee_id) ? <Chip>👤 {owner(i.assignee_id)}</Chip> : <Chip tone="amber">unowned</Chip>}

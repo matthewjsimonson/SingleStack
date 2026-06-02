@@ -137,7 +137,7 @@ export default function InitiativeBoard({ lane, title, meta, recordType }: {
                       <div className="row gap-2">
                         {stage !== "backlog" && <button className="btn btn-secondary btn-sm" onClick={() => move(it.id, stage === "done" ? "active" : "backlog")}>←</button>}
                         {stage !== "done" && <button className="btn btn-secondary btn-sm" onClick={() => move(it.id, stage === "backlog" ? "active" : "done")}>{stage === "backlog" ? "Start →" : "Done →"}</button>}
-                        <a href={`/ship/${it.id}`} className="btn btn-secondary btn-sm" style={{ marginLeft: "auto" }}>Workstreams →</a>
+                        <a href={`/initiatives/${it.id}`} className="btn btn-secondary btn-sm" style={{ marginLeft: "auto" }}>Workstreams →</a>
                       </div>
                     </div>
                   ))}
