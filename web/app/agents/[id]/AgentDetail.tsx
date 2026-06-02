@@ -6,7 +6,7 @@
 import { useEffect, useState, useCallback } from "react";
 import { createClient } from "@/lib/supabase/client";
 import { getOrgId } from "@/lib/org";
-import { PageHeader, Section, Chip, Banner, BackLink, Empty } from "@/components/ui";
+import { PageHeader, Section, Chip, Banner, BackLink, Empty, Modal } from "@/components/ui";
 
 type Agent = { id: string; key: string; name: string; role: string | null; model: string | null; system_prompt: string | null; is_active: boolean };
 type Skill = { id: string; key: string; name: string; description: string | null; category: string | null };
@@ -119,6 +119,8 @@ function Skills({ agentId, skills, attached, reload, setError }: { agentId: stri
   const [creating, setCreating] = useState(false);
   const [form, setForm] = useState({ name: "", description: "", instructions: "", category: "general" });
   const [busy, setBusy] = useState(false);
+  const [evolving, setEvolving] = useState(false);
+  const [histSkill, setHistSkill] = useState<Skill | null>(null);
 
   async function toggle(skillId: string, on: boolean) {
     setError(null);
@@ -147,9 +149,19 @@ function Skills({ agentId, skills, attached, reload, setError }: { agentId: stri
     finally { setBusy(false); }
   }
 
+  const attachedCount = skills.filter((s) => attached.has(s.id)).length;
+
   return (
-    <Section label="Skills" action={!creating ? <button className="btn btn-secondary btn-sm" onClick={() => setCreating(true)}>+ New skill</button> : undefined}>
-      <div className="t-sub t-muted" style={{ fontSize: 12.5, marginBottom: 12 }}>Reusable, tailorable capabilities. Attach what this agent should be able to do; author your own playbooks tailored to your company. (Importing from GitHub comes with the marketplace.)</div>
+    <Section label="Skills" action={!creating ? (
+      <div className="row gap-2">
+        {attachedCount > 0 && <button className="btn btn-sm" onClick={() => setEvolving((v) => !v)} style={{ background: "var(--ac)", color: "#fff" }}>✦ Evolve from signals</button>}
+        <button className="btn btn-secondary btn-sm" onClick={() => setCreating(true)}>+ New skill</button>
+      </div>
+    ) : undefined}>
+      <div className="t-sub t-muted" style={{ fontSize: 12.5, marginBottom: 12 }}>Reusable, tailorable capabilities. Attach what this agent should be able to do; author your own playbooks tailored to your company. <strong>Evolve from signals</strong> rewrites the attached playbooks as new intelligence lands — you review and ratify each change.</div>
+
+      {evolving && <EvolvePanel agentId={agentId} onApplied={reload} onClose={() => setEvolving(false)} setError={setError} />}
+      {histSkill && <SkillHistory skill={histSkill} onClose={() => setHistSkill(null)} />}
 
       {creating && (
         <form onSubmit={createSkill} className="card card-pad" style={{ marginBottom: "var(--sp-3)" }}>
@@ -176,7 +188,10 @@ function Skills({ agentId, skills, attached, reload, setError }: { agentId: stri
                   <div className="row gap-2"><span style={{ fontSize: 14, fontWeight: 620 }}>{s.name}</span><Chip tone={s.category === "product" ? "accent" : s.category === "gtm" ? "violet" : "default"}>{s.category}</Chip></div>
                   {s.description && <div className="t-sub t-muted" style={{ fontSize: 12.5, marginTop: 2 }}>{s.description}</div>}
                 </div>
-                <button className={`btn btn-sm ${on ? "btn-secondary" : ""}`} onClick={() => toggle(s.id, !on)}>{on ? "Attached ✓" : "Attach"}</button>
+                <div className="row gap-2">
+                  {on && <button className="btn btn-secondary btn-sm" onClick={() => setHistSkill(s)}>History</button>}
+                  <button className={`btn btn-sm ${on ? "btn-secondary" : ""}`} onClick={() => toggle(s.id, !on)}>{on ? "Attached ✓" : "Attach"}</button>
+                </div>
               </div>
             );
           })}
@@ -330,5 +345,138 @@ function Workflows({ agentId, workflows, reload, setError }: { agentId: string; 
         </div>
       )}
     </Section>
+  );
+}
+
+// ---------- Evolve from signals (recursive skill evolution) ----------
+type Revision = { skill_id: string; name: string; category: string | null; current_instructions: string; proposed_instructions: string; rationale: string; drivers: string[] };
+
+function EvolvePanel({ agentId, onApplied, onClose, setError }: { agentId: string; onApplied: () => void; onClose: () => void; setError: (s: string | null) => void }) {
+  const supabase = createClient();
+  const [loading, setLoading] = useState(true);
+  const [note, setNote] = useState<string | null>(null);
+  const [revs, setRevs] = useState<Revision[]>([]);
+  const [drafts, setDrafts] = useState<Record<string, string>>({});
+  const [applying, setApplying] = useState<string | null>(null);
+
+  const run = useCallback(async () => {
+    setLoading(true); setError(null); setNote(null);
+    try {
+      const { data: s } = await supabase.auth.getSession();
+      const token = s.session?.access_token;
+      const { data, error } = await supabase.functions.invoke("evolve-skills", {
+        body: { agent_id: agentId },
+        headers: token ? { Authorization: `Bearer ${token}` } : undefined,
+      });
+      if (error) throw error;
+      if (data?.error) throw new Error(data.error);
+      const rs: Revision[] = data?.revisions ?? [];
+      setRevs(rs);
+      setDrafts(Object.fromEntries(rs.map((r) => [r.skill_id, r.proposed_instructions])));
+      if (rs.length === 0) setNote(data?.message ?? "No skill changes warranted by current intelligence. Your playbooks are up to date.");
+    } catch (e) { setError(e instanceof Error ? e.message : "Could not evolve skills."); }
+    finally { setLoading(false); }
+  }, [supabase, agentId, setError]);
+
+  useEffect(() => { run(); }, [run]);
+
+  async function accept(r: Revision) {
+    setApplying(r.skill_id); setError(null);
+    try {
+      const { error } = await supabase.rpc("apply_skill_evolution", {
+        p_skill: r.skill_id,
+        p_instructions: drafts[r.skill_id] ?? r.proposed_instructions,
+        p_drivers: r.drivers.map((d) => ({ kind: "intelligence", title: d })),
+        p_note: r.rationale,
+      });
+      if (error) throw error;
+      setRevs((prev) => prev.filter((x) => x.skill_id !== r.skill_id));
+      onApplied();
+    } catch (e) { setError(e instanceof Error ? e.message : "Could not apply evolution."); }
+    finally { setApplying(null); }
+  }
+  function dismiss(id: string) { setRevs((prev) => prev.filter((x) => x.skill_id !== id)); }
+
+  return (
+    <div className="card card-pad" style={{ marginBottom: "var(--sp-3)", borderColor: "var(--ac)", background: "var(--ac-fill)" }}>
+      <div className="row-between" style={{ marginBottom: 10 }}>
+        <div className="row gap-2"><span style={{ color: "var(--ac-text)", fontWeight: 800 }}>✦</span><span style={{ fontWeight: 660 }}>Evolve skills from signals</span></div>
+        <div className="row gap-2">
+          <button className="btn btn-secondary btn-sm" onClick={run} disabled={loading}>{loading ? "Analyzing…" : "Re-run"}</button>
+          <button className="btn btn-secondary btn-sm" onClick={onClose}>Close</button>
+        </div>
+      </div>
+
+      {loading && <div className="t-sub t-muted">Reading this agent's intelligence and proposing playbook updates…</div>}
+      {!loading && note && <div className="t-sub" style={{ fontSize: 13 }}>{note}</div>}
+
+      <div className="stack-3">
+        {revs.map((r) => (
+          <div key={r.skill_id} className="card card-pad" style={{ background: "var(--panel)" }}>
+            <div className="row gap-2" style={{ marginBottom: 6 }}>
+              <span style={{ fontSize: 14, fontWeight: 640 }}>{r.name}</span>
+              {r.category && <Chip tone={r.category === "product" ? "accent" : r.category === "gtm" ? "violet" : "default"}>{r.category}</Chip>}
+            </div>
+            <div className="t-sub" style={{ fontSize: 12.5, marginBottom: 8 }}><strong>Why:</strong> {r.rationale}</div>
+            {r.drivers.length > 0 && (
+              <div className="row gap-2" style={{ flexWrap: "wrap", marginBottom: 8 }}>
+                {r.drivers.map((d, i) => <Chip key={i} tone="default">{d}</Chip>)}
+              </div>
+            )}
+            <details style={{ marginBottom: 8 }}>
+              <summary className="t-sub t-muted" style={{ fontSize: 12, cursor: "pointer" }}>Current instructions</summary>
+              <pre style={{ whiteSpace: "pre-wrap", fontSize: 12, color: "var(--ts)", marginTop: 6, fontFamily: "inherit" }}>{r.current_instructions || "(none yet)"}</pre>
+            </details>
+            <label className="field"><span className="t-label">Proposed instructions (edit before accepting)</span>
+              <textarea className="textarea" rows={8} value={drafts[r.skill_id] ?? ""} onChange={(e) => setDrafts({ ...drafts, [r.skill_id]: e.target.value })} /></label>
+            <div className="row gap-2">
+              <button className="btn btn-success btn-sm" onClick={() => accept(r)} disabled={applying === r.skill_id}>{applying === r.skill_id ? "Applying…" : "Accept & evolve"}</button>
+              <button className="btn btn-secondary btn-sm" onClick={() => dismiss(r.skill_id)} disabled={applying === r.skill_id}>Dismiss</button>
+            </div>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+// ---------- Skill revision history ----------
+type Rev = { id: string; created_at: string; instructions: string | null; source: string; drivers: { kind?: string; title: string }[] | null; note: string | null };
+
+function SkillHistory({ skill, onClose }: { skill: Skill; onClose: () => void }) {
+  const supabase = createClient();
+  const [revs, setRevs] = useState<Rev[]>([]);
+  const [loading, setLoading] = useState(true);
+  useEffect(() => {
+    (async () => {
+      const { data } = await supabase.from("skill_revisions").select("id, created_at, instructions, source, drivers, note").eq("skill_id", skill.id).order("created_at", { ascending: false });
+      setRevs(data ?? []); setLoading(false);
+    })();
+  }, [supabase, skill.id]);
+  return (
+    <Modal open onClose={onClose} title={`History · ${skill.name}`} width={620}>
+      {loading ? <div className="t-sub t-muted">Loading…</div> : revs.length === 0 ? (
+        <div className="t-sub t-muted">No revisions yet. This skill hasn't changed since it was created.</div>
+      ) : (
+        <div className="stack-3">
+          {revs.map((r, i) => (
+            <div key={r.id} className="card card-pad">
+              <div className="row gap-2" style={{ marginBottom: 6 }}>
+                <Chip tone={r.source === "evolved" ? "accent" : "default"}>{r.source === "evolved" ? "evolved from signals" : r.source}</Chip>
+                {i === 0 && <Chip tone="green">current</Chip>}
+                <span className="t-sub t-muted mono" style={{ fontSize: 11 }}>{new Date(r.created_at).toLocaleString()}</span>
+              </div>
+              {r.note && <div className="t-sub" style={{ fontSize: 12.5, marginBottom: 6 }}><strong>Why:</strong> {r.note}</div>}
+              {(r.drivers?.length ?? 0) > 0 && (
+                <div className="row gap-2" style={{ flexWrap: "wrap", marginBottom: 6 }}>
+                  {r.drivers!.map((d, j) => <Chip key={j}>{d.title}</Chip>)}
+                </div>
+              )}
+              <pre style={{ whiteSpace: "pre-wrap", fontSize: 12, color: "var(--ts)", fontFamily: "inherit", margin: 0 }}>{r.instructions || "(empty)"}</pre>
+            </div>
+          ))}
+        </div>
+      )}
+    </Modal>
   );
 }
