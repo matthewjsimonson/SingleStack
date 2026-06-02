@@ -22,6 +22,7 @@ import SourceManager from "@/components/SourceManager";
 import IntelReview from "./IntelReview";
 import Bridges from "./Bridges";
 import MapView from "./MapView";
+import SignalDrawer, { type DrawerSignal } from "@/components/SignalDrawer";
 import { useAgentRun, AgentProgress, type AgentRun } from "@/components/AgentProgress";
 
 type Source = { id: string; label: string; icon: string; origin: string };
@@ -73,6 +74,7 @@ export default function SignalsView() {
   const supabase = createClient();
   const [sources, setSources] = useState<Source[]>([]);
   const [signals, setSignals] = useState<Signal[]>([]);
+  const [openSignal, setOpenSignal] = useState<DrawerSignal | null>(null);
   const [themes, setThemes] = useState<Theme[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -207,9 +209,11 @@ export default function SignalsView() {
       ) : (
         <LensTab
           lens={tab} signals={signalsScoped.filter((s) => inLens(s, tab))} originFilter={originFilter}
-          onOriginFilter={setOriginFilter} sourceById={sourceById} setCategory={setCategory}
+          onOriginFilter={setOriginFilter} sourceById={sourceById} setCategory={setCategory} onOpen={setOpenSignal}
         />
       )}
+
+      <SignalDrawer signal={openSignal} onClose={() => setOpenSignal(null)} onChanged={load} />
 
       {/* Log signal — modal */}
       <Modal open={logOpen} onClose={() => setLogOpen(false)} title="Log a signal">
@@ -366,9 +370,10 @@ function Home({ signals, themes, productThemes, gtmThemes, highSignals, unsorted
 }
 
 // ---------- Lens tab (Product / GTM) ----------
-function LensTab({ lens, signals, originFilter, onOriginFilter, sourceById, setCategory }: {
+function LensTab({ lens, signals, originFilter, onOriginFilter, sourceById, setCategory, onOpen }: {
   lens: Lens; signals: Signal[]; originFilter: OriginFilter; onOriginFilter: (f: OriginFilter) => void;
   sourceById: (id: string | null) => Source | null; setCategory: (id: string, c: string | null) => void;
+  onOpen: (s: Signal) => void;
 }) {
   const guide = LENS_GUIDE[lens];
   const stream = signals.filter((s) => originFilter === "all" ? true : s.origin === originFilter);
@@ -401,16 +406,16 @@ function LensTab({ lens, signals, originFilter, onOriginFilter, sourceById, setC
         <div className="t-sub t-muted">No {originFilter === "all" ? "" : originFilter + " "}signals in this lens yet. Log one (top right) or connect a source above; unsorted signals get classified on Synthesize.</div>
       ) : (
         <div className="stack-3">
-          {stream.map((s) => <SignalCard key={s.id} s={s} src={sourceById(s.source_id)} setCategory={setCategory} />)}
+          {stream.map((s) => <SignalCard key={s.id} s={s} src={sourceById(s.source_id)} setCategory={setCategory} onOpen={onOpen} />)}
         </div>
       )}
     </div>
   );
 }
 
-function SignalCard({ s, src, setCategory }: { s: Signal; src: Source | null; setCategory: (id: string, c: string | null) => void }) {
+function SignalCard({ s, src, setCategory, onOpen }: { s: Signal; src: Source | null; setCategory: (id: string, c: string | null) => void; onOpen: (s: Signal) => void }) {
   return (
-    <div className="card card-pad">
+    <div className="card card-pad card-link" style={{ cursor: "pointer" }} onClick={() => onOpen(s)} title="Open signal">
       <div className="row-between" style={{ gap: 12, alignItems: "flex-start", marginBottom: 5 }}>
         <span style={{ fontSize: 14.5, fontWeight: 620 }}>{s.title}</span>
         <Confidence label={s.conf_label} level={s.conf_level} />
@@ -422,7 +427,9 @@ function SignalCard({ s, src, setCategory }: { s: Signal; src: Source | null; se
           <Chip tone={s.origin === "external" ? "violet" : "default"}>{s.origin}</Chip>
           {s.observed_at && <span className="t-mono-xs">{ago(s.observed_at)}</span>}
         </div>
-        <CategoryPicker value={s.category} onChange={(c) => setCategory(s.id, c)} />
+        <div onClick={(e) => e.stopPropagation()}>
+          <CategoryPicker value={s.category} onChange={(c) => setCategory(s.id, c)} />
+        </div>
       </div>
     </div>
   );
