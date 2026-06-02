@@ -68,7 +68,7 @@ export default function InitiativesView() {
 
   return (
     <div>
-      <PageHeader title="Initiatives" meta="The cross-functional efforts that move the strategy — each spanning Build and GTM, tied to an objective and an owner." />
+      <PageHeader title="Initiatives" meta="Your product-led growth motion — cross-functional efforts recommended by signals, each spanning Build and GTM, tied to an objective and an owner. Build & GTM are where the work gets done." />
       <Banner>{error}</Banner>
 
       {loading ? <div className="t-sub t-muted">Loading…</div> : scoped.length === 0 ? (

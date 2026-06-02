@@ -11,6 +11,7 @@ import { useProductScope } from "@/lib/ProductContext";
 import { templateFor } from "@/lib/templates";
 import { PageHeader, Section } from "@/components/ui";
 import ExecutiveRow from "@/components/ExecutiveRow";
+import HomeInitiatives from "@/components/HomeInitiatives";
 import ReviewDrawer from "@/components/ReviewDrawer";
 
 type Run = { id: string; status: string; started_at: string; cost_usd: number | null };
@@ -108,6 +109,9 @@ export default function FoundationView() {
           style={{ flex: 1, border: "none", outline: "none", fontSize: 14, background: "transparent", color: "var(--tp)" }} />
         <button className="btn btn-sm" type="submit">Go</button>
       </form>
+
+      {/* initiatives — the growth motion, up top */}
+      <HomeInitiatives />
 
       {/* executive team */}
       <ExecutiveRow />

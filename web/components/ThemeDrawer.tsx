@@ -36,6 +36,9 @@ export default function ThemeDrawer({ themeId, onClose, onChanged }: { themeId: 
   const [inits, setInits] = useState<Init[]>([]);
   const [take, setTake] = useState<string | null>(null);
   const [thinking, setThinking] = useState(false);
+  const [rec, setRec] = useState<{ name: string; build: string; gtm: string; why: string } | null>(null);
+  const [recBusy, setRecBusy] = useState(false);
+  const [recDone, setRecDone] = useState<{ id: string } | null>(null);
   const [busy, setBusy] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
 
@@ -93,6 +96,45 @@ export default function ThemeDrawer({ themeId, onClose, onChanged }: { themeId: 
     finally { setThinking(false); }
   }
 
+  // Signals -> recommended initiative: the officer drafts a cross-functional PLG
+  // initiative (name + a Build action + a GTM action) from this theme's evidence.
+  async function recommendInitiative() {
+    if (!theme) return;
+    setRecBusy(true); setError(null); setRec(null); setRecDone(null);
+    try {
+      const { data: s } = await supabase.auth.getSession();
+      const token = s.session?.access_token;
+      const prompt = `Propose ONE product-led-growth initiative from this intelligence. It must span Build and GTM. Reply EXACTLY in this format, nothing else:\nINITIATIVE: <short name>\nBUILD: <one concrete product/build workstream>\nGTM: <one concrete go-to-market workstream>\nWHY: <one sentence tying it to the evidence>\n\nTheme: ${theme.title}\nSummary: ${theme.summary || "—"}\nRecommendation: ${theme.recommendation || "—"}\nSignals: ${signals.slice(0, 6).map((x) => x.title).join("; ")}`;
+      const { data, error } = await supabase.functions.invoke("agent-chat", { body: { agent_key: officer.key, messages: [{ role: "user", content: prompt }], context: { area: "signals" } }, headers: token ? { Authorization: `Bearer ${token}` } : undefined });
+      if (error) throw error; if (data?.error) throw new Error(data.error);
+      const txt: string = data.reply ?? "";
+      const grab = (k: string) => (txt.match(new RegExp(`${k}:\\s*(.+)`, "i"))?.[1] ?? "").trim();
+      setRec({ name: grab("INITIATIVE") || theme.title, build: grab("BUILD") || `Build: ${theme.title}`, gtm: grab("GTM") || `Position: ${theme.title}`, why: grab("WHY") || theme.recommendation || "" });
+    } catch (e) { setError(e instanceof Error ? e.message : "Could not draft an initiative."); }
+    finally { setRecBusy(false); }
+  }
+
+  async function createRecommended() {
+    if (!theme || !rec) return;
+    setRecBusy(true); setError(null);
+    try {
+      const orgId = await getOrgId(); if (!orgId) throw new Error("No org.");
+      const { data: ini, error } = await supabase.from("initiatives").insert({
+        org_id: orgId, lane: theme.category === "gtm" ? "enablement" : "ship", title: rec.name, description: rec.why || null, kind: "feature",
+        product_id: products[0]?.id ?? null, gtm_record_id: gtms[0]?.id ?? null, stage: "backlog", priority: "high",
+      }).select("id").single();
+      if (error) throw error;
+      await supabase.from("initiative_workstreams").insert([
+        { org_id: orgId, initiative_id: ini.id, area: "build", title: rec.build, stage: "backlog" },
+        { org_id: orgId, initiative_id: ini.id, area: "gtm", title: rec.gtm, stage: "backlog" },
+      ]);
+      const sids = theme.signal_ids ?? [];
+      if (sids.length) await supabase.from("initiative_signals").insert(sids.map((sid) => ({ org_id: orgId, initiative_id: ini.id, signal_id: sid })));
+      setRecDone({ id: ini.id }); setRec(null); onChanged?.();
+    } catch (e) { setError(e instanceof Error ? e.message : "Could not create initiative."); }
+    finally { setRecBusy(false); }
+  }
+
   async function makeDecision() {
     if (!theme) return;
     setBusy("decision"); setError(null);
@@ -134,6 +176,29 @@ export default function ThemeDrawer({ themeId, onClose, onChanged }: { themeId: 
             {theme?.recommendation ? <div className="t-body" style={{ fontSize: 13, lineHeight: 1.5, marginBottom: 10 }}>→ {theme.recommendation}</div> : <div className="t-sub t-muted" style={{ fontSize: 12.5, marginBottom: 10 }}>No recommendation yet.</div>}
             <button className="btn btn-sm" onClick={ask} disabled={thinking} style={{ background: "var(--ac)", color: "#fff" }}>{thinking ? `${officer.name} is reading…` : `✦ Ask ${officer.name}`}</button>
             {take && <div className="card card-pad" style={{ marginTop: 10, background: "var(--panel)" }}><div className="t-sub" style={{ fontSize: 13, lineHeight: 1.55, whiteSpace: "pre-wrap" }}>{take}</div></div>}
+          </div>
+
+          {/* Signals -> recommended PLG initiative (rooted in this theme's evidence) */}
+          <div className="card card-pad" style={{ borderLeft: "3px solid var(--gn)" }}>
+            <div className="t-label" style={{ color: "var(--tm)", marginBottom: 8 }}>Initiative (the PLG motion)</div>
+            {recDone ? (
+              <div className="t-sub" style={{ fontSize: 12.5 }}>✓ Created, rooted in this theme&rsquo;s signals. <a href={`/ship/${recDone.id}`} style={{ color: "var(--ac-text)", fontWeight: 600 }}>Open workstreams →</a></div>
+            ) : rec ? (
+              <div className="stack-3">
+                <label className="field"><span className="t-label">Initiative</span><input className="input" value={rec.name} onChange={(e) => setRec({ ...rec, name: e.target.value })} /></label>
+                <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "var(--sp-3)" }}>
+                  <label className="field"><span className="t-label" style={{ color: "var(--ac-text)" }}>Build workstream</span><textarea className="textarea" rows={2} value={rec.build} onChange={(e) => setRec({ ...rec, build: e.target.value })} /></label>
+                  <label className="field"><span className="t-label" style={{ color: "var(--vl-text)" }}>GTM workstream</span><textarea className="textarea" rows={2} value={rec.gtm} onChange={(e) => setRec({ ...rec, gtm: e.target.value })} /></label>
+                </div>
+                {rec.why && <div className="t-sub t-muted" style={{ fontSize: 12 }}>Why: {rec.why}</div>}
+                <div className="row gap-2"><button className="btn btn-success btn-sm" onClick={createRecommended} disabled={recBusy}>{recBusy ? "Creating…" : "Create initiative"}</button><button className="btn btn-secondary btn-sm" onClick={() => setRec(null)}>Discard</button></div>
+              </div>
+            ) : (
+              <>
+                <div className="t-sub t-muted" style={{ fontSize: 12.5, marginBottom: 8 }}>Turn this intelligence into a cross-functional effort — {officer.name} drafts the Build + GTM workstreams; you tailor and create.</div>
+                <button className="btn btn-sm" onClick={recommendInitiative} disabled={recBusy} style={{ background: "var(--gn)", color: "#fff" }}>{recBusy ? "Drafting…" : "✦ Recommend an initiative"}</button>
+              </>
+            )}
           </div>
 
           {/* Decisions — made, routed, and managed fully in place */}
