@@ -350,6 +350,8 @@ function Workflows({ agentId, workflows, reload, setError }: { agentId: string; 
 
 // ---------- Evolve from signals (recursive skill evolution) ----------
 type Revision = { skill_id: string; name: string; category: string | null; current_instructions: string; proposed_instructions: string; rationale: string; drivers: string[] };
+type NewSkill = { name: string; description: string; category: string; instructions: string; rationale: string; drivers: string[] };
+type NewDraft = { name: string; category: string; instructions: string };
 
 function EvolvePanel({ agentId, onApplied, onClose, setError }: { agentId: string; onApplied: () => void; onClose: () => void; setError: (s: string | null) => void }) {
   const supabase = createClient();
@@ -358,6 +360,9 @@ function EvolvePanel({ agentId, onApplied, onClose, setError }: { agentId: strin
   const [revs, setRevs] = useState<Revision[]>([]);
   const [drafts, setDrafts] = useState<Record<string, string>>({});
   const [applying, setApplying] = useState<string | null>(null);
+  const [news, setNews] = useState<(NewSkill & { uid: string })[]>([]);
+  const [newDrafts, setNewDrafts] = useState<Record<string, NewDraft>>({});
+  const [applyingNew, setApplyingNew] = useState<string | null>(null);
 
   const run = useCallback(async () => {
     setLoading(true); setError(null); setNote(null);
@@ -371,9 +376,13 @@ function EvolvePanel({ agentId, onApplied, onClose, setError }: { agentId: strin
       if (error) throw error;
       if (data?.error) throw new Error(data.error);
       const rs: Revision[] = data?.revisions ?? [];
+      const ns: NewSkill[] = data?.new_skills ?? [];
       setRevs(rs);
       setDrafts(Object.fromEntries(rs.map((r) => [r.skill_id, r.proposed_instructions])));
-      if (rs.length === 0) setNote(data?.message ?? "No skill changes warranted by current intelligence. Your playbooks are up to date.");
+      const withUid = ns.map((n, i) => ({ ...n, uid: `new-${i}` }));
+      setNews(withUid);
+      setNewDrafts(Object.fromEntries(withUid.map((n) => [n.uid, { name: n.name, category: n.category, instructions: n.instructions }])));
+      if (rs.length === 0 && ns.length === 0) setNote(data?.message ?? "No skill changes warranted by current intelligence. Your playbooks are up to date.");
     } catch (e) { setError(e instanceof Error ? e.message : "Could not evolve skills."); }
     finally { setLoading(false); }
   }, [supabase, agentId, setError]);
@@ -397,6 +406,37 @@ function EvolvePanel({ agentId, onApplied, onClose, setError }: { agentId: strin
   }
   function dismiss(id: string) { setRevs((prev) => prev.filter((x) => x.skill_id !== id)); }
 
+  async function acceptNew(n: NewSkill & { uid: string }) {
+    const d = newDrafts[n.uid] ?? { name: n.name, category: n.category, instructions: n.instructions };
+    if (!d.name.trim() || !d.instructions.trim()) { setError("New skill needs a name and instructions."); return; }
+    setApplyingNew(n.uid); setError(null);
+    try {
+      const orgId = await getOrgId();
+      if (!orgId) throw new Error("Could not resolve your organization.");
+      const base = d.name.trim().toLowerCase().replace(/[^a-z0-9]+/g, "_").replace(/^_|_$/g, "") || `skill_${Date.now()}`;
+      // Create with no instructions first, then evolve them in — so the skill's
+      // first revision is provenance-tagged 'evolved' (born from these signals).
+      let { data: created, error: insErr } = await supabase.from("skills")
+        .insert({ org_id: orgId, key: base, name: d.name.trim(), description: n.description?.trim() || null, instructions: null, category: d.category, source: "evolved" })
+        .select("id").single();
+      if (insErr && (insErr as { code?: string }).code === "23505") {
+        ({ data: created, error: insErr } = await supabase.from("skills")
+          .insert({ org_id: orgId, key: `${base}_${Date.now().toString(36)}`, name: d.name.trim(), description: n.description?.trim() || null, instructions: null, category: d.category, source: "evolved" })
+          .select("id").single());
+      }
+      if (insErr) throw insErr;
+      await supabase.from("agent_skills").insert({ org_id: orgId, agent_id: agentId, skill_id: created!.id });
+      const { error: rpcErr } = await supabase.rpc("apply_skill_evolution", {
+        p_skill: created!.id, p_instructions: d.instructions, p_drivers: n.drivers.map((x) => ({ kind: "intelligence", title: x })), p_note: n.rationale,
+      });
+      if (rpcErr) throw rpcErr;
+      setNews((prev) => prev.filter((x) => x.uid !== n.uid));
+      onApplied();
+    } catch (e) { setError(e instanceof Error ? e.message : "Could not create skill."); }
+    finally { setApplyingNew(null); }
+  }
+  function dismissNew(uid: string) { setNews((prev) => prev.filter((x) => x.uid !== uid)); }
+
   return (
     <div className="card card-pad" style={{ marginBottom: "var(--sp-3)", borderColor: "var(--ac)", background: "var(--ac-fill)" }}>
       <div className="row-between" style={{ marginBottom: 10 }}>
@@ -414,6 +454,7 @@ function EvolvePanel({ agentId, onApplied, onClose, setError }: { agentId: strin
         {revs.map((r) => (
           <div key={r.skill_id} className="card card-pad" style={{ background: "var(--panel)" }}>
             <div className="row gap-2" style={{ marginBottom: 6 }}>
+              <Chip tone="accent">revise</Chip>
               <span style={{ fontSize: 14, fontWeight: 640 }}>{r.name}</span>
               {r.category && <Chip tone={r.category === "product" ? "accent" : r.category === "gtm" ? "violet" : "default"}>{r.category}</Chip>}
             </div>
@@ -435,6 +476,38 @@ function EvolvePanel({ agentId, onApplied, onClose, setError }: { agentId: strin
             </div>
           </div>
         ))}
+
+        {news.map((n) => {
+          const d = newDrafts[n.uid] ?? { name: n.name, category: n.category, instructions: n.instructions };
+          return (
+            <div key={n.uid} className="card card-pad" style={{ background: "var(--panel)", borderColor: "var(--gn)" }}>
+              <div className="row gap-2" style={{ marginBottom: 6 }}>
+                <Chip tone="green">new skill</Chip>
+                <span className="t-sub t-muted" style={{ fontSize: 12 }}>a capability this agent doesn&apos;t have yet</span>
+              </div>
+              <div className="t-sub" style={{ fontSize: 12.5, marginBottom: 8 }}><strong>Why:</strong> {n.rationale}</div>
+              {n.drivers.length > 0 && (
+                <div className="row gap-2" style={{ flexWrap: "wrap", marginBottom: 8 }}>
+                  {n.drivers.map((x, i) => <Chip key={i} tone="default">{x}</Chip>)}
+                </div>
+              )}
+              <div style={{ display: "grid", gridTemplateColumns: "2fr 1fr", gap: "var(--sp-3)" }}>
+                <label className="field"><span className="t-label">Name</span>
+                  <input className="input" value={d.name} onChange={(e) => setNewDrafts({ ...newDrafts, [n.uid]: { ...d, name: e.target.value } })} /></label>
+                <label className="field"><span className="t-label">Category</span>
+                  <select className="select" value={d.category} onChange={(e) => setNewDrafts({ ...newDrafts, [n.uid]: { ...d, category: e.target.value } })}>
+                    <option value="general">General</option><option value="product">Product</option><option value="gtm">GTM</option><option value="research">Research</option>
+                  </select></label>
+              </div>
+              <label className="field"><span className="t-label">Instructions / playbook (edit before accepting)</span>
+                <textarea className="textarea" rows={8} value={d.instructions} onChange={(e) => setNewDrafts({ ...newDrafts, [n.uid]: { ...d, instructions: e.target.value } })} /></label>
+              <div className="row gap-2">
+                <button className="btn btn-success btn-sm" onClick={() => acceptNew(n)} disabled={applyingNew === n.uid}>{applyingNew === n.uid ? "Creating…" : "Create & attach"}</button>
+                <button className="btn btn-secondary btn-sm" onClick={() => dismissNew(n.uid)} disabled={applyingNew === n.uid}>Dismiss</button>
+              </div>
+            </div>
+          );
+        })}
       </div>
     </div>
   );

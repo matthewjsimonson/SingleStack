@@ -48,8 +48,26 @@ const SCHEMA = {
         required: ["skill_id", "change", "proposed_instructions", "rationale", "drivers"],
       },
     },
+    // Genuinely NEW capabilities the agent lacks — not a sharpening of an
+    // existing skill, but a capability the new intelligence reveals it needs.
+    new_skills: {
+      type: "array",
+      items: {
+        type: "object",
+        additionalProperties: false,
+        properties: {
+          name: { type: "string" },
+          description: { type: "string" },
+          category: { type: "string", enum: ["product", "gtm", "research", "general"] },
+          instructions: { type: "string" },
+          rationale: { type: "string" },
+          drivers: { type: "array", items: { type: "string" } },
+        },
+        required: ["name", "description", "category", "instructions", "rationale", "drivers"],
+      },
+    },
   },
-  required: ["revisions"],
+  required: ["revisions", "new_skills"],
 };
 
 Deno.serve(async (req: Request) => {
@@ -125,10 +143,15 @@ Deno.serve(async (req: Request) => {
 
     const system = [
       `You evolve the playbooks ("instructions") of ${agent.name}${agent.role ? `, ${agent.role}` : ""}, an executive agent, so they stay current with new intelligence.`,
-      "For EACH skill, decide whether the new intelligence (themes + signals) MEANINGFULLY changes how this skill should be applied — e.g. new market positioning, a competitive/market factor, a product release, or a shift in dev strategy from frontier models.",
-      "If it does: set change=true and rewrite the FULL instructions — preserve the skill's intent and structure, evolve the specifics. Keep it a tight, usable playbook (not a changelog). Cite the exact theme/signal titles that justify it in `drivers`.",
-      "If the intelligence does NOT change this skill: set change=false, leave proposed_instructions empty, drivers empty, and say why in one line in rationale. Do NOT manufacture changes — a no-op is the right answer when nothing relevant shifted.",
-      "Return one entry per skill, keyed by the exact skill_id given.",
+      "",
+      "REVISE an existing skill when the new intelligence (themes + signals) MEANINGFULLY changes how that EXISTING capability should be applied — same job, sharper playbook. For each skill:",
+      "• If it does: set change=true and rewrite the FULL instructions — preserve the skill's intent and structure, evolve the specifics. Keep it a tight, usable playbook (not a changelog). Cite the exact theme/signal titles in `drivers`.",
+      "• If it does NOT: set change=false, leave proposed_instructions empty, drivers empty, and say why in one line in rationale. Do NOT manufacture changes — a no-op is the right answer when nothing relevant shifted.",
+      "Return one revisions entry per skill, keyed by the exact skill_id given.",
+      "",
+      "ADD a new skill ONLY when the intelligence reveals a capability this agent genuinely LACKS — a new capability, not a sharpening of an existing skill (e.g. a new platform/model capability or market motion that needs its own playbook). Put these in new_skills with a tight name, one-line description, the best-fit category, and a usable instructions playbook. Be conservative: most reviews should add zero new skills. If nothing warrants a new capability, return an empty new_skills array.",
+      "",
+      "Restraint is the point: a review that changes little is a sign of health, not failure. Do not pad.",
     ].join("\n");
 
     const userMsg = `INTELLIGENCE DIGEST (scoped to this agent's connected areas: ${areas.join(", ")}):\n${digest}\n\nSKILLS TO REVIEW:\n${skillList}\n\nPropose evolutions.`;
@@ -146,7 +169,10 @@ Deno.serve(async (req: Request) => {
 
     const block = resp.content.find((b) => b.type === "text");
     if (!block || block.type !== "text") throw new Error("no revisions returned");
-    const parsed = JSON.parse(block.text) as { revisions?: { skill_id: string; change: boolean; proposed_instructions: string; rationale: string; drivers: string[] }[] };
+    const parsed = JSON.parse(block.text) as {
+      revisions?: { skill_id: string; change: boolean; proposed_instructions: string; rationale: string; drivers: string[] }[];
+      new_skills?: { name: string; description: string; category: string; instructions: string; rationale: string; drivers: string[] }[];
+    };
 
     // Decorate with current text + names so the client can show a clean diff;
     // only return entries that propose a real change.
@@ -166,7 +192,21 @@ Deno.serve(async (req: Request) => {
         };
       });
 
-    return json({ revisions, reviewed: skills.length });
+    // Don't propose a "new" skill whose name collides with one this agent
+    // already has (that's a revision, not a new capability).
+    const haveNames = new Set(skills.map((s) => (s.name ?? "").trim().toLowerCase()));
+    const newSkills = (parsed.new_skills ?? [])
+      .filter((n) => n.name && n.instructions && !haveNames.has(n.name.trim().toLowerCase()))
+      .map((n) => ({
+        name: n.name,
+        description: n.description ?? "",
+        category: ["product", "gtm", "research", "general"].includes(n.category) ? n.category : "general",
+        instructions: n.instructions,
+        rationale: n.rationale ?? "",
+        drivers: n.drivers ?? [],
+      }));
+
+    return json({ revisions, new_skills: newSkills, reviewed: skills.length });
   } catch (e) {
     return json({ error: e instanceof Error ? e.message : String(e) }, 500);
   }
