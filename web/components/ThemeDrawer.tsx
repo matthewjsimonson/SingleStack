@@ -15,7 +15,8 @@ type Theme = {
   state: string | null; momentum: string | null; conf_level: number | null; category: string | null; signal_ids: string[] | null;
 };
 type Sig = { id: string; title: string; conf_label: string | null };
-type Decision = { id: string; title: string; status: string };
+type Decision = { id: string; title: string; status: string; rationale: string | null; input_context: string | null };
+type Routed = { id: string; title: string; lane: string };
 
 const OFFICER = (cat: string | null) => (cat === "gtm" ? { key: "cro", name: "CRO" } : { key: "cpo", name: "CPO" });
 
@@ -39,7 +40,7 @@ export default function ThemeDrawer({ themeId, onClose, onChanged }: { themeId: 
     const ids = (t?.signal_ids as string[] | null) ?? [];
     const [{ data: sigs }, { data: ev }] = await Promise.all([
       ids.length ? supabase.from("signals").select("id, title, conf_label").in("id", ids) : Promise.resolve({ data: [] as Sig[] }),
-      supabase.from("decision_evidence").select("decisions ( id, title, status )").eq("theme_id", themeId),
+      supabase.from("decision_evidence").select("decisions ( id, title, status, rationale, input_context )").eq("theme_id", themeId),
     ]);
     setSignals((sigs ?? []) as Sig[]);
     // deno-lint-ignore no-explicit-any
@@ -93,38 +94,6 @@ export default function ThemeDrawer({ themeId, onClose, onChanged }: { themeId: 
     setBusy(null);
   }
 
-  async function decide(id: string) {
-    setBusy(id); setError(null);
-    const { error } = await supabase.from("decisions").update({ status: "decided", decided_at: new Date().toISOString() }).eq("id", id);
-    if (error) setError(error.message); else { await load(); onChanged?.(); }
-    setBusy(null);
-  }
-  async function reopen(id: string) {
-    setBusy(id); setError(null);
-    await supabase.from("decisions").update({ status: "open", decided_at: null }).eq("id", id);
-    await load(); onChanged?.(); setBusy(null);
-  }
-  async function del(id: string) {
-    setBusy(id); setError(null);
-    await supabase.from("decisions").delete().eq("id", id);
-    await load(); onChanged?.(); setBusy(null);
-  }
-  // Route a decision into action: spawn an initiative carrying the decision as
-  // provenance (initiatives.decision_id), and mark the decision routed. The
-  // initiative lands where it's worked — Ship (product) or Enablement (GTM).
-  async function route(d: Decision) {
-    setBusy(d.id); setError(null);
-    try {
-      const orgId = await getOrgId(); if (!orgId) throw new Error("No org.");
-      const lane = theme?.category === "gtm" ? "enablement" : "ship";
-      const { error: ie } = await supabase.from("initiatives").insert({ org_id: orgId, lane, title: `Act: ${d.title}`, description: theme?.recommendation ?? null, decision_id: d.id, stage: "backlog", priority: "high" });
-      if (ie) throw ie;
-      await supabase.from("decisions").update({ status: "routed", decided_at: new Date().toISOString() }).eq("id", d.id);
-      await load(); onChanged?.();
-    } catch (e) { setError(e instanceof Error ? e.message : "Could not route decision."); }
-    setBusy(null);
-  }
-
   return (
     <>
       <div onClick={onClose} style={{ position: "fixed", inset: 0, background: "rgba(11,12,14,0.32)", opacity: open ? 1 : 0, transition: "opacity 0.18s ease", zIndex: 40 }} />
@@ -153,35 +122,14 @@ export default function ThemeDrawer({ themeId, onClose, onChanged }: { themeId: 
             {take && <div className="card card-pad" style={{ marginTop: 10, background: "var(--panel)" }}><div className="t-sub" style={{ fontSize: 13, lineHeight: 1.55, whiteSpace: "pre-wrap" }}>{take}</div></div>}
           </div>
 
-          {/* Decisions — made, routed, and managed in place */}
+          {/* Decisions — made, routed, and managed fully in place */}
           <div className="card card-pad">
             <div className="t-label" style={{ color: "var(--tm)", marginBottom: 8 }}>Decisions</div>
             {decisions.length > 0 ? (
               <div className="stack-3" style={{ marginBottom: 10 }}>
-                {decisions.map((d) => {
-                  const r = routed[d.id];
-                  return (
-                    <div key={d.id} className="card card-pad" style={{ background: "var(--panel-2)", padding: 12 }}>
-                      <div className="row-between" style={{ gap: 8, marginBottom: 6 }}>
-                        <span style={{ fontSize: 13, fontWeight: 620 }}>{d.title}</span>
-                        <Chip tone={d.status === "open" ? "amber" : d.status === "routed" ? "accent" : "green"}>{d.status}</Chip>
-                      </div>
-                      {/* impact: where it routed */}
-                      {r ? (
-                        <div className="t-sub" style={{ fontSize: 12, marginBottom: 8 }}>→ Routed to <strong>{r.lane === "ship" ? "Build · Ship" : "GTM · Enablement"}</strong>: {r.title}</div>
-                      ) : (
-                        <div className="t-sub t-muted" style={{ fontSize: 11.5, marginBottom: 8 }}>Impact: backed by this theme + {signals.length} signal{signals.length === 1 ? "" : "s"}. Decide, then route it into action.</div>
-                      )}
-                      <div className="row gap-2" style={{ flexWrap: "wrap" }}>
-                        {d.status === "open" && <button className="btn btn-success btn-sm" onClick={() => decide(d.id)} disabled={busy === d.id}>Mark decided</button>}
-                        {d.status !== "routed" && <button className="btn btn-sm" onClick={() => route(d)} disabled={busy === d.id}>Route to action →</button>}
-                        {d.status !== "open" && <button className="btn btn-secondary btn-sm" onClick={() => reopen(d.id)} disabled={busy === d.id}>Reopen</button>}
-                        <a href={`/decisions/${d.id}`} className="btn btn-secondary btn-sm">Open</a>
-                        <button className="btn btn-secondary btn-sm" onClick={() => del(d.id)} disabled={busy === d.id} style={{ marginLeft: "auto", color: "var(--rd-text)" }}>Delete</button>
-                      </div>
-                    </div>
-                  );
-                })}
+                {decisions.map((d) => (
+                  <DecisionCard key={d.id} d={d} theme={theme} signalCount={signals.length} routed={routed[d.id]} reload={async () => { await load(); onChanged?.(); }} />
+                ))}
               </div>
             ) : <div className="t-sub t-muted" style={{ fontSize: 12.5, marginBottom: 10 }}>No decision yet. Turn this theme into a decision — its signals carry over as evidence.</div>}
             <button className="btn btn-sm" onClick={makeDecision} disabled={busy === "decision"}>{busy === "decision" ? "Creating…" : "+ Make a decision"}</button>
@@ -204,5 +152,89 @@ export default function ThemeDrawer({ themeId, onClose, onChanged }: { themeId: 
         </div>
       </aside>
     </>
+  );
+}
+
+// A decision, fully managed in place: evidence → rationale → decide → route, plus
+// request-input (copy a summary to share on Slack/email, paste the reply back as
+// context). No second screen.
+function DecisionCard({ d, theme, signalCount, routed, reload }: { d: Decision; theme: Theme | null; signalCount: number; routed?: Routed; reload: () => Promise<void>; }) {
+  const supabase = createClient();
+  const [rationale, setRationale] = useState(d.rationale ?? "");
+  const [input, setInput] = useState(d.input_context ?? "");
+  const [asking, setAsking] = useState(false);
+  const [copied, setCopied] = useState(false);
+  const [busy, setBusy] = useState<string | null>(null);
+  const [err, setErr] = useState<string | null>(null);
+
+  async function patch(fields: Record<string, unknown>, key: string) {
+    setBusy(key); setErr(null);
+    const { error } = await supabase.from("decisions").update(fields).eq("id", d.id);
+    if (error) setErr(error.message); else await reload();
+    setBusy(null);
+  }
+  async function route() {
+    setBusy("route"); setErr(null);
+    try {
+      const orgId = await getOrgId(); if (!orgId) throw new Error("No org.");
+      const lane = theme?.category === "gtm" ? "enablement" : "ship";
+      const { error: ie } = await supabase.from("initiatives").insert({ org_id: orgId, lane, title: `Act: ${d.title}`, description: rationale || theme?.recommendation || null, decision_id: d.id, stage: "backlog", priority: "high" });
+      if (ie) throw ie;
+      await supabase.from("decisions").update({ status: "routed", decided_at: new Date().toISOString() }).eq("id", d.id);
+      await reload();
+    } catch (e) { setErr(e instanceof Error ? e.message : "Could not route."); }
+    setBusy(null);
+  }
+  async function del() { setBusy("del"); await supabase.from("decisions").delete().eq("id", d.id); await reload(); setBusy(null); }
+
+  const summary = `Decision: ${d.title}\n\nContext (theme): ${theme?.title ?? ""}\n${theme?.summary ? theme.summary + "\n" : ""}Backed by ${signalCount} signal(s).\n\nLeaning: ${rationale || "(undecided)"}\n\nWhat's your take? Reply and I'll fold it in.`;
+  const mailto = `mailto:?subject=${encodeURIComponent("Input needed: " + d.title)}&body=${encodeURIComponent(summary)}`;
+  async function copy() { try { await navigator.clipboard.writeText(summary); setCopied(true); setTimeout(() => setCopied(false), 1500); } catch { /* clipboard unavailable */ } }
+
+  return (
+    <div className="card card-pad" style={{ background: "var(--panel-2)", padding: 12 }}>
+      {err && <div className="banner banner-error" style={{ marginBottom: 8 }}>{err}</div>}
+      <div className="row-between" style={{ gap: 8, marginBottom: 6 }}>
+        <span style={{ fontSize: 13, fontWeight: 620 }}>{d.title}</span>
+        <Chip tone={d.status === "open" ? "amber" : d.status === "routed" ? "accent" : "green"}>{d.status}</Chip>
+      </div>
+
+      {/* evidence + impact */}
+      {routed ? (
+        <div className="t-sub" style={{ fontSize: 12, marginBottom: 8 }}>→ Routed to <strong>{routed.lane === "ship" ? "Build · Ship" : "GTM · Enablement"}</strong>: {routed.title}</div>
+      ) : (
+        <div className="t-sub t-muted" style={{ fontSize: 11.5, marginBottom: 8 }}>Evidence: this theme + {signalCount} signal{signalCount === 1 ? "" : "s"}. Write the call, then route it into action.</div>
+      )}
+
+      {/* the decision / rationale */}
+      <label className="field"><span className="t-label">The decision &amp; why</span>
+        <textarea className="textarea" rows={2} value={rationale} onChange={(e) => setRationale(e.target.value)} placeholder="What are we doing, and why — in a sentence or two." /></label>
+      <div className="row gap-2" style={{ flexWrap: "wrap", marginBottom: 8 }}>
+        <button className="btn btn-secondary btn-sm" onClick={() => patch({ rationale: rationale.trim() || null }, "save")} disabled={busy === "save"}>{busy === "save" ? "Saving…" : "Save"}</button>
+        {d.status === "open" && <button className="btn btn-success btn-sm" onClick={() => patch({ status: "decided", decided_at: new Date().toISOString(), rationale: rationale.trim() || null }, "decide")} disabled={busy === "decide"}>Mark decided</button>}
+        {d.status !== "routed" && <button className="btn btn-sm" onClick={route} disabled={busy === "route"}>{busy === "route" ? "Routing…" : "Route to action →"}</button>}
+        {d.status !== "open" && <button className="btn btn-secondary btn-sm" onClick={() => patch({ status: "open", decided_at: null }, "reopen")} disabled={busy === "reopen"}>Reopen</button>}
+        <button className="btn btn-secondary btn-sm" onClick={del} disabled={busy === "del"} style={{ marginLeft: "auto", color: "var(--rd-text)" }}>Delete</button>
+      </div>
+
+      {/* request input from a colleague (Slack/email), fold the reply back in */}
+      <div style={{ borderTop: "1px solid var(--border)", paddingTop: 8 }}>
+        {!asking ? (
+          <button className="btn btn-secondary btn-sm" onClick={() => setAsking(true)}>✉ Request input</button>
+        ) : (
+          <div className="stack-3">
+            <div className="row gap-2" style={{ flexWrap: "wrap" }}>
+              <button className="btn btn-secondary btn-sm" onClick={copy}>{copied ? "Copied ✓" : "Copy summary"}</button>
+              <a className="btn btn-secondary btn-sm" href={mailto}>Open in email</a>
+              <span className="t-sub t-muted" style={{ fontSize: 11.5, alignSelf: "center" }}>paste into Slack/email, then drop their reply below</span>
+            </div>
+            <label className="field"><span className="t-label">Input received</span>
+              <textarea className="textarea" rows={2} value={input} onChange={(e) => setInput(e.target.value)} placeholder="Paste their response here — it becomes context on this decision." /></label>
+            <div className="row gap-2"><button className="btn btn-sm" onClick={() => patch({ input_context: input.trim() || null }, "input")} disabled={busy === "input"}>{busy === "input" ? "Saving…" : "Save input"}</button><button className="btn btn-secondary btn-sm" onClick={() => setAsking(false)}>Done</button></div>
+          </div>
+        )}
+        {d.input_context && !asking && <div className="t-sub" style={{ fontSize: 12, marginTop: 6 }}><strong>Input:</strong> {d.input_context}</div>}
+      </div>
+    </div>
   );
 }
