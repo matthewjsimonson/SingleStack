@@ -1,9 +1,11 @@
 "use client";
 
-// Roadmap — what's COMING. Releases (versioned) grouped by stage: Planned →
-// In development → Released. Each release shows version, target date, the
-// product it's for, and how many build items (initiatives) ship in it. This is
-// "what the product will be"; the actual building happens in Ship.
+// Roadmap — the OUTPUT people want to see. A release bundles shipped product
+// work; its changelog is populated by completed BUILD tasks tagged to it
+// (change_type: feature / feature-update / module-update / bug-fix /
+// enhancement). You don't do work here — you do it in Ship and tag the task to
+// a release; finishing it lands it in the changelog. Roadmap = Planned → In
+// development → Released, the rollup of that.
 import { useEffect, useState, useCallback } from "react";
 import { createClient } from "@/lib/supabase/client";
 import { getOrgId } from "@/lib/org";
@@ -11,17 +13,27 @@ import { useProductScope } from "@/lib/ProductContext";
 import { PageHeader, Section, Chip, Banner } from "@/components/ui";
 
 type Release = { id: string; name: string; version: string | null; summary: string | null; stage: string; target_date: string | null; product_id: string | null };
+type Task = { id: string; title: string; stage: string; change_type: string | null; release_id: string | null };
 type Rec = { id: string; name: string };
 
 const STAGES = [["planned", "Planned"], ["in_dev", "In development"], ["released", "Released"]] as const;
 const STAGE_TONE: Record<string, "default" | "violet" | "green"> = { planned: "default", in_dev: "violet", released: "green" };
+// What a build task ships as — drives the changelog grouping.
+const CHANGE: Record<string, { label: string; tone: "accent" | "violet" | "green" | "amber" | "default"; icon: string }> = {
+  feature:        { label: "New feature",    tone: "accent",  icon: "✦" },
+  feature_update: { label: "Feature update", tone: "violet",  icon: "↑" },
+  module_update:  { label: "Module update",  tone: "violet",  icon: "▢" },
+  enhancement:    { label: "Enhancement",    tone: "green",   icon: "+" },
+  bug_fix:        { label: "Bug fix",        tone: "amber",   icon: "✕" },
+};
+const CHANGE_ORDER = ["feature", "feature_update", "module_update", "enhancement", "bug_fix"];
 
 export default function RoadmapView() {
   const supabase = createClient();
   const { matches } = useProductScope(); // scope releases to the active product line
   const [releases, setReleases] = useState<Release[]>([]);
   const [products, setProducts] = useState<Rec[]>([]);
-  const [counts, setCounts] = useState<Record<string, number>>({});
+  const [tasks, setTasks] = useState<Task[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [creating, setCreating] = useState(false);
@@ -29,15 +41,12 @@ export default function RoadmapView() {
   const [busy, setBusy] = useState(false);
 
   const load = useCallback(async () => {
-    const [{ data: rel }, { data: prods }, { data: inits }] = await Promise.all([
+    const [{ data: rel }, { data: prods }, { data: w }] = await Promise.all([
       supabase.from("releases").select("id, name, version, summary, stage, target_date, product_id").order("target_date", { nullsFirst: false }).order("created_at"),
       supabase.from("product_records").select("id, name"),
-      supabase.from("initiatives").select("release_id"),
+      supabase.from("initiative_workstreams").select("id, title, stage, change_type, release_id").eq("area", "build").not("release_id", "is", null),
     ]);
-    setReleases(rel ?? []); setProducts(prods ?? []);
-    const c: Record<string, number> = {};
-    (inits ?? []).forEach((i) => { if (i.release_id) c[i.release_id] = (c[i.release_id] ?? 0) + 1; });
-    setCounts(c); setLoading(false);
+    setReleases(rel ?? []); setProducts(prods ?? []); setTasks((w ?? []) as Task[]); setLoading(false);
   }, [supabase]);
   useEffect(() => { load(); }, [load]);
 
@@ -59,10 +68,11 @@ export default function RoadmapView() {
   async function remove(id: string) { setError(null); await supabase.from("releases").delete().eq("id", id); await load(); }
 
   const productName = (id: string | null) => products.find((p) => p.id === id)?.name ?? null;
+  const tasksFor = (rid: string) => tasks.filter((t) => t.release_id === rid);
 
   return (
     <div>
-      <PageHeader title="Roadmap" meta="What's coming — releases and what the product will be. Build & test happens in Ship." actions={!creating ? <button className="btn" onClick={() => setCreating(true)}>+ New release</button> : undefined} />
+      <PageHeader title="Roadmap" meta="What's shipping — releases and their changelog. The work happens in Ship; tag a build task to a release and finishing it lands here." actions={!creating ? <button className="btn" onClick={() => setCreating(true)}>+ New release</button> : undefined} />
       <Banner>{error}</Banner>
 
       {creating && (
@@ -81,36 +91,64 @@ export default function RoadmapView() {
       )}
 
       {loading ? <div className="t-sub t-muted">Loading…</div> : releases.filter(matches).length === 0 && !creating ? (
-        <div className="empty"><div className="t-body" style={{ fontWeight: 600, marginBottom: 6 }}>No releases yet</div><div className="t-sub">Plan what's coming — create a release, then build its work in Ship.</div></div>
+        <div className="empty"><div className="t-body" style={{ fontWeight: 600, marginBottom: 6 }}>No releases yet</div><div className="t-sub">Plan what's coming — create a release, then tag its build tasks to it in Ship.</div></div>
       ) : STAGES.map(([stage, label]) => {
         const list = releases.filter((r) => r.stage === stage && matches(r));
         if (list.length === 0) return null;
         return (
           <Section key={stage} label={`${label} · ${list.length}`}>
             <div className="stack-3">
-              {list.map((r) => (
-                <div key={r.id} className="card card-pad">
-                  <div className="row-between" style={{ alignItems: "flex-start", marginBottom: 6 }}>
-                    <div className="row gap-2">
-                      {r.version && <Chip>{r.version}</Chip>}
-                      <span style={{ fontSize: 15, fontWeight: 620 }}>{r.name}</span>
-                      <Chip tone={STAGE_TONE[r.stage]}>{label}</Chip>
+              {list.map((r) => {
+                const rt = tasksFor(r.id);
+                const doneN = rt.filter((t) => t.stage === "done").length;
+                const groups = CHANGE_ORDER.map((ct) => [ct, rt.filter((t) => (t.change_type ?? "feature") === ct)] as const).filter(([, l]) => l.length > 0);
+                return (
+                  <div key={r.id} className="card card-pad">
+                    <div className="row-between" style={{ alignItems: "flex-start", marginBottom: 6 }}>
+                      <div className="row gap-2">
+                        {r.version && <Chip>{r.version}</Chip>}
+                        <span style={{ fontSize: 15, fontWeight: 620 }}>{r.name}</span>
+                        <Chip tone={STAGE_TONE[r.stage]}>{label}</Chip>
+                      </div>
+                      <button className="t-muted" onClick={() => remove(r.id)} style={{ background: "none", border: "none", cursor: "pointer", fontSize: 15 }}>×</button>
                     </div>
-                    <button className="t-muted" onClick={() => remove(r.id)} style={{ background: "none", border: "none", cursor: "pointer", fontSize: 15 }}>×</button>
+                    {r.summary && <div className="t-sub" style={{ lineHeight: 1.5, marginBottom: 10 }}>{r.summary}</div>}
+                    <div className="row gap-2" style={{ flexWrap: "wrap", marginBottom: rt.length ? 12 : 10 }}>
+                      {productName(r.product_id) && <Chip tone="accent">{productName(r.product_id)}</Chip>}
+                      {r.target_date && <Chip>🎯 {new Date(r.target_date).toLocaleDateString()}</Chip>}
+                      <Chip tone={rt.length && doneN === rt.length ? "green" : "default"}>📦 {rt.length ? `${doneN}/${rt.length} shipped` : "no tasks tagged yet"}</Chip>
+                    </div>
+
+                    {/* changelog — completed (and pending) build work tied to this release */}
+                    {groups.length > 0 && (
+                      <div className="stack-3" style={{ marginBottom: 12, borderTop: "1px solid var(--border)", paddingTop: 10 }}>
+                        {groups.map(([ct, l]) => {
+                          const c = CHANGE[ct] ?? CHANGE.feature;
+                          return (
+                            <div key={ct}>
+                              <div className="row gap-2" style={{ marginBottom: 4 }}><Chip tone={c.tone}>{c.icon} {c.label}</Chip></div>
+                              <div className="stack-3" style={{ paddingLeft: 2 }}>
+                                {l.map((t) => (
+                                  <div key={t.id} className="row gap-2" style={{ fontSize: 13, alignItems: "baseline" }}>
+                                    <span style={{ color: t.stage === "done" ? "var(--gn-text)" : "var(--tm)", fontWeight: 700, width: 14 }}>{t.stage === "done" ? "✓" : "○"}</span>
+                                    <span style={{ color: t.stage === "done" ? "var(--tp)" : "var(--tm)" }}>{t.title}</span>
+                                  </div>
+                                ))}
+                              </div>
+                            </div>
+                          );
+                        })}
+                      </div>
+                    )}
+
+                    <div className="row gap-2">
+                      {stage !== "planned" && <button className="btn btn-secondary btn-sm" onClick={() => move(r.id, stage === "released" ? "in_dev" : "planned")}>←</button>}
+                      {stage !== "released" && <button className="btn btn-secondary btn-sm" onClick={() => move(r.id, stage === "planned" ? "in_dev" : "released")}>{stage === "planned" ? "Start dev →" : "Mark released →"}</button>}
+                      <a className="btn btn-secondary btn-sm" href="/ship">Build in Ship →</a>
+                    </div>
                   </div>
-                  {r.summary && <div className="t-sub" style={{ lineHeight: 1.5, marginBottom: 10 }}>{r.summary}</div>}
-                  <div className="row gap-2" style={{ flexWrap: "wrap", marginBottom: 10 }}>
-                    {productName(r.product_id) && <Chip tone="accent">{productName(r.product_id)}</Chip>}
-                    {r.target_date && <Chip>🎯 {new Date(r.target_date).toLocaleDateString()}</Chip>}
-                    <Chip>🔨 {counts[r.id] ?? 0} build item{(counts[r.id] ?? 0) === 1 ? "" : "s"}</Chip>
-                  </div>
-                  <div className="row gap-2">
-                    {stage !== "planned" && <button className="btn btn-secondary btn-sm" onClick={() => move(r.id, stage === "released" ? "in_dev" : "planned")}>←</button>}
-                    {stage !== "released" && <button className="btn btn-secondary btn-sm" onClick={() => move(r.id, stage === "planned" ? "in_dev" : "released")}>{stage === "planned" ? "Start dev →" : "Mark released →"}</button>}
-                    <a className="btn btn-secondary btn-sm" href="/ship">Build in Ship →</a>
-                  </div>
-                </div>
-              ))}
+                );
+              })}
             </div>
           </Section>
         );

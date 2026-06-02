@@ -10,20 +10,25 @@ import { createClient } from "@/lib/supabase/client";
 import { getOrgId } from "@/lib/org";
 import { PageHeader, Chip, Banner } from "@/components/ui";
 
-type Task = { id: string; title: string; stage: string; assignee_id: string | null; lifecycle_stage: string; initiative_id: string | null };
+type Task = { id: string; title: string; stage: string; assignee_id: string | null; lifecycle_stage: string; initiative_id: string | null; change_type: string | null; content_type: string | null; release_id: string | null };
 type Init = { id: string; title: string; lifecycle: string };
 type Person = { id: string; name: string };
+type Release = { id: string; name: string; version: string | null };
 
 const COLS = [["backlog", "To do"], ["active", "In progress"], ["done", "Done"]] as const;
 const NEXT: Record<string, string> = { backlog: "active", active: "done" };
 const PREV: Record<string, string> = { done: "active", active: "backlog" };
 const LIFE_ORDER = ["signal", "plan", "build", "launch", "live"];
+// Build tasks ship as one of these — feeds the Roadmap release changelog.
+const CHANGE_TYPES: [string, string][] = [["feature", "New feature"], ["feature_update", "Feature update"], ["module_update", "Module update"], ["enhancement", "Enhancement"], ["bug_fix", "Bug fix"]];
+const CONTENT_LABEL: Record<string, string> = { social: "Social", video: "Video", blog: "Blog", thought_leadership: "Thought leadership", case_study: "Case study", white_paper: "White paper", testimonial: "Testimonial" };
 
 export default function WorkstreamBoard({ area, title, meta }: { area: "build" | "gtm"; title: string; meta: string }) {
   const supabase = createClient();
   const [tasks, setTasks] = useState<Task[]>([]);
   const [inits, setInits] = useState<Init[]>([]);
   const [people, setPeople] = useState<Person[]>([]);
+  const [releases, setReleases] = useState<Release[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [rolled, setRolled] = useState<string | null>(null);
@@ -31,12 +36,13 @@ export default function WorkstreamBoard({ area, title, meta }: { area: "build" |
   const [form, setForm] = useState({ title: "", initiativeId: "" });
 
   const load = useCallback(async () => {
-    const [{ data: w }, { data: i }, { data: p }] = await Promise.all([
-      supabase.from("initiative_workstreams").select("id, title, stage, assignee_id, lifecycle_stage, initiative_id").eq("area", area).order("created_at"),
+    const [{ data: w }, { data: i }, { data: p }, { data: rel }] = await Promise.all([
+      supabase.from("initiative_workstreams").select("id, title, stage, assignee_id, lifecycle_stage, initiative_id, change_type, content_type, release_id").eq("area", area).order("created_at"),
       supabase.from("initiatives").select("id, title, lifecycle").is("parent_id", null).order("created_at", { ascending: false }),
       supabase.from("people").select("id, name"),
+      area === "build" ? supabase.from("releases").select("id, name, version").order("created_at") : Promise.resolve({ data: [] as Release[] }),
     ]);
-    setTasks((w ?? []) as Task[]); setInits((i ?? []) as Init[]); setPeople(p ?? []); setLoading(false);
+    setTasks((w ?? []) as Task[]); setInits((i ?? []) as Init[]); setPeople(p ?? []); setReleases((rel ?? []) as Release[]); setLoading(false);
   }, [supabase, area]);
   useEffect(() => { load(); }, [load]);
 
@@ -68,7 +74,7 @@ export default function WorkstreamBoard({ area, title, meta }: { area: "build" |
     e.preventDefault(); if (!form.title.trim()) return;
     const orgId = await getOrgId(); if (!orgId) return;
     const ls = form.initiativeId ? (iniOf(form.initiativeId)?.lifecycle ?? "plan") : "plan";
-    const { error } = await supabase.from("initiative_workstreams").insert({ org_id: orgId, area, title: form.title.trim(), initiative_id: form.initiativeId || null, lifecycle_stage: ls });
+    const { error } = await supabase.from("initiative_workstreams").insert({ org_id: orgId, area, title: form.title.trim(), initiative_id: form.initiativeId || null, lifecycle_stage: ls, change_type: area === "build" ? "feature" : null });
     if (error) setError(error.message); else { setAdding(false); setForm({ title: "", initiativeId: "" }); load(); }
   }
 
@@ -108,6 +114,7 @@ export default function WorkstreamBoard({ area, title, meta }: { area: "build" |
                     return (
                       <div key={t.id} className="card card-pad" style={{ borderLeft: `3px solid var(--${area === "build" ? "ac" : "vl"})` }}>
                         <div style={{ fontSize: 13.5, fontWeight: 620, marginBottom: 6 }}>{t.title}</div>
+                        {area === "gtm" && t.content_type && <div style={{ marginBottom: 6 }}><Chip tone="violet">{CONTENT_LABEL[t.content_type] ?? t.content_type}</Chip></div>}
                         <div className="row gap-2" style={{ alignItems: "center" }}>
                           <select className="select" value={t.assignee_id ?? ""} onChange={(e) => patch(t, { assignee_id: e.target.value || null })} style={{ flex: 1, fontSize: 12, padding: "4px 8px" }}>
                             <option value="">Unassigned</option>{people.map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}
@@ -115,6 +122,17 @@ export default function WorkstreamBoard({ area, title, meta }: { area: "build" |
                           {PREV[t.stage] && <button className="btn btn-secondary btn-sm" onClick={() => patch(t, { stage: PREV[t.stage] })}>←</button>}
                           {NEXT[t.stage] && <button className="btn btn-secondary btn-sm" onClick={() => patch(t, { stage: NEXT[t.stage] })}>{t.stage === "backlog" ? "Start →" : "Done →"}</button>}
                         </div>
+                        {/* build tasks ship as a change_type into a release — feeds the Roadmap changelog */}
+                        {area === "build" && (
+                          <div className="row gap-2" style={{ marginTop: 6 }}>
+                            <select className="select" value={t.change_type ?? "feature"} onChange={(e) => patch(t, { change_type: e.target.value })} style={{ flex: 1, fontSize: 11.5, padding: "4px 8px" }}>
+                              {CHANGE_TYPES.map(([v, l]) => <option key={v} value={v}>{l}</option>)}
+                            </select>
+                            <select className="select" value={t.release_id ?? ""} onChange={(e) => patch(t, { release_id: e.target.value || null })} style={{ flex: 1, fontSize: 11.5, padding: "4px 8px" }}>
+                              <option value="">No release</option>{releases.map((r) => <option key={r.id} value={r.id}>{r.version ? `${r.version} · ${r.name}` : r.name}</option>)}
+                            </select>
+                          </div>
+                        )}
                         {ini && <a href={`/initiatives/${ini.id}`} className="t-sub" style={{ display: "inline-block", marginTop: 6, fontSize: 11, color: "var(--tm)", textDecoration: "none" }}>↑ {ini.title}</a>}
                       </div>
                     );
