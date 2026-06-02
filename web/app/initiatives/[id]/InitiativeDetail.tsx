@@ -1,13 +1,14 @@
 "use client";
 
-// Initiative detail — the card's own page: stage-aware and scope-aware. An
-// initiative is Product, GTM, or both, and moves through the PLG lifecycle
-// (Signal → Plan → Build → Launch → Live). Each stage dictates DIFFERENT work
-// per side; you complete the current stage's tasks to advance (gated). This is
-// NOT the Ship build workspace — it's the cross-functional motion's cockpit.
+// Initiative detail — TRACKING, not doing. An initiative is Product, GTM, or
+// both, moving through the PLG lifecycle (Signal → Plan → Build → Launch →
+// Live). This page tells you WHERE the initiative is and what's left in the
+// current stage — but the actual work happens in the Ship (build) and
+// Enablement (GTM) module boards. Completing the last task of a stage there
+// rolls status UP and auto-advances this initiative. So here you can see the
+// rollup and jump out to do the work; manual advance is a management override.
 import { useCallback, useEffect, useState } from "react";
 import { createClient } from "@/lib/supabase/client";
-import { getOrgId } from "@/lib/org";
 import { Chip, Banner, BackLink, Spinner } from "@/components/ui";
 
 type Initiative = { id: string; title: string; description: string | null; scope: string; lifecycle: string; kind: string | null; assignee_id: string | null; objective_id: string | null };
@@ -24,6 +25,8 @@ const LIFE: { key: string; label: string; product: string; gtm: string }[] = [
 ];
 const ORDER = LIFE.map((s) => s.key);
 const SCOPE_LABEL: Record<string, string> = { product: "Product", gtm: "GTM", both: "Product + GTM" };
+// Where you actually do the work for each side.
+const MODULE: Record<string, { href: string; name: string }> = { build: { href: "/ship", name: "Ship" }, gtm: { href: "/enablement", name: "Enablement" } };
 
 export default function InitiativeDetail({ id }: { id: string }) {
   const supabase = createClient();
@@ -32,8 +35,6 @@ export default function InitiativeDetail({ id }: { id: string }) {
   const [people, setPeople] = useState<Person[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  const [adding, setAdding] = useState<string | null>(null); // area being added to
-  const [title, setTitle] = useState("");
 
   const load = useCallback(async () => {
     const [{ data: i }, { data: w }, { data: p }] = await Promise.all([
@@ -55,15 +56,9 @@ export default function InitiativeDetail({ id }: { id: string }) {
   const stageTasks = (area: string) => tasks.filter((t) => t.area === area && t.lifecycle_stage === ini.lifecycle);
   const curTasks = sides.flatMap((s) => stageTasks(s));
   const blocking = curTasks.filter((t) => t.stage !== "done").length;
+  const STAGE_STATE: Record<string, { label: string; tone: string }> = { backlog: { label: "To do", tone: "" }, active: { label: "In progress", tone: "amber" }, done: { label: "Done", tone: "green" } };
 
-  async function addTask(area: string) {
-    if (!title.trim()) return;
-    const orgId = await getOrgId(); if (!orgId) return;
-    const { error } = await supabase.from("initiative_workstreams").insert({ org_id: orgId, initiative_id: id, area, lifecycle_stage: ini!.lifecycle, title: title.trim() });
-    if (error) setError(error.message); else { setAdding(null); setTitle(""); load(); }
-  }
-  async function patchTask(tid: string, fields: Record<string, unknown>) { setError(null); await supabase.from("initiative_workstreams").update(fields).eq("id", tid); load(); }
-  async function delTask(tid: string) { setError(null); await supabase.from("initiative_workstreams").delete().eq("id", tid); load(); }
+  // Management override — normally the module boards auto-advance via rollup.
   async function moveStage(dir: number) {
     const next = ORDER[Math.max(0, Math.min(ORDER.length - 1, stageIdx + dir))];
     setError(null); await supabase.from("initiatives").update({ lifecycle: next }).eq("id", id); load();
@@ -81,7 +76,7 @@ export default function InitiativeDetail({ id }: { id: string }) {
       {ini.description && <div className="t-sub t-muted" style={{ marginBottom: "var(--sp-5)", maxWidth: 720 }}>{ini.description}</div>}
       <Banner>{error}</Banner>
 
-      {/* lifecycle rail */}
+      {/* lifecycle rail — where this initiative is */}
       <div className="card card-pad" style={{ marginBottom: "var(--sp-5)" }}>
         <div className="row" style={{ gap: 0, flexWrap: "wrap" }}>
           {LIFE.map((s, idx) => {
@@ -99,47 +94,45 @@ export default function InitiativeDetail({ id }: { id: string }) {
           })}
         </div>
         <div className="row-between" style={{ marginTop: 12, alignItems: "center", flexWrap: "wrap", gap: 8 }}>
-          <span className="t-sub t-muted" style={{ fontSize: 12.5 }}>{blocking > 0 ? `${blocking} task${blocking === 1 ? "" : "s"} left in “${cur.label}” before you can advance.` : `“${cur.label}” is clear — ready to advance.`}</span>
+          <span className="t-sub t-muted" style={{ fontSize: 12.5 }}>{blocking > 0 ? `${blocking} task${blocking === 1 ? "" : "s"} left in “${cur.label}” — finishing them in the module boards advances this automatically.` : `“${cur.label}” is clear — ready to advance.`}</span>
           <div className="row gap-2">
             {stageIdx > 0 && <button className="btn btn-secondary btn-sm" onClick={() => moveStage(-1)}>← {LIFE[stageIdx - 1].label}</button>}
-            {stageIdx < ORDER.length - 1 && <button className="btn btn-sm" disabled={blocking > 0} title={blocking > 0 ? "Complete this stage's tasks first" : ""} onClick={() => moveStage(1)}>Advance to {LIFE[stageIdx + 1].label} →</button>}
+            {stageIdx < ORDER.length - 1 && <button className="btn btn-sm" disabled={blocking > 0} title={blocking > 0 ? "Finish this stage's tasks in the module boards first" : "Manual override"} onClick={() => moveStage(1)}>Advance to {LIFE[stageIdx + 1].label} →</button>}
           </div>
         </div>
       </div>
 
-      {/* current stage's work, per side (scope-aware) */}
+      {/* current stage's work, per side (scope-aware) — READ-ONLY rollup. Do the
+          work in the module board; this just tracks it. */}
       <div style={{ display: "grid", gridTemplateColumns: sides.length === 2 ? "1fr 1fr" : "1fr", gap: "var(--sp-4)" }}>
         {sides.map((area) => {
           const list = stageTasks(area);
           const label = area === "build" ? cur.product : cur.gtm;
           const tone = area === "build" ? "accent" : "violet";
+          const mod = MODULE[area];
+          const doneN = list.filter((t) => t.stage === "done").length;
           return (
             <div key={area} className="card" style={{ overflow: "hidden", borderTop: `2px solid var(--${tone === "accent" ? "ac" : "vl"})` }}>
               <div className="row-between" style={{ padding: "10px 14px", borderBottom: "1px solid var(--border)" }}>
                 <span className="row gap-2"><Chip tone={tone}>{area === "build" ? "Product" : "GTM"}</Chip><span style={{ fontSize: 13, fontWeight: 640 }}>{label}</span></span>
-                <button className="btn btn-secondary btn-sm" onClick={() => { setAdding(adding === area ? null : area); setTitle(""); }}>{adding === area ? "Cancel" : "+ Task"}</button>
+                {list.length > 0 && <span className="t-mono-xs t-muted">{doneN}/{list.length} done</span>}
               </div>
               <div style={{ padding: 12 }} className="stack-3">
-                {adding === area && (
-                  <form onSubmit={(e) => { e.preventDefault(); addTask(area); }} className="card card-pad" style={{ background: "var(--panel-2)" }}>
-                    <input className="input" autoFocus value={title} onChange={(e) => setTitle(e.target.value)} placeholder={`${cur.label} task…`} style={{ marginBottom: 8 }} />
-                    <button className="btn btn-sm" type="submit">Add</button>
-                  </form>
-                )}
-                {list.length === 0 && adding !== area ? <div className="t-sub t-muted" style={{ fontSize: 12.5 }}>No {cur.label.toLowerCase()} tasks yet for this side.</div> : list.map((t) => (
-                  <div key={t.id} className="card card-pad" style={{ padding: 10 }}>
-                    <div className="row gap-2" style={{ alignItems: "flex-start" }}>
-                      <input type="checkbox" checked={t.stage === "done"} onChange={(e) => patchTask(t.id, { stage: e.target.checked ? "done" : "active" })} style={{ marginTop: 3 }} />
-                      <span style={{ flex: 1, fontSize: 13.5, fontWeight: 600, textDecoration: t.stage === "done" ? "line-through" : "none", color: t.stage === "done" ? "var(--tm)" : "var(--tp)" }}>{t.title}</span>
-                      <button className="t-muted" onClick={() => delTask(t.id)} style={{ background: "none", border: "none", cursor: "pointer", fontSize: 14 }}>×</button>
+                {list.length === 0 ? (
+                  <div className="t-sub t-muted" style={{ fontSize: 12.5 }}>No {cur.label.toLowerCase()} tasks yet. Add them in <a href={mod.href} style={{ color: "var(--ac-text)", fontWeight: 600 }}>{mod.name}</a>.</div>
+                ) : list.map((t) => {
+                  const st = STAGE_STATE[t.stage] ?? STAGE_STATE.backlog;
+                  return (
+                    <div key={t.id} className="card card-pad" style={{ padding: 10 }}>
+                      <div className="row-between" style={{ alignItems: "flex-start", gap: 8 }}>
+                        <span style={{ flex: 1, fontSize: 13.5, fontWeight: 600, textDecoration: t.stage === "done" ? "line-through" : "none", color: t.stage === "done" ? "var(--tm)" : "var(--tp)" }}>{t.title}</span>
+                        <Chip tone={st.tone as any}>{st.label}</Chip>
+                      </div>
+                      {ownerName(t.assignee_id) && <div className="t-mono-xs t-muted" style={{ marginTop: 6 }}>👤 {ownerName(t.assignee_id)}</div>}
                     </div>
-                    <div style={{ marginTop: 6 }}>
-                      <select className="select" value={t.assignee_id ?? ""} onChange={(e) => patchTask(t.id, { assignee_id: e.target.value || null })} style={{ fontSize: 12, padding: "4px 8px" }}>
-                        <option value="">Unassigned</option>{people.map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}
-                      </select>
-                    </div>
-                  </div>
-                ))}
+                  );
+                })}
+                <a href={mod.href} className="t-sub" style={{ fontSize: 12.5, color: "var(--ac-text)", fontWeight: 600, textDecoration: "none", display: "inline-block", marginTop: 2 }}>Work on this in {mod.name} →</a>
               </div>
             </div>
           );
