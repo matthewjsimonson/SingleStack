@@ -266,6 +266,38 @@ export async function loadDemoData(supabase: SupabaseClient, orgId: string): Pro
     if (error) throw error; return `+${toAdd.length}`;
   });
 
+  // ---- Strategy: objective -> cross-functional initiatives -> workstreams ----
+  await step("strategy", async () => {
+    const OBJ = "Win the AI-native product + GTM category in 2026";
+    let { data: obj } = await supabase.from("objectives").select("id").eq("title", OBJ).maybeSingle();
+    if (!obj) ({ data: obj } = await supabase.from("objectives").insert({ org_id: orgId, title: OBJ, pillar: "Growth", description: "Be the living system of record for product + GTM before the category consolidates.", status: "active" }).select("id").single());
+    const { data: ppl } = await supabase.from("people").select("id, name");
+    const who = (n: string) => ppl?.find((p) => p.name === n)?.id ?? null;
+
+    const defs: { title: string; kind: string; lane: string; gtm: boolean; assignee: string | null; stage: string; ws: [string, string, string | null][] }[] = [
+      { title: "Agent orchestration v1", kind: "module", lane: "ship", gtm: true, assignee: who("Maya Chen"), stage: "active", ws: [
+        ["build", "Ship multi-agent orchestration", who("Sam Rivera")], ["build", "Orchestration telemetry & guardrails", who("Sam Rivera")],
+        ["gtm", "Orchestration launch post + demo", who("Jordan Lee")], ["gtm", "Update competitive battlecards", who("Jordan Lee")],
+      ] },
+      { title: "Pricing clarity", kind: "feature", lane: "enablement", gtm: true, assignee: who("Jordan Lee"), stage: "backlog", ws: [
+        ["gtm", "Publish transparent pricing tiers", who("Jordan Lee")], ["gtm", "Pricing FAQ for demo follow-up", who("Jordan Lee")],
+        ["build", "Pricing page UX + mobile hero", who("Maya Chen")],
+      ] },
+    ];
+    let made = 0;
+    for (const d of defs) {
+      const { data: exi } = await supabase.from("initiatives").select("id").eq("title", d.title).maybeSingle();
+      if (exi) continue;
+      const { data: ini, error } = await supabase.from("initiatives").insert({
+        org_id: orgId, lane: d.lane, title: d.title, kind: d.kind, objective_id: obj?.id ?? null,
+        product_id: pid, gtm_record_id: d.gtm ? gtmId ?? null : null, assignee_id: d.assignee, stage: d.stage, priority: "high",
+      }).select("id").single();
+      if (error) throw error; made++;
+      await supabase.from("initiative_workstreams").insert(d.ws.map(([area, title, assignee], i) => ({ org_id: orgId, initiative_id: ini.id, area, title, assignee_id: assignee, stage: i === 0 && d.stage === "active" ? "active" : "backlog" })));
+    }
+    return made ? `+${made}` : "exist";
+  });
+
   // ---- Durable themes ----
   await step("themes", async () => {
     const defs = [

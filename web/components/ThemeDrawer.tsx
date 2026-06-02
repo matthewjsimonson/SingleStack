@@ -225,14 +225,19 @@ function DecisionCard({ d, theme, signalCount, routed, people, products, gtms, i
     try {
       const orgId = await getOrgId(); if (!orgId) throw new Error("No org.");
       const lane = rt.recordType === "gtm" ? "enablement" : "ship";
+      const wsArea = rt.recordType === "gtm" ? "gtm" : "build";
       const assignee = rt.assigneeId || null;
+      let initiativeId = rt.target;
       if (rt.target === "new") {
         const row: Record<string, unknown> = { org_id: orgId, lane, title: `Act: ${d.title}`, description: rationale || theme?.recommendation || null, decision_id: d.id, assignee_id: assignee, stage: "backlog", priority: "high" };
         row[rt.recordType === "gtm" ? "gtm_record_id" : "product_id"] = rt.recordId || null;
-        const { error: ie } = await supabase.from("initiatives").insert(row); if (ie) throw ie;
+        const { data: ini, error: ie } = await supabase.from("initiatives").insert(row).select("id").single(); if (ie) throw ie;
+        initiativeId = ini.id;
       } else {
         const { error: ue } = await supabase.from("initiatives").update({ decision_id: d.id, assignee_id: assignee }).eq("id", rt.target); if (ue) throw ue;
       }
+      // seed the matching workstream so the effort is born cross-functional
+      await supabase.from("initiative_workstreams").insert({ org_id: orgId, initiative_id: initiativeId, area: wsArea, title: d.title, assignee_id: assignee, stage: "backlog" });
       await supabase.from("decisions").update({ status: "routed", decided_at: new Date().toISOString(), assignee_id: assignee }).eq("id", d.id);
       setRouting(false); await reload();
     } catch (e) { setErr(e instanceof Error ? e.message : "Could not route."); }
