@@ -28,6 +28,7 @@ export default function CompetitiveView() {
   const [scores, setScores] = useState<Score[]>([]);
   const [cards, setCards] = useState<Card[]>([]);
   const [signals, setSignals] = useState<Signal[]>([]);
+  const [overview, setOverview] = useState<{ name: string; overview: string | null; valueProp: string | null } | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
@@ -40,9 +41,17 @@ export default function CompetitiveView() {
       supabase.from("signals").select("id, title, why, conf_label, conf_level, observed_at, metadata, source_id").order("observed_at", { ascending: false, nullsFirst: false }),
     ]);
     setCompetitors(comp ?? []); setCapabilities(caps ?? []); setScores(scs ?? []); setCards(cds ?? []); setSignals(sigs ?? []);
+    // Our product overview — anchors the "us vs them" framing on battlecards.
+    const { data: prod } = await supabase.from("product_records").select("id, name").order("created_at").limit(1).maybeSingle();
+    if (prod) {
+      const { data: fs } = await supabase.from("record_fields").select("field_key, value").eq("product_id", prod.id).in("field_key", ["overview", "value_prop"]);
+      setOverview({ name: prod.name, overview: fs?.find((f) => f.field_key === "overview")?.value ?? null, valueProp: fs?.find((f) => f.field_key === "value_prop")?.value ?? null });
+    }
     setLoading(false);
   }, [supabase]);
   useEffect(() => { load(); }, [load]);
+
+  const compSignals = signals.filter((s) => s.metadata?.domain === "competitive");
 
   return (
     <div>
@@ -51,16 +60,16 @@ export default function CompetitiveView() {
       <SubTabs<Tab> tabs={[{ key: "dashboard", label: "Dashboard" }, { key: "battlecards", label: "Battlecards" }, { key: "feed", label: "Signal feed" }]} active={tab} onChange={setTab} />
 
       {loading ? <div className="t-sub t-muted">Loading…</div>
-        : tab === "dashboard" ? <Dashboard competitors={competitors} capabilities={capabilities} scores={scores} reload={load} setError={setError} />
-        : tab === "battlecards" ? <Battlecards competitors={competitors} cards={cards} reload={load} setError={setError} />
+        : tab === "dashboard" ? <Dashboard competitors={competitors} capabilities={capabilities} scores={scores} compSignals={compSignals} reload={load} setError={setError} />
+        : tab === "battlecards" ? <Battlecards competitors={competitors} cards={cards} overview={overview} reload={load} setError={setError} />
         : <Feed signals={signals} />}
     </div>
   );
 }
 
 // ---------- Dashboard: competitors + capability heat-map ----------
-function Dashboard({ competitors, capabilities, scores, reload, setError }: {
-  competitors: Competitor[]; capabilities: Capability[]; scores: Score[]; reload: () => void; setError: (s: string | null) => void;
+function Dashboard({ competitors, capabilities, scores, compSignals, reload, setError }: {
+  competitors: Competitor[]; capabilities: Capability[]; scores: Score[]; compSignals: Signal[]; reload: () => void; setError: (s: string | null) => void;
 }) {
   const supabase = createClient();
   const [addingComp, setAddingComp] = useState(false);
@@ -117,8 +126,45 @@ function Dashboard({ competitors, capabilities, scores, reload, setError }: {
   const heat = (s: number) => ["var(--fill)", "#FCE4C7", "#CDEBD6", "#9FD9B4"][s] || "var(--fill)";
   const heatText = (s: number) => ["—", "Partial", "Good", "Strong"][s] || "—";
 
+  // Metrics: where competitors out-cover us (gaps) and where we lead (edges).
+  const usScore = (capId: string) => scoreOf(capId, null);
+  const gaps = capabilities.filter((cap) => competitors.some((c) => scoreOf(cap.id, c.id) > usScore(cap.id))).length;
+  const edges = capabilities.filter((cap) => usScore(cap.id) >= 3 && competitors.every((c) => scoreOf(cap.id, c.id) < 3)).length;
+  const recent = compSignals.filter((s) => s.observed_at && Date.now() - new Date(s.observed_at).getTime() < 30 * 86400_000).length;
+  const METRICS: [number, string, boolean][] = [
+    [competitors.length, "Tracked", false],
+    [direct.length, "Direct", false],
+    [edges, "We lead", false],
+    [gaps, "Gaps to close", gaps > 0],
+    [recent, "Moves · 30d", recent > 0],
+  ];
+
   return (
     <div>
+      {/* Metrics — the landscape at a glance, not just a list */}
+      <div className="card card-pad" style={{ marginBottom: "var(--sp-5)", display: "grid", gridTemplateColumns: `repeat(${METRICS.length}, 1fr)`, gap: "var(--sp-4)" }}>
+        {METRICS.map(([n, label, warn]) => (
+          <div key={label} className="stat"><span className="stat-num" style={{ color: warn ? "var(--am-text)" : undefined }}>{n}</span><span className="stat-label">{label}</span></div>
+        ))}
+      </div>
+
+      {/* What's happening — high-value competitive moves */}
+      {compSignals.length > 0 && (
+        <Section label="What's happening">
+          <div className="stack-3">
+            {compSignals.slice(0, 4).map((s) => (
+              <div key={s.id} className="card card-pad signal-card" style={{ borderLeft: "3px solid var(--vl)" }}>
+                <div className="row-between" style={{ gap: 12, alignItems: "flex-start", marginBottom: 4 }}>
+                  <span style={{ fontSize: 14, fontWeight: 620 }}>{s.title}</span>
+                  <Confidence label={s.conf_label} level={s.conf_level} />
+                </div>
+                {s.why && <div className="t-sub t-muted" style={{ fontSize: 12.5, lineHeight: 1.45 }}>{s.why}</div>}
+              </div>
+            ))}
+          </div>
+        </Section>
+      )}
+
       {pendingDelete && (
         <ConfirmDialog
           title="Remove competitor?"
@@ -215,8 +261,8 @@ function Dashboard({ competitors, capabilities, scores, reload, setError }: {
 }
 
 // ---------- Battlecards ----------
-function Battlecards({ competitors, cards, reload, setError }: {
-  competitors: Competitor[]; cards: Card[]; reload: () => void; setError: (s: string | null) => void;
+function Battlecards({ competitors, cards, overview, reload, setError }: {
+  competitors: Competitor[]; cards: Card[]; overview: { name: string; overview: string | null; valueProp: string | null } | null; reload: () => void; setError: (s: string | null) => void;
 }) {
   const supabase = createClient();
   const [scope, setScope] = useState<string | null>(null); // selected competitor id; null = picker
@@ -266,6 +312,19 @@ function Battlecards({ competitors, cards, reload, setError }: {
           <span style={{ fontSize: 15 }}>‹</span> All competitors
         </button>
         <div className="row gap-2"><span className="t-h2" style={{ fontSize: 15 }}>{selected?.name}</span>{selected && <Chip tone={selected.relationship === "direct" ? "accent" : "violet"}>{selected.relationship}</Chip>}</div>
+      </div>
+
+      {/* Overviews — who they are vs who we are, so the battlecard stands alone */}
+      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "var(--sp-4)", marginBottom: "var(--sp-5)" }}>
+        <div className="card card-pad" style={{ borderTop: "2px solid var(--vl)" }}>
+          <div className="t-label" style={{ color: "var(--tm)", marginBottom: 6 }}>Them · {selected?.name}</div>
+          <div className="t-sub" style={{ fontSize: 12.5, lineHeight: 1.5 }}>{selected?.notes || <span className="t-muted">No overview yet — add notes on the competitor.</span>}</div>
+          {selected?.website && <a href={selected.website} target="_blank" rel="noreferrer" className="t-sub" style={{ fontSize: 12, color: "var(--ac-text)", fontWeight: 600, display: "inline-block", marginTop: 6 }}>{selected.website.replace(/^https?:\/\//, "")} →</a>}
+        </div>
+        <div className="card card-pad" style={{ borderTop: "2px solid var(--ac)" }}>
+          <div className="t-label" style={{ color: "var(--tm)", marginBottom: 6 }}>Us · {overview?.name ?? "Our product"}</div>
+          <div className="t-sub" style={{ fontSize: 12.5, lineHeight: 1.5 }}>{overview?.valueProp || overview?.overview || <span className="t-muted">Add an Overview / Value proposition on your product record.</span>}</div>
+        </div>
       </div>
 
       <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "var(--sp-4)" }}>

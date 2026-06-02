@@ -108,6 +108,51 @@ export async function loadDemoData(supabase: SupabaseClient, orgId: string): Pro
     if (error) throw error; return "+6";
   });
 
+  // ---- Competitive capability heat-map: functionality vectors × competitors ----
+  await step("capability matrix", async () => {
+    const { data: exCap } = await supabase.from("capabilities").select("id").limit(1);
+    if (exCap && exCap.length) return "exist";
+    const CAPS = [
+      "Unified product + GTM record", "Competitive intelligence", "Agent orchestration",
+      "Roadmapping & delivery", "Signal synthesis", "Human-in-the-loop governance", "Frontier-capability leverage",
+    ];
+    const { data: created, error } = await supabase.from("capabilities").insert(CAPS.map((name, i) => ({ org_id: orgId, name, position: i }))).select("id, name");
+    if (error) throw error;
+    const capId = (n: string) => created!.find((c) => c.name === n)!.id;
+    const { data: comps } = await supabase.from("competitors").select("id, name");
+    const compId = (n: string) => comps?.find((c) => c.name === n)?.id ?? null;
+    // score 0..3 (— / Partial / Good / Strong). null competitor = "Us".
+    const S: Record<string, Record<string, number>> = {
+      "Us": { "Unified product + GTM record": 3, "Competitive intelligence": 2, "Agent orchestration": 3, "Roadmapping & delivery": 2, "Signal synthesis": 3, "Human-in-the-loop governance": 3, "Frontier-capability leverage": 3 },
+      "Productboard": { "Unified product + GTM record": 1, "Competitive intelligence": 2, "Agent orchestration": 1, "Roadmapping & delivery": 3, "Signal synthesis": 1, "Human-in-the-loop governance": 1, "Frontier-capability leverage": 1 },
+      "Crayon": { "Competitive intelligence": 3, "Signal synthesis": 2, "Roadmapping & delivery": 0, "Unified product + GTM record": 0, "Agent orchestration": 1, "Human-in-the-loop governance": 1, "Frontier-capability leverage": 1 },
+      "Klue": { "Competitive intelligence": 3, "Signal synthesis": 1, "Roadmapping & delivery": 0, "Unified product + GTM record": 0, "Agent orchestration": 0, "Human-in-the-loop governance": 1, "Frontier-capability leverage": 0 },
+      "Aha!": { "Roadmapping & delivery": 3, "Unified product + GTM record": 1, "Competitive intelligence": 0, "Agent orchestration": 0, "Signal synthesis": 1, "Human-in-the-loop governance": 1, "Frontier-capability leverage": 0 },
+      "Gong": { "Competitive intelligence": 1, "Signal synthesis": 2, "Roadmapping & delivery": 0, "Unified product + GTM record": 0, "Agent orchestration": 1, "Human-in-the-loop governance": 0, "Frontier-capability leverage": 1 },
+      "Signum.AI": { "Competitive intelligence": 2, "Signal synthesis": 2, "Roadmapping & delivery": 0, "Unified product + GTM record": 0, "Agent orchestration": 1, "Human-in-the-loop governance": 0, "Frontier-capability leverage": 1 },
+    };
+    const rows: Record<string, unknown>[] = [];
+    for (const [who, scores] of Object.entries(S)) {
+      const cid = who === "Us" ? null : compId(who);
+      if (who !== "Us" && !cid) continue;
+      for (const [cap, score] of Object.entries(scores)) rows.push({ org_id: orgId, capability_id: capId(cap), competitor_id: cid, score });
+    }
+    if (rows.length) { const { error: se } = await supabase.from("capability_scores").insert(rows); if (se) throw se; }
+    return `+${CAPS.length} caps`;
+  });
+
+  // ---- Competitive signals (what's happening) ----
+  await step("competitive signals", async () => {
+    const { count: c } = await supabase.from("signals").select("id", { count: "exact", head: true }).eq("metadata->>domain", "competitive");
+    if (c) return "exist";
+    const { error } = await supabase.from("signals").insert([
+      ["Crayon ships Sparks AI: auto-SWOT + talk tracks", "Competitor deepening AI on CI — raises the bar on automated competitive analysis.", 0.7, "High", 18],
+      ["Productboard's Spark adds agentic competitive research", "Direct overlap with our competitive intel; watch their battlecard automation.", 0.68, "Medium", 36],
+      ["Klue expanding into win/loss analytics", "Moving down-funnel toward revenue intelligence; adjacent encroachment.", 0.55, "Medium", 70],
+    ].map(([title, why, conf_level, conf_label, h]) => ({ org_id: orgId, scope: "org", category: "gtm", title, why, conf_level, conf_label, observed_at: iso(h as number), metadata: { domain: "competitive" } })));
+    if (error) throw error; return "+3";
+  });
+
   // ---- GTM record (find or create) ----
   let gtmId: string | undefined;
   await step("gtm record", async () => {
