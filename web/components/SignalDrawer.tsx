@@ -17,7 +17,9 @@ type Initiative = { id: string; title: string; lane: string; stage?: string | nu
 type LinkedTheme = { id: string; title: string; recommendation: string | null };
 
 const OFFICER = (cat: string | null) => (cat === "gtm" ? { key: "cro", name: "CRO" } : { key: "cpo", name: "CPO" });
-const LANE_FOR = (cat: string | null) => (cat === "gtm" ? "content" : "roadmap");
+// Only lanes that actually have a board are valid destinations (no voids).
+const LANES: [string, string][] = [["ship", "Build (Ship)"], ["enablement", "GTM (Enablement)"]];
+const LANE_FOR = (cat: string | null) => (cat === "gtm" ? "enablement" : "ship");
 
 export default function SignalDrawer({ signal, onClose, onChanged }: { signal: DrawerSignal | null; onClose: () => void; onChanged: () => void }) {
   const supabase = createClient();
@@ -32,10 +34,12 @@ export default function SignalDrawer({ signal, onClose, onChanged }: { signal: D
   const [error, setError] = useState<string | null>(null);
   const [take, setTake] = useState<string | null>(null);
   const [thinking, setThinking] = useState(false);
+  const [lane, setLane] = useState("ship");
 
   const load = useCallback(async () => {
     if (!signal) return;
     setError(null); setTake(null);
+    setLane(LANE_FOR(signal.category));
     setEdit({ title: signal.title, why: signal.why ?? "", conf_level: signal.conf_level != null ? String(signal.conf_level) : "", category: signal.category ?? "" });
     const [{ data: full }, { data: ls }, { data: lt }, { data: inits }] = await Promise.all([
       supabase.from("signals").select("metadata").eq("id", signal.id).maybeSingle(),
@@ -111,7 +115,7 @@ export default function SignalDrawer({ signal, onClose, onChanged }: { signal: D
     try {
       const orgId = await getOrgId(); if (!orgId) throw new Error("No org.");
       const { data, error } = await supabase.from("initiatives").insert({
-        org_id: orgId, lane: LANE_FOR(signal!.category), title: edit.title.trim() || signal!.title,
+        org_id: orgId, lane, title: edit.title.trim() || signal!.title,
         description: edit.why?.trim() || null, product_id: signal!.product_id ?? null, stage: "backlog", priority: "medium",
       }).select("id").single();
       if (error) throw error;
@@ -180,8 +184,12 @@ export default function SignalDrawer({ signal, onClose, onChanged }: { signal: D
                   {linkable.map((i) => <option key={i.id} value={i.id}>{i.lane} · {i.title}</option>)}
                 </select>
               )}
-              <button className="btn btn-sm" onClick={createInitiative} disabled={busy === "create"}>{busy === "create" ? "Creating…" : "+ Create initiative from this"}</button>
+              <select className="select" value={lane} onChange={(e) => setLane(e.target.value)} style={{ maxWidth: 170 }}>
+                {LANES.map(([k, label]) => <option key={k} value={k}>{label}</option>)}
+              </select>
+              <button className="btn btn-sm" onClick={createInitiative} disabled={busy === "create"}>{busy === "create" ? "Creating…" : "+ Create initiative"}</button>
             </div>
+            <div className="t-sub t-muted" style={{ fontSize: 11.5, marginTop: 8 }}>Lands in {lane === "ship" ? "Build → Ship" : "Go-to-market → Enablement"}, with this signal linked as its evidence.</div>
           </div>
 
           {/* Human context */}

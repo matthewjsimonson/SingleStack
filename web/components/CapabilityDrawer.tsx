@@ -16,13 +16,15 @@ export type DrawerCapability = {
 };
 type Initiative = { id: string; title: string; lane: string };
 
-// Officers who can interpret a capability — delivery, product, GTM, narrative.
+// Officers who can interpret a capability. lane = where an initiative lands —
+// only lanes that actually have a board (Ship = build-side, Enablement = GTM).
 const OFFICERS = [
   { key: "ceng", name: "Chief Engineering", lane: "ship" },
-  { key: "cpo", name: "CPO", lane: "roadmap" },
-  { key: "cro", name: "CRO", lane: "content" },
-  { key: "cco", name: "CCO", lane: "content" },
+  { key: "cpo", name: "CPO", lane: "ship" },
+  { key: "cro", name: "CRO", lane: "enablement" },
+  { key: "cco", name: "CCO", lane: "enablement" },
 ];
+const LANE_LABEL: Record<string, string> = { ship: "Build → Ship", enablement: "GTM → Enablement" };
 
 export default function CapabilityDrawer({ capability, onClose, onChanged }: { capability: DrawerCapability | null; onClose: () => void; onChanged: () => void }) {
   const supabase = createClient();
@@ -178,7 +180,7 @@ export default function CapabilityDrawer({ capability, onClose, onChanged }: { c
               </div>
             )}
             <div className="row gap-2" style={{ flexWrap: "wrap" }}>
-              <button className="btn btn-sm" onClick={createInitiative} disabled={busy === "init"}>{busy === "init" ? "Creating…" : `+ Create ${officer.lane} initiative`}</button>
+              <button className="btn btn-sm" onClick={createInitiative} disabled={busy === "init"}>{busy === "init" ? "Creating…" : `+ Create initiative (${LANE_LABEL[officer.lane] ?? officer.lane})`}</button>
               <button className="btn btn-secondary btn-sm" onClick={createWorkflow} disabled={busy === "wf"}>{busy === "wf" ? "Creating…" : `+ Workflow for ${officer.name}`}</button>
               {linkable.length > 0 && (
                 <select className="select" defaultValue="" onChange={(e) => { linkInitiative(e.target.value); e.target.value = ""; }} disabled={busy === "link"} style={{ maxWidth: 240 }}>
@@ -187,7 +189,7 @@ export default function CapabilityDrawer({ capability, onClose, onChanged }: { c
                 </select>
               )}
             </div>
-            <div className="t-sub t-muted" style={{ fontSize: 11.5, marginTop: 8 }}>Initiatives appear in Build (Roadmap/Ship) or GTM; workflows in Frontier → Automated responses.</div>
+            <div className="t-sub t-muted" style={{ fontSize: 11.5, marginTop: 8 }}>Initiatives appear in Build → Ship or GTM → Enablement; workflows in Frontier → Automated responses.</div>
           </div>
 
           {/* Human context */}
