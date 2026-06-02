@@ -11,7 +11,6 @@ import { useRouter } from "next/navigation";
 import { createClient } from "@/lib/supabase/client";
 import { Banner, Spinner } from "@/components/ui";
 import { projectActionMatrix, VIEWS, type ViewKey, type PTheme, type PBridgeEdge } from "@/lib/projections";
-import { elevationField, contours, type Contour } from "@/lib/terrain";
 
 const W = 1000, H = 600, PAD = 56;
 
@@ -22,7 +21,7 @@ const BG = "#F7F8FA";
 const themeFill = (t: PTheme) => (t.lens === "gtm" ? "#7C3AED" : "#4F46E5");
 const themeOpacity = (t: PTheme) => (t.state === "fading" ? 0.5 : t.state === "dormant" ? 0.32 : t.state === "escalating" ? 1 : 0.9);
 
-export default function MapView({ productFilter = "all" }: { productFilter?: string }) {
+export default function MapView({ productFilter = "all", onOpenTheme }: { productFilter?: string; onOpenTheme?: (id: string) => void }) {
   const supabase = createClient();
   const router = useRouter();
   const [themes, setThemes] = useState<PTheme[]>([]);
@@ -65,17 +64,6 @@ export default function MapView({ productFilter = "all" }: { productFilter?: str
   const projection = useMemo(() => projectActionMatrix(themes, W, H, PAD), [themes]);
   const posById = useMemo(() => new Map(projection.nodes.map((n) => [n.id, n])), [projection]);
 
-  // Terrain: elevation field → iso-contours. High ground = confident+accelerating
-  // concentration; rifts at contradictions. Recomputed only when themes change.
-  const terrain = useMemo<Contour[]>(() => {
-    if (projection.nodes.length === 0) return [];
-    const grid = elevationField(
-      projection.nodes.map((n) => ({ x: n.x, y: n.y, conf: n.conf, momentum: n.momentum, contra: n.contraCount })),
-      W, H,
-    );
-    return contours(grid, 7);
-  }, [projection]);
-
   // "Breathing" — a single slow clock drives subtle ambient motion. Tied to real
   // state: accelerating nodes pulse faster/brighter, the terrain drifts gently.
   // Respects prefers-reduced-motion.
@@ -95,7 +83,6 @@ export default function MapView({ productFilter = "all" }: { productFilter?: str
     return () => { mounted = false; if (raf.current) cancelAnimationFrame(raf.current); };
   }, []);
   const breathe = 0.5 + 0.5 * Math.sin(t * 0.6);          // slow 0..1 global breath
-  const drift = Math.sin(t * 0.25) * 3;                    // gentle terrain sway (px)
 
   if (loading) return <Spinner label="Projecting the map…" />;
 
@@ -124,23 +111,19 @@ export default function MapView({ productFilter = "all" }: { productFilter?: str
         <div style={{ border: "1px solid var(--border)", borderRadius: 12, overflow: "hidden", background: BG }}>
           <svg viewBox={`0 0 ${W} ${H}`} style={{ width: "100%", height: "72vh", display: "block" }}>
             <defs>
-              <radialGradient id="vignette" cx="50%" cy="42%" r="75%">
-                <stop offset="62%" stopColor="#FFFFFF" stopOpacity="0" />
-                <stop offset="100%" stopColor="#0B0C0E" stopOpacity="0.05" />
+              <radialGradient id="bgGrad" cx="50%" cy="38%" r="80%">
+                <stop offset="0%" stopColor="#FFFFFF" />
+                <stop offset="100%" stopColor="#EEF0F4" />
               </radialGradient>
             </defs>
 
-            {/* TERRAIN — iso-contours that breathe. Higher levels brighter/thicker. */}
-            <g transform={`translate(${drift},${drift * 0.5})`}>
-              {terrain.map((c, i) => (
-                <path key={i} d={c.paths.join(" ")} fill="none"
-                  stroke={c.level > 0.66 ? "#6366F1" : "#A5B4FC"}
-                  strokeWidth={0.5 + c.level * 1.6}
-                  opacity={(0.10 + c.level * 0.42) * (0.85 + 0.15 * breathe)} />
-              ))}
-            </g>
+            {/* soft canvas — gentle depth instead of a flat field */}
+            <rect x={0} y={0} width={W} height={H} fill="url(#bgGrad)" />
 
-            {/* lane dividers (subtle, on dark) */}
+            {/* lane bands (alternating, very subtle) + dividers */}
+            {projection.lanes.map((l, i) => i % 2 === 1 ? (
+              <rect key={`band${i}`} x={0} y={l.y0} width={W} height={(projection.lanes[i + 1]?.y0 ?? H) - l.y0} fill="#000" opacity={0.012} />
+            ) : null)}
             {projection.lanes.map((l, i) => i === 0 ? null : (
               <line key={i} x1={PAD} y1={l.y0} x2={W - PAD} y2={l.y0} stroke="#E6E8EE" strokeWidth={1} />
             ))}
@@ -167,27 +150,29 @@ export default function MapView({ productFilter = "all" }: { productFilter?: str
               const glow = n.flag === "escalating" ? "#D97706" : n.flag === "reconsider" ? "#D97706" : isHover ? "#4F46E5" : null;
               return (
                 <g key={n.id} transform={`translate(${n.x},${n.y})`} style={{ cursor: "pointer" }}
-                   onClick={() => router.push(n.href)}
+                   onClick={() => (onOpenTheme ? onOpenTheme(n.id) : router.push(n.href))}
                    onPointerEnter={() => setHover(n.id)} onPointerLeave={() => setHover(null)}>
-                  {accel && <circle r={n.r * pulse + 5} fill="none" stroke={themeFill(n)} strokeWidth={1} opacity={0.18 + 0.22 * (1 - breathe)} />}
+                  {accel && <circle r={n.r * pulse + 6} fill="none" stroke={themeFill(n)} strokeWidth={1.2} opacity={0.16 + 0.2 * (1 - breathe)} />}
+                  {/* white halo so nodes read cleanly on the light canvas */}
+                  <circle r={n.r * pulse + 3} fill="#FFFFFF" opacity={0.92} />
                   <circle r={n.r * pulse} fill={themeFill(n)} opacity={themeOpacity(n)}
-                    stroke={glow ?? "none"} strokeWidth={glow ? (n.flag ? 2.5 : 1.5) : 0} />
-                  {n.contraCount > 0 && <circle r={3.5} cx={n.r * 0.7} cy={-n.r * 0.7} fill="#EF4444" />}
-                  <text x={0} y={n.r + 12} fontSize={isHover ? 11 : 9.5} fontWeight={isHover ? 600 : 500} fill={isHover ? "#131417" : "#6B7280"} textAnchor="middle" style={{ pointerEvents: "none" }}>
-                    {n.title.length > 22 ? n.title.slice(0, 22) + "…" : n.title}
+                    stroke={glow ?? "#FFFFFF"} strokeWidth={glow ? (n.flag ? 2.5 : 2) : 1.5} />
+                  {isHover && <circle r={n.r * pulse + 3} fill="none" stroke={themeFill(n)} strokeWidth={1.5} opacity={0.5} />}
+                  {n.contraCount > 0 && <circle r={3.5} cx={n.r * 0.7} cy={-n.r * 0.7} fill="#EF4444" stroke="#fff" strokeWidth={1} />}
+                  <text x={0} y={n.r + 13} fontSize={isHover ? 11.5 : 10} fontWeight={isHover ? 680 : 560} fill={isHover ? "#131417" : "#5A5E68"} textAnchor="middle" style={{ pointerEvents: "none" }}>
+                    {n.title.length > 24 ? n.title.slice(0, 24) + "…" : n.title}
                   </text>
                 </g>
               );
             })}
 
-            <rect x={0} y={0} width={W} height={H} fill="url(#vignette)" style={{ pointerEvents: "none" }} />
           </svg>
 
           {/* legend */}
           <div className="row gap-2" style={{ padding: "10px 14px", borderTop: "1px solid var(--border)", flexWrap: "wrap", background: "var(--panel)" }}>
             <span style={{ color: "#4F46E5", fontSize: 12, fontWeight: 600 }}>● product</span>
             <span style={{ color: "#7C3AED", fontSize: 12, fontWeight: 600 }}>● gtm</span>
-            <span style={{ color: "var(--tm)", fontSize: 11.5 }}>elevation = confidence × momentum concentration · size = confidence · lane = momentum · <span style={{ color: "#EF4444" }}>●</span> contradicted · pulse = accelerating</span>
+            <span style={{ color: "var(--tm)", fontSize: 11.5 }}>size = confidence · lane = momentum · position = action priority · <span style={{ color: "#EF4444" }}>●</span> contradicted · pulse = accelerating · click a node to open it</span>
           </div>
         </div>
       )}

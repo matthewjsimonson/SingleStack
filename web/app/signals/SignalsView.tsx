@@ -10,8 +10,6 @@
 // Setup (log a signal, sources, tracking) stays in modals / compact rows so the
 // page is for SHOWING intel, not housing forms.
 import { useEffect, useState, useCallback } from "react";
-import Link from "next/link";
-import { useRouter } from "next/navigation";
 import { createClient } from "@/lib/supabase/client";
 import { getOrgId } from "@/lib/org";
 import { useProductScope } from "@/lib/ProductContext";
@@ -23,6 +21,7 @@ import IntelReview from "./IntelReview";
 import Bridges from "./Bridges";
 import MapView from "./MapView";
 import SignalDrawer, { type DrawerSignal } from "@/components/SignalDrawer";
+import ThemeDrawer from "@/components/ThemeDrawer";
 import { useAgentRun, AgentProgress, type AgentRun } from "@/components/AgentProgress";
 
 type Source = { id: string; label: string; icon: string; origin: string };
@@ -75,6 +74,7 @@ export default function SignalsView() {
   const [sources, setSources] = useState<Source[]>([]);
   const [signals, setSignals] = useState<Signal[]>([]);
   const [openSignal, setOpenSignal] = useState<DrawerSignal | null>(null);
+  const [openThemeId, setOpenThemeId] = useState<string | null>(null);
   const [themes, setThemes] = useState<Theme[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -198,13 +198,13 @@ export default function SignalsView() {
       />
 
       {loading ? <div className="t-sub t-muted">Loading…</div> : tab === "map" ? (
-        <MapView productFilter={active} />
+        <MapView productFilter={active} onOpenTheme={setOpenThemeId} />
       ) : tab === "home" ? (
         <Home
           signals={signalsScoped} themes={themesScoped} productThemes={productThemes} gtmThemes={gtmThemes}
           highSignals={highSignals} unsorted={unsorted} internalCount={internalCount} externalCount={externalCount}
           sourceById={sourceById} synthRun={synthRun} onSynthesize={synthesize} setCategory={setCategory} goLens={setTab}
-          reload={load} productFilter={active} onOpen={setOpenSignal}
+          reload={load} productFilter={active} onOpen={setOpenSignal} onOpenTheme={setOpenThemeId}
         />
       ) : (
         <LensTab
@@ -214,6 +214,7 @@ export default function SignalsView() {
       )}
 
       <SignalDrawer signal={openSignal} onClose={() => setOpenSignal(null)} onChanged={load} />
+      <ThemeDrawer themeId={openThemeId} onClose={() => setOpenThemeId(null)} onChanged={load} />
 
       {/* Log signal — modal */}
       <Modal open={logOpen} onClose={() => setLogOpen(false)} title="Log a signal">
@@ -267,12 +268,12 @@ export default function SignalsView() {
 }
 
 // ---------- Intel homepage ----------
-function Home({ signals, themes, productThemes, gtmThemes, highSignals, unsorted, internalCount, externalCount, sourceById, synthRun, onSynthesize, setCategory, goLens, reload , productFilter, onOpen }: {
+function Home({ signals, themes, productThemes, gtmThemes, highSignals, unsorted, internalCount, externalCount, sourceById, synthRun, onSynthesize, setCategory, goLens, reload , productFilter, onOpen, onOpenTheme }: {
   signals: Signal[]; themes: Theme[]; productThemes: Theme[]; gtmThemes: Theme[]; highSignals: Signal[]; unsorted: Signal[];
   internalCount: number; externalCount: number;
   sourceById: (id: string | null) => Source | null; synthRun: AgentRun; onSynthesize: () => void;
   setCategory: (id: string, c: string | null) => void; goLens: (l: Lens) => void; reload: () => void; productFilter: string;
-  onOpen: (s: Signal) => void;
+  onOpen: (s: Signal) => void; onOpenTheme: (id: string) => void;
 }) {
   return (
     <div>
@@ -308,8 +309,8 @@ function Home({ signals, themes, productThemes, gtmThemes, highSignals, unsorted
           {/* Callouts: synthesized themes as product/gtm intelligence briefs */}
           {themes.length > 0 && (
             <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "var(--sp-5)", alignItems: "start", marginBottom: "var(--sp-6)" }}>
-              <ThemeColumn title="Product intelligence" tone="accent" themes={productThemes} />
-              <ThemeColumn title="Go-to-market intelligence" tone="violet" themes={gtmThemes} />
+              <ThemeColumn title="Product intelligence" tone="accent" themes={productThemes} onOpenTheme={onOpenTheme} />
+              <ThemeColumn title="Go-to-market intelligence" tone="violet" themes={gtmThemes} onOpenTheme={onOpenTheme} />
             </div>
           )}
 
@@ -465,29 +466,7 @@ function Stat({ n, label, accent }: { n: number; label: string; accent?: boolean
   );
 }
 
-function ThemeColumn({ title, tone, themes }: { title: string; tone: "accent" | "violet"; themes: Theme[] }) {
-  const supabase = createClient();
-  const router = useRouter();
-  const [busyId, setBusyId] = useState<string | null>(null);
-
-  // Turn a synthesized theme into a decision: carry the theme (and its signals)
-  // as cited evidence, then open the decision workspace to weigh options.
-  async function makeDecision(t: Theme) {
-    setBusyId(t.id);
-    try {
-      const orgId = await getOrgId(); if (!orgId) throw new Error("no org");
-      const { data: dec, error } = await supabase.from("decisions").insert({
-        org_id: orgId, title: t.title, status: "open", scope: "org", theme_id: t.id,
-      }).select("id").single();
-      if (error) throw error;
-      const evidence: { org_id: string; decision_id: string; theme_id?: string; signal_id?: string }[] =
-        [{ org_id: orgId, decision_id: dec.id, theme_id: t.id }];
-      for (const sid of t.signal_ids ?? []) evidence.push({ org_id: orgId, decision_id: dec.id, signal_id: sid });
-      await supabase.from("decision_evidence").insert(evidence);
-      router.push(`/decisions/${dec.id}`);
-    } catch { setBusyId(null); }
-  }
-
+function ThemeColumn({ title, tone, themes, onOpenTheme }: { title: string; tone: "accent" | "violet"; themes: Theme[]; onOpenTheme: (id: string) => void }) {
   return (
     <div>
       <div className="t-label" style={{ marginBottom: "var(--sp-3)" }}>{title}</div>
@@ -498,9 +477,9 @@ function ThemeColumn({ title, tone, themes }: { title: string; tone: "accent" | 
             const n = (t.signal_ids ?? []).length;
             const fresh = t.newThisWeek ?? 0;
             return (
-            <div key={t.id} className="card card-pad" style={{ borderTop: `2px solid var(--${tone === "accent" ? "ac" : "vl"})` }}>
+            <div key={t.id} className="card card-pad signal-card" onClick={() => onOpenTheme(t.id)} title="Open theme" style={{ borderTop: `2px solid var(--${tone === "accent" ? "ac" : "vl"})`, cursor: "pointer" }}>
               <div className="row-between" style={{ gap: 10, alignItems: "flex-start", marginBottom: 6 }}>
-                <Link href={`/signals/themes/${t.id}`} style={{ fontSize: 14.5, fontWeight: 640, color: "inherit", textDecoration: "none" }}>{t.title}</Link>
+                <span style={{ fontSize: 14.5, fontWeight: 640 }}>{t.title}</span>
                 <span title={mo.label} style={{ color: mo.color, fontSize: 12, flexShrink: 0 }}>{mo.glyph}</span>
               </div>
               <div className="row gap-2" style={{ marginBottom: 8, flexWrap: "wrap" }}>
@@ -518,9 +497,7 @@ function ThemeColumn({ title, tone, themes }: { title: string; tone: "accent" | 
                 <span className="t-mono-xs">
                   {n} signal{n === 1 ? "" : "s"}{fresh > 0 ? ` · +${fresh} this week` : ""}{t.last_evidence_at ? ` · ${ago(t.last_evidence_at)}` : ""}
                 </span>
-                <button className="btn btn-secondary btn-sm" disabled={busyId === t.id} onClick={() => makeDecision(t)}>
-                  {busyId === t.id ? "Creating…" : "Make a decision →"}
-                </button>
+                <button className="btn btn-secondary btn-sm" onClick={(e) => { e.stopPropagation(); onOpenTheme(t.id); }}>Open →</button>
               </div>
             </div>
             );
