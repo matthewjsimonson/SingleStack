@@ -120,21 +120,32 @@ Deno.serve(async (req: Request) => {
       : areas.includes("products") ? "product" : areas.includes("gtm") ? "gtm" : null;
     let themeQ = supabase.from("signal_themes").select("title, summary, recommendation, state, momentum, conf_level, category").order("last_evidence_at", { ascending: false }).limit(20);
     if (themeCats) themeQ = themeQ.eq("category", themeCats);
-    const [{ data: themes }, { data: sigs }] = await Promise.all([
+    const [{ data: themes }, { data: rawSigs }] = await Promise.all([
       themeQ,
-      seesSignals ? supabase.from("signals").select("title, why").order("observed_at", { ascending: false }).limit(20) : Promise.resolve({ data: [] as { title: string; why: string | null }[] }),
+      seesSignals
+        ? supabase.from("signals").select("title, why, metadata").order("observed_at", { ascending: false }).limit(30)
+        : Promise.resolve({ data: [] as { title: string; why: string | null; metadata: { domain?: string; provider?: string; area?: string } | null }[] }),
     ]);
+    // deno-lint-ignore no-explicit-any
+    const allSigs = (rawSigs ?? []) as any[];
+    const capSigs = allSigs.filter((s) => s.metadata?.domain === "capability");
+    const sigs = allSigs.filter((s) => s.metadata?.domain !== "capability").slice(0, 20);
 
-    if ((themes ?? []).length === 0 && (sigs ?? []).length === 0) {
-      return json({ revisions: [], message: "No intelligence in this agent's areas yet — log/synthesize signals first, then evolve." });
+    if ((themes ?? []).length === 0 && allSigs.length === 0) {
+      return json({ revisions: [], new_skills: [], message: "No intelligence in this agent's areas yet — log/synthesize signals first, then evolve." });
     }
 
     const digest = [
       "RECONCILED THEMES (durable patterns — the substance of what has changed):",
       ...(themes ?? []).map((t) => `• [${t.state}/${t.momentum}${t.conf_level != null ? `, conf ${t.conf_level}` : ""}] (${t.category}) ${t.title}${t.summary ? ` — ${t.summary}` : ""}${t.recommendation ? ` → ${t.recommendation}` : ""}`),
+      ...(capSigs.length ? [
+        "",
+        "PLATFORM CAPABILITIES (what is now POSSIBLE to leverage — frontier/platform releases). Treat these as opportunities to upgrade how this agent works (e.g. a new orchestration/coding capability may warrant a new or revised engineering skill):",
+        ...capSigs.map((s) => `• ${s.metadata?.provider ? `[${s.metadata.provider}${s.metadata?.area ? `/${s.metadata.area}` : ""}] ` : ""}${s.title}${s.why ? ` — ${s.why}` : ""}`),
+      ] : []),
       "",
       "RECENT SIGNALS:",
-      ...(sigs ?? []).map((s) => `• ${s.title}${s.why ? ` (${s.why})` : ""}`),
+      ...sigs.map((s) => `• ${s.title}${s.why ? ` (${s.why})` : ""}`),
     ].join("\n");
 
     const skillList = skills.map((s) =>
