@@ -11,7 +11,12 @@ import { Chip, Confidence } from "@/components/ui";
 
 export type DrawerSignal = {
   id: string; title: string; why: string | null; conf_label: string | null; conf_level: number | null;
-  observed_at: string | null; category: string | null; origin: string; product_id: string | null;
+  observed_at: string | null; category: string | null; origin: string; product_id: string | null; source_id?: string | null;
+};
+const IMPACTS: Record<string, string[]> = {
+  product: ["Product strategy", "Roadmap & delivery"],
+  gtm: ["GTM & messaging", "Sales enablement"],
+  both: ["Product strategy", "GTM & messaging"],
 };
 type Initiative = { id: string; title: string; lane: string; stage?: string | null };
 type LinkedTheme = { id: string; title: string; recommendation: string | null };
@@ -35,18 +40,21 @@ export default function SignalDrawer({ signal, onClose, onChanged }: { signal: D
   const [take, setTake] = useState<string | null>(null);
   const [thinking, setThinking] = useState(false);
   const [lane, setLane] = useState("ship");
+  const [source, setSource] = useState<{ label: string; icon: string } | null>(null);
 
   const load = useCallback(async () => {
     if (!signal) return;
     setError(null); setTake(null);
     setLane(LANE_FOR(signal.category));
     setEdit({ title: signal.title, why: signal.why ?? "", conf_level: signal.conf_level != null ? String(signal.conf_level) : "", category: signal.category ?? "" });
-    const [{ data: full }, { data: ls }, { data: lt }, { data: inits }] = await Promise.all([
+    const [{ data: full }, { data: ls }, { data: lt }, { data: inits }, { data: src }] = await Promise.all([
       supabase.from("signals").select("metadata").eq("id", signal.id).maybeSingle(),
       supabase.from("initiative_signals").select("initiatives ( id, title, lane, stage )").eq("signal_id", signal.id),
       supabase.from("theme_signals").select("signal_themes ( id, title, recommendation )").eq("signal_id", signal.id),
       supabase.from("initiatives").select("id, title, lane").order("created_at", { ascending: false }).limit(100),
+      signal.source_id ? supabase.from("sources").select("label, icon").eq("id", signal.source_id).maybeSingle() : Promise.resolve({ data: null }),
     ]);
+    setSource(src ? { label: (src as { label?: string }).label ?? "Source", icon: (src as { icon?: string }).icon ?? "🔌" } : null);
     const m = (full?.metadata as Record<string, unknown>) ?? {};
     setMeta(m); setContext(typeof m.context === "string" ? m.context : "");
     // deno-lint-ignore no-explicit-any
@@ -146,6 +154,20 @@ export default function SignalDrawer({ signal, onClose, onChanged }: { signal: D
 
         <div style={{ flex: 1, overflowY: "auto", padding: "16px 20px" }} className="stack-3">
           {error && <div className="banner banner-error">{error}</div>}
+
+          {/* What it is — detail, source system, who it impacts */}
+          <div className="card card-pad">
+            {signal.why && <div className="t-body" style={{ fontSize: 13.5, lineHeight: 1.55, marginBottom: 10 }}>{signal.why}</div>}
+            <div className="row gap-2" style={{ flexWrap: "wrap", alignItems: "center" }}>
+              <span className="t-label" style={{ color: "var(--tm)" }}>Source</span>
+              {source ? <Chip>{source.icon} {source.label}</Chip> : <Chip tone="default">{signal.origin === "external" ? "External · unlinked" : "Manual entry"}</Chip>}
+              {signal.observed_at && <span className="t-mono-xs" style={{ color: "var(--tm)" }}>{new Date(signal.observed_at).toLocaleDateString()}</span>}
+            </div>
+            <div className="row gap-2" style={{ flexWrap: "wrap", alignItems: "center", marginTop: 8 }}>
+              <span className="t-label" style={{ color: "var(--tm)" }}>Impacts</span>
+              {(IMPACTS[signal.category ?? ""] ?? ["Triage — tag a lens"]).map((x) => <Chip key={x} tone={signal.category === "gtm" ? "violet" : "accent"}>{x}</Chip>)}
+            </div>
+          </div>
 
           {/* The so-what — themes + officer take */}
           <div className="card card-pad" style={{ background: "var(--panel-2)" }}>

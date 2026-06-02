@@ -387,13 +387,18 @@ function LensTab({ lens, signals, originFilter, onOriginFilter, sourceById, setC
 
   return (
     <div>
-      {/* Lens header + best-practice scaffold */}
+      {/* Lens header — live summary of this lens (not static scaffold) */}
       <div className="card card-pad" style={{ borderTop: `2px solid var(--${guide.tone === "accent" ? "ac" : "vl"})`, marginBottom: "var(--sp-5)" }}>
-        <div className="t-h2" style={{ fontSize: 15, marginBottom: 2 }}>{guide.title}</div>
-        <div className="t-sub t-muted" style={{ fontSize: 12.5, marginBottom: 10 }}>{guide.blurb}</div>
-        <div className="row gap-2" style={{ flexWrap: "wrap" }}>
-          <span className="t-label" style={{ marginRight: 2 }}>What good looks like:</span>
-          {guide.buckets.map((b) => <Chip key={b}>{b}</Chip>)}
+        <div className="row-between" style={{ alignItems: "flex-start", gap: 12 }}>
+          <div style={{ minWidth: 0 }}>
+            <div className="t-h2" style={{ fontSize: 15, marginBottom: 2 }}>{guide.title}</div>
+            <div className="t-sub t-muted" style={{ fontSize: 12.5 }}>{guide.blurb}</div>
+          </div>
+          <div className="row gap-2" style={{ flexShrink: 0 }}>
+            <div className="stat"><span className="stat-num" style={{ fontSize: 18 }}>{signals.length}</span><span className="stat-label">Signals</span></div>
+            <div className="stat"><span className="stat-num" style={{ fontSize: 18, color: signals.filter((s) => (s.conf_level ?? 0) >= 0.75).length ? "var(--gn-text)" : undefined }}>{signals.filter((s) => (s.conf_level ?? 0) >= 0.75).length}</span><span className="stat-label">High-conf</span></div>
+            <div className="stat"><span className="stat-num" style={{ fontSize: 18 }}>{signals.filter((s) => s.origin === "external").length}</span><span className="stat-label">External</span></div>
+          </div>
         </div>
       </div>
 
