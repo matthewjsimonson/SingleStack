@@ -15,8 +15,11 @@ type Theme = {
   state: string | null; momentum: string | null; conf_level: number | null; category: string | null; signal_ids: string[] | null;
 };
 type Sig = { id: string; title: string; conf_label: string | null };
-type Decision = { id: string; title: string; status: string; rationale: string | null; input_context: string | null };
+type Decision = { id: string; title: string; status: string; rationale: string | null; input_context: string | null; assignee_id: string | null };
 type Routed = { id: string; title: string; lane: string };
+export type Person = { id: string; name: string; title: string | null; area: string | null };
+export type Rec = { id: string; name: string };
+export type Init = { id: string; title: string; lane: string; product_id: string | null; gtm_record_id: string | null };
 
 const OFFICER = (cat: string | null) => (cat === "gtm" ? { key: "cro", name: "CRO" } : { key: "cpo", name: "CPO" });
 
@@ -27,6 +30,10 @@ export default function ThemeDrawer({ themeId, onClose, onChanged }: { themeId: 
   const [signals, setSignals] = useState<Sig[]>([]);
   const [decisions, setDecisions] = useState<Decision[]>([]);
   const [routed, setRouted] = useState<Record<string, { id: string; title: string; lane: string }>>({});
+  const [people, setPeople] = useState<Person[]>([]);
+  const [products, setProducts] = useState<Rec[]>([]);
+  const [gtms, setGtms] = useState<Rec[]>([]);
+  const [inits, setInits] = useState<Init[]>([]);
   const [take, setTake] = useState<string | null>(null);
   const [thinking, setThinking] = useState(false);
   const [busy, setBusy] = useState<string | null>(null);
@@ -40,8 +47,15 @@ export default function ThemeDrawer({ themeId, onClose, onChanged }: { themeId: 
     const ids = (t?.signal_ids as string[] | null) ?? [];
     const [{ data: sigs }, { data: ev }] = await Promise.all([
       ids.length ? supabase.from("signals").select("id, title, conf_label").in("id", ids) : Promise.resolve({ data: [] as Sig[] }),
-      supabase.from("decision_evidence").select("decisions ( id, title, status, rationale, input_context )").eq("theme_id", themeId),
+      supabase.from("decision_evidence").select("decisions ( id, title, status, rationale, input_context, assignee_id )").eq("theme_id", themeId),
     ]);
+    const [{ data: pl }, { data: pr }, { data: gt }, { data: it }] = await Promise.all([
+      supabase.from("people").select("id, name, title, area").eq("is_active", true).order("name"),
+      supabase.from("product_records").select("id, name").order("created_at"),
+      supabase.from("gtm_records").select("id, name").order("created_at"),
+      supabase.from("initiatives").select("id, title, lane, product_id, gtm_record_id").order("created_at", { ascending: false }).limit(100),
+    ]);
+    setPeople(pl ?? []); setProducts(pr ?? []); setGtms(gt ?? []); setInits((it ?? []) as Init[]);
     setSignals((sigs ?? []) as Sig[]);
     // deno-lint-ignore no-explicit-any
     const decs = ((ev ?? []) as any[]).map((r) => r.decisions).filter(Boolean);
@@ -128,7 +142,9 @@ export default function ThemeDrawer({ themeId, onClose, onChanged }: { themeId: 
             {decisions.length > 0 ? (
               <div className="stack-3" style={{ marginBottom: 10 }}>
                 {decisions.map((d) => (
-                  <DecisionCard key={d.id} d={d} theme={theme} signalCount={signals.length} routed={routed[d.id]} reload={async () => { await load(); onChanged?.(); }} />
+                  <DecisionCard key={d.id} d={d} theme={theme} signalCount={signals.length} routed={routed[d.id]}
+                    people={people} products={products} gtms={gtms} inits={inits}
+                    reload={async () => { await load(); onChanged?.(); }} />
                 ))}
               </div>
             ) : <div className="t-sub t-muted" style={{ fontSize: 12.5, marginBottom: 10 }}>No decision yet. Turn this theme into a decision — its signals carry over as evidence.</div>}
@@ -158,7 +174,7 @@ export default function ThemeDrawer({ themeId, onClose, onChanged }: { themeId: 
 // A decision, fully managed in place: evidence → rationale → decide → route, plus
 // request-input (copy a summary to share on Slack/email, paste the reply back as
 // context). No second screen.
-function DecisionCard({ d, theme, signalCount, routed, reload }: { d: Decision; theme: Theme | null; signalCount: number; routed?: Routed; reload: () => Promise<void>; }) {
+function DecisionCard({ d, theme, signalCount, routed, people, products, gtms, inits, reload }: { d: Decision; theme: Theme | null; signalCount: number; routed?: Routed; people: Person[]; products: Rec[]; gtms: Rec[]; inits: Init[]; reload: () => Promise<void>; }) {
   const supabase = createClient();
   const [rationale, setRationale] = useState(d.rationale ?? "");
   const [input, setInput] = useState(d.input_context ?? "");
@@ -166,6 +182,15 @@ function DecisionCard({ d, theme, signalCount, routed, reload }: { d: Decision; 
   const [copied, setCopied] = useState(false);
   const [busy, setBusy] = useState<string | null>(null);
   const [err, setErr] = useState<string | null>(null);
+  // routing panel state
+  const [routing, setRouting] = useState(false);
+  const defaultType = theme?.category === "gtm" ? "gtm" : "product";
+  const [rt, setRt] = useState<{ recordType: "product" | "gtm"; recordId: string; target: string; assigneeId: string }>(
+    { recordType: defaultType, recordId: "", target: "new", assigneeId: d.assignee_id ?? "" });
+  const [sugg, setSugg] = useState<string | null>(null);
+  const [suggesting, setSuggesting] = useState(false);
+
+  const ownerName = (id: string | null) => people.find((p) => p.id === id)?.name ?? null;
 
   async function patch(fields: Record<string, unknown>, key: string) {
     setBusy(key); setErr(null);
@@ -173,19 +198,50 @@ function DecisionCard({ d, theme, signalCount, routed, reload }: { d: Decision; 
     if (error) setErr(error.message); else await reload();
     setBusy(null);
   }
+
+  // Agent suggests an owner by area/role; human confirms (sets rt.assigneeId).
+  async function suggestOwner() {
+    if (!people.length) { setErr("Add people in Settings → Team first."); return; }
+    setSuggesting(true); setErr(null); setSugg(null);
+    try {
+      const { data: s } = await supabase.auth.getSession();
+      const token = s.session?.access_token;
+      const roster = people.map((p) => `${p.name} — ${p.title ?? "?"} (${p.area ?? "?"})`).join("; ");
+      const officer = theme?.category === "gtm" ? "cro" : "cpo";
+      const prompt = `Decision to own: "${d.title}"${rationale ? ` — ${rationale}` : ""} (area: ${theme?.category ?? "general"}). Pick the single best owner from this team and say why in one short sentence. Reply EXACTLY as: NAME — reason.\nTeam: ${roster}`;
+      const { data, error } = await supabase.functions.invoke("agent-chat", { body: { agent_key: officer, messages: [{ role: "user", content: prompt }], context: { area: "signals" } }, headers: token ? { Authorization: `Bearer ${token}` } : undefined });
+      if (error) throw error; if (data?.error) throw new Error(data.error);
+      const reply: string = data.reply ?? "";
+      const match = people.find((p) => reply.toLowerCase().includes(p.name.toLowerCase()));
+      if (match) setRt((r) => ({ ...r, assigneeId: match.id }));
+      setSugg(reply.trim());
+    } catch (e) { setErr(e instanceof Error ? e.message : "Could not suggest an owner."); }
+    finally { setSuggesting(false); }
+  }
+
+  // Route the decision INTO an initiative on a specific product/GTM record, with an owner.
   async function route() {
     setBusy("route"); setErr(null);
     try {
       const orgId = await getOrgId(); if (!orgId) throw new Error("No org.");
-      const lane = theme?.category === "gtm" ? "enablement" : "ship";
-      const { error: ie } = await supabase.from("initiatives").insert({ org_id: orgId, lane, title: `Act: ${d.title}`, description: rationale || theme?.recommendation || null, decision_id: d.id, stage: "backlog", priority: "high" });
-      if (ie) throw ie;
-      await supabase.from("decisions").update({ status: "routed", decided_at: new Date().toISOString() }).eq("id", d.id);
-      await reload();
+      const lane = rt.recordType === "gtm" ? "enablement" : "ship";
+      const assignee = rt.assigneeId || null;
+      if (rt.target === "new") {
+        const row: Record<string, unknown> = { org_id: orgId, lane, title: `Act: ${d.title}`, description: rationale || theme?.recommendation || null, decision_id: d.id, assignee_id: assignee, stage: "backlog", priority: "high" };
+        row[rt.recordType === "gtm" ? "gtm_record_id" : "product_id"] = rt.recordId || null;
+        const { error: ie } = await supabase.from("initiatives").insert(row); if (ie) throw ie;
+      } else {
+        const { error: ue } = await supabase.from("initiatives").update({ decision_id: d.id, assignee_id: assignee }).eq("id", rt.target); if (ue) throw ue;
+      }
+      await supabase.from("decisions").update({ status: "routed", decided_at: new Date().toISOString(), assignee_id: assignee }).eq("id", d.id);
+      setRouting(false); await reload();
     } catch (e) { setErr(e instanceof Error ? e.message : "Could not route."); }
     setBusy(null);
   }
   async function del() { setBusy("del"); await supabase.from("decisions").delete().eq("id", d.id); await reload(); setBusy(null); }
+
+  const recs = rt.recordType === "gtm" ? gtms : products;
+  const targetInits = inits.filter((i) => i.lane === (rt.recordType === "gtm" ? "enablement" : "ship"));
 
   const summary = `Decision: ${d.title}\n\nContext (theme): ${theme?.title ?? ""}\n${theme?.summary ? theme.summary + "\n" : ""}Backed by ${signalCount} signal(s).\n\nLeaning: ${rationale || "(undecided)"}\n\nWhat's your take? Reply and I'll fold it in.`;
   const mailto = `mailto:?subject=${encodeURIComponent("Input needed: " + d.title)}&body=${encodeURIComponent(summary)}`;
@@ -201,10 +257,22 @@ function DecisionCard({ d, theme, signalCount, routed, reload }: { d: Decision; 
 
       {/* evidence + impact */}
       {routed ? (
-        <div className="t-sub" style={{ fontSize: 12, marginBottom: 8 }}>→ Routed to <strong>{routed.lane === "ship" ? "Build · Ship" : "GTM · Enablement"}</strong>: {routed.title}</div>
+        <div className="t-sub" style={{ fontSize: 12, marginBottom: 8 }}>→ Routed to <strong>{routed.lane === "ship" ? "Build · Ship" : "GTM · Enablement"}</strong>: {routed.title}{ownerName(d.assignee_id) ? ` · owner ${ownerName(d.assignee_id)}` : ""}</div>
       ) : (
-        <div className="t-sub t-muted" style={{ fontSize: 11.5, marginBottom: 8 }}>Evidence: this theme + {signalCount} signal{signalCount === 1 ? "" : "s"}. Write the call, then route it into action.</div>
+        <div className="t-sub t-muted" style={{ fontSize: 11.5, marginBottom: 8 }}>Evidence: this theme + {signalCount} signal{signalCount === 1 ? "" : "s"}. Write the call, assign an owner, then route it onto an initiative.</div>
       )}
+
+      {/* owner */}
+      <label className="field"><span className="t-label">Owner</span>
+        <div className="row gap-2">
+          <select className="select" value={d.assignee_id ?? ""} onChange={(e) => patch({ assignee_id: e.target.value || null }, "owner")} style={{ flex: 1 }}>
+            <option value="">Unassigned</option>
+            {people.map((p) => <option key={p.id} value={p.id}>{p.name}{p.title ? ` · ${p.title}` : ""}</option>)}
+          </select>
+          <button className="btn btn-secondary btn-sm" type="button" onClick={suggestOwner} disabled={suggesting}>{suggesting ? "…" : "✦ Suggest"}</button>
+        </div>
+      </label>
+      {sugg && <div className="t-sub" style={{ fontSize: 12, marginBottom: 8 }}>✦ {sugg}{rt.assigneeId && rt.assigneeId !== (d.assignee_id ?? "") && <> · <button className="btn-link" style={{ background: "none", border: "none", color: "var(--ac-text)", fontWeight: 600, cursor: "pointer", padding: 0, fontSize: 12 }} onClick={() => patch({ assignee_id: rt.assigneeId }, "owner")}>Assign {ownerName(rt.assigneeId)}</button></>}</div>}
 
       {/* the decision / rationale */}
       <label className="field"><span className="t-label">The decision &amp; why</span>
@@ -212,10 +280,41 @@ function DecisionCard({ d, theme, signalCount, routed, reload }: { d: Decision; 
       <div className="row gap-2" style={{ flexWrap: "wrap", marginBottom: 8 }}>
         <button className="btn btn-secondary btn-sm" onClick={() => patch({ rationale: rationale.trim() || null }, "save")} disabled={busy === "save"}>{busy === "save" ? "Saving…" : "Save"}</button>
         {d.status === "open" && <button className="btn btn-success btn-sm" onClick={() => patch({ status: "decided", decided_at: new Date().toISOString(), rationale: rationale.trim() || null }, "decide")} disabled={busy === "decide"}>Mark decided</button>}
-        {d.status !== "routed" && <button className="btn btn-sm" onClick={route} disabled={busy === "route"}>{busy === "route" ? "Routing…" : "Route to action →"}</button>}
+        {d.status !== "routed" && <button className="btn btn-sm" onClick={() => setRouting((v) => !v)}>{routing ? "Cancel route" : "Route to action →"}</button>}
         {d.status !== "open" && <button className="btn btn-secondary btn-sm" onClick={() => patch({ status: "open", decided_at: null }, "reopen")} disabled={busy === "reopen"}>Reopen</button>}
         <button className="btn btn-secondary btn-sm" onClick={del} disabled={busy === "del"} style={{ marginLeft: "auto", color: "var(--rd-text)" }}>Delete</button>
       </div>
+
+      {/* routing panel — onto a specific Product/GTM initiative, with an owner */}
+      {routing && (
+        <div className="card card-pad" style={{ background: "var(--panel)", marginBottom: 8 }}>
+          <div className="t-label" style={{ color: "var(--tm)", marginBottom: 8 }}>Route onto an initiative</div>
+          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "var(--sp-3)" }}>
+            <label className="field"><span className="t-label">Lives on</span>
+              <select className="select" value={rt.recordType} onChange={(e) => setRt({ ...rt, recordType: e.target.value as "product" | "gtm", recordId: "", target: "new" })}>
+                <option value="product">Product (→ Ship)</option><option value="gtm">GTM (→ Enablement)</option>
+              </select></label>
+            <label className="field"><span className="t-label">{rt.recordType === "gtm" ? "GTM record" : "Product"}</span>
+              <select className="select" value={rt.recordId} onChange={(e) => setRt({ ...rt, recordId: e.target.value })}>
+                <option value="">— select —</option>{recs.map((r) => <option key={r.id} value={r.id}>{r.name}</option>)}
+              </select></label>
+          </div>
+          <label className="field"><span className="t-label">Initiative</span>
+            <select className="select" value={rt.target} onChange={(e) => setRt({ ...rt, target: e.target.value })}>
+              <option value="new">+ New initiative (&ldquo;Act: {d.title}&rdquo;)</option>
+              {targetInits.map((i) => <option key={i.id} value={i.id}>{i.title}</option>)}
+            </select></label>
+          <label className="field"><span className="t-label">Owner</span>
+            <div className="row gap-2">
+              <select className="select" value={rt.assigneeId} onChange={(e) => setRt({ ...rt, assigneeId: e.target.value })} style={{ flex: 1 }}>
+                <option value="">Unassigned</option>{people.map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}
+              </select>
+              <button className="btn btn-secondary btn-sm" type="button" onClick={suggestOwner} disabled={suggesting}>{suggesting ? "…" : "✦ Suggest"}</button>
+            </div>
+          </label>
+          <button className="btn btn-sm" onClick={route} disabled={busy === "route"}>{busy === "route" ? "Routing…" : "Route →"}</button>
+        </div>
+      )}
 
       {/* request input from a colleague (Slack/email), fold the reply back in */}
       <div style={{ borderTop: "1px solid var(--border)", paddingTop: 8 }}>
