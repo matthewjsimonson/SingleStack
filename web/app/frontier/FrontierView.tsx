@@ -21,6 +21,9 @@ type Workflow = { id: string; name: string; trigger: string; is_active: boolean;
 const PROVIDERS: { key: string; label: string; tone: "accent" | "violet" | "green" | "default" }[] = [
   { key: "anthropic", label: "Anthropic", tone: "accent" },
   { key: "openai", label: "OpenAI", tone: "green" },
+  { key: "google", label: "Google", tone: "violet" },
+  { key: "meta", label: "Meta", tone: "default" },
+  { key: "xai", label: "xAI", tone: "default" },
   { key: "platform", label: "Platform", tone: "violet" },
   { key: "other", label: "Other", tone: "default" },
 ];
@@ -64,8 +67,6 @@ export default function FrontierView() {
   }, [supabase]);
   useEffect(() => { load(); }, [load]);
 
-  const tone = (p?: string) => PROVIDERS.find((x) => x.key === p)?.tone ?? "default";
-  const plabel = (p?: string) => PROVIDERS.find((x) => x.key === p)?.label ?? p ?? "—";
   const agentName = (id: string | null) => agents.find((a) => a.id === id)?.name ?? "—";
   const skillName = (id: string) => skills.find((s) => s.id === id)?.name;
   function toggleSkill(id: string) { setWf((f) => ({ ...f, skill_ids: f.skill_ids.includes(id) ? f.skill_ids.filter((x) => x !== id) : [...f.skill_ids, id] })); }
@@ -128,19 +129,32 @@ export default function FrontierView() {
         {loading ? <div className="t-sub t-muted">Loading…</div> : caps.length === 0 && !logging ? (
           <div className="t-sub t-muted">No capabilities tracked yet. Log a frontier or platform release and your agents can act on it.</div>
         ) : (
-          <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(280px, 1fr))", gap: "var(--sp-3)" }}>
-            {caps.map((c) => (
-              <div key={c.id} className="card card-pad card-link" style={{ cursor: "pointer" }} onClick={() => setOpenCap(c)} title="Drill in & leverage">
-                <div className="row gap-2" style={{ marginBottom: 6, flexWrap: "wrap" }}>
-                  <Chip tone={tone(c.metadata?.provider)}>{plabel(c.metadata?.provider)}</Chip>
-                  {c.metadata?.area && <Chip>{c.metadata.area}</Chip>}
-                  {c.observed_at && <span className="t-mono-xs" style={{ marginLeft: "auto" }}>{ago(c.observed_at)}</span>}
+          <div className="stack-3">
+            {PROVIDERS.filter((p) => caps.some((c) => (c.metadata?.provider ?? "other") === p.key)).map((p) => {
+              const list = caps.filter((c) => (c.metadata?.provider ?? "other") === p.key);
+              return (
+                <div key={p.key}>
+                  <div className="row gap-2" style={{ marginBottom: 8, alignItems: "center" }}>
+                    <span style={{ width: 8, height: 8, borderRadius: 999, background: p.tone === "accent" ? "var(--ac)" : p.tone === "green" ? "var(--gn)" : p.tone === "violet" ? "var(--vl)" : "var(--border-strong)" }} />
+                    <span style={{ fontSize: 13.5, fontWeight: 680 }}>{p.label}</span>
+                    <span className="t-sub t-muted" style={{ fontSize: 12 }}>{list.length}</span>
+                  </div>
+                  <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(258px, 1fr))", gap: "var(--sp-3)" }}>
+                    {list.map((c) => (
+                      <div key={c.id} className="card card-pad card-link signal-card" style={{ cursor: "pointer", borderLeft: `3px solid ${p.tone === "accent" ? "var(--ac)" : p.tone === "green" ? "var(--gn)" : p.tone === "violet" ? "var(--vl)" : "var(--border-strong)"}` }} onClick={() => setOpenCap(c)} title="Drill in & leverage">
+                        <div className="row gap-2" style={{ marginBottom: 6, flexWrap: "wrap" }}>
+                          {c.metadata?.area && <Chip>{c.metadata.area}</Chip>}
+                          {c.observed_at && <span className="t-mono-xs" style={{ marginLeft: "auto" }}>{ago(c.observed_at)}</span>}
+                        </div>
+                        <div style={{ fontSize: 14, fontWeight: 640, lineHeight: 1.35, marginBottom: 4 }}>{c.title}</div>
+                        {c.why && <div className="t-sub t-muted" style={{ fontSize: 12.5, lineHeight: 1.45, marginBottom: 8 }}>{c.why}</div>}
+                        <span className="t-sub" style={{ fontSize: 12, color: "var(--ac-text)", fontWeight: 600 }}>Drill in & leverage →</span>
+                      </div>
+                    ))}
+                  </div>
                 </div>
-                <div style={{ fontSize: 14, fontWeight: 640, lineHeight: 1.35, marginBottom: 4 }}>{c.title}</div>
-                {c.why && <div className="t-sub t-muted" style={{ fontSize: 12.5, lineHeight: 1.45, marginBottom: 8 }}>{c.why}</div>}
-                <span className="t-sub" style={{ fontSize: 12, color: "var(--ac-text)", fontWeight: 600 }}>Drill in & leverage →</span>
-              </div>
-            ))}
+              );
+            })}
           </div>
         )}
       </Section>
