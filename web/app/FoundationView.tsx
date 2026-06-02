@@ -25,6 +25,15 @@ export default function FoundationView() {
   const [q, setQ] = useState("");
   const [reviewOpen, setReviewOpen] = useState(false);
   const [tab, setTab] = useState<"home" | "initiatives">("home");
+  // The homepage Initiatives tab is the single canonical Initiatives home — make
+  // it URL-addressable (?tab=initiatives) so detail pages can back to it.
+  useEffect(() => {
+    if (typeof window !== "undefined" && new URLSearchParams(window.location.search).get("tab") === "initiatives") setTab("initiatives");
+  }, []);
+  const selectTab = (k: "home" | "initiatives") => {
+    setTab(k);
+    if (typeof window !== "undefined") window.history.replaceState(null, "", k === "initiatives" ? "/?tab=initiatives" : "/");
+  };
 
   const load = useCallback(async () => {
     const now = Date.now();
@@ -103,7 +112,7 @@ export default function FoundationView() {
     <div>
       <PageHeader title="Home" meta={tab === "home" ? "Your command center — what's moving, what needs you, and what to do next." : "Your product-led-growth motion — initiatives moving from signal to live, across Build and GTM."} />
 
-      <SubTabs<"home" | "initiatives"> tabs={[{ key: "home", label: "Homepage" }, { key: "initiatives", label: "Initiatives" }]} active={tab} onChange={setTab} />
+      <SubTabs<"home" | "initiatives"> tabs={[{ key: "home", label: "Homepage" }, { key: "initiatives", label: "Initiatives" }]} active={tab} onChange={selectTab} />
 
       {tab === "initiatives" ? (
         <InitiativeLifecycleBoard />

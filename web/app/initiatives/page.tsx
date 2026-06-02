@@ -1,13 +1,7 @@
-import { createClient } from "@/lib/supabase/server";
-import Shell from "@/components/Shell";
-import InitiativesView from "./InitiativesView";
+import { redirect } from "next/navigation";
 
-export default async function Page() {
-  const supabase = await createClient();
-  const { data: { user } } = await supabase.auth.getUser();
-  return (
-    <Shell email={user?.email} crumbs={[{ label: "Initiatives" }]}>
-      <InitiativesView />
-    </Shell>
-  );
+// Initiatives lives as a tab on the homepage (the single canonical home).
+// This route just forwards there so old links / the [id] parent resolve cleanly.
+export default function Page() {
+  redirect("/?tab=initiatives");
 }

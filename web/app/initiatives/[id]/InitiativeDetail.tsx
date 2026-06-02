@@ -71,7 +71,7 @@ export default function InitiativeDetail({ id }: { id: string }) {
 
   return (
     <div>
-      <BackLink href="/initiatives" label="Initiatives" />
+      <BackLink href="/?tab=initiatives" label="Initiatives" />
       <div className="row gap-2" style={{ marginBottom: 4, flexWrap: "wrap" }}>
         <Chip tone={ini.scope === "gtm" ? "violet" : "accent"}>{SCOPE_LABEL[ini.scope] ?? ini.scope}</Chip>
         {ini.kind && <Chip>{ini.kind}</Chip>}
