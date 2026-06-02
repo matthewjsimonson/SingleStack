@@ -34,7 +34,7 @@ export default function MapView({ productFilter = "all", onOpenTheme }: { produc
   const load = useCallback(async () => {
     setError(null);
     const [{ data: ths }, { data: strength }, { data: tsig }, { data: misses }, { data: brs }] = await Promise.all([
-      supabase.from("signal_themes").select("id, title, category, state, momentum, horizon, owner_team, product_id").neq("state", "dormant"),
+      supabase.from("signal_themes").select("id, title, category, state, momentum, horizon, owner_team, product_id, conf_level").neq("state", "dormant"),
       supabase.from("theme_evidence_strength").select("theme_id, honest_conf, contra_signals"),
       supabase.from("theme_signals").select("theme_id, stance"),
       supabase.from("theme_misses").select("theme_id"),
@@ -49,7 +49,7 @@ export default function MapView({ productFilter = "all", onOpenTheme }: { produc
     const scoped = (ths ?? []).filter((t) =>
       productFilter === "all" ? true : productFilter === "company" ? !t.product_id : t.product_id === productFilter);
     const list: PTheme[] = scoped.map((t) => ({
-      id: t.id, title: t.title, lens: t.category as "product" | "gtm", conf: confBy[t.id] ?? 0,
+      id: t.id, title: t.title, lens: t.category as "product" | "gtm", conf: confBy[t.id] || (t.conf_level ?? 0),
       momentum: t.momentum, state: t.state, horizon: t.horizon, owner: t.owner_team,
       signalCount: sigCount[t.id] ?? 0, contraCount: contraBy[t.id] ?? 0,
       flag: t.state === "escalating" ? "escalating" : missSet.has(t.id) ? "reconsider" : null,
@@ -120,10 +120,15 @@ export default function MapView({ productFilter = "all", onOpenTheme }: { produc
             {/* soft canvas — gentle depth instead of a flat field */}
             <rect x={0} y={0} width={W} height={H} fill="url(#bgGrad)" />
 
-            {/* lane bands (alternating, very subtle) + dividers */}
-            {projection.lanes.map((l, i) => i % 2 === 1 ? (
-              <rect key={`band${i}`} x={0} y={l.y0} width={W} height={(projection.lanes[i + 1]?.y0 ?? H) - l.y0} fill="#000" opacity={0.012} />
-            ) : null)}
+            {/* momentum lanes, tinted live: accelerating = warm, fading = cool */}
+            {projection.lanes.map((l, i) => {
+              const h = (projection.lanes[i + 1]?.y0 ?? H) - l.y0;
+              const tint = l.tone === "hot" ? "#F59E0B" : l.tone === "cool" ? "#6366F1" : "#94A3B8";
+              const op = l.tone === "hot" ? 0.07 : l.tone === "cool" ? 0.05 : 0.025;
+              return <rect key={`band${i}`} x={0} y={l.y0} width={W} height={h} fill={tint} opacity={op} />;
+            })}
+            {/* "Act now" zone — high-confidence right edge glows faintly */}
+            <rect x={PAD + (W - PAD * 2) * 0.66} y={PAD - 6} width={(W - PAD * 2) * 0.34 + 6} height={H - PAD * 2 + 12} fill="#16A34A" opacity={0.05} />
             {projection.lanes.map((l, i) => i === 0 ? null : (
               <line key={i} x1={PAD} y1={l.y0} x2={W - PAD} y2={l.y0} stroke="#E6E8EE" strokeWidth={1} />
             ))}
