@@ -24,6 +24,7 @@ export default function Modules({ productId }: { productId: string }) {
   const [moduleName, setModuleName] = useState("");
   const [moduleDesc, setModuleDesc] = useState(""); // what the module does
   const [openModuleId, setOpenModuleId] = useState<string | null>(null); // detail modal
+  const [editModule, setEditModule] = useState<{ id: string; name: string; description: string } | null>(null); // inline module edit
   // staged deletions → confirmed via in-app dialog (not a browser popup)
   const [delModule, setDelModule] = useState<Module | null>(null);
 
@@ -65,6 +66,14 @@ export default function Modules({ productId }: { productId: string }) {
       if (error) throw error;
       setAddingModule(false); setModuleName(""); setModuleDesc(""); await load();
     } catch (e) { setError(errText(e, "Could not add module.")); }
+  }
+
+  async function saveModuleEdit(e: React.FormEvent) {
+    e.preventDefault(); setError(null);
+    const m = editModule; if (!m || !m.name.trim()) return;
+    const { error } = await supabase.from("modules").update({ name: m.name.trim(), description: m.description.trim() || null }).eq("id", m.id);
+    if (error) { setError(errText(error, "Could not update module.")); return; }
+    setEditModule(null); await load();
   }
 
   async function removeModule() {
@@ -111,6 +120,17 @@ export default function Modules({ productId }: { productId: string }) {
           <div className="stack-3">
             {modules.map((m) => {
               const n = featuresOf(m.id).length;
+              if (editModule?.id === m.id) {
+                return (
+                  <form key={m.id} onSubmit={saveModuleEdit} className="card card-pad">
+                    <label className="field" style={{ marginBottom: 8 }}><span className="t-label">Module name</span>
+                      <input className="input" autoFocus value={editModule.name} onChange={(e) => setEditModule({ ...editModule, name: e.target.value })} /></label>
+                    <label className="field" style={{ marginBottom: 8 }}><span className="t-label">What it does</span>
+                      <textarea className="textarea" rows={2} value={editModule.description} onChange={(e) => setEditModule({ ...editModule, description: e.target.value })} /></label>
+                    <div className="row gap-2"><button className="btn btn-sm" type="submit">Save</button><button className="btn btn-secondary btn-sm" type="button" onClick={() => setEditModule(null)}>Cancel</button></div>
+                  </form>
+                );
+              }
               return (
                 <div key={m.id} className="card card-pad row-between" style={{ alignItems: "flex-start", gap: 12 }}>
                   <button onClick={() => setOpenModuleId(m.id)} style={{ background: "none", border: "none", padding: 0, cursor: "pointer", textAlign: "left", flex: 1, minWidth: 0 }}>
@@ -121,8 +141,11 @@ export default function Modules({ productId }: { productId: string }) {
                     {m.description && <span className="t-sub t-muted" style={{ display: "block", fontSize: 12.5, marginTop: 3, lineHeight: 1.5 }}>{m.description}</span>}
                     <span className="t-sub" style={{ display: "block", fontSize: 11.5, marginTop: 5, color: "var(--ac-text)", fontWeight: 600 }}>Open to manage features →</span>
                   </button>
-                  <button onClick={() => setDelModule(m)} title={`Delete ${m.name}`} aria-label={`Delete module ${m.name}`}
-                    style={{ background: "none", border: "none", cursor: "pointer", fontSize: 16, lineHeight: 1, color: "var(--tm)", padding: "0 2px", flexShrink: 0 }}>×</button>
+                  <div className="row gap-2" style={{ flexShrink: 0, alignItems: "center" }}>
+                    <button className="btn btn-secondary btn-sm" onClick={() => setEditModule({ id: m.id, name: m.name, description: m.description ?? "" })}>Edit</button>
+                    <button onClick={() => setDelModule(m)} title={`Delete ${m.name}`} aria-label={`Delete module ${m.name}`}
+                      style={{ background: "none", border: "none", cursor: "pointer", fontSize: 16, lineHeight: 1, color: "var(--tm)", padding: "0 2px" }}>×</button>
+                  </div>
                 </div>
               );
             })}
@@ -159,6 +182,15 @@ function ModuleDetail({ module, features, onClose, reload, errText, setError }: 
   const [desc, setDesc] = useState("");
   const [busy, setBusy] = useState(false);
   const [delFeature, setDelFeature] = useState<Feature | null>(null);
+  const [editFeat, setEditFeat] = useState<{ id: string; name: string; description: string } | null>(null);
+
+  async function saveFeatureEdit(e: React.FormEvent) {
+    e.preventDefault(); setError(null);
+    const f = editFeat; if (!f || !f.name.trim()) return;
+    const { error } = await supabase.from("features").update({ name: f.name.trim(), description: f.description.trim() || null }).eq("id", f.id);
+    if (error) { setError(errText(error, "Could not update feature.")); return; }
+    setEditFeat(null); await reload();
+  }
 
   async function addFeature(e: React.FormEvent) {
     e.preventDefault(); setError(null);
@@ -218,13 +250,28 @@ function ModuleDetail({ module, features, onClose, reload, errText, setError }: 
       ) : (
         <div className="card" style={{ overflow: "hidden" }}>
           {features.map((f, i) => (
-            <div key={f.id} className="row-between" style={{ padding: "10px 14px", borderTop: i === 0 ? "none" : "1px solid var(--border)", alignItems: "flex-start", gap: 10 }}>
-              <div style={{ minWidth: 0 }}>
-                <div style={{ fontSize: 13.5, fontWeight: 620 }}>{f.name}</div>
-                {f.description && <div className="t-sub t-muted" style={{ fontSize: 12.5, marginTop: 2, lineHeight: 1.5 }}>{f.description}</div>}
-              </div>
-              <button onClick={() => setDelFeature(f)} title={`Delete ${f.name}`} aria-label={`Delete feature ${f.name}`}
-                style={{ background: "none", border: "none", cursor: "pointer", fontSize: 15, lineHeight: 1, color: "var(--tm)", padding: "0 2px", flexShrink: 0 }}>×</button>
+            <div key={f.id} style={{ padding: "10px 14px", borderTop: i === 0 ? "none" : "1px solid var(--border)" }}>
+              {editFeat?.id === f.id ? (
+                <form onSubmit={saveFeatureEdit}>
+                  <label className="field" style={{ marginBottom: 8 }}><span className="t-label">Feature name</span>
+                    <input className="input" autoFocus value={editFeat.name} onChange={(e) => setEditFeat({ ...editFeat, name: e.target.value })} /></label>
+                  <label className="field" style={{ marginBottom: 8 }}><span className="t-label">What it does</span>
+                    <textarea className="textarea" rows={2} value={editFeat.description} onChange={(e) => setEditFeat({ ...editFeat, description: e.target.value })} /></label>
+                  <div className="row gap-2"><button className="btn btn-sm" type="submit">Save</button><button className="btn btn-secondary btn-sm" type="button" onClick={() => setEditFeat(null)}>Cancel</button></div>
+                </form>
+              ) : (
+                <div className="row-between" style={{ alignItems: "flex-start", gap: 10 }}>
+                  <div style={{ minWidth: 0 }}>
+                    <div style={{ fontSize: 13.5, fontWeight: 620 }}>{f.name}</div>
+                    {f.description && <div className="t-sub t-muted" style={{ fontSize: 12.5, marginTop: 2, lineHeight: 1.5 }}>{f.description}</div>}
+                  </div>
+                  <div className="row gap-2" style={{ flexShrink: 0, alignItems: "center" }}>
+                    <button className="btn btn-secondary btn-sm" onClick={() => setEditFeat({ id: f.id, name: f.name, description: f.description ?? "" })}>Edit</button>
+                    <button onClick={() => setDelFeature(f)} title={`Delete ${f.name}`} aria-label={`Delete feature ${f.name}`}
+                      style={{ background: "none", border: "none", cursor: "pointer", fontSize: 15, lineHeight: 1, color: "var(--tm)", padding: "0 2px" }}>×</button>
+                  </div>
+                </div>
+              )}
             </div>
           ))}
         </div>
