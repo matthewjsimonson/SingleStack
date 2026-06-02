@@ -96,9 +96,10 @@ export default function DecisionWorkspace({ id }: { id: string }) {
     try {
       const orgId = await getOrgId(); if (!orgId) throw new Error("Could not resolve your organization.");
       const chosen = options.find((o) => o.id === d.chosen_option_id);
-      // Spawn a build item carrying the decision's intent.
+      // Spawn an initiative carrying the decision's intent — lands in Plan on
+      // the cross-functional board; its build/GTM tasks execute from there.
       const { data: item, error: iErr } = await supabase.from("initiatives").insert({
-        org_id: orgId, lane: "ship", title: chosen?.title || d.title, build_stage: "spec", stage: "active",
+        org_id: orgId, lane: "ship", title: chosen?.title || d.title, lifecycle: "plan", scope: "product", stage: "active",
         priority: "medium", product_id: d.product_id, decision_id: d.id,
       }).select("id").single();
       if (iErr) throw iErr;
