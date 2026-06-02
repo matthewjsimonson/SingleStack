@@ -15,9 +15,11 @@ import { elevationField, contours, type Contour } from "@/lib/terrain";
 
 const W = 1000, H = 600, PAD = 56;
 
-// Dark tactical palette — the terrain glows against it.
-const BG = "#0B0E14";
-const themeFill = (t: PTheme) => (t.lens === "gtm" ? "#8B8FF5" : "#5E8AFF");
+// Light surface — consistent with the rest of the product. The terrain sits
+// softly on the app canvas; nodes use the product's indigo (product) / violet
+// (gtm) accents rather than a dark "tactical" look.
+const BG = "#F7F8FA";
+const themeFill = (t: PTheme) => (t.lens === "gtm" ? "#7C3AED" : "#4F46E5");
 const themeOpacity = (t: PTheme) => (t.state === "fading" ? 0.5 : t.state === "dormant" ? 0.32 : t.state === "escalating" ? 1 : 0.9);
 
 export default function MapView({ productFilter = "all" }: { productFilter?: string }) {
@@ -123,8 +125,8 @@ export default function MapView({ productFilter = "all" }: { productFilter?: str
           <svg viewBox={`0 0 ${W} ${H}`} style={{ width: "100%", height: "72vh", display: "block" }}>
             <defs>
               <radialGradient id="vignette" cx="50%" cy="42%" r="75%">
-                <stop offset="60%" stopColor={BG} stopOpacity="0" />
-                <stop offset="100%" stopColor="#05070B" stopOpacity="0.9" />
+                <stop offset="62%" stopColor="#FFFFFF" stopOpacity="0" />
+                <stop offset="100%" stopColor="#0B0C0E" stopOpacity="0.05" />
               </radialGradient>
             </defs>
 
@@ -132,29 +134,29 @@ export default function MapView({ productFilter = "all" }: { productFilter?: str
             <g transform={`translate(${drift},${drift * 0.5})`}>
               {terrain.map((c, i) => (
                 <path key={i} d={c.paths.join(" ")} fill="none"
-                  stroke={c.level > 0.66 ? "#7BA0FF" : "#3B5BCC"}
+                  stroke={c.level > 0.66 ? "#6366F1" : "#A5B4FC"}
                   strokeWidth={0.5 + c.level * 1.6}
-                  opacity={(0.12 + c.level * 0.5) * (0.82 + 0.18 * breathe)} />
+                  opacity={(0.10 + c.level * 0.42) * (0.85 + 0.15 * breathe)} />
               ))}
             </g>
 
             {/* lane dividers (subtle, on dark) */}
             {projection.lanes.map((l, i) => i === 0 ? null : (
-              <line key={i} x1={PAD} y1={l.y0} x2={W - PAD} y2={l.y0} stroke="#1A2030" strokeWidth={1} />
+              <line key={i} x1={PAD} y1={l.y0} x2={W - PAD} y2={l.y0} stroke="#E6E8EE" strokeWidth={1} />
             ))}
             {projection.lanes.map((l, i) => (
-              <text key={`lbl${i}`} x={PAD + 6} y={l.y0 + 16} fontSize={11} fontWeight={600} fill="#5A6478" letterSpacing="0.04em">{l.label.toUpperCase()}</text>
+              <text key={`lbl${i}`} x={PAD + 6} y={l.y0 + 16} fontSize={11} fontWeight={600} fill="#8B8E97" letterSpacing="0.04em">{l.label.toUpperCase()}</text>
             ))}
             {projection.colLabels.map((c, i) => (
-              <text key={`c${i}`} x={c.x} y={H - 16} fontSize={11} fontWeight={600} fill="#7A8499" textAnchor="middle" letterSpacing="0.04em">{c.label.toUpperCase()}</text>
+              <text key={`c${i}`} x={c.x} y={H - 16} fontSize={11} fontWeight={600} fill="#8B8E97" textAnchor="middle" letterSpacing="0.04em">{c.label.toUpperCase()}</text>
             ))}
-            <text x={W / 2} y={H - 3} fontSize={10} fill="#4A5366" textAnchor="middle">{projection.xAxisLabel}</text>
+            <text x={W / 2} y={H - 3} fontSize={10} fill="#A6A9B2" textAnchor="middle">{projection.xAxisLabel}</text>
 
             {/* bridges */}
             {bridges.map((b, i) => {
               const a = posById.get(b.source), c = posById.get(b.target);
               if (!a || !c) return null;
-              return <line key={i} x1={a.x} y1={a.y} x2={c.x} y2={c.y} stroke="#8B8FF5" strokeWidth={1.2} opacity={0.4} />;
+              return <line key={i} x1={a.x} y1={a.y} x2={c.x} y2={c.y} stroke="#A78BFA" strokeWidth={1.2} opacity={0.5} />;
             })}
 
             {/* theme nodes */}
@@ -162,7 +164,7 @@ export default function MapView({ productFilter = "all" }: { productFilter?: str
               const isHover = hover === n.id;
               const accel = n.momentum === "accelerating" && n.state !== "fading";
               const pulse = accel ? 1 + 0.12 * breathe : 1;            // breathing on hot nodes
-              const glow = n.flag === "escalating" ? "#E0A642" : n.flag === "reconsider" ? "#E0A642" : isHover ? "#FFFFFF" : null;
+              const glow = n.flag === "escalating" ? "#D97706" : n.flag === "reconsider" ? "#D97706" : isHover ? "#4F46E5" : null;
               return (
                 <g key={n.id} transform={`translate(${n.x},${n.y})`} style={{ cursor: "pointer" }}
                    onClick={() => router.push(n.href)}
@@ -170,8 +172,8 @@ export default function MapView({ productFilter = "all" }: { productFilter?: str
                   {accel && <circle r={n.r * pulse + 5} fill="none" stroke={themeFill(n)} strokeWidth={1} opacity={0.18 + 0.22 * (1 - breathe)} />}
                   <circle r={n.r * pulse} fill={themeFill(n)} opacity={themeOpacity(n)}
                     stroke={glow ?? "none"} strokeWidth={glow ? (n.flag ? 2.5 : 1.5) : 0} />
-                  {n.contraCount > 0 && <circle r={3.5} cx={n.r * 0.7} cy={-n.r * 0.7} fill="#FF5C5C" />}
-                  <text x={0} y={n.r + 12} fontSize={isHover ? 11 : 9.5} fontWeight={isHover ? 600 : 400} fill={isHover ? "#E8EAF0" : "#9BA3B8"} textAnchor="middle" style={{ pointerEvents: "none" }}>
+                  {n.contraCount > 0 && <circle r={3.5} cx={n.r * 0.7} cy={-n.r * 0.7} fill="#EF4444" />}
+                  <text x={0} y={n.r + 12} fontSize={isHover ? 11 : 9.5} fontWeight={isHover ? 600 : 500} fill={isHover ? "#131417" : "#6B7280"} textAnchor="middle" style={{ pointerEvents: "none" }}>
                     {n.title.length > 22 ? n.title.slice(0, 22) + "…" : n.title}
                   </text>
                 </g>
@@ -182,10 +184,10 @@ export default function MapView({ productFilter = "all" }: { productFilter?: str
           </svg>
 
           {/* legend */}
-          <div className="row gap-2" style={{ padding: "10px 14px", borderTop: "1px solid #1A2030", flexWrap: "wrap", background: "#0E121A" }}>
-            <span style={{ color: "#5E8AFF", fontSize: 12, fontWeight: 600 }}>● product</span>
-            <span style={{ color: "#8B8FF5", fontSize: 12, fontWeight: 600 }}>● gtm</span>
-            <span style={{ color: "#7A8499", fontSize: 11.5 }}>elevation = confidence × momentum concentration · size = confidence · lane = momentum · <span style={{ color: "#FF5C5C" }}>●</span> contradicted · pulse = accelerating</span>
+          <div className="row gap-2" style={{ padding: "10px 14px", borderTop: "1px solid var(--border)", flexWrap: "wrap", background: "var(--panel)" }}>
+            <span style={{ color: "#4F46E5", fontSize: 12, fontWeight: 600 }}>● product</span>
+            <span style={{ color: "#7C3AED", fontSize: 12, fontWeight: 600 }}>● gtm</span>
+            <span style={{ color: "var(--tm)", fontSize: 11.5 }}>elevation = confidence × momentum concentration · size = confidence · lane = momentum · <span style={{ color: "#EF4444" }}>●</span> contradicted · pulse = accelerating</span>
           </div>
         </div>
       )}

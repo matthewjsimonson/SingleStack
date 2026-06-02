@@ -104,6 +104,11 @@ button { font-family: inherit; cursor: pointer; }
 .card-link:hover { border-color: var(--border-strong); box-shadow: var(--shadow-md); }
 .card-link:active { transform: translateY(0.5px); }
 
+/* Signals read as a live intel feed, not document-y records: a lens-colored
+   spine (set inline) + a tasteful micro-lift on hover. */
+.signal-card { transition: transform 0.13s ease, box-shadow 0.16s ease, border-color 0.16s ease; }
+.signal-card:hover { transform: translateY(-1px); }
+
 /* ---- buttons ------------------------------------------------------------- */
 .btn {
   display: inline-flex; align-items: center; justify-content: center; gap: 6px;

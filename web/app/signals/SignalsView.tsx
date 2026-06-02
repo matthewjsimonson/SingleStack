@@ -415,7 +415,7 @@ function LensTab({ lens, signals, originFilter, onOriginFilter, sourceById, setC
 
 function SignalCard({ s, src, setCategory, onOpen }: { s: Signal; src: Source | null; setCategory: (id: string, c: string | null) => void; onOpen: (s: Signal) => void }) {
   return (
-    <div className="card card-pad card-link" style={{ cursor: "pointer" }} onClick={() => onOpen(s)} title="Open signal">
+    <div className="card card-pad card-link signal-card" style={{ cursor: "pointer", borderLeft: `3px solid ${s.category === "gtm" ? "var(--vl)" : s.category === "product" ? "var(--ac)" : "var(--border-strong)"}` }} onClick={() => onOpen(s)} title="Open signal">
       <div className="row-between" style={{ gap: 12, alignItems: "flex-start", marginBottom: 5 }}>
         <span style={{ fontSize: 14.5, fontWeight: 620 }}>{s.title}</span>
         <Confidence label={s.conf_label} level={s.conf_level} />
