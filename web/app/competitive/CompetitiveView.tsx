@@ -395,18 +395,57 @@ function Battlecards({ competitors, cards, overview, capabilities, scores, compS
         <div className="row gap-2"><span className="t-h2" style={{ fontSize: 15 }}>{selected?.name}</span>{selected && <Chip tone={selected.relationship === "direct" ? "accent" : "violet"}>{selected.relationship}</Chip>}</div>
       </div>
 
-      {/* Overviews — who they are vs who we are, so the battlecard stands alone */}
-      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "var(--sp-4)", marginBottom: "var(--sp-5)" }}>
-        <div className="card card-pad" style={{ borderTop: "2px solid var(--vl)" }}>
-          <div className="t-label" style={{ color: "var(--tm)", marginBottom: 6 }}>Them · {selected?.name}</div>
-          <div className="t-sub" style={{ fontSize: 12.5, lineHeight: 1.5 }}>{selected?.notes || <span className="t-muted">No overview yet — add notes on the competitor.</span>}</div>
-          {selected?.website && <a href={selected.website} target="_blank" rel="noreferrer" className="t-sub" style={{ fontSize: 12, color: "var(--ac-text)", fontWeight: 600, display: "inline-block", marginTop: 6 }}>{selected.website.replace(/^https?:\/\//, "")} →</a>}
-        </div>
-        <div className="card card-pad" style={{ borderTop: "2px solid var(--ac)" }}>
-          <div className="t-label" style={{ color: "var(--tm)", marginBottom: 6 }}>Us · {overview?.name ?? "Our product"}</div>
-          <div className="t-sub" style={{ fontSize: 12.5, lineHeight: 1.5 }}>{overview?.valueProp || overview?.overview || <span className="t-muted">Add an Overview / Value proposition on your product record.</span>}</div>
-        </div>
-      </div>
+      {/* Us vs Them — dynamic: live strengths from the matrix + the signals moving the matchup */}
+      {(() => {
+        const theirStrong = capabilities.filter((c) => scope && scoreOf(c.id, scope) >= 2);
+        const weLead = capabilities.filter((c) => scope && scoreOf(c.id, null) > scoreOf(c.id, scope));
+        const theyLead = capabilities.filter((c) => scope && scoreOf(c.id, scope) > scoreOf(c.id, null));
+        const matchup = compFor(selected);
+        return (
+          <div style={{ marginBottom: "var(--sp-5)" }}>
+            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "var(--sp-4)" }}>
+              <div className="card card-pad" style={{ borderTop: "2px solid var(--vl)" }}>
+                <div className="t-label" style={{ color: "var(--tm)", marginBottom: 6 }}>Them · {selected?.name}</div>
+                <div className="t-sub" style={{ fontSize: 12.5, lineHeight: 1.5, marginBottom: 8 }}>{selected?.notes || <span className="t-muted">No overview yet.</span>}</div>
+                <div className="t-label" style={{ color: "var(--tm)", fontSize: 10.5, marginBottom: 4 }}>Strong on</div>
+                <div className="row gap-2" style={{ flexWrap: "wrap", marginBottom: 8 }}>
+                  {theirStrong.length ? theirStrong.map((c) => <Chip key={c.id} tone="violet">{c.name}</Chip>) : <span className="t-sub t-muted" style={{ fontSize: 12 }}>—</span>}
+                </div>
+                <div className="row gap-2" style={{ flexWrap: "wrap" }}>
+                  <span className="t-mono-xs">{matchup.length} recent move{matchup.length === 1 ? "" : "s"}</span>
+                  {selected?.website && <a href={selected.website} target="_blank" rel="noreferrer" className="t-sub" style={{ fontSize: 12, color: "var(--ac-text)", fontWeight: 600 }}>{selected.website.replace(/^https?:\/\//, "")} →</a>}
+                </div>
+              </div>
+              <div className="card card-pad" style={{ borderTop: "2px solid var(--ac)" }}>
+                <div className="t-label" style={{ color: "var(--tm)", marginBottom: 6 }}>Us · {overview?.name ?? "Our product"}</div>
+                <div className="t-sub" style={{ fontSize: 12.5, lineHeight: 1.5, marginBottom: 8 }}>{overview?.valueProp || overview?.overview || <span className="t-muted">Add a value proposition on your product record.</span>}</div>
+                <div className="t-label" style={{ color: "var(--tm)", fontSize: 10.5, marginBottom: 4 }}>We lead on</div>
+                <div className="row gap-2" style={{ flexWrap: "wrap", marginBottom: 8 }}>
+                  {weLead.length ? weLead.map((c) => <Chip key={c.id} tone="green">{c.name}</Chip>) : <span className="t-sub t-muted" style={{ fontSize: 12 }}>—</span>}
+                </div>
+                <span className="t-mono-xs" style={{ color: theyLead.length ? "var(--am-text)" : "var(--gn-text)" }}>{theyLead.length ? `${theyLead.length} gap${theyLead.length === 1 ? "" : "s"} to close` : "ahead or even everywhere"}</span>
+              </div>
+            </div>
+            {/* signals moving this matchup */}
+            {matchup.length > 0 && (
+              <div className="card card-pad" style={{ marginTop: "var(--sp-3)", borderLeft: "3px solid var(--vl)" }}>
+                <div className="t-label" style={{ color: "var(--tm)", marginBottom: 8 }}>Signals moving this matchup</div>
+                <div className="stack-3">
+                  {matchup.slice(0, 3).map((s) => (
+                    <div key={s.id} className="row-between" style={{ gap: 10, alignItems: "flex-start" }}>
+                      <div style={{ minWidth: 0 }}>
+                        <div style={{ fontSize: 13, fontWeight: 600 }}>{s.title}</div>
+                        {s.why && <div className="t-sub t-muted" style={{ fontSize: 12 }}>{s.why}</div>}
+                      </div>
+                      <Confidence label={s.conf_label} level={s.conf_level} />
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+          </div>
+        );
+      })()}
 
       {/* Competitor agent — a CRO read on how to win this matchup */}
       <div className="card card-pad" style={{ background: "var(--panel-2)", marginBottom: "var(--sp-5)" }}>
