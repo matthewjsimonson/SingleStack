@@ -79,6 +79,7 @@ function Dashboard({ competitors, capabilities, scores, compSignals, overview, r
   const [addingCap, setAddingCap] = useState(false);
   const [capName, setCapName] = useState("");
   const [openCell, setOpenCell] = useState<Cell | null>(null);
+  const [openMetric, setOpenMetric] = useState<"gaps" | "moves" | null>(null);
   const [matrixView, setMatrixView] = useState<"matrix" | "grid">("matrix");
   const [pendingDelete, setPendingDelete] = useState<Competitor | null>(null); // staged for in-app confirm
 
@@ -119,40 +120,17 @@ function Dashboard({ competitors, capabilities, scores, compSignals, overview, r
   const gaps = capabilities.filter((cap) => competitors.some((c) => scoreOf(cap.id, c.id) > usScore(cap.id))).length;
   const edges = capabilities.filter((cap) => usScore(cap.id) >= 3 && competitors.every((c) => scoreOf(cap.id, c.id) < 3)).length;
   const recent = compSignals.filter((s) => s.observed_at && Date.now() - new Date(s.observed_at).getTime() < 30 * 86400_000).length;
-  const METRICS: [number, string, boolean][] = [
-    [competitors.length, "Tracked", false],
-    [direct.length, "Direct", false],
-    [edges, "We lead", false],
-    [gaps, "Gaps to close", gaps > 0],
-    [recent, "Moves · 30d", recent > 0],
+  const gapList = capabilities.filter((cap) => competitors.some((c) => scoreOf(cap.id, c.id) > usScore(cap.id)));
+  const METRICS: [number, string, boolean, string][] = [
+    [competitors.length, "Tracked", false, ""],
+    [direct.length, "Direct", false, ""],
+    [edges, "We lead", false, ""],
+    [gaps, "Gaps to close", gaps > 0, "gaps"],
+    [recent, "Moves · 30d", recent > 0, "moves"],
   ];
 
   return (
     <div>
-      {/* Metrics — the landscape at a glance, not just a list */}
-      <div className="card card-pad" style={{ marginBottom: "var(--sp-5)", display: "grid", gridTemplateColumns: `repeat(${METRICS.length}, 1fr)`, gap: "var(--sp-4)" }}>
-        {METRICS.map(([n, label, warn]) => (
-          <div key={label} className="stat"><span className="stat-num" style={{ color: warn ? "var(--am-text)" : undefined }}>{n}</span><span className="stat-label">{label}</span></div>
-        ))}
-      </div>
-
-      {/* What's happening — high-value competitive moves */}
-      {compSignals.length > 0 && (
-        <Section label="What's happening">
-          <div className="stack-3">
-            {compSignals.slice(0, 4).map((s) => (
-              <div key={s.id} className="card card-pad signal-card" style={{ borderLeft: "3px solid var(--vl)" }}>
-                <div className="row-between" style={{ gap: 12, alignItems: "flex-start", marginBottom: 4 }}>
-                  <span style={{ fontSize: 14, fontWeight: 620 }}>{s.title}</span>
-                  <Confidence label={s.conf_label} level={s.conf_level} />
-                </div>
-                {s.why && <div className="t-sub t-muted" style={{ fontSize: 12.5, lineHeight: 1.45 }}>{s.why}</div>}
-              </div>
-            ))}
-          </div>
-        </Section>
-      )}
-
       {pendingDelete && (
         <ConfirmDialog
           title="Remove competitor?"
@@ -217,6 +195,77 @@ function Dashboard({ competitors, capabilities, scores, compSignals, overview, r
         )}
         </>)}
       </Section>
+
+      {/* Metrics — click Gaps / Moves to drill in */}
+      <div className="card card-pad" style={{ margin: "var(--sp-5) 0", display: "grid", gridTemplateColumns: `repeat(${METRICS.length}, 1fr)`, gap: "var(--sp-4)" }}>
+        {METRICS.map(([n, label, warn, key]) => {
+          const clickable = key === "gaps" || key === "moves";
+          return (
+            <button key={label} onClick={() => clickable && setOpenMetric(key as "gaps" | "moves")} disabled={!clickable}
+              className="stat" style={{ background: "none", border: "none", textAlign: "left", padding: 0, cursor: clickable ? "pointer" : "default" }}>
+              <span className="stat-num" style={{ color: warn ? "var(--am-text)" : undefined }}>{n}</span>
+              <span className="stat-label" style={{ color: clickable ? "var(--ac-text)" : undefined }}>{label}{clickable ? " →" : ""}</span>
+            </button>
+          );
+        })}
+      </div>
+
+      {/* What's happening — high-value competitive moves */}
+      {compSignals.length > 0 && (
+        <Section label="What's happening">
+          <div className="stack-3">
+            {compSignals.slice(0, 4).map((s) => (
+              <div key={s.id} className="card card-pad signal-card" style={{ borderLeft: "3px solid var(--vl)" }}>
+                <div className="row-between" style={{ gap: 12, alignItems: "flex-start", marginBottom: 4 }}>
+                  <span style={{ fontSize: 14, fontWeight: 620 }}>{s.title}</span>
+                  <Confidence label={s.conf_label} level={s.conf_level} />
+                </div>
+                {s.why && <div className="t-sub t-muted" style={{ fontSize: 12.5, lineHeight: 1.45 }}>{s.why}</div>}
+              </div>
+            ))}
+          </div>
+        </Section>
+      )}
+
+      {/* Gaps / Moves drill-in drawer */}
+      {openMetric && (
+        <>
+          <div onClick={() => setOpenMetric(null)} style={{ position: "fixed", inset: 0, background: "rgba(11,12,14,0.32)", zIndex: 40 }} />
+          <aside style={{ position: "fixed", top: 0, right: 0, height: "100vh", width: 460, maxWidth: "94vw", background: "var(--panel)", borderLeft: "1px solid var(--border)", boxShadow: "var(--shadow-md)", zIndex: 41, display: "flex", flexDirection: "column" }}>
+            <div style={{ padding: "16px 20px", borderBottom: "1px solid var(--border)" }} className="row-between">
+              <span className="t-h2" style={{ fontSize: 15 }}>{openMetric === "gaps" ? "Gaps to close" : "Recent moves (30d)"}</span>
+              <button className="btn btn-secondary btn-sm" onClick={() => setOpenMetric(null)}>Close</button>
+            </div>
+            <div style={{ flex: 1, overflowY: "auto", padding: "16px 20px" }} className="stack-3">
+              {openMetric === "gaps" ? (
+                gapList.length === 0 ? <div className="t-sub t-muted">No gaps — you match or lead on every tracked capability.</div> : (<>
+                  <div className="t-sub t-muted" style={{ fontSize: 12.5 }}>Capabilities where a competitor out-covers us today. Close these or reframe around your edges.</div>
+                  {gapList.map((cap) => {
+                    const leaders = competitors.filter((c) => scoreOf(cap.id, c.id) > usScore(cap.id));
+                    return (
+                      <div key={cap.id} className="card card-pad">
+                        <div className="row-between" style={{ marginBottom: 4 }}><span style={{ fontSize: 13.5, fontWeight: 620 }}>{cap.name}</span><span className="t-mono-xs">us: {heatText(usScore(cap.id))}</span></div>
+                        <div className="t-sub" style={{ fontSize: 12.5 }}>Ahead of us: {leaders.map((c) => `${c.name} (${heatText(scoreOf(cap.id, c.id))})`).join(", ")}</div>
+                        <button className="btn btn-secondary btn-sm" style={{ marginTop: 8 }} onClick={() => { setMatrixView("matrix"); setOpenMetric(null); }}>Open in matrix →</button>
+                      </div>
+                    );
+                  })}
+                </>)
+              ) : (
+                compSignals.length === 0 ? <div className="t-sub t-muted">No recent competitive moves.</div> : (<>
+                  <div className="t-sub t-muted" style={{ fontSize: 12.5 }}>Competitor activity in the last 30 days — what changed and why it matters.</div>
+                  {compSignals.map((s) => (
+                    <div key={s.id} className="card card-pad">
+                      <div style={{ fontSize: 13.5, fontWeight: 620, marginBottom: 3 }}>{s.title}</div>
+                      {s.why && <div className="t-sub t-muted" style={{ fontSize: 12.5 }}>{s.why}</div>}
+                    </div>
+                  ))}
+                </>)
+              )}
+            </div>
+          </aside>
+        </>
+      )}
 
       {/* Competitors */}
       <Section label="Competitors" action={!addingComp ? <button className="btn btn-secondary btn-sm" onClick={() => setAddingComp(true)}>+ Competitor</button> : undefined}>
