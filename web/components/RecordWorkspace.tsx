@@ -6,6 +6,7 @@ import { useEffect, useState, useCallback } from "react";
 import { createClient } from "@/lib/supabase/client";
 import { Section, Chip, Banner, Confidence } from "@/components/ui";
 import SectionedFields from "@/components/SectionedFields";
+import RecordAdvisors from "@/components/RecordAdvisors";
 
 export type Target = { kind: "product" | "gtm"; id: string };
 
@@ -17,14 +18,13 @@ type Proposal = {
 
 const fkCol = (t: Target) => (t.kind === "product" ? "product_id" : "gtm_record_id");
 
-export default function RecordWorkspace({ target }: { target: Target }) {
+export default function RecordWorkspace({ target, recordName }: { target: Target; recordName?: string }) {
   const supabase = createClient();
   const fk = fkCol(target);
 
   const [agents, setAgents] = useState<Agent[]>([]);
   const [proposals, setProposals] = useState<Proposal[]>([]);
   const [loading, setLoading] = useState(true);
-  const [runningKey, setRunningKey] = useState<string | null>(null);
   const [acceptingId, setAcceptingId] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [fieldsNonce, setFieldsNonce] = useState(0); // bump to refresh SectionedFields after accept
@@ -41,23 +41,20 @@ export default function RecordWorkspace({ target }: { target: Target }) {
 
   useEffect(() => { load(); }, [load]);
 
-  async function runAgent(key: string) {
-    setRunningKey(key); setError(null);
-    try {
-      const { data: s } = await supabase.auth.getSession();
-      const token = s.session?.access_token;
-      const body = target.kind === "product"
-        ? { agent_key: key, product_id: target.id }
-        : { agent_key: key, gtm_record_id: target.id };
-      const { data, error } = await supabase.functions.invoke("agent-propose", {
-        body, headers: token ? { Authorization: `Bearer ${token}` } : undefined,
-      });
-      if (error) throw error;
-      if (data?.error) throw new Error(data.error);
-      await load();
-    } catch (e) { setError(e instanceof Error ? e.message : "Agent run failed."); }
-    finally { setRunningKey(null); }
-  }
+  // Run an officer's proposal pass. Throws on failure so the advisor card can
+  // show its own running/error state; the card refreshes via onRan.
+  const proposeFor = useCallback(async (key: string) => {
+    const { data: s } = await supabase.auth.getSession();
+    const token = s.session?.access_token;
+    const body = target.kind === "product"
+      ? { agent_key: key, product_id: target.id }
+      : { agent_key: key, gtm_record_id: target.id };
+    const { data, error } = await supabase.functions.invoke("agent-propose", {
+      body, headers: token ? { Authorization: `Bearer ${token}` } : undefined,
+    });
+    if (error) throw error;
+    if (data?.error) throw new Error(data.error);
+  }, [supabase, target]);
 
   async function accept(id: string) {
     setAcceptingId(id); setError(null);
@@ -72,26 +69,15 @@ export default function RecordWorkspace({ target }: { target: Target }) {
 
   const pending = proposals.filter((p) => p.status === "pending");
   const resolved = proposals.filter((p) => p.status !== "pending");
+  const pendingByName = pending.reduce<Record<string, number>>((acc, p) => { acc[p.proposed_by] = (acc[p.proposed_by] ?? 0) + 1; return acc; }, {});
 
   return (
     <div>
       <Banner>{error}</Banner>
 
-      {/* Agents */}
-      <Section label="Run an agent">
-        {loading ? <div className="t-sub t-muted">Loading…</div>
-          : agents.length === 0 ? (
-            <div className="t-sub t-muted">No active agents. <a href="/agents" style={{ color: "var(--ac-text)", fontWeight: 600 }}>Create one →</a></div>
-          ) : (
-            <div className="row gap-2" style={{ flexWrap: "wrap" }}>
-              {agents.map((a) => (
-                <button key={a.id} className="btn btn-accent" disabled={runningKey !== null} onClick={() => runAgent(a.key)} title={a.role ?? undefined}>
-                  {runningKey === a.key ? `Running ${a.name}…` : a.name}
-                </button>
-              ))}
-            </div>
-          )}
-      </Section>
+      {/* Advisors — the agents that live on this record, aligned to its area */}
+      {loading ? <div className="t-sub t-muted" style={{ marginBottom: "var(--sp-6)" }}>Loading…</div>
+        : <RecordAdvisors target={target} recordName={recordName} agents={agents} pendingByName={pendingByName} onRun={proposeFor} onRan={load} onError={setError} />}
 
       {/* Structured content */}
       <SectionedFields key={fieldsNonce} target={target} />

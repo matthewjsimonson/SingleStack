@@ -92,7 +92,7 @@ export default function GtmView({ gtmId }: { gtmId: string }) {
 
       <Banner>{error}</Banner>
 
-      <RecordWorkspace target={{ kind: "gtm", id: gtmId }} />
+      <RecordWorkspace target={{ kind: "gtm", id: gtmId }} recordName={gtm.name} />
 
       {/* Messaging tabs — the GTM structure */}
       <Section

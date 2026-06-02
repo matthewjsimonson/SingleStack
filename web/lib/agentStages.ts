@@ -3,6 +3,13 @@
 // AgentProgress to make AI moments feel alive without any backend change.
 
 export const AGENT_STAGES: Record<string, string[]> = {
+  // agent-propose (an officer reviews a record and drafts a change)
+  propose: [
+    "Reading the record",
+    "Recalling its skills & connected areas",
+    "Reviewing the signals",
+    "Drafting a proposal",
+  ],
   // synthesize-signals (reconciliation engine)
   synthesize: [
     "Reading your signals",

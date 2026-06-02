@@ -74,6 +74,7 @@ export default function AgentLauncher() {
         style={{ display: "flex", alignItems: "center", gap: 6 }}
         aria-haspopup="menu"
         aria-expanded={menuOpen}
+        title="Ask an AI advisor about whatever you're looking at"
       >
         <span style={{ color: "var(--ac)", fontWeight: 800 }}>✦</span>
         Advisors

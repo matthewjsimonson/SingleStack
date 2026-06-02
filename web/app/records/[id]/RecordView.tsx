@@ -58,7 +58,7 @@ export default function RecordView({ recordId }: { recordId: string }) {
       <div className="row" style={{ marginBottom: 6 }}><Chip tone="accent">Product record</Chip></div>
       <h1 className="t-page" style={{ marginBottom: "var(--sp-6)" }}>{record.name}</h1>
 
-      <RecordWorkspace target={target} />
+      <RecordWorkspace target={target} recordName={record.name} />
 
       <Modules productId={recordId} />
 
