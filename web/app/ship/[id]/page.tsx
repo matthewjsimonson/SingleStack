@@ -1,14 +1,8 @@
-import { createClient } from "@/lib/supabase/server";
-import Shell from "@/components/Shell";
-import BuildItemWorkspace from "./BuildItemWorkspace";
+import { redirect } from "next/navigation";
 
+// One detail page for an initiative — the cross-functional cockpit at
+// /initiatives/[id]. The old build-item workspace is folded into it.
 export default async function Page({ params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
-  const supabase = await createClient();
-  const { data: { user } } = await supabase.auth.getUser();
-  return (
-    <Shell email={user?.email} crumbs={[{ label: "Ship", href: "/ship" }, { label: "Build item" }]}>
-      <BuildItemWorkspace id={id} />
-    </Shell>
-  );
+  redirect(`/initiatives/${id}`);
 }
