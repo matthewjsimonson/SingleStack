@@ -200,8 +200,6 @@ export async function loadDemoData(supabase: SupabaseClient, orgId: string): Pro
 
   // ---- Frontier capabilities ----
   await step("capabilities", async () => {
-    const { count: c } = await supabase.from("signals").select("id", { count: "exact", head: true }).eq("metadata->>domain", "capability");
-    if (c) return "exist";
     const caps: [string, string, string, string, number][] = [
       ["Claude tool orchestration", "Native multi-tool orchestration lets a single agent plan and run multi-step tasks.", "anthropic", "orchestration", 12],
       ["Claude long-term memory", "Agents persist and recall context across sessions.", "anthropic", "memory", 40],
@@ -212,9 +210,14 @@ export async function loadDemoData(supabase: SupabaseClient, orgId: string): Pro
       ["Meta Llama on-prem", "Open-weight models for self-hosted, data-resident deployments.", "meta", "deployment", 150],
       ["xAI Grok live search", "Real-time web/X signal grounding inside the model.", "xai", "retrieval", 80],
     ];
-    const { error } = await supabase.from("signals").insert(caps.map(([title, why, provider, area, h]) =>
+    // Top up by title (idempotent), so re-running adds NEW providers instead of bailing.
+    const { data: ex } = await supabase.from("signals").select("title").eq("metadata->>domain", "capability");
+    const have = new Set((ex ?? []).map((r) => r.title));
+    const toAdd = caps.filter((c) => !have.has(c[0]));
+    if (!toAdd.length) return "exist";
+    const { error } = await supabase.from("signals").insert(toAdd.map(([title, why, provider, area, h]) =>
       ({ org_id: orgId, scope: "org", title, why, observed_at: iso(h), metadata: { domain: "capability", provider, area } })));
-    if (error) throw error; return `+${caps.length}`;
+    if (error) throw error; return `+${toAdd.length}`;
   });
 
   // ---- Skills + attach ----
@@ -249,9 +252,7 @@ export async function loadDemoData(supabase: SupabaseClient, orgId: string): Pro
 
   // ---- Durable themes ----
   await step("themes", async () => {
-    const { data: ex } = await supabase.from("signal_themes").select("id").eq("title", "Buyers expect built-in agent orchestration").maybeSingle();
-    if (ex) return "exist";
-    const { error } = await supabase.from("signal_themes").insert([
+    const defs = [
       { category: "product", state: "escalating", momentum: "accelerating", conf_level: 0.86, title: "Buyers expect built-in agent orchestration", summary: "Demand is shifting from single assistants to multi-agent orchestration; analysts and competitor moves (Productboard Spark, Crayon Sparks) corroborate.", recommendation: "Make orchestration a first-class, demoable capability; evolve engineering & product skills to leverage new platform features." },
       { category: "gtm", state: "active", momentum: "steady", conf_level: 0.7, title: "Pricing & “AI wrapper” objections create demo-to-trial friction", summary: "Two recurring post-demo blockers: unclear pricing and skepticism that we're 'just a wrapper'.", recommendation: "Lead messaging with human-in-the-loop control; clarify pricing tiers on the hero path." },
       { category: "product", state: "escalating", momentum: "accelerating", conf_level: 0.78, title: "Frontier capabilities reset table stakes each quarter", summary: "New model capabilities (orchestration, memory, long context) keep changing what's expected of an 'AI operating layer'.", recommendation: "Continuously evolve agent skills to leverage new capabilities; treat capability releases as signals every officer acts on." },
@@ -260,8 +261,14 @@ export async function loadDemoData(supabase: SupabaseClient, orgId: string): Pro
       { category: "gtm", state: "emerging", momentum: "accelerating", conf_level: 0.34, title: "“Operating layer” category language is forming", summary: "Analysts beginning to reframe copilots as operating layers — early, thin, but trending our way.", recommendation: "Watch; seed the language in content, don't bet the positioning yet." },
       { category: "product", state: "fading", momentum: "fading", conf_level: 0.42, title: "Standalone roadmapping as a wedge", summary: "Leading with roadmapping (vs Aha!) is losing steam; buyers want the unified record, not another roadmap tool.", recommendation: "De-emphasize roadmapping-first messaging." },
       { category: "gtm", state: "active", momentum: "steady", conf_level: 0.9, title: "Win/loss cites unclear pricing as top stall", summary: "Across recent deals, pricing clarity is the most-cited reason for stalls — high confidence, well corroborated.", recommendation: "Publish transparent tiers; add a pricing FAQ to the demo follow-up." },
-    ].map((t, i) => ({ org_id: orgId, ...t, domain: "signals", last_evidence_at: iso(8 + i * 5) })));
-    if (error) throw error; return "+8";
+    ];
+    // Top up by title so re-running adds the spread themes instead of bailing.
+    const { data: ex } = await supabase.from("signal_themes").select("title");
+    const have = new Set((ex ?? []).map((r) => r.title));
+    const toAdd = defs.filter((d) => !have.has(d.title));
+    if (!toAdd.length) return "exist";
+    const { error } = await supabase.from("signal_themes").insert(toAdd.map((t, i) => ({ org_id: orgId, ...t, domain: "signals", last_evidence_at: iso(8 + i * 5) })));
+    if (error) throw error; return `+${toAdd.length}`;
   });
 
   const summary = report.join(" · ");
