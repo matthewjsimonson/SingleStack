@@ -108,6 +108,8 @@ button { font-family: inherit; cursor: pointer; }
    spine (set inline) + a tasteful micro-lift on hover. */
 .signal-card { transition: transform 0.13s ease, box-shadow 0.16s ease, border-color 0.16s ease; }
 .signal-card:hover { transform: translateY(-1px); }
+.ticker-row { transition: background 0.12s ease; }
+.ticker-row:hover { background: var(--fill); }
 
 /* ---- buttons ------------------------------------------------------------- */
 .btn {

@@ -204,7 +204,7 @@ export default function SignalsView() {
           signals={signalsScoped} themes={themesScoped} productThemes={productThemes} gtmThemes={gtmThemes}
           highSignals={highSignals} unsorted={unsorted} internalCount={internalCount} externalCount={externalCount}
           sourceById={sourceById} synthRun={synthRun} onSynthesize={synthesize} setCategory={setCategory} goLens={setTab}
-          reload={load} productFilter={active}
+          reload={load} productFilter={active} onOpen={setOpenSignal}
         />
       ) : (
         <LensTab
@@ -267,11 +267,12 @@ export default function SignalsView() {
 }
 
 // ---------- Intel homepage ----------
-function Home({ signals, themes, productThemes, gtmThemes, highSignals, unsorted, internalCount, externalCount, sourceById, synthRun, onSynthesize, setCategory, goLens, reload , productFilter }: {
+function Home({ signals, themes, productThemes, gtmThemes, highSignals, unsorted, internalCount, externalCount, sourceById, synthRun, onSynthesize, setCategory, goLens, reload , productFilter, onOpen }: {
   signals: Signal[]; themes: Theme[]; productThemes: Theme[]; gtmThemes: Theme[]; highSignals: Signal[]; unsorted: Signal[];
   internalCount: number; externalCount: number;
   sourceById: (id: string | null) => Source | null; synthRun: AgentRun; onSynthesize: () => void;
   setCategory: (id: string, c: string | null) => void; goLens: (l: Lens) => void; reload: () => void; productFilter: string;
+  onOpen: (s: Signal) => void;
 }) {
   return (
     <div>
@@ -318,12 +319,14 @@ function Home({ signals, themes, productThemes, gtmThemes, highSignals, unsorted
               <div className="t-sub t-muted" style={{ fontSize: 12.5, marginBottom: 10 }}>Tag what each informs, or run Synthesize to let AI sort them.</div>
               <div className="stack-3">
                 {unsorted.slice(0, 6).map((s) => (
-                  <div key={s.id} className="card card-pad row-between" style={{ gap: 12, alignItems: "center" }}>
+                  <div key={s.id} className="card card-pad row-between signal-card" style={{ gap: 12, alignItems: "center", cursor: "pointer" }} onClick={() => onOpen(s)} title="Open signal">
                     <div style={{ minWidth: 0 }}>
                       <div style={{ fontSize: 13.5, fontWeight: 600, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{s.title}</div>
                       <Chip tone={s.origin === "external" ? "violet" : "default"}>{s.origin}</Chip>
                     </div>
-                    <CategoryPicker value={s.category} onChange={(c) => setCategory(s.id, c)} />
+                    <div onClick={(e) => e.stopPropagation()}>
+                      <CategoryPicker value={s.category} onChange={(c) => setCategory(s.id, c)} />
+                    </div>
                   </div>
                 ))}
               </div>
@@ -337,7 +340,7 @@ function Home({ signals, themes, productThemes, gtmThemes, highSignals, unsorted
                 {signals.slice(0, 8).map((s, i) => {
                   const src = sourceById(s.source_id);
                   return (
-                    <div key={s.id} style={{ padding: "11px 14px", borderTop: i === 0 ? "none" : "1px solid var(--border)", display: "flex", alignItems: "center", gap: 10 }}>
+                    <div key={s.id} className="ticker-row" onClick={() => onOpen(s)} title="Open signal" style={{ padding: "11px 14px", borderTop: i === 0 ? "none" : "1px solid var(--border)", display: "flex", alignItems: "center", gap: 10, cursor: "pointer" }}>
                       <span style={{ width: 6, height: 6, borderRadius: 999, flexShrink: 0, background: (s.conf_level ?? 0) >= 0.75 ? "var(--gn)" : (s.conf_level ?? 0) >= 0.5 ? "var(--am-text)" : "var(--border-strong)" }} />
                       <span style={{ flex: 1, fontSize: 13.5, fontWeight: 600, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{s.title}</span>
                       {s.category && <Chip tone={s.category === "gtm" ? "violet" : "accent"}>{s.category === "both" ? "P+G" : s.category}</Chip>}
@@ -354,7 +357,7 @@ function Home({ signals, themes, productThemes, gtmThemes, highSignals, unsorted
               {highSignals.length === 0 ? <div className="t-sub t-muted" style={{ fontSize: 12.5 }}>No high-confidence signals yet.</div> : (
                 <div className="stack-3">
                   {highSignals.slice(0, 5).map((s) => (
-                    <div key={s.id} className="card card-pad" style={{ borderLeft: "2px solid var(--gn)", padding: "12px 14px" }}>
+                    <div key={s.id} className="card card-pad signal-card" onClick={() => onOpen(s)} title="Open signal" style={{ borderLeft: "2px solid var(--gn)", padding: "12px 14px", cursor: "pointer" }}>
                       <div style={{ fontSize: 13.5, fontWeight: 620, marginBottom: 3 }}>{s.title}</div>
                       <Confidence label={s.conf_label} level={s.conf_level} />
                     </div>
