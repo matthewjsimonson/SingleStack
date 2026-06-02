@@ -1,13 +1,22 @@
 // ============================================================================
 // agent-chat — conversational endpoint for an executive agent.
 //
-// Plain English: powers the command-center drawer. Given an agent_key and the
-// conversation so far, it loads that agent (its role + system prompt + model),
-// gives Claude lightweight context about the org's Foundation (products, GTM
-// records, pending proposals, recent signals), and returns the agent's reply.
-// Logs the turn in agent_runs. The agent can be asked for a "daily briefing" or
-// anything else. Action *execution* (creating records, etc.) is a later layer;
-// this is real chat grounded in the org's data.
+// Plain English: powers the command-center drawer. Given an agent_key, the
+// conversation so far, and (optionally) what the operator is currently looking
+// at, it loads that agent and reasons AS that agent — using:
+//   • the agent's SKILLS (attached playbooks) injected as how-to-think guidance,
+//   • the agent's CONNECTIONS (internal areas: products|gtm|signals|records),
+//     which SCOPE what org data the agent can see — so a CPO agent connected to
+//     "products" reasons over the product foundation, a CRO over GTM, etc.
+//     (Aligning agents to a module/function.) Agents with no connections
+//     declared default to full Foundation access (backward compatible.)
+//   • CONTEXT: when the drawer is opened on a specific record/module, that
+//     record's fields + related signals/themes/proposals are pulled in so the
+//     reply is grounded in exactly what the operator is looking at.
+// Returns the agent's reply and logs the turn in agent_runs.
+//
+// This is structured cross-module grounding (no embeddings). True semantic RAG
+// over document_chunks is an optional upgrade once an embedding key exists.
 //
 // Runs as the caller (JWT forwarded) so all reads are org-scoped by RLS.
 // Secret: ANTHROPIC_API_KEY.
@@ -35,6 +44,16 @@ function json(body: unknown, status = 200): Response {
 }
 
 type ChatMsg = { role: "user" | "assistant"; content: string };
+type Area = "products" | "gtm" | "signals" | "records";
+type Ctx = {
+  area?: Area;
+  record_id?: string;
+  record_type?: "product" | "gtm";
+  record_name?: string;
+  module?: string;
+};
+
+const ALL_AREAS: Area[] = ["products", "gtm", "signals", "records"];
 
 Deno.serve(async (req: Request) => {
   if (req.method === "OPTIONS") return new Response("ok", { headers: CORS });
@@ -51,9 +70,9 @@ Deno.serve(async (req: Request) => {
     { global: { headers: { Authorization: authHeader } } },
   );
 
-  let input: { agent_key?: string; messages?: ChatMsg[] };
+  let input: { agent_key?: string; messages?: ChatMsg[]; context?: Ctx };
   try { input = await req.json(); } catch { return json({ error: "invalid JSON body" }, 400); }
-  const { agent_key, messages } = input;
+  const { agent_key, messages, context } = input;
   if (!agent_key) return json({ error: "agent_key is required" }, 400);
   if (!Array.isArray(messages) || messages.length === 0) return json({ error: "messages required" }, 400);
 
@@ -67,28 +86,104 @@ Deno.serve(async (req: Request) => {
   const orgId = agent.org_id as string;
 
   try {
-    // Lightweight org context so replies are grounded (not generic).
-    const [{ data: prods }, { data: gtms }, { count: pending }, { data: sigs }] = await Promise.all([
-      supabase.from("product_records").select("name").limit(25),
-      supabase.from("gtm_records").select("name").limit(25),
-      supabase.from("proposals").select("id", { count: "exact", head: true }).eq("status", "pending"),
-      supabase.from("signals").select("title, conf_label").order("observed_at", { ascending: false }).limit(10),
-    ]);
+    // ---- Skills: the agent's attached, tailorable playbooks. -----------------
+    const { data: skillRows } = await supabase
+      .from("agent_skills")
+      .select("skills ( name, description, instructions, category )")
+      .eq("agent_id", agent.id);
+    // deno-lint-ignore no-explicit-any
+    const skills = (skillRows ?? []).map((r: any) => r.skills).filter(Boolean);
 
-    const context = [
-      `Organization Foundation snapshot:`,
-      `- Products: ${(prods ?? []).map((p) => p.name).join(", ") || "none yet"}`,
-      `- GTM records: ${(gtms ?? []).map((g) => g.name).join(", ") || "none yet"}`,
-      `- Pending proposals awaiting review: ${pending ?? 0}`,
-      `- Recent signals: ${(sigs ?? []).map((s) => s.title).join("; ") || "none yet"}`,
-    ].join("\n");
+    // ---- Connections: the internal areas this agent is allowed to see. -------
+    const { data: connRows } = await supabase
+      .from("connections")
+      .select("kind, area, label, status")
+      .eq("agent_id", agent.id)
+      .eq("kind", "internal");
+    const declaredAreas = [...new Set((connRows ?? []).map((c) => c.area).filter(Boolean))] as Area[];
+    // No connections declared → full access (so existing agents keep working).
+    const areas = declaredAreas.length ? declaredAreas : ALL_AREAS;
+    const can = (a: Area) => areas.includes(a) || areas.includes("records");
+
+    // The operator's current focus (drawer opened on a record/module) gives
+    // access to that record regardless of declared areas — you can ask about
+    // what you're looking at.
+    const focus = context && context.record_id && context.record_type
+      ? { id: context.record_id, type: context.record_type, name: context.record_name, module: context.module }
+      : null;
+
+    // ---- Build grounding context, scoped to the agent's areas + focus. -------
+    const grounding: string[] = [];
+
+    if (can("products") || focus?.type === "product") {
+      const { data: prods } = await supabase.from("product_records").select("name").limit(25);
+      grounding.push(`Products: ${(prods ?? []).map((p) => p.name).join(", ") || "none yet"}`);
+    }
+    if (can("gtm") || focus?.type === "gtm") {
+      const { data: gtms } = await supabase.from("gtm_records").select("name").limit(25);
+      grounding.push(`GTM records: ${(gtms ?? []).map((g) => g.name).join(", ") || "none yet"}`);
+    }
+    if (can("signals")) {
+      const [{ data: sigs }, { data: themes }] = await Promise.all([
+        supabase.from("signals").select("title, conf_label, observed_at").order("observed_at", { ascending: false }).limit(10),
+        supabase.from("signal_themes").select("title, summary, recommendation, state, momentum").order("last_evidence_at", { ascending: false }).limit(6),
+      ]);
+      grounding.push(`Recent signals: ${(sigs ?? []).map((s) => s.title).join("; ") || "none yet"}`);
+      if ((themes ?? []).length) {
+        grounding.push(
+          "Active intelligence themes:\n" +
+          (themes ?? []).map((t) => `  • [${t.state}/${t.momentum}] ${t.title}${t.summary ? ` — ${t.summary}` : ""}${t.recommendation ? ` → ${t.recommendation}` : ""}`).join("\n"),
+        );
+      }
+    }
+
+    // Pending proposals count is always useful (the operator's queue).
+    const { count: pending } = await supabase.from("proposals").select("id", { count: "exact", head: true }).eq("status", "pending");
+    grounding.push(`Pending proposals awaiting review: ${pending ?? 0}`);
+
+    // ---- Deep focus: the exact record the operator is looking at. ------------
+    if (focus) {
+      const col = focus.type === "product" ? "product_id" : "gtm_record_id";
+      const [{ data: fields }, { data: props }] = await Promise.all([
+        supabase.from("record_fields").select("label, value").eq(col, focus.id).order("position").limit(40),
+        supabase.from("proposals").select("title, rationale, status").eq(col, focus.id).eq("status", "pending").limit(10),
+      ]);
+      const fieldText = (fields ?? []).filter((f) => f.value && f.value.trim())
+        .map((f) => `  - ${f.label}: ${f.value}`).join("\n");
+      const focusLines = [
+        `\nCURRENT FOCUS — the operator is viewing this ${focus.type === "product" ? "Product" : "GTM"} record${focus.name ? ` "${focus.name}"` : ""}${focus.module ? ` (module: ${focus.module})` : ""}:`,
+        fieldText ? `Record fields:\n${fieldText}` : "  (no fields filled yet)",
+      ];
+      if (focus.type === "gtm") {
+        const { data: gsigs } = await supabase.from("signals").select("title, why, conf_label").eq("gtm_record_id", focus.id).order("observed_at", { ascending: false }).limit(8);
+        if ((gsigs ?? []).length) focusLines.push(`Signals on this record:\n${(gsigs ?? []).map((s) => `  - ${s.title}${s.why ? ` (${s.why})` : ""}`).join("\n")}`);
+      }
+      if ((props ?? []).length) focusLines.push(`Pending proposals on this record:\n${(props ?? []).map((p) => `  - ${p.title}`).join("\n")}`);
+      grounding.push(focusLines.join("\n"));
+    }
+
+    // ---- Assemble the system prompt. ----------------------------------------
+    const areaLabels: Record<Area, string> = { products: "Product records", gtm: "GTM records", signals: "Signals & intelligence", records: "All records" };
+    const accessLine = `You are connected to these areas of SingleStack and should ground answers in them: ${areas.map((a) => areaLabels[a]).join(", ")}. If asked about an area you are not connected to, say you don't have access to it rather than guessing.`;
+
+    const skillsBlock = skills.length
+      ? [
+          "",
+          "YOUR SKILLS — apply these playbooks when relevant. They are how you do your job:",
+          ...skills.map((s) => `\n## ${s.name}${s.category ? ` (${s.category})` : ""}${s.description ? `\n${s.description}` : ""}${s.instructions ? `\n${s.instructions}` : ""}`),
+        ].join("\n")
+      : "";
 
     const system = [
       agent.system_prompt || `You are ${agent.name}${agent.role ? `, ${agent.role}` : ""}, an executive agent in SingleStack.`,
       "",
-      "You advise the operator on this organization's product and go-to-market. Be concise, specific, and action-oriented. When asked for a daily briefing, give a tight summary of what needs attention and 2–3 concrete recommended next steps. Ground everything in the snapshot below; if data is missing, say so plainly.",
+      "You advise the operator on this organization's product and go-to-market. Be concise, specific, and action-oriented. When asked for a daily briefing, give a tight summary of what needs attention and 2–3 concrete recommended next steps. Ground everything in the data below; if data is missing, say so plainly.",
       "",
-      context,
+      accessLine,
+      skillsBlock,
+      "",
+      "ORGANIZATION CONTEXT:",
+      grounding.join("\n"),
     ].join("\n");
 
     const anthropic = new Anthropic({ apiKey: anthropicKey });
@@ -109,7 +204,7 @@ Deno.serve(async (req: Request) => {
     const cost = price ? (resp.usage.input_tokens * price.input + resp.usage.output_tokens * price.output) / 1_000_000 : null;
     await supabase.from("agent_runs").insert({
       org_id: orgId, agent_id: agent.id, status: "succeeded",
-      input: { kind: "chat", messages }, output: reply, model,
+      input: { kind: "chat", messages, context: context ?? null, skills: skills.length, areas }, output: reply, model,
       input_tokens: resp.usage.input_tokens, output_tokens: resp.usage.output_tokens, cost_usd: cost,
       finished_at: new Date().toISOString(),
     });

@@ -12,6 +12,7 @@ import { createClient } from "@/lib/supabase/client";
 import { useRouter, usePathname } from "next/navigation";
 import type { ReactNode } from "react";
 import { ProductProvider, useProductScope } from "@/lib/ProductContext";
+import AgentLauncher from "@/components/AgentLauncher";
 
 // Active-product switcher — the cross-module "which line am I in?" selector.
 // Hidden for single-product orgs (no clutter when there's nothing to switch).
@@ -165,6 +166,8 @@ export default function Shell({
               {c.href ? <a href={c.href} className="t-sub" style={{ fontWeight: 600 }}>{c.label}</a> : <span style={{ fontSize: 13, fontWeight: 600 }}>{c.label}</span>}
             </span>
           ))}
+          <div style={{ flex: 1 }} />
+          <AgentLauncher />
         </header>
         <main style={{ flex: 1, overflowY: "auto" }}>
           <div style={{ maxWidth: 1000, margin: "0 auto", width: "100%", padding: "28px 28px 64px" }}>{children}</div>

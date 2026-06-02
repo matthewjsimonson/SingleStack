@@ -8,15 +8,24 @@ import { createClient } from "@/lib/supabase/client";
 import type { Exec } from "@/lib/team";
 
 type Msg = { role: "user" | "assistant"; content: string };
+export type AgentContext = {
+  area?: "products" | "gtm" | "signals" | "records";
+  record_id?: string;
+  record_type?: "product" | "gtm";
+  record_name?: string;
+  module?: string;
+};
 
 export default function AgentDrawer({
   exec,
   open,
   onClose,
+  context,
 }: {
   exec: Exec | null;
   open: boolean;
   onClose: () => void;
+  context?: AgentContext | null;
 }) {
   const supabase = createClient();
   const [messages, setMessages] = useState<Msg[]>([]);
@@ -54,7 +63,7 @@ export default function AgentDrawer({
       const { data: s } = await supabase.auth.getSession();
       const token = s.session?.access_token;
       const { data, error } = await supabase.functions.invoke("agent-chat", {
-        body: { agent_key: exec.key, messages: next },
+        body: { agent_key: exec.key, messages: next, context: context ?? undefined },
         headers: token ? { Authorization: `Bearer ${token}` } : undefined,
       });
       if (error) throw error;
@@ -87,6 +96,16 @@ export default function AgentDrawer({
           </div>
           <button onClick={onClose} className="btn btn-secondary btn-sm">Close</button>
         </div>
+
+        {/* context strip — shows what the agent is grounded in right now */}
+        {context?.record_name && (
+          <div style={{ padding: "8px 18px", borderBottom: "1px solid var(--border)", background: "var(--panel-2)", display: "flex", alignItems: "center", gap: 8 }}>
+            <span className="t-label" style={{ color: "var(--tm)" }}>Grounded in</span>
+            <span className="chip chip-accent" style={{ fontSize: 11.5 }}>
+              {context.record_type === "gtm" ? "GTM" : "Product"}: {context.record_name}{context.module ? ` · ${context.module}` : ""}
+            </span>
+          </div>
+        )}
 
         {/* status tiles */}
         <div style={{ padding: "14px 18px", borderBottom: "1px solid var(--border)", display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10 }}>
