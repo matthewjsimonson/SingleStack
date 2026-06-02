@@ -11,7 +11,7 @@ import { PageHeader, Section, Chip, Banner, BackLink, Empty, Modal } from "@/com
 type Agent = { id: string; key: string; name: string; role: string | null; model: string | null; system_prompt: string | null; is_active: boolean };
 type Skill = { id: string; key: string; name: string; description: string | null; category: string | null };
 type Connection = { id: string; kind: string; label: string; area: string | null; mcp_url: string | null; status: string; config: { purpose?: string | null } | null; targets: { type?: string; ref: string; label?: string }[] | null; guidance: string | null };
-type Workflow = { id: string; name: string; description: string | null; trigger: string; target_type: string | null; is_active: boolean; last_run_at: string | null };
+type Workflow = { id: string; name: string; description: string | null; trigger: string; target_type: string | null; is_active: boolean; last_run_at: string | null; skill_ids: string[] | null };
 
 type Tab = "overview" | "skills" | "connections" | "workflows";
 
@@ -39,7 +39,7 @@ export default function AgentDetail({ agentId }: { agentId: string }) {
       supabase.from("skills").select("id, key, name, description, category").order("name"),
       supabase.from("agent_skills").select("skill_id").eq("agent_id", agentId),
       supabase.from("connections").select("id, kind, label, area, mcp_url, status, config, targets, guidance").eq("agent_id", agentId).order("created_at"),
-      supabase.from("workflows").select("id, name, description, trigger, target_type, is_active, last_run_at").eq("agent_id", agentId).order("created_at"),
+      supabase.from("workflows").select("id, name, description, trigger, target_type, is_active, last_run_at, skill_ids").eq("agent_id", agentId).order("created_at"),
     ]);
     setAgent(a); setSkills(sk ?? []); setAttached(new Set((as ?? []).map((x) => x.skill_id)));
     setConnections(cs ?? []); setWorkflows(wf ?? []); setLoading(false);
@@ -83,7 +83,7 @@ export default function AgentDetail({ agentId }: { agentId: string }) {
       {tab === "overview" && <Overview agent={agent} onSaved={load} setError={setError} />}
       {tab === "skills" && <Skills agentId={agentId} skills={skills} attached={attached} reload={load} setError={setError} />}
       {tab === "connections" && <Connections agentId={agentId} connections={connections} reload={load} setError={setError} />}
-      {tab === "workflows" && <Workflows agentId={agentId} workflows={workflows} reload={load} setError={setError} />}
+      {tab === "workflows" && <Workflows agentId={agentId} workflows={workflows} skills={skills.filter((s) => attached.has(s.id))} reload={load} setError={setError} />}
     </div>
   );
 }
@@ -295,11 +295,23 @@ function Connections({ agentId, connections, reload, setError }: { agentId: stri
 }
 
 // ---------- Workflows ----------
-function Workflows({ agentId, workflows, reload, setError }: { agentId: string; workflows: Workflow[]; reload: () => void; setError: (s: string | null) => void }) {
+const WF_TRIGGERS: [string, string][] = [
+  ["manual", "Manual (run on demand)"],
+  ["scheduled", "Scheduled"],
+  ["on_signal", "When a signal lands"],
+  ["on_release", "On release"],
+  ["on_capability_update", "On new capability"],
+];
+
+function Workflows({ agentId, workflows, skills, reload, setError }: { agentId: string; workflows: Workflow[]; skills: Skill[]; reload: () => void; setError: (s: string | null) => void }) {
   const supabase = createClient();
   const [creating, setCreating] = useState(false);
-  const [form, setForm] = useState({ name: "", description: "", trigger: "manual" });
+  const [form, setForm] = useState<{ name: string; description: string; trigger: string; skill_ids: string[] }>({ name: "", description: "", trigger: "manual", skill_ids: [] });
   const [busy, setBusy] = useState(false);
+
+  function toggleSkill(id: string) {
+    setForm((f) => ({ ...f, skill_ids: f.skill_ids.includes(id) ? f.skill_ids.filter((x) => x !== id) : [...f.skill_ids, id] }));
+  }
 
   async function create(e: React.FormEvent) {
     e.preventDefault(); if (!form.name.trim()) return;
@@ -307,17 +319,19 @@ function Workflows({ agentId, workflows, reload, setError }: { agentId: string; 
     try {
       const orgId = await getOrgId();
       if (!orgId) throw new Error("Could not resolve your organization.");
-      const { error } = await supabase.from("workflows").insert({ org_id: orgId, agent_id: agentId, name: form.name.trim(), description: form.description.trim() || null, trigger: form.trigger });
+      const { error } = await supabase.from("workflows").insert({ org_id: orgId, agent_id: agentId, name: form.name.trim(), description: form.description.trim() || null, trigger: form.trigger, skill_ids: form.skill_ids });
       if (error) throw error;
-      setCreating(false); setForm({ name: "", description: "", trigger: "manual" }); reload();
+      setCreating(false); setForm({ name: "", description: "", trigger: "manual", skill_ids: [] }); reload();
     } catch (e) { setError(e instanceof Error ? e.message : "Could not create workflow."); }
     finally { setBusy(false); }
   }
   async function remove(id: string) { setError(null); await supabase.from("workflows").delete().eq("id", id); reload(); }
 
+  const skillName = (id: string) => skills.find((s) => s.id === id)?.name;
+
   return (
     <Section label="Workflows" action={!creating ? <button className="btn btn-secondary btn-sm" onClick={() => setCreating(true)}>+ New workflow</button> : undefined}>
-      <div className="t-sub t-muted" style={{ fontSize: 12.5, marginBottom: 12 }}>Saved tasks this agent runs — on demand, on a schedule, or when a signal lands. (Manual run today; scheduled & signal triggers execute once the runtime ships.)</div>
+      <div className="t-sub t-muted" style={{ fontSize: 12.5, marginBottom: 12 }}>Saved tasks this agent runs — an agent + the skills it applies + a trigger. (Manual run today; scheduled, release &amp; capability triggers execute once the runtime ships.)</div>
 
       {creating && (
         <form onSubmit={create} className="card card-pad" style={{ marginBottom: "var(--sp-3)" }}>
@@ -325,9 +339,20 @@ function Workflows({ agentId, workflows, reload, setError }: { agentId: string; 
           <label className="field"><span className="t-label">Description</span><input className="input" value={form.description} onChange={(e) => setForm({ ...form, description: e.target.value })} placeholder="What it does" /></label>
           <label className="field"><span className="t-label">Trigger</span>
             <select className="select" value={form.trigger} onChange={(e) => setForm({ ...form, trigger: e.target.value })}>
-              <option value="manual">Manual (run on demand)</option><option value="scheduled">Scheduled</option><option value="on_signal">When a signal lands</option>
+              {WF_TRIGGERS.map(([k, label]) => <option key={k} value={k}>{label}</option>)}
             </select></label>
-          <div className="row gap-2"><button className="btn" type="submit" disabled={busy}>{busy ? "Creating…" : "Create"}</button><button className="btn btn-secondary" type="button" onClick={() => setCreating(false)}>Cancel</button></div>
+          {skills.length > 0 ? (
+            <div className="field">
+              <span className="t-label">Skills it applies</span>
+              <div className="row gap-2" style={{ flexWrap: "wrap", marginTop: 4 }}>
+                {skills.map((s) => {
+                  const on = form.skill_ids.includes(s.id);
+                  return <button type="button" key={s.id} onClick={() => toggleSkill(s.id)} className={`btn btn-sm ${on ? "" : "btn-secondary"}`}>{on ? "✓ " : ""}{s.name}</button>;
+                })}
+              </div>
+            </div>
+          ) : <div className="t-sub t-muted" style={{ fontSize: 12, marginBottom: 8 }}>Attach skills on the Skills tab to apply them in workflows.</div>}
+          <div className="row gap-2" style={{ marginTop: 8 }}><button className="btn" type="submit" disabled={busy}>{busy ? "Creating…" : "Create"}</button><button className="btn btn-secondary" type="button" onClick={() => setCreating(false)}>Cancel</button></div>
         </form>
       )}
 
@@ -335,9 +360,14 @@ function Workflows({ agentId, workflows, reload, setError }: { agentId: string; 
         <div className="stack-3">
           {workflows.map((w) => (
             <div key={w.id} className="card card-pad row-between">
-              <div>
-                <div className="row gap-2"><span style={{ fontSize: 14, fontWeight: 620 }}>{w.name}</span><Chip>{w.trigger}</Chip>{!w.is_active && <Chip tone="amber">paused</Chip>}</div>
+              <div style={{ minWidth: 0 }}>
+                <div className="row gap-2" style={{ flexWrap: "wrap" }}><span style={{ fontSize: 14, fontWeight: 620 }}>{w.name}</span><Chip>{w.trigger}</Chip>{!w.is_active && <Chip tone="amber">paused</Chip>}</div>
                 {w.description && <div className="t-sub t-muted" style={{ fontSize: 12.5, marginTop: 2 }}>{w.description}</div>}
+                {(w.skill_ids?.length ?? 0) > 0 && (
+                  <div className="row gap-2" style={{ flexWrap: "wrap", marginTop: 6 }}>
+                    {w.skill_ids!.map((id) => { const n = skillName(id); return n ? <Chip key={id} tone="default">{n}</Chip> : null; })}
+                  </div>
+                )}
               </div>
               <button className="btn btn-secondary btn-sm" onClick={() => remove(w.id)}>Remove</button>
             </div>

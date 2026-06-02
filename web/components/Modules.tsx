@@ -8,6 +8,7 @@ import { useEffect, useState, useCallback } from "react";
 import { createClient } from "@/lib/supabase/client";
 import { getOrgId } from "@/lib/org";
 import { Section, Banner, ConfirmDialog } from "@/components/ui";
+import ModuleWorkflows from "@/components/ModuleWorkflows";
 
 type Module = { id: string; name: string; description: string | null };
 type Feature = { id: string; module_id: string; name: string; description: string | null };
@@ -239,6 +240,9 @@ export default function Modules({ productId }: { productId: string }) {
                     ))}
                   </div>
                 )}
+
+                {/* module-level workflows: agent × skills × trigger for this module */}
+                <ModuleWorkflows moduleId={active.id} productId={productId} />
               </div>
             )}
           </div>
