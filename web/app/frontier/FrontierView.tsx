@@ -11,6 +11,7 @@ import { useCallback, useEffect, useState } from "react";
 import { createClient } from "@/lib/supabase/client";
 import { getOrgId } from "@/lib/org";
 import { PageHeader, Section, Chip, Banner } from "@/components/ui";
+import CapabilityDrawer, { type DrawerCapability } from "@/components/CapabilityDrawer";
 
 type Cap = { id: string; title: string; why: string | null; observed_at: string | null; metadata: { domain?: string; provider?: string; area?: string; url?: string } | null };
 type Agent = { id: string; key: string; name: string };
@@ -40,6 +41,7 @@ export default function FrontierView() {
   const [watchingIds, setWatchingIds] = useState<Set<string>>(new Set());
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [openCap, setOpenCap] = useState<DrawerCapability | null>(null);
 
   const [logging, setLogging] = useState(false);
   const [cap, setCap] = useState({ title: "", summary: "", provider: "anthropic", area: "", url: "" });
@@ -128,7 +130,7 @@ export default function FrontierView() {
         ) : (
           <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(280px, 1fr))", gap: "var(--sp-3)" }}>
             {caps.map((c) => (
-              <div key={c.id} className="card card-pad">
+              <div key={c.id} className="card card-pad card-link" style={{ cursor: "pointer" }} onClick={() => setOpenCap(c)} title="Drill in & leverage">
                 <div className="row gap-2" style={{ marginBottom: 6, flexWrap: "wrap" }}>
                   <Chip tone={tone(c.metadata?.provider)}>{plabel(c.metadata?.provider)}</Chip>
                   {c.metadata?.area && <Chip>{c.metadata.area}</Chip>}
@@ -136,7 +138,7 @@ export default function FrontierView() {
                 </div>
                 <div style={{ fontSize: 14, fontWeight: 640, lineHeight: 1.35, marginBottom: 4 }}>{c.title}</div>
                 {c.why && <div className="t-sub t-muted" style={{ fontSize: 12.5, lineHeight: 1.45, marginBottom: 8 }}>{c.why}</div>}
-                {c.metadata?.url && <a href={c.metadata.url} target="_blank" rel="noreferrer" className="t-sub" style={{ fontSize: 12, color: "var(--ac-text)", fontWeight: 600 }}>Details →</a>}
+                <span className="t-sub" style={{ fontSize: 12, color: "var(--ac-text)", fontWeight: 600 }}>Drill in & leverage →</span>
               </div>
             ))}
           </div>
@@ -188,6 +190,8 @@ export default function FrontierView() {
           </div>
         )}
       </Section>
+
+      <CapabilityDrawer capability={openCap} onClose={() => setOpenCap(null)} onChanged={load} />
     </div>
   );
 }
