@@ -67,14 +67,14 @@ export default function SettingsView() {
       <PageHeader title="Settings" meta="Connect the sources that feed your signals. Manual today; live connectors arrive with MCP." />
       <Banner>{error}</Banner>
 
-      <Section label="Sample workspace">
+      <Section label="Dogfood workspace (SingleStack)">
         <div className="t-sub t-muted" style={{ fontSize: 12.5, marginBottom: 12 }}>
-          Loads a realistic demo: a product &amp; GTM record, <strong>signals</strong> (GTM, market &amp; capability), durable themes, and skills attached to your executive agents — everything the advisors, Evolve, and the Chief of Staff need to run on. Writes to your workspace; safe to run once.
+          Loads SingleStack&apos;s own workspace — we use SingleStack to build SingleStack: the product &amp; a GTM record, <strong>signals</strong> (GTM + market), real <strong>competitors</strong>, <strong>frontier-model capabilities</strong>, durable themes, and skills wired to your executive agents (including the frontier-models area). It&apos;s data only — the platform stays product-agnostic. Writes to your workspace; safe to run once.
         </div>
         {seedNote && <div className="banner" style={{ marginBottom: 12 }}>{seedNote}</div>}
         <div className="row gap-2" style={{ flexWrap: "wrap", alignItems: "center" }}>
-          <button className="btn" onClick={seed} disabled={seeding}>{seeding ? "Loading sample…" : "Load sample workspace"}</button>
-          {seedNote && <><a className="btn btn-secondary btn-sm" href="/products">View product →</a><a className="btn btn-secondary btn-sm" href="/market">View capabilities →</a><a className="btn btn-secondary btn-sm" href="/agents">Run agent review →</a></>}
+          <button className="btn" onClick={seed} disabled={seeding}>{seeding ? "Loading…" : "Load SingleStack workspace"}</button>
+          {seedNote && <><a className="btn btn-secondary btn-sm" href="/products">Product →</a><a className="btn btn-secondary btn-sm" href="/competitive">Competitors →</a><a className="btn btn-secondary btn-sm" href="/frontier">Frontier models →</a><a className="btn btn-secondary btn-sm" href="/agents">Run agent review →</a></>}
         </div>
       </Section>
 
