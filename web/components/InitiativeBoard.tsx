@@ -27,6 +27,7 @@ export default function InitiativeBoard({ lane, title, meta, recordType }: {
   const [gtm, setGtm] = useState<Rec[]>([]);
   const [signals, setSignals] = useState<Signal[]>([]);
   const [links, setLinks] = useState<Record<string, string[]>>({}); // initiative_id -> signal_ids
+  const [wsBy, setWsBy] = useState<Record<string, { b: number; bt: number; g: number; gt: number }>>({});
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
@@ -35,17 +36,21 @@ export default function InitiativeBoard({ lane, title, meta, recordType }: {
   const [busy, setBusy] = useState(false);
 
   const load = useCallback(async () => {
-    const [{ data: its }, { data: prods }, { data: gtms }, { data: sigs }, { data: isl }] = await Promise.all([
+    const [{ data: its }, { data: prods }, { data: gtms }, { data: sigs }, { data: isl }, { data: wss }] = await Promise.all([
       supabase.from("initiatives").select("id, title, description, stage, priority, product_id, co_product_ids, gtm_record_id, target_date").eq("lane", lane).order("position").order("created_at"),
       supabase.from("product_records").select("id, name"),
       supabase.from("gtm_records").select("id, name"),
       supabase.from("signals").select("id, title").order("observed_at", { ascending: false, nullsFirst: false }).limit(40),
       supabase.from("initiative_signals").select("initiative_id, signal_id"),
+      supabase.from("initiative_workstreams").select("initiative_id, area, stage"),
     ]);
     setItems(its ?? []); setProducts(prods ?? []); setGtm(gtms ?? []); setSignals(sigs ?? []);
     const l: Record<string, string[]> = {};
     (isl ?? []).forEach((x) => { (l[x.initiative_id] ??= []).push(x.signal_id); });
     setLinks(l);
+    const w: Record<string, { b: number; bt: number; g: number; gt: number }> = {};
+    (wss ?? []).forEach((x) => { const e = (w[x.initiative_id] ??= { b: 0, bt: 0, g: 0, gt: 0 }); if (x.area === "build") { e.bt++; if (x.stage === "done") e.b++; } else { e.gt++; if (x.stage === "done") e.g++; } });
+    setWsBy(w);
     setLoading(false);
   }, [supabase, lane]);
   useEffect(() => { load(); }, [load]);
@@ -127,10 +132,12 @@ export default function InitiativeBoard({ lane, title, meta, recordType }: {
                         {it.priority && <Chip tone={PRIORITY_TONE[it.priority] ?? "default"}>{it.priority}</Chip>}
                         {recName(it) && <Chip tone={recordType === "product" ? "accent" : "violet"}>{recName(it)}</Chip>}
                         {(links[it.id]?.length ?? 0) > 0 && <Chip>📡 {links[it.id].length}</Chip>}
+                        {wsBy[it.id] && <span className="t-mono-xs"><span style={{ color: "var(--ac-text)" }}>B {wsBy[it.id].b}/{wsBy[it.id].bt}</span> · <span style={{ color: "var(--vl-text)" }}>G {wsBy[it.id].g}/{wsBy[it.id].gt}</span></span>}
                       </div>
                       <div className="row gap-2">
                         {stage !== "backlog" && <button className="btn btn-secondary btn-sm" onClick={() => move(it.id, stage === "done" ? "active" : "backlog")}>←</button>}
                         {stage !== "done" && <button className="btn btn-secondary btn-sm" onClick={() => move(it.id, stage === "backlog" ? "active" : "done")}>{stage === "backlog" ? "Start →" : "Done →"}</button>}
+                        <a href={`/ship/${it.id}`} className="btn btn-secondary btn-sm" style={{ marginLeft: "auto" }}>Workstreams →</a>
                       </div>
                     </div>
                   ))}
