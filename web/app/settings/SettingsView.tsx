@@ -8,6 +8,7 @@ import { getOrgId } from "@/lib/org";
 import { PageHeader, Section, Chip, Banner } from "@/components/ui";
 import { SOURCE_CATALOG, type SourceDef } from "@/lib/sources";
 import { loadDemoData } from "@/lib/demoSeed";
+import TeamManager from "@/components/TeamManager";
 
 type Source = { id: string; label: string; icon: string; origin: string; kind: string; status: string };
 
@@ -77,6 +78,8 @@ export default function SettingsView() {
           {seedNote && <><a className="btn btn-secondary btn-sm" href="/products">Product →</a><a className="btn btn-secondary btn-sm" href="/competitive">Competitors →</a><a className="btn btn-secondary btn-sm" href="/frontier">Frontier models →</a><a className="btn btn-secondary btn-sm" href="/agents">Run agent review →</a></>}
         </div>
       </Section>
+
+      <TeamManager />
 
       <Section label="Connected sources">
         {loading ? <div className="t-sub t-muted">Loading…</div>

@@ -250,6 +250,22 @@ export async function loadDemoData(supabase: SupabaseClient, orgId: string): Pro
     if (error) throw error; return "created";
   });
 
+  // ---- People (assignable owners) — top up by name ----
+  await step("people", async () => {
+    const team: [string, string, string][] = [
+      ["Maya Chen", "Head of Product", "product"],
+      ["Sam Rivera", "Chief Engineer", "eng"],
+      ["Jordan Lee", "Head of GTM", "gtm"],
+      ["Alex Kim", "Founder / CEO", "exec"],
+    ];
+    const { data: ex } = await supabase.from("people").select("name");
+    const have = new Set((ex ?? []).map((r) => r.name));
+    const toAdd = team.filter(([n]) => !have.has(n));
+    if (!toAdd.length) return "exist";
+    const { error } = await supabase.from("people").insert(toAdd.map(([name, title, area]) => ({ org_id: orgId, name, title, area })));
+    if (error) throw error; return `+${toAdd.length}`;
+  });
+
   // ---- Durable themes ----
   await step("themes", async () => {
     const defs = [
