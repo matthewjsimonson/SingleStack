@@ -58,6 +58,7 @@ const GROUPS: Group[] = [
       { label: "Signals", href: "/signals" },
       { label: "Competitive intel", href: "/competitive" },
       { label: "Market intel", href: "/market" },
+      { label: "Frontier models", href: "/frontier" },
     ],
   },
   {

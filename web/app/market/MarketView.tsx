@@ -11,8 +11,8 @@ import { PageHeader, Section, Chip, Banner, Confidence, SubTabs } from "@/compon
 import TrackingTopics from "@/components/TrackingTopics";
 import SourceManager from "@/components/SourceManager";
 
-type Signal = { id: string; title: string; why: string | null; conf_label: string | null; conf_level: number | null; observed_at: string | null; metadata: { domain?: string; lens?: string; provider?: string; area?: string; url?: string } | null };
-type Tab = "overview" | "signals" | "capabilities";
+type Signal = { id: string; title: string; why: string | null; conf_label: string | null; conf_level: number | null; observed_at: string | null; metadata: { domain?: string; lens?: string } | null };
+type Tab = "overview" | "signals";
 type Lane = "analysts" | "industry" | "persona";
 
 const LANES: { key: Lane; label: string; blurb: string }[] = [
@@ -32,7 +32,6 @@ export default function MarketView() {
   const supabase = createClient();
   const [tab, setTab] = useState<Tab>("overview");
   const [signals, setSignals] = useState<Signal[]>([]);
-  const [caps, setCaps] = useState<Signal[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [open, setOpen] = useState<Signal | null>(null);
@@ -42,9 +41,7 @@ export default function MarketView() {
 
   const load = useCallback(async () => {
     const { data } = await supabase.from("signals").select("id, title, why, conf_label, conf_level, observed_at, metadata").order("observed_at", { ascending: false, nullsFirst: false });
-    const all = data ?? [];
-    setSignals(all.filter((s) => s.metadata?.domain === "market"));
-    setCaps(all.filter((s) => s.metadata?.domain === "capability"));
+    setSignals((data ?? []).filter((s) => s.metadata?.domain === "market"));
     setLoading(false);
   }, [supabase]);
   useEffect(() => { load(); }, [load]);
@@ -72,7 +69,7 @@ export default function MarketView() {
     <div>
       <PageHeader title="Market intel" meta="Analysts, industry & tech, and personas — the broad intel shaping product strategy & narrative." />
       <Banner>{error}</Banner>
-      <SubTabs<Tab> tabs={[{ key: "overview", label: "Overview" }, { key: "signals", label: "Market signals" }, { key: "capabilities", label: `Capabilities${caps.length ? ` · ${caps.length}` : ""}` }]} active={tab} onChange={setTab} />
+      <SubTabs<Tab> tabs={[{ key: "overview", label: "Overview" }, { key: "signals", label: "Market signals" }]} active={tab} onChange={setTab} />
 
       {loading ? <div className="t-sub t-muted">Loading…</div> : tab === "overview" ? (
         <div>
@@ -95,8 +92,6 @@ export default function MarketView() {
             )}
           </Section>
         </div>
-      ) : tab === "capabilities" ? (
-        <CapabilitiesTab caps={caps} reload={load} />
       ) : (
         <div style={{ display: "flex", flexDirection: "column", gap: "var(--sp-6)" }}>
           {LANES.map((lane) => {
@@ -134,7 +129,7 @@ export default function MarketView() {
         </div>
       )}
 
-      {open && open.metadata?.domain !== "capability" && (
+      {open && (
         <>
           <div onClick={() => setOpen(null)} style={{ position: "fixed", inset: 0, background: "rgba(11,12,14,0.32)", zIndex: 40 }} />
           <aside style={{ position: "fixed", top: 0, right: 0, height: "100vh", width: 440, maxWidth: "92vw", background: "var(--panel)", borderLeft: "1px solid var(--border)", boxShadow: "var(--shadow-md)", zIndex: 41, padding: 20, overflowY: "auto" }}>
@@ -152,92 +147,3 @@ export default function MarketView() {
   );
 }
 
-// ---------- Capabilities (technology radar) ----------
-// Frontier/platform capability releases, modeled as `capability`-domain signals
-// so they ride the existing intelligence loop: agents connected to Signals see
-// them, and Evolve from signals turns them into skill updates (esp. the Chief
-// Engineering agent — "what's now possible to leverage").
-const PROVIDERS: { key: string; label: string; tone: "accent" | "violet" | "green" | "default" }[] = [
-  { key: "anthropic", label: "Anthropic", tone: "accent" },
-  { key: "openai", label: "OpenAI", tone: "green" },
-  { key: "platform", label: "Platform", tone: "violet" },
-  { key: "other", label: "Other", tone: "default" },
-];
-
-function CapabilitiesTab({ caps, reload }: { caps: Signal[]; reload: () => Promise<void> | void }) {
-  const supabase = createClient();
-  const [logging, setLogging] = useState(false);
-  const [form, setForm] = useState({ title: "", summary: "", provider: "anthropic", area: "", url: "" });
-  const [busy, setBusy] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-
-  async function log(e: React.FormEvent) {
-    e.preventDefault(); if (!form.title.trim()) return;
-    setBusy(true); setError(null);
-    try {
-      const orgId = await getOrgId(); if (!orgId) throw new Error("Could not resolve your organization.");
-      const { error } = await supabase.from("signals").insert({
-        org_id: orgId, scope: "org", title: form.title.trim(), why: form.summary.trim() || null,
-        observed_at: new Date().toISOString(),
-        metadata: { domain: "capability", provider: form.provider, area: form.area.trim() || null, url: form.url.trim() || null },
-      });
-      if (error) throw error;
-      setLogging(false); setForm({ title: "", summary: "", provider: "anthropic", area: "", url: "" }); await reload();
-    } catch (e) { setError(e instanceof Error ? e.message : "Could not log capability."); }
-    finally { setBusy(false); }
-  }
-
-  const tone = (p?: string) => PROVIDERS.find((x) => x.key === p)?.tone ?? "default";
-  const label = (p?: string) => PROVIDERS.find((x) => x.key === p)?.label ?? p ?? "—";
-
-  return (
-    <Section label="Capabilities — technology radar" action={<button className="btn btn-secondary btn-sm" onClick={() => setLogging((v) => !v)}>{logging ? "Cancel" : "+ Log capability"}</button>}>
-      <div className="t-sub t-muted" style={{ fontSize: 12.5, marginBottom: 12 }}>
-        Frontier &amp; platform capabilities you can leverage (e.g. new Claude features). These feed your agents: connect an agent to <strong>Signals</strong>, then run <strong>Evolve from signals</strong> on its Skills tab to update its playbooks as new capabilities land — especially the Chief Engineering agent.
-      </div>
-
-      {error && <div className="banner banner-error" style={{ marginBottom: 12 }}>{error}</div>}
-
-      {logging && (
-        <form onSubmit={log} className="card card-pad" style={{ marginBottom: "var(--sp-3)" }}>
-          <div style={{ display: "grid", gridTemplateColumns: "2fr 1fr", gap: "var(--sp-3)" }}>
-            <label className="field"><span className="t-label">Capability</span><input className="input" autoFocus value={form.title} onChange={(e) => setForm({ ...form, title: e.target.value })} placeholder="e.g. Claude adds tool orchestration" /></label>
-            <label className="field"><span className="t-label">Provider</span>
-              <select className="select" value={form.provider} onChange={(e) => setForm({ ...form, provider: e.target.value })}>
-                {PROVIDERS.map((p) => <option key={p.key} value={p.key}>{p.label}</option>)}
-              </select></label>
-          </div>
-          <div style={{ display: "grid", gridTemplateColumns: "1fr 2fr", gap: "var(--sp-3)" }}>
-            <label className="field"><span className="t-label">Area</span><input className="input" value={form.area} onChange={(e) => setForm({ ...form, area: e.target.value })} placeholder="orchestration · coding · memory · vision" /></label>
-            <label className="field"><span className="t-label">Link (optional)</span><input className="input mono" value={form.url} onChange={(e) => setForm({ ...form, url: e.target.value })} placeholder="https://…" /></label>
-          </div>
-          <label className="field"><span className="t-label">What it is &amp; how we could leverage it</span><textarea className="textarea" rows={3} value={form.summary} onChange={(e) => setForm({ ...form, summary: e.target.value })} placeholder="Plain-English summary and the opportunity for our product/agents." /></label>
-          <button className="btn btn-sm" type="submit" disabled={busy}>{busy ? "Logging…" : "Log capability"}</button>
-        </form>
-      )}
-
-      {caps.length === 0 && !logging ? (
-        <div className="empty">
-          <div className="t-body" style={{ fontWeight: 600, marginBottom: 6 }}>No capabilities tracked yet</div>
-          <div className="t-sub" style={{ maxWidth: 460, marginInline: "auto", marginBottom: 16 }}>Log a frontier or platform capability (e.g. a new Claude feature) and your agents can evolve their skills to leverage it.</div>
-          <button className="btn" onClick={() => setLogging(true)}>+ Log capability</button>
-        </div>
-      ) : (
-        <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(280px, 1fr))", gap: "var(--sp-3)" }}>
-          {caps.map((c) => (
-            <div key={c.id} className="card card-pad">
-              <div className="row gap-2" style={{ marginBottom: 6, flexWrap: "wrap" }}>
-                <Chip tone={tone(c.metadata?.provider)}>{label(c.metadata?.provider)}</Chip>
-                {c.metadata?.area && <Chip>{c.metadata.area}</Chip>}
-                {c.observed_at && <span className="t-mono-xs" style={{ marginLeft: "auto" }}>{ago(c.observed_at)}</span>}
-              </div>
-              <div style={{ fontSize: 14, fontWeight: 640, lineHeight: 1.35, marginBottom: 4 }}>{c.title}</div>
-              {c.why && <div className="t-sub t-muted" style={{ fontSize: 12.5, lineHeight: 1.45, marginBottom: 8 }}>{c.why}</div>}
-              {c.metadata?.url && <a href={c.metadata.url} target="_blank" rel="noreferrer" className="t-sub" style={{ fontSize: 12, color: "var(--ac-text)", fontWeight: 600 }}>Details →</a>}
-            </div>
-          ))}
-        </div>
-      )}
-    </Section>
-  );
-}
