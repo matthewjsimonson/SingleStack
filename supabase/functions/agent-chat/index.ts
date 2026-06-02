@@ -44,7 +44,7 @@ function json(body: unknown, status = 200): Response {
 }
 
 type ChatMsg = { role: "user" | "assistant"; content: string };
-type Area = "products" | "gtm" | "signals" | "records";
+type Area = "products" | "gtm" | "signals" | "capabilities" | "records";
 type Ctx = {
   area?: Area;
   record_id?: string;
@@ -53,7 +53,7 @@ type Ctx = {
   module?: string;
 };
 
-const ALL_AREAS: Area[] = ["products", "gtm", "signals", "records"];
+const ALL_AREAS: Area[] = ["products", "gtm", "signals", "capabilities", "records"];
 
 Deno.serve(async (req: Request) => {
   if (req.method === "OPTIONS") return new Response("ok", { headers: CORS });
@@ -123,16 +123,32 @@ Deno.serve(async (req: Request) => {
       const { data: gtms } = await supabase.from("gtm_records").select("name").limit(25);
       grounding.push(`GTM records: ${(gtms ?? []).map((g) => g.name).join(", ") || "none yet"}`);
     }
-    if (can("signals")) {
-      const [{ data: sigs }, { data: themes }] = await Promise.all([
-        supabase.from("signals").select("title, conf_label, observed_at").order("observed_at", { ascending: false }).limit(10),
-        supabase.from("signal_themes").select("title, summary, recommendation, state, momentum").order("last_evidence_at", { ascending: false }).limit(6),
+    const seesCaps = areas.includes("capabilities") || can("signals");
+    if (can("signals") || seesCaps) {
+      const [{ data: rawSigs }, { data: themes }] = await Promise.all([
+        supabase.from("signals").select("title, why, conf_label, observed_at, metadata").order("observed_at", { ascending: false }).limit(24),
+        can("signals")
+          ? supabase.from("signal_themes").select("title, summary, recommendation, state, momentum").order("last_evidence_at", { ascending: false }).limit(6)
+          : Promise.resolve({ data: [] as { title: string; summary: string | null; recommendation: string | null; state: string; momentum: string }[] }),
       ]);
-      grounding.push(`Recent signals: ${(sigs ?? []).map((s) => s.title).join("; ") || "none yet"}`);
-      if ((themes ?? []).length) {
+      // deno-lint-ignore no-explicit-any
+      const caps = (rawSigs ?? []).filter((s: any) => s.metadata?.domain === "capability");
+      // deno-lint-ignore no-explicit-any
+      const sgs = (rawSigs ?? []).filter((s: any) => s.metadata?.domain !== "capability").slice(0, 10);
+      if (can("signals")) {
+        grounding.push(`Recent signals: ${sgs.map((s) => s.title).join("; ") || "none yet"}`);
+        if ((themes ?? []).length) {
+          grounding.push(
+            "Active intelligence themes:\n" +
+            (themes ?? []).map((t) => `  • [${t.state}/${t.momentum}] ${t.title}${t.summary ? ` — ${t.summary}` : ""}${t.recommendation ? ` → ${t.recommendation}` : ""}`).join("\n"),
+          );
+        }
+      }
+      if (seesCaps && caps.length) {
         grounding.push(
-          "Active intelligence themes:\n" +
-          (themes ?? []).map((t) => `  • [${t.state}/${t.momentum}] ${t.title}${t.summary ? ` — ${t.summary}` : ""}${t.recommendation ? ` → ${t.recommendation}` : ""}`).join("\n"),
+          "FRONTIER MODEL CAPABILITIES you can leverage (what's now possible — act on these in your own domain, not just engineering):\n" +
+          // deno-lint-ignore no-explicit-any
+          caps.map((c: any) => `  • ${c.metadata?.provider ? `[${c.metadata.provider}${c.metadata?.area ? `/${c.metadata.area}` : ""}] ` : ""}${c.title}${c.why ? ` — ${c.why}` : ""}`).join("\n"),
         );
       }
     }
@@ -163,7 +179,7 @@ Deno.serve(async (req: Request) => {
     }
 
     // ---- Assemble the system prompt. ----------------------------------------
-    const areaLabels: Record<Area, string> = { products: "Product records", gtm: "GTM records", signals: "Signals & intelligence", records: "All records" };
+    const areaLabels: Record<Area, string> = { products: "Product records", gtm: "GTM records", signals: "Signals & intelligence", capabilities: "Frontier models & capabilities", records: "All records" };
     const accessLine = `You are connected to these areas of SingleStack and should ground answers in them: ${areas.map((a) => areaLabels[a]).join(", ")}. If asked about an area you are not connected to, say you don't have access to it rather than guessing.`;
 
     const skillsBlock = skills.length

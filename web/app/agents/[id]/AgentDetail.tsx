@@ -19,6 +19,7 @@ const INTERNAL_AREAS = [
   { area: "products", label: "Product records" },
   { area: "gtm", label: "GTM records" },
   { area: "signals", label: "Signals" },
+  { area: "capabilities", label: "Frontier models & capabilities" },
   { area: "records", label: "All records" },
 ];
 

@@ -26,8 +26,8 @@ const CORS = {
 };
 const json = (b: unknown, s = 200) => new Response(JSON.stringify(b), { status: s, headers: { ...CORS, "content-type": "application/json" } });
 
-type Area = "products" | "gtm" | "signals" | "records";
-const ALL_AREAS: Area[] = ["products", "gtm", "signals", "records"];
+type Area = "products" | "gtm" | "signals" | "capabilities" | "records";
+const ALL_AREAS: Area[] = ["products", "gtm", "signals", "capabilities", "records"];
 
 const SCHEMA = {
   type: "object",
@@ -111,6 +111,7 @@ Deno.serve(async (req: Request) => {
     const declared = [...new Set((connRows ?? []).map((c) => c.area).filter(Boolean))] as Area[];
     const areas = declared.length ? declared : ALL_AREAS;
     const seesSignals = areas.includes("signals") || areas.includes("records");
+    const seesCaps = areas.includes("capabilities") || seesSignals;
 
     // The intelligence digest: reconciled themes (the durable patterns) + recent
     // signals. Themes carry state/momentum/recommendation — the substance of
@@ -122,7 +123,7 @@ Deno.serve(async (req: Request) => {
     if (themeCats) themeQ = themeQ.eq("category", themeCats);
     const [{ data: themes }, { data: rawSigs }] = await Promise.all([
       themeQ,
-      seesSignals
+      (seesSignals || seesCaps)
         ? supabase.from("signals").select("title, why, metadata").order("observed_at", { ascending: false }).limit(30)
         : Promise.resolve({ data: [] as { title: string; why: string | null; metadata: { domain?: string; provider?: string; area?: string } | null }[] }),
     ]);
@@ -140,12 +141,10 @@ Deno.serve(async (req: Request) => {
       ...(themes ?? []).map((t) => `• [${t.state}/${t.momentum}${t.conf_level != null ? `, conf ${t.conf_level}` : ""}] (${t.category}) ${t.title}${t.summary ? ` — ${t.summary}` : ""}${t.recommendation ? ` → ${t.recommendation}` : ""}`),
       ...(capSigs.length ? [
         "",
-        "PLATFORM CAPABILITIES (what is now POSSIBLE to leverage — frontier/platform releases). Treat these as opportunities to upgrade how this agent works (e.g. a new orchestration/coding capability may warrant a new or revised engineering skill):",
+        "FRONTIER MODEL CAPABILITIES (what is now POSSIBLE to leverage). Treat these as opportunities to upgrade how THIS agent works — in its own domain, whatever that is (product strategy, GTM, narrative, or engineering), not only engineering:",
         ...capSigs.map((s) => `• ${s.metadata?.provider ? `[${s.metadata.provider}${s.metadata?.area ? `/${s.metadata.area}` : ""}] ` : ""}${s.title}${s.why ? ` — ${s.why}` : ""}`),
       ] : []),
-      "",
-      "RECENT SIGNALS:",
-      ...sigs.map((s) => `• ${s.title}${s.why ? ` (${s.why})` : ""}`),
+      ...(seesSignals ? ["", "RECENT SIGNALS:", ...sigs.map((s) => `• ${s.title}${s.why ? ` (${s.why})` : ""}`)] : []),
     ].join("\n");
 
     const skillList = skills.map((s) =>

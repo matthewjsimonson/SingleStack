@@ -176,8 +176,9 @@ Deno.serve(async (req: Request) => {
     const { data: connRows } = await supabase
       .from("connections").select("area").eq("agent_id", agent.id).eq("kind", "internal");
     const declaredAreas = [...new Set((connRows ?? []).map((c) => c.area).filter(Boolean))] as string[];
-    const areas = declaredAreas.length ? declaredAreas : ["products", "gtm", "signals", "records"];
+    const areas = declaredAreas.length ? declaredAreas : ["products", "gtm", "signals", "capabilities", "records"];
     const seesSignals = areas.includes("signals") || areas.includes("records");
+    const seesCaps = areas.includes("capabilities") || seesSignals;
 
     // ---- intelligence grounding, scoped to the agent's areas ----------------
     const intel: string[] = [];
@@ -185,18 +186,18 @@ Deno.serve(async (req: Request) => {
       const { data: gsigs } = await supabase.from("signals").select("title, why").eq("gtm_record_id", targetId).order("observed_at", { ascending: false }).limit(10);
       if ((gsigs ?? []).length) intel.push("SIGNALS ON THIS RECORD:\n" + (gsigs ?? []).map((s) => `• ${s.title}${s.why ? ` (${s.why})` : ""}`).join("\n"));
     }
-    if (seesSignals) {
+    if (seesSignals || seesCaps) {
       const [{ data: themes }, { data: rawSigs }] = await Promise.all([
-        supabase.from("signal_themes").select("title, summary, recommendation, state, momentum").order("last_evidence_at", { ascending: false }).limit(8),
+        seesSignals ? supabase.from("signal_themes").select("title, summary, recommendation, state, momentum").order("last_evidence_at", { ascending: false }).limit(8) : Promise.resolve({ data: [] as { title: string; summary: string | null; recommendation: string | null; state: string; momentum: string }[] }),
         supabase.from("signals").select("title, why, metadata").order("observed_at", { ascending: false }).limit(20),
       ]);
       // deno-lint-ignore no-explicit-any
       const caps = (rawSigs ?? []).filter((s: any) => s.metadata?.domain === "capability");
       // deno-lint-ignore no-explicit-any
       const sgs = (rawSigs ?? []).filter((s: any) => s.metadata?.domain !== "capability").slice(0, 12);
-      if ((themes ?? []).length) intel.push("ACTIVE THEMES:\n" + (themes ?? []).map((t) => `• [${t.state}/${t.momentum}] ${t.title}${t.summary ? ` — ${t.summary}` : ""}${t.recommendation ? ` → ${t.recommendation}` : ""}`).join("\n"));
-      if (caps.length) intel.push("PLATFORM CAPABILITIES TO LEVERAGE:\n" + caps.map((s) => `• ${s.title}${s.why ? ` — ${s.why}` : ""}`).join("\n"));
-      if (sgs.length) intel.push("RECENT SIGNALS:\n" + sgs.map((s) => `• ${s.title}${s.why ? ` (${s.why})` : ""}`).join("\n"));
+      if (seesSignals && (themes ?? []).length) intel.push("ACTIVE THEMES:\n" + (themes ?? []).map((t) => `• [${t.state}/${t.momentum}] ${t.title}${t.summary ? ` — ${t.summary}` : ""}${t.recommendation ? ` → ${t.recommendation}` : ""}`).join("\n"));
+      if (seesCaps && caps.length) intel.push("FRONTIER MODEL CAPABILITIES TO LEVERAGE (act on these in your own domain):\n" + caps.map((s) => `• ${s.metadata?.provider ? `[${s.metadata.provider}${s.metadata?.area ? `/${s.metadata.area}` : ""}] ` : ""}${s.title}${s.why ? ` — ${s.why}` : ""}`).join("\n"));
+      if (seesSignals && sgs.length) intel.push("RECENT SIGNALS:\n" + sgs.map((s) => `• ${s.title}${s.why ? ` (${s.why})` : ""}`).join("\n"));
     }
 
     // ---- retrieval (RAG) parked: Anthropic-only ----------------------------
