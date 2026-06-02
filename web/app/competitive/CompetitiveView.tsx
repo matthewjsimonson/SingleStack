@@ -12,6 +12,7 @@ import { PageHeader, Section, Chip, Banner, Confidence, SubTabs, ConfirmDialog }
 import TrackingTopics from "@/components/TrackingTopics";
 import SourceManager from "@/components/SourceManager";
 import CapabilityCellDrawer, { type Cell } from "@/components/CapabilityCellDrawer";
+import CompetitiveGrid from "@/components/CompetitiveGrid";
 
 type Competitor = { id: string; name: string; relationship: string; website: string | null; notes: string | null };
 type Capability = { id: string; name: string; category: string | null };
@@ -78,6 +79,7 @@ function Dashboard({ competitors, capabilities, scores, compSignals, overview, r
   const [addingCap, setAddingCap] = useState(false);
   const [capName, setCapName] = useState("");
   const [openCell, setOpenCell] = useState<Cell | null>(null);
+  const [matrixView, setMatrixView] = useState<"matrix" | "grid">("matrix");
   const [pendingDelete, setPendingDelete] = useState<Competitor | null>(null); // staged for in-app confirm
 
   const direct = competitors.filter((c) => c.relationship === "direct");
@@ -160,9 +162,22 @@ function Dashboard({ competitors, capabilities, scores, compSignals, overview, r
           onCancel={() => setPendingDelete(null)}
         />
       )}
-      {/* Capability matrix heat-map — the differentiator, up top */}
-      <Section label="Capability matrix" action={!addingCap ? <button className="btn btn-secondary btn-sm" onClick={() => setAddingCap(true)}>+ Capability</button> : undefined}>
-        <div className="t-sub t-muted" style={{ fontSize: 12.5, marginBottom: 12 }}>Functionality vectors × competitors (you vs each). Click any cell for the agent&rsquo;s read — reasons, sources, implications — then set the rating yourself.</div>
+      {/* Capability matrix / momentum grid — the differentiator, up top */}
+      <Section label="Capability landscape" action={
+        <div className="row gap-2">
+          <div className="row" style={{ border: "1px solid var(--border)", borderRadius: 8, overflow: "hidden" }}>
+            {(["matrix", "grid"] as const).map((v) => (
+              <button key={v} onClick={() => setMatrixView(v)} className="btn-sm" style={{ border: "none", background: matrixView === v ? "var(--ac)" : "var(--panel)", color: matrixView === v ? "#fff" : "var(--ts)", fontWeight: 600, padding: "6px 12px", cursor: "pointer" }}>{v === "matrix" ? "Matrix" : "Grid"}</button>
+            ))}
+          </div>
+          {!addingCap && <button className="btn btn-secondary btn-sm" onClick={() => setAddingCap(true)}>+ Capability</button>}
+        </div>
+      }>
+        <div className="t-sub t-muted" style={{ fontSize: 12.5, marginBottom: 12 }}>{matrixView === "matrix" ? "Functionality vectors × competitors (you vs each). Click any cell for the agent's read — reasons, sources, implications — then set the rating yourself." : "Coverage × momentum quadrant — where each player sits, you vs them (G2-style). Top-right leads."}</div>
+        {matrixView === "grid" ? (
+          capabilities.length === 0 ? <div className="t-sub t-muted">Add capabilities to plot the grid.</div>
+          : <CompetitiveGrid competitors={competitors} capabilities={capabilities} scores={scores} compSignals={compSignals} />
+        ) : (<>
         {addingCap && (
           <form onSubmit={addCapability} className="card card-pad" style={{ marginBottom: "var(--sp-3)" }}>
             <div className="row gap-2"><input className="input" autoFocus placeholder="Capability (e.g. Explainability)" value={capName} onChange={(e) => setCapName(e.target.value)} style={{ flex: 1 }} /><button className="btn btn-sm" type="submit">Add</button><button className="btn btn-secondary btn-sm" type="button" onClick={() => setAddingCap(false)}>Cancel</button></div>
@@ -200,6 +215,7 @@ function Dashboard({ competitors, capabilities, scores, compSignals, overview, r
             </table>
           </div>
         )}
+        </>)}
       </Section>
 
       {/* Competitors */}
