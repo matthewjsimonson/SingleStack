@@ -8,10 +8,11 @@
 //   3. writes that as a `proposal` (+ `proposal_changes`) for human approval,
 //   4. logs the whole invocation in `agent_runs`.
 //
-// Anthropic-only: the agent reasons from the record alone. RAG retrieval is
-// parked (Anthropic has no embeddings API) — the documents/document_chunks
-// tables and the match_document_chunks RPC stay in place so retrieval can be
-// switched on later without schema changes.
+// The agent reasons with its SKILLS (attached playbooks) and the intelligence
+// in its CONNECTED AREAS (themes, capabilities, and the record's own signals) —
+// the same structured grounding agent-chat uses. Vector RAG over
+// document_chunks stays parked (Anthropic has no embeddings API); the tables +
+// match_document_chunks RPC remain so it can be switched on later.
 //
 // Runs as the caller (the user's JWT is forwarded to Supabase), so every read
 // and write is fenced to their org by RLS. Provider key comes from a secret:
@@ -165,6 +166,39 @@ Deno.serve(async (req: Request) => {
       .order("position", { ascending: true });
     if (fieldsErr) throw new Error(`fields lookup failed: ${fieldsErr.message}`);
 
+    // ---- the agent's skills + connected areas (mirror agent-chat) -----------
+    // The officer proposes USING its playbooks, grounded in the intelligence of
+    // the areas it's connected to. No connections declared → full access.
+    const { data: skillRows } = await supabase
+      .from("agent_skills").select("skills ( name, description, instructions, category )").eq("agent_id", agent.id);
+    // deno-lint-ignore no-explicit-any
+    const skills = (skillRows ?? []).map((r: any) => r.skills).filter(Boolean);
+    const { data: connRows } = await supabase
+      .from("connections").select("area").eq("agent_id", agent.id).eq("kind", "internal");
+    const declaredAreas = [...new Set((connRows ?? []).map((c) => c.area).filter(Boolean))] as string[];
+    const areas = declaredAreas.length ? declaredAreas : ["products", "gtm", "signals", "records"];
+    const seesSignals = areas.includes("signals") || areas.includes("records");
+
+    // ---- intelligence grounding, scoped to the agent's areas ----------------
+    const intel: string[] = [];
+    if (gtm_record_id) {
+      const { data: gsigs } = await supabase.from("signals").select("title, why").eq("gtm_record_id", targetId).order("observed_at", { ascending: false }).limit(10);
+      if ((gsigs ?? []).length) intel.push("SIGNALS ON THIS RECORD:\n" + (gsigs ?? []).map((s) => `• ${s.title}${s.why ? ` (${s.why})` : ""}`).join("\n"));
+    }
+    if (seesSignals) {
+      const [{ data: themes }, { data: rawSigs }] = await Promise.all([
+        supabase.from("signal_themes").select("title, summary, recommendation, state, momentum").order("last_evidence_at", { ascending: false }).limit(8),
+        supabase.from("signals").select("title, why, metadata").order("observed_at", { ascending: false }).limit(20),
+      ]);
+      // deno-lint-ignore no-explicit-any
+      const caps = (rawSigs ?? []).filter((s: any) => s.metadata?.domain === "capability");
+      // deno-lint-ignore no-explicit-any
+      const sgs = (rawSigs ?? []).filter((s: any) => s.metadata?.domain !== "capability").slice(0, 12);
+      if ((themes ?? []).length) intel.push("ACTIVE THEMES:\n" + (themes ?? []).map((t) => `• [${t.state}/${t.momentum}] ${t.title}${t.summary ? ` — ${t.summary}` : ""}${t.recommendation ? ` → ${t.recommendation}` : ""}`).join("\n"));
+      if (caps.length) intel.push("PLATFORM CAPABILITIES TO LEVERAGE:\n" + caps.map((s) => `• ${s.title}${s.why ? ` — ${s.why}` : ""}`).join("\n"));
+      if (sgs.length) intel.push("RECENT SIGNALS:\n" + sgs.map((s) => `• ${s.title}${s.why ? ` (${s.why})` : ""}`).join("\n"));
+    }
+
     // ---- retrieval (RAG) parked: Anthropic-only ----------------------------
     // RAG needs an embedding model and Anthropic has no embeddings API, so the
     // agent reasons from the record + its fields alone. The documents /
@@ -175,32 +209,33 @@ Deno.serve(async (req: Request) => {
     // ---- ask Claude for a proposal ------------------------------------------
     const anthropic = new Anthropic({ apiKey: anthropicKey });
 
+    const areaLabels: Record<string, string> = { products: "Product records", gtm: "GTM records", signals: "Signals & intelligence", records: "All records" };
+    const skillsBlock = skills.length
+      ? "\n\nYOUR SKILLS — apply these playbooks; they are how you do your job:\n" +
+        skills.map((s) => `## ${s.name}${s.category ? ` (${s.category})` : ""}${s.description ? `\n${s.description}` : ""}${s.instructions ? `\n${s.instructions}` : ""}`).join("\n\n")
+      : "";
+
     const systemText = [
       agent.system_prompt ?? `You are ${agent.name}, an agent that improves records.`,
       "",
-      "You propose a concrete, well-grounded change to the record below. Use the",
-      "retrieved source excerpts as evidence and explain in `rationale` which",
-      "sources informed the change. To revise an existing field, emit an",
-      "`update_field` change with that field's `record_field_id` (from the record's",
-      "fields). To introduce a new field, emit an `add_field` change with a",
-      "snake_case `field_key` and a human `label`. Only propose changes you can",
-      "justify from the record or the sources. `conf_level` is 0..1.",
+      `You are connected to: ${areas.map((a) => areaLabels[a] ?? a).join(", ")}. Ground your proposal in the record and the intelligence provided.`,
+      "You propose a concrete, well-grounded change to the record below. Apply your",
+      "skills, and in `rationale` cite the signals/themes/capabilities that inform the",
+      "change. To revise an existing field, emit an `update_field` change with that",
+      "field's `record_field_id` (from the record's fields). To introduce a new field,",
+      "emit an `add_field` change with a snake_case `field_key` and a human `label`.",
+      "Only propose changes you can justify from the record or the intelligence.",
+      "`conf_level` is 0..1.",
+      skillsBlock,
     ].join("\n");
 
-    const userText = JSON.stringify(
-      {
-        instruction: instruction ?? null,
-        record: { id: targetId, kind: targetTable, ...record },
-        fields: fields ?? [],
-        retrieved_sources: (chunks ?? []).map((c: Record<string, unknown>) => ({
-          document_title: c.document_title,
-          content: c.content,
-          similarity: c.similarity,
-        })),
-      },
-      null,
-      2,
-    );
+    const userText = [
+      "INTELLIGENCE (use as evidence; cite what informs the change in `rationale`):",
+      intel.length ? intel.join("\n\n") : "(none in your connected areas yet)",
+      "",
+      "THE RECORD TO IMPROVE:",
+      JSON.stringify({ instruction: instruction ?? null, record: { id: targetId, kind: targetTable, ...record }, fields: fields ?? [] }, null, 2),
+    ].join("\n");
 
     // Cast the body to `any`: adaptive thinking / output_config / effort may be
     // newer than the pinned SDK's request types, but the SDK forwards the body
