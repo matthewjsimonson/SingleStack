@@ -16,7 +16,17 @@ const AREA_LABEL: Record<string, string> = { products: "Product records", gtm: "
 
 export async function loadDemoData(supabase: SupabaseClient, orgId: string): Promise<{ created: boolean; message: string }> {
   const { data: existing } = await supabase.from("product_records").select("id").eq("name", DEMO_PRODUCT).maybeSingle();
-  if (existing) return { created: false, message: "SingleStack workspace already loaded." };
+  if (existing) {
+    // Already loaded: refresh signal categorization/scope so they surface in the
+    // Signals hub (its Product/GTM lenses key off signals.category, and the
+    // product switcher matches on product_id). Idempotent — only touches nulls.
+    const productId = existing.id as string;
+    const { data: gids } = await supabase.from("gtm_records").select("id").eq("product_id", productId);
+    const gtmIds = (gids ?? []).map((g) => g.id);
+    if (gtmIds.length) await supabase.from("signals").update({ category: "gtm", product_id: productId }).in("gtm_record_id", gtmIds).is("category", null);
+    await supabase.from("signals").update({ category: "product" }).eq("metadata->>domain", "market").is("category", null);
+    return { created: false, message: "SingleStack workspace already loaded — refreshed signals so they show in the Signals hub. Set the product switcher to “All products” if a single line is selected." };
+  }
 
   const now = Date.now();
   const iso = (hoursAgo: number) => new Date(now - hoursAgo * 3600_000).toISOString();
@@ -99,13 +109,13 @@ export async function loadDemoData(supabase: SupabaseClient, orgId: string): Pro
     ["“Is it just an AI wrapper?” keeps surfacing", "Recurring first-call objection — our human-in-the-loop control isn't landing in the messaging.", 0.78, "High", 22],
     ["Founders resonate with “living system of record”", "The phrase consistently lands with founders in discovery; product leads less so.", 0.66, "Medium", 50],
     ["Demo-to-trial drop-off on mobile", "Hero CTA underperforms on mobile; analytics show ~40% lower trial starts.", 0.7, "Medium", 73],
-  ].map(([title, why, conf_level, conf_label, h]) => ({ org_id: orgId, scope: "gtm", gtm_record_id: gtmId, title, why, conf_level, conf_label, observed_at: iso(h as number) })));
+  ].map(([title, why, conf_level, conf_label, h]) => ({ org_id: orgId, scope: "gtm", gtm_record_id: gtmId, product_id: productId, category: "gtm", title, why, conf_level, conf_label, observed_at: iso(h as number) })));
 
   await supabase.from("signals").insert([
     ["Analysts reframing “AI copilots” as “AI operating layers”", "industry", "Analyst commentary is shifting the category from assistants to systems of record — our exact framing.", 0.62, "Medium", 30],
     ["CI teams adopting AI daily (Crayon 2025 report)", "analysts", "~60% of competitive-intelligence teams now use AI tools daily, up ~25% YoY — buyers expect AI-native intel.", 0.7, "High", 54],
     ["Buyers now expect human-in-the-loop governance", "persona", "Procurement increasingly asks how AI-driven changes are reviewed and audited — a strength to lead with.", 0.72, "High", 80],
-  ].map(([title, lens, why, conf_level, conf_label, h]) => ({ org_id: orgId, scope: "org", title, why, conf_level, conf_label, observed_at: iso(h as number), metadata: { domain: "market", lens } })));
+  ].map(([title, lens, why, conf_level, conf_label, h]) => ({ org_id: orgId, scope: "org", category: "product", title, why, conf_level, conf_label, observed_at: iso(h as number), metadata: { domain: "market", lens } })));
 
   // 7) FRONTIER capabilities — real model/platform releases (feed the Frontier space).
   await supabase.from("signals").insert([
