@@ -11,6 +11,7 @@ import Link from "next/link";
 import { createClient } from "@/lib/supabase/client";
 import { getOrgId } from "@/lib/org";
 import { PageHeader, Section, Chip, Banner, BackLink, Spinner } from "@/components/ui";
+import Workstreams from "@/components/Workstreams";
 import { BUILD_ITEM_TEMPLATE, BUILD_STAGE_GATES } from "@/lib/templates";
 import { useAgentRun, AgentProgress } from "@/components/AgentProgress";
 
@@ -306,6 +307,10 @@ export default function BuildItemWorkspace({ id }: { id: string }) {
             )}
           </Section>
         </div>
+      </div>
+
+      <div style={{ marginTop: "var(--sp-5)" }}>
+        <Workstreams initiativeId={id} />
       </div>
     </div>
   );
