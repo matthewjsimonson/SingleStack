@@ -267,31 +267,64 @@ function Connections({ agentId, connections, reload, setError }: { agentId: stri
       </Section>
 
       <Section label="Connected">
+        <div className="t-sub t-muted" style={{ fontSize: 12.5, marginBottom: 12 }}>Connecting an area isn&apos;t enough — <strong>curate</strong> it: tell the agent what to watch, prioritize, or ignore, and point it at specifics. The agent reads this at runtime.</div>
         {connections.length === 0 ? <div className="t-sub t-muted">No connections yet.</div> : (
           <div className="stack-3">
-            {connections.map((c) => (
-              <div key={c.id} className="card card-pad row-between" style={{ alignItems: "flex-start" }}>
-                <div style={{ minWidth: 0 }}>
-                  <div className="row gap-2">
-                    <Chip tone={c.kind === "internal" ? "accent" : "violet"}>{c.kind === "internal" ? "internal" : "MCP"}</Chip>
-                    <span style={{ fontSize: 14, fontWeight: 600 }}>{c.label}</span>
-                    <Chip tone={c.status === "connected" ? "green" : "default"}>{c.status === "connected" ? "live" : "declared"}</Chip>
-                  </div>
-                  {c.mcp_url && <div className="mono t-muted" style={{ fontSize: 11, marginTop: 4 }}>{c.mcp_url}</div>}
-                  {c.config?.purpose && <div className="t-sub" style={{ fontSize: 12.5, marginTop: 4 }}>{c.config.purpose}</div>}
-                  {(c.targets?.length ?? 0) > 0 && (
-                    <div className="t-sub t-muted" style={{ fontSize: 11.5, marginTop: 4 }}>
-                      🎯 Looks at: {c.targets!.map((t) => t.ref).join(" · ")}
-                    </div>
-                  )}
-                </div>
-                <button className="btn btn-secondary btn-sm" onClick={() => remove(c.id)}>Remove</button>
-              </div>
-            ))}
+            {connections.map((c) => <ConnRow key={c.id} c={c} onRemove={remove} reload={reload} setError={setError} />)}
           </div>
         )}
       </Section>
     </>
+  );
+}
+
+// A connected area/tool, with an inline "curate" editor for guidance + targets —
+// what to watch/prioritize/ignore and which specifics to consult.
+function ConnRow({ c, onRemove, reload, setError }: { c: Connection; onRemove: (id: string) => void; reload: () => void; setError: (s: string | null) => void }) {
+  const supabase = createClient();
+  const [editing, setEditing] = useState(false);
+  const [guidance, setGuidance] = useState(c.guidance ?? "");
+  const [targets, setTargets] = useState((c.targets ?? []).map((t) => t.ref).join("\n"));
+  const [busy, setBusy] = useState(false);
+
+  async function save() {
+    setBusy(true); setError(null);
+    const tg = targets.split("\n").map((l) => l.trim()).filter(Boolean).map((ref) => ({ type: "ref", ref }));
+    const { error } = await supabase.from("connections").update({ guidance: guidance.trim() || null, targets: tg }).eq("id", c.id);
+    if (error) setError(error.message); else { setEditing(false); reload(); }
+    setBusy(false);
+  }
+
+  return (
+    <div className="card card-pad">
+      <div className="row-between" style={{ alignItems: "flex-start", gap: 12 }}>
+        <div style={{ minWidth: 0 }}>
+          <div className="row gap-2">
+            <Chip tone={c.kind === "internal" ? "accent" : "violet"}>{c.kind === "internal" ? "internal" : "MCP"}</Chip>
+            <span style={{ fontSize: 14, fontWeight: 600 }}>{c.label}</span>
+            <Chip tone={c.status === "connected" ? "green" : "default"}>{c.status === "connected" ? "live" : "declared"}</Chip>
+          </div>
+          {c.mcp_url && <div className="mono t-muted" style={{ fontSize: 11, marginTop: 4 }}>{c.mcp_url}</div>}
+          {c.guidance && <div className="t-sub" style={{ fontSize: 12.5, marginTop: 4 }}>🧭 {c.guidance}</div>}
+          {(c.targets?.length ?? 0) > 0 && (
+            <div className="t-sub t-muted" style={{ fontSize: 11.5, marginTop: 4 }}>🎯 Watches: {c.targets!.map((t) => t.ref).join(" · ")}</div>
+          )}
+        </div>
+        <div className="row gap-2" style={{ flexShrink: 0 }}>
+          <button className="btn btn-secondary btn-sm" onClick={() => setEditing((v) => !v)}>{editing ? "Cancel" : "Curate"}</button>
+          <button className="btn btn-secondary btn-sm" onClick={() => onRemove(c.id)}>Remove</button>
+        </div>
+      </div>
+      {editing && (
+        <div style={{ marginTop: 10 }}>
+          <label className="field"><span className="t-label">What to watch / prioritize / ignore</span>
+            <textarea className="textarea" rows={2} value={guidance} onChange={(e) => setGuidance(e.target.value)} placeholder="e.g. Focus on pricing & competitive signals; weight escalating themes; ignore low-confidence noise." /></label>
+          <label className="field"><span className="t-label">Point at specifics (one per line)</span>
+            <textarea className="textarea" rows={2} value={targets} onChange={(e) => setTargets(e.target.value)} placeholder={"theme: Pricing friction\ncompetitor: Crayon\ncapability area: orchestration"} /></label>
+          <button className="btn btn-sm" onClick={save} disabled={busy}>{busy ? "Saving…" : "Save curation"}</button>
+        </div>
+      )}
+    </div>
   );
 }
 

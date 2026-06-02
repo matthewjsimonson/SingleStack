@@ -97,10 +97,17 @@ Deno.serve(async (req: Request) => {
     // ---- Connections: the internal areas this agent is allowed to see. -------
     const { data: connRows } = await supabase
       .from("connections")
-      .select("kind, area, label, status")
+      .select("kind, area, label, status, guidance, targets")
       .eq("agent_id", agent.id)
       .eq("kind", "internal");
     const declaredAreas = [...new Set((connRows ?? []).map((c) => c.area).filter(Boolean))] as Area[];
+    // Human curation: what the operator told this agent to watch/prioritize per area.
+    const curation = (connRows ?? [])
+      // deno-lint-ignore no-explicit-any
+      .filter((c: any) => c.guidance || (Array.isArray(c.targets) && c.targets.length))
+      // deno-lint-ignore no-explicit-any
+      .map((c: any) => `  • ${c.label}${c.guidance ? `: ${c.guidance}` : ""}${Array.isArray(c.targets) && c.targets.length ? ` (watch: ${c.targets.map((t: any) => t.ref).join(", ")})` : ""}`)
+      .join("\n");
     // No connections declared → full access (so existing agents keep working).
     const areas = declaredAreas.length ? declaredAreas : ALL_AREAS;
     const can = (a: Area) => areas.includes(a) || areas.includes("records");
@@ -196,6 +203,7 @@ Deno.serve(async (req: Request) => {
       "You advise the operator on this organization's product and go-to-market. Be concise, specific, and action-oriented. When asked for a daily briefing, give a tight summary of what needs attention and 2–3 concrete recommended next steps. Ground everything in the data below; if data is missing, say so plainly.",
       "",
       accessLine,
+      curation ? `\nYOUR CURATION — the operator has told you what to watch/prioritize/ignore. Honor it:\n${curation}` : "",
       skillsBlock,
       "",
       "ORGANIZATION CONTEXT:",
