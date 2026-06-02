@@ -9,9 +9,9 @@ import { useRouter } from "next/navigation";
 import { createClient } from "@/lib/supabase/client";
 import { useProductScope } from "@/lib/ProductContext";
 import { templateFor } from "@/lib/templates";
-import { PageHeader, Section } from "@/components/ui";
+import { PageHeader, Section, SubTabs } from "@/components/ui";
 import ExecutiveRow from "@/components/ExecutiveRow";
-import HomeInitiatives from "@/components/HomeInitiatives";
+import InitiativeLifecycleBoard from "@/components/InitiativeLifecycleBoard";
 import ReviewDrawer from "@/components/ReviewDrawer";
 
 type Run = { id: string; status: string; started_at: string; cost_usd: number | null };
@@ -24,6 +24,7 @@ export default function FoundationView() {
   const [loading, setLoading] = useState(true);
   const [q, setQ] = useState("");
   const [reviewOpen, setReviewOpen] = useState(false);
+  const [tab, setTab] = useState<"home" | "initiatives">("home");
 
   const load = useCallback(async () => {
     const now = Date.now();
@@ -100,46 +101,51 @@ export default function FoundationView() {
 
   return (
     <div>
-      <PageHeader title="Homepage" meta="Your command center — what's moving, what needs you, and what to do next." />
+      <PageHeader title="Home" meta={tab === "home" ? "Your command center — what's moving, what needs you, and what to do next." : "Your product-led-growth motion — initiatives moving from signal to live, across Build and GTM."} />
 
-      {/* chat / action bar */}
-      <form onSubmit={runIntent} className="card" style={{ display: "flex", alignItems: "center", gap: 10, padding: "10px 14px", marginBottom: "var(--sp-6)" }}>
-        <span style={{ width: 26, height: 26, borderRadius: 7, background: "var(--ac-fill)", color: "var(--ac-text)", display: "inline-flex", alignItems: "center", justifyContent: "center", fontWeight: 800, fontSize: 13, flexShrink: 0 }}>⌘</span>
-        <input value={q} onChange={(e) => setQ(e.target.value)} placeholder="Ask or act — e.g. “review pending proposals”, “open GTM records”, “brief me”…"
-          style={{ flex: 1, border: "none", outline: "none", fontSize: 14, background: "transparent", color: "var(--tp)" }} />
-        <button className="btn btn-sm" type="submit">Go</button>
-      </form>
+      <SubTabs<"home" | "initiatives"> tabs={[{ key: "home", label: "Homepage" }, { key: "initiatives", label: "Initiatives" }]} active={tab} onChange={setTab} />
 
-      {/* initiatives — the growth motion, up top */}
-      <HomeInitiatives />
+      {tab === "initiatives" ? (
+        <InitiativeLifecycleBoard />
+      ) : (
+        <>
+          {/* chat / action bar */}
+          <form onSubmit={runIntent} className="card" style={{ display: "flex", alignItems: "center", gap: 10, padding: "10px 14px", marginBottom: "var(--sp-6)" }}>
+            <span style={{ width: 26, height: 26, borderRadius: 7, background: "var(--ac-fill)", color: "var(--ac-text)", display: "inline-flex", alignItems: "center", justifyContent: "center", fontWeight: 800, fontSize: 13, flexShrink: 0 }}>⌘</span>
+            <input value={q} onChange={(e) => setQ(e.target.value)} placeholder="Ask or act — e.g. “review pending proposals”, “open GTM records”, “brief me”…"
+              style={{ flex: 1, border: "none", outline: "none", fontSize: 14, background: "transparent", color: "var(--tp)" }} />
+            <button className="btn btn-sm" type="submit">Go</button>
+          </form>
 
-      {/* executive team */}
-      <ExecutiveRow />
+          {/* executive team */}
+          <ExecutiveRow />
 
-      {/* KPI widgets — dynamic, useful */}
-      <Section label="At a glance">
-        <div style={{ display: "grid", gridTemplateColumns: "repeat(4, 1fr)", gap: "var(--sp-3)" }}>
-          <Widget label="Needs review" value={loading ? "—" : String(stats.pending)} hint="pending proposals" accent={stats.pending > 0} onClick={() => setReviewOpen(true)} cta="Review →" />
-          <Widget label="Agent activity" value={loading ? "—" : String(stats.runs7d)} hint="runs · last 7d" />
-          <Widget label="New signals" value={loading ? "—" : String(stats.signals7d)} hint="last 7d" />
-          <Widget label="Foundation filled" value={loading ? "—" : `${stats.fieldsCompletion}%`} hint="record completeness" ring={stats.fieldsCompletion} />
-        </div>
-      </Section>
+          {/* KPI widgets — dynamic, useful */}
+          <Section label="At a glance">
+            <div style={{ display: "grid", gridTemplateColumns: "repeat(4, 1fr)", gap: "var(--sp-3)" }}>
+              <Widget label="Needs review" value={loading ? "—" : String(stats.pending)} hint="pending proposals" accent={stats.pending > 0} onClick={() => setReviewOpen(true)} cta="Review →" />
+              <Widget label="Agent activity" value={loading ? "—" : String(stats.runs7d)} hint="runs · last 7d" />
+              <Widget label="New signals" value={loading ? "—" : String(stats.signals7d)} hint="last 7d" />
+              <Widget label="Foundation filled" value={loading ? "—" : `${stats.fieldsCompletion}%`} hint="record completeness" ring={stats.fieldsCompletion} />
+            </div>
+          </Section>
 
-      {/* suggested prompts */}
-      <Section label="Suggested for you">
-        <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(260px, 1fr))", gap: "var(--sp-3)" }}>
-          {suggestions.map((s, i) => (
-            <button key={i} className="card card-pad pop" style={{ textAlign: "left" }} onClick={s.action}>
-              <div className="row gap-2" style={{ marginBottom: 6 }}>
-                <span style={{ width: 24, height: 24, borderRadius: 7, background: s.tint, display: "inline-flex", alignItems: "center", justifyContent: "center", fontSize: 13 }}>{s.icon}</span>
-                <span className="t-label" style={{ color: "var(--tm)" }}>{s.tag}</span>
-              </div>
-              <div style={{ fontSize: 13.5, fontWeight: 600, lineHeight: 1.4 }}>{s.text}</div>
-            </button>
-          ))}
-        </div>
-      </Section>
+          {/* suggested prompts */}
+          <Section label="Suggested for you">
+            <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(260px, 1fr))", gap: "var(--sp-3)" }}>
+              {suggestions.map((s, i) => (
+                <button key={i} className="card card-pad pop" style={{ textAlign: "left" }} onClick={s.action}>
+                  <div className="row gap-2" style={{ marginBottom: 6 }}>
+                    <span style={{ width: 24, height: 24, borderRadius: 7, background: s.tint, display: "inline-flex", alignItems: "center", justifyContent: "center", fontSize: 13 }}>{s.icon}</span>
+                    <span className="t-label" style={{ color: "var(--tm)" }}>{s.tag}</span>
+                  </div>
+                  <div style={{ fontSize: 13.5, fontWeight: 600, lineHeight: 1.4 }}>{s.text}</div>
+                </button>
+              ))}
+            </div>
+          </Section>
+        </>
+      )}
 
       <ReviewDrawer open={reviewOpen} onClose={() => setReviewOpen(false)} onChanged={load} />
     </div>

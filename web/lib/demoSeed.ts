@@ -274,12 +274,12 @@ export async function loadDemoData(supabase: SupabaseClient, orgId: string): Pro
     const { data: ppl } = await supabase.from("people").select("id, name");
     const who = (n: string) => ppl?.find((p) => p.name === n)?.id ?? null;
 
-    const defs: { title: string; kind: string; lane: string; gtm: boolean; assignee: string | null; stage: string; ws: [string, string, string | null][] }[] = [
-      { title: "Agent orchestration v1", kind: "module", lane: "ship", gtm: true, assignee: who("Maya Chen"), stage: "active", ws: [
+    const defs: { title: string; kind: string; lane: string; lifecycle: string; gtm: boolean; assignee: string | null; stage: string; ws: [string, string, string | null][] }[] = [
+      { title: "Agent orchestration v1", kind: "module", lane: "ship", lifecycle: "build", gtm: true, assignee: who("Maya Chen"), stage: "active", ws: [
         ["build", "Ship multi-agent orchestration", who("Sam Rivera")], ["build", "Orchestration telemetry & guardrails", who("Sam Rivera")],
         ["gtm", "Orchestration launch post + demo", who("Jordan Lee")], ["gtm", "Update competitive battlecards", who("Jordan Lee")],
       ] },
-      { title: "Pricing clarity", kind: "feature", lane: "enablement", gtm: true, assignee: who("Jordan Lee"), stage: "backlog", ws: [
+      { title: "Pricing clarity", kind: "feature", lane: "enablement", lifecycle: "plan", gtm: true, assignee: who("Jordan Lee"), stage: "backlog", ws: [
         ["gtm", "Publish transparent pricing tiers", who("Jordan Lee")], ["gtm", "Pricing FAQ for demo follow-up", who("Jordan Lee")],
         ["build", "Pricing page UX + mobile hero", who("Maya Chen")],
       ] },
@@ -289,7 +289,7 @@ export async function loadDemoData(supabase: SupabaseClient, orgId: string): Pro
       const { data: exi } = await supabase.from("initiatives").select("id").eq("title", d.title).maybeSingle();
       if (exi) continue;
       const { data: ini, error } = await supabase.from("initiatives").insert({
-        org_id: orgId, lane: d.lane, title: d.title, kind: d.kind, objective_id: obj?.id ?? null,
+        org_id: orgId, lane: d.lane, title: d.title, kind: d.kind, lifecycle: d.lifecycle, objective_id: obj?.id ?? null,
         product_id: pid, gtm_record_id: d.gtm ? gtmId ?? null : null, assignee_id: d.assignee, stage: d.stage, priority: "high",
       }).select("id").single();
       if (error) throw error; made++;
