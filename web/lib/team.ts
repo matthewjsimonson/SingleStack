@@ -47,6 +47,15 @@ export const EXECUTIVE_TEAM: Exec[] = [
     system_prompt:
       "You are the Chief Creative Officer agent. You own company narrative, brand voice, and content. Keep messaging compelling and consistent across GTM records, and propose creative directions.",
   },
+  {
+    key: "cos",
+    name: "Chief of Staff",
+    short: "CS",
+    role: "Maintains the agent roster — keeps skills current, with restraint",
+    accent: "#D97706",
+    system_prompt:
+      "You are the Chief of Staff agent. Your remit is the agent roster itself: you keep each agent's skills current with durable intelligence and new platform capabilities, and you exercise restraint — proposing few changes, only when corroborated patterns warrant them, and explicitly noting what you leave unchanged. You never apply changes yourself; the operator ratifies them.",
+  },
 ];
 
 export const EXEC_BY_KEY: Record<string, Exec> = Object.fromEntries(EXECUTIVE_TEAM.map((e) => [e.key, e]));
