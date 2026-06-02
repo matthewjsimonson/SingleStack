@@ -25,6 +25,7 @@ export default function ThemeDrawer({ themeId, onClose, onChanged }: { themeId: 
   const [theme, setTheme] = useState<Theme | null>(null);
   const [signals, setSignals] = useState<Sig[]>([]);
   const [decisions, setDecisions] = useState<Decision[]>([]);
+  const [routed, setRouted] = useState<Record<string, { id: string; title: string; lane: string }>>({});
   const [take, setTake] = useState<string | null>(null);
   const [thinking, setThinking] = useState(false);
   const [busy, setBusy] = useState<string | null>(null);
@@ -43,7 +44,16 @@ export default function ThemeDrawer({ themeId, onClose, onChanged }: { themeId: 
     setSignals((sigs ?? []) as Sig[]);
     // deno-lint-ignore no-explicit-any
     const decs = ((ev ?? []) as any[]).map((r) => r.decisions).filter(Boolean);
-    const seen = new Set<string>(); setDecisions(decs.filter((d: Decision) => (seen.has(d.id) ? false : seen.add(d.id))));
+    const seen = new Set<string>();
+    const uniq = decs.filter((d: Decision) => (seen.has(d.id) ? false : seen.add(d.id)));
+    setDecisions(uniq);
+    // routed initiatives (the impact / where each decision went)
+    if (uniq.length) {
+      const { data: inits } = await supabase.from("initiatives").select("id, title, lane, decision_id").in("decision_id", uniq.map((d) => d.id));
+      const map: Record<string, { id: string; title: string; lane: string }> = {};
+      for (const it of inits ?? []) if (it.decision_id) map[it.decision_id] = { id: it.id, title: it.title, lane: it.lane };
+      setRouted(map);
+    } else setRouted({});
   }, [supabase, themeId]);
   useEffect(() => { load(); }, [load]);
 
@@ -83,6 +93,38 @@ export default function ThemeDrawer({ themeId, onClose, onChanged }: { themeId: 
     setBusy(null);
   }
 
+  async function decide(id: string) {
+    setBusy(id); setError(null);
+    const { error } = await supabase.from("decisions").update({ status: "decided", decided_at: new Date().toISOString() }).eq("id", id);
+    if (error) setError(error.message); else { await load(); onChanged?.(); }
+    setBusy(null);
+  }
+  async function reopen(id: string) {
+    setBusy(id); setError(null);
+    await supabase.from("decisions").update({ status: "open", decided_at: null }).eq("id", id);
+    await load(); onChanged?.(); setBusy(null);
+  }
+  async function del(id: string) {
+    setBusy(id); setError(null);
+    await supabase.from("decisions").delete().eq("id", id);
+    await load(); onChanged?.(); setBusy(null);
+  }
+  // Route a decision into action: spawn an initiative carrying the decision as
+  // provenance (initiatives.decision_id), and mark the decision routed. The
+  // initiative lands where it's worked — Ship (product) or Enablement (GTM).
+  async function route(d: Decision) {
+    setBusy(d.id); setError(null);
+    try {
+      const orgId = await getOrgId(); if (!orgId) throw new Error("No org.");
+      const lane = theme?.category === "gtm" ? "enablement" : "ship";
+      const { error: ie } = await supabase.from("initiatives").insert({ org_id: orgId, lane, title: `Act: ${d.title}`, description: theme?.recommendation ?? null, decision_id: d.id, stage: "backlog", priority: "high" });
+      if (ie) throw ie;
+      await supabase.from("decisions").update({ status: "routed", decided_at: new Date().toISOString() }).eq("id", d.id);
+      await load(); onChanged?.();
+    } catch (e) { setError(e instanceof Error ? e.message : "Could not route decision."); }
+    setBusy(null);
+  }
+
   return (
     <>
       <div onClick={onClose} style={{ position: "fixed", inset: 0, background: "rgba(11,12,14,0.32)", opacity: open ? 1 : 0, transition: "opacity 0.18s ease", zIndex: 40 }} />
@@ -111,17 +153,35 @@ export default function ThemeDrawer({ themeId, onClose, onChanged }: { themeId: 
             {take && <div className="card card-pad" style={{ marginTop: 10, background: "var(--panel)" }}><div className="t-sub" style={{ fontSize: 13, lineHeight: 1.55, whiteSpace: "pre-wrap" }}>{take}</div></div>}
           </div>
 
-          {/* Decisions it drives (in place) */}
+          {/* Decisions — made, routed, and managed in place */}
           <div className="card card-pad">
             <div className="t-label" style={{ color: "var(--tm)", marginBottom: 8 }}>Decisions</div>
             {decisions.length > 0 ? (
               <div className="stack-3" style={{ marginBottom: 10 }}>
-                {decisions.map((d) => (
-                  <a key={d.id} href={`/decisions/${d.id}`} className="row-between card-link" style={{ textDecoration: "none", color: "inherit", gap: 8 }}>
-                    <span style={{ fontSize: 13, fontWeight: 600 }}>{d.title}</span>
-                    <Chip tone={d.status === "open" ? "amber" : "green"}>{d.status}</Chip>
-                  </a>
-                ))}
+                {decisions.map((d) => {
+                  const r = routed[d.id];
+                  return (
+                    <div key={d.id} className="card card-pad" style={{ background: "var(--panel-2)", padding: 12 }}>
+                      <div className="row-between" style={{ gap: 8, marginBottom: 6 }}>
+                        <span style={{ fontSize: 13, fontWeight: 620 }}>{d.title}</span>
+                        <Chip tone={d.status === "open" ? "amber" : d.status === "routed" ? "accent" : "green"}>{d.status}</Chip>
+                      </div>
+                      {/* impact: where it routed */}
+                      {r ? (
+                        <div className="t-sub" style={{ fontSize: 12, marginBottom: 8 }}>→ Routed to <strong>{r.lane === "ship" ? "Build · Ship" : "GTM · Enablement"}</strong>: {r.title}</div>
+                      ) : (
+                        <div className="t-sub t-muted" style={{ fontSize: 11.5, marginBottom: 8 }}>Impact: backed by this theme + {signals.length} signal{signals.length === 1 ? "" : "s"}. Decide, then route it into action.</div>
+                      )}
+                      <div className="row gap-2" style={{ flexWrap: "wrap" }}>
+                        {d.status === "open" && <button className="btn btn-success btn-sm" onClick={() => decide(d.id)} disabled={busy === d.id}>Mark decided</button>}
+                        {d.status !== "routed" && <button className="btn btn-sm" onClick={() => route(d)} disabled={busy === d.id}>Route to action →</button>}
+                        {d.status !== "open" && <button className="btn btn-secondary btn-sm" onClick={() => reopen(d.id)} disabled={busy === d.id}>Reopen</button>}
+                        <a href={`/decisions/${d.id}`} className="btn btn-secondary btn-sm">Open</a>
+                        <button className="btn btn-secondary btn-sm" onClick={() => del(d.id)} disabled={busy === d.id} style={{ marginLeft: "auto", color: "var(--rd-text)" }}>Delete</button>
+                      </div>
+                    </div>
+                  );
+                })}
               </div>
             ) : <div className="t-sub t-muted" style={{ fontSize: 12.5, marginBottom: 10 }}>No decision yet. Turn this theme into a decision — its signals carry over as evidence.</div>}
             <button className="btn btn-sm" onClick={makeDecision} disabled={busy === "decision"}>{busy === "decision" ? "Creating…" : "+ Make a decision"}</button>
