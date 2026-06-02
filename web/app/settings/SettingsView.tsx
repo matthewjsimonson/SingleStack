@@ -7,6 +7,7 @@ import { createClient } from "@/lib/supabase/client";
 import { getOrgId } from "@/lib/org";
 import { PageHeader, Section, Chip, Banner } from "@/components/ui";
 import { SOURCE_CATALOG, type SourceDef } from "@/lib/sources";
+import { loadDemoData } from "@/lib/demoSeed";
 
 type Source = { id: string; label: string; icon: string; origin: string; kind: string; status: string };
 
@@ -48,10 +49,34 @@ export default function SettingsView() {
   const internal = sources.filter((s) => s.origin === "internal");
   const external = sources.filter((s) => s.origin === "external");
 
+  const [seeding, setSeeding] = useState(false);
+  const [seedNote, setSeedNote] = useState<string | null>(null);
+  async function seed() {
+    setSeeding(true); setError(null); setSeedNote(null);
+    try {
+      const orgId = await getOrgId();
+      if (!orgId) throw new Error("Could not resolve your organization.");
+      const res = await loadDemoData(supabase, orgId);
+      setSeedNote(res.message);
+    } catch (e) { setError(e instanceof Error ? e.message : "Could not load sample data."); }
+    finally { setSeeding(false); }
+  }
+
   return (
     <div>
       <PageHeader title="Settings" meta="Connect the sources that feed your signals. Manual today; live connectors arrive with MCP." />
       <Banner>{error}</Banner>
+
+      <Section label="Sample workspace">
+        <div className="t-sub t-muted" style={{ fontSize: 12.5, marginBottom: 12 }}>
+          Loads a realistic demo: a product &amp; GTM record, <strong>signals</strong> (GTM, market &amp; capability), durable themes, and skills attached to your executive agents — everything the advisors, Evolve, and the Chief of Staff need to run on. Writes to your workspace; safe to run once.
+        </div>
+        {seedNote && <div className="banner" style={{ marginBottom: 12 }}>{seedNote}</div>}
+        <div className="row gap-2" style={{ flexWrap: "wrap", alignItems: "center" }}>
+          <button className="btn" onClick={seed} disabled={seeding}>{seeding ? "Loading sample…" : "Load sample workspace"}</button>
+          {seedNote && <><a className="btn btn-secondary btn-sm" href="/products">View product →</a><a className="btn btn-secondary btn-sm" href="/market">View capabilities →</a><a className="btn btn-secondary btn-sm" href="/agents">Run agent review →</a></>}
+        </div>
+      </Section>
 
       <Section label="Connected sources">
         {loading ? <div className="t-sub t-muted">Loading…</div>
