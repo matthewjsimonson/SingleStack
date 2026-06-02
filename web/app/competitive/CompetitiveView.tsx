@@ -369,8 +369,15 @@ function Battlecards({ competitors, cards, overview, capabilities, scores, compS
       </div>
 
       {/* Tabbed box — GTM battlecard · Product eval · Competitor signals */}
-      <SubTabs<BcTab> tabs={[{ key: "gtm", label: "GTM battlecard" }, { key: "product", label: "Product eval" }, { key: "signals", label: `Signals${compFor(selected).length ? ` · ${compFor(selected).length}` : ""}` }]} active={bcTab} onChange={setBcTab} />
-
+      {/* tabbed box — same shape as the product record's modules box */}
+      <div className="card" style={{ overflow: "hidden" }}>
+        <div className="row" style={{ gap: 4, padding: "8px 8px 0", borderBottom: "1px solid var(--border)", flexWrap: "wrap" }}>
+          {([["gtm", "GTM battlecard"], ["product", "Product eval"], ["signals", `Signals${compFor(selected).length ? ` · ${compFor(selected).length}` : ""}`]] as [BcTab, string][]).map(([k, label]) => {
+            const on = bcTab === k;
+            return <button key={k} onClick={() => setBcTab(k)} style={{ background: "none", border: "none", borderBottom: on ? "2px solid var(--vl)" : "2px solid transparent", color: on ? "var(--tp)" : "var(--ts)", fontWeight: 600, fontSize: 13, padding: "8px 14px", cursor: "pointer", marginBottom: -1 }}>{label}</button>;
+          })}
+        </div>
+        <div style={{ padding: "var(--sp-4)" }}>
       {bcTab === "gtm" ? (
         <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "var(--sp-4)" }}>
           {KINDS.map(([kind, label, tone]) => (
@@ -441,6 +448,8 @@ function Battlecards({ competitors, cards, overview, capabilities, scores, compS
           )}
         </Section>
       )}
+        </div>
+      </div>
     </div>
   );
 }
