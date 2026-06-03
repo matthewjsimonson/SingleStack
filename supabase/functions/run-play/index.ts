@@ -149,39 +149,45 @@ Deno.serve(async (req: Request) => {
   };
   if (target_type && target_type !== play.target) return json({ error: `the "${play.label}" play runs on a ${play.target}, not a ${target_type}` }, 400);
 
-  // The PRIMARY agent — first attached agent (play_agents), else configured/default.
-  let primaryAgentId: string | null = null;
+  // Resolve the agent CHAIN — every attached agent in order; fallback to the
+  // configured/default officer as a one-agent chain.
+  type ChainAgent = { id: string; org_id: string; name: string; role: string | null; model: string | null; system_prompt: string | null };
+  let chain: ChainAgent[] = [];
   if (play.id) {
-    const { data: pas } = await supabase.from("play_agents").select("agent_id, position").eq("play_id", play.id).order("position").limit(1);
-    primaryAgentId = (pas?.[0]?.agent_id as string | undefined) ?? null;
+    const { data: pas } = await supabase.from("play_agents").select("agent_id, position").eq("play_id", play.id).order("position");
+    const ids = (pas ?? []).map((r) => r.agent_id as string);
+    if (ids.length) {
+      const { data: ags } = await supabase.from("agents").select("id, org_id, name, role, model, system_prompt").in("id", ids).eq("is_active", true);
+      chain = ids.map((id) => (ags ?? []).find((a) => a.id === id)).filter(Boolean) as ChainAgent[];
+    }
   }
-  let agentQ = supabase.from("agents").select("id, org_id, name, role, model, system_prompt").eq("is_active", true);
-  agentQ = primaryAgentId ? agentQ.eq("id", primaryAgentId) : cfg?.agent_id ? agentQ.eq("id", cfg.agent_id) : def ? agentQ.eq("key", def.agent_key) : agentQ.limit(1);
-  const { data: agent, error: aErr } = await agentQ.maybeSingle();
-  if (aErr) return json({ error: `agent lookup failed: ${aErr.message}` }, 500);
-  if (!agent) return json({ error: `no active agent to run the "${play.label}" play` }, 404);
+  if (chain.length === 0) {
+    let aq = supabase.from("agents").select("id, org_id, name, role, model, system_prompt").eq("is_active", true);
+    aq = cfg?.agent_id ? aq.eq("id", cfg.agent_id) : def ? aq.eq("key", def.agent_key) : aq.limit(1);
+    const { data: a1 } = await aq.maybeSingle();
+    if (a1) chain = [a1 as ChainAgent];
+  }
+  if (chain.length === 0) return json({ error: `no active agent to run the "${play.label}" play` }, 404);
+  const orgId = chain[0].org_id;
 
-  const model = (agent.model as string) || DEFAULT_MODEL;
-  const orgId = agent.org_id as string;
-
-  try {
-    // Skills the agent runs WITH: its CORNERSTONE skills + the PLAY-SPECIFIC skills
-    // layered onto it for this play (on top of cornerstones). That's the model.
+  // Skills an agent runs WITH: its cornerstone skills + the play-specific skills
+  // layered onto it (on top of cornerstones); legacy fallback to all attached.
+  async function loadSkills(agentId: string): Promise<{ name: string; instructions: string | null }[]> {
     const [{ data: cornerRows }, { data: playSkillRows }] = await Promise.all([
-      supabase.from("agent_skills").select("is_cornerstone, skills ( name, instructions )").eq("agent_id", agent.id).eq("is_cornerstone", true),
-      play.id ? supabase.from("play_skills").select("skills ( name, instructions )").eq("play_id", play.id).eq("agent_id", agent.id) : Promise.resolve({ data: [] as unknown[] }),
+      supabase.from("agent_skills").select("is_cornerstone, skills ( name, instructions )").eq("agent_id", agentId).eq("is_cornerstone", true),
+      play.id ? supabase.from("play_skills").select("skills ( name, instructions )").eq("play_id", play.id).eq("agent_id", agentId) : Promise.resolve({ data: [] as unknown[] }),
     ]);
     // deno-lint-ignore no-explicit-any
-    const cornerSkills = (cornerRows ?? []).map((r: any) => r.skills).filter(Boolean);
+    const corner = (cornerRows ?? []).map((r: any) => r.skills).filter(Boolean);
     // deno-lint-ignore no-explicit-any
-    const laySkills = (playSkillRows ?? []).map((r: any) => r.skills).filter(Boolean);
-    let skills = [...cornerSkills, ...laySkills];
-    // Legacy fallback: agents with no cornerstone set still run with their skills.
-    if (cornerSkills.length === 0) {
-      const { data: allRows } = await supabase.from("agent_skills").select("skills ( name, instructions )").eq("agent_id", agent.id);
-      // deno-lint-ignore no-explicit-any
-      skills = [...((allRows ?? []).map((r: any) => r.skills).filter(Boolean)), ...laySkills];
-    }
+    const lay = (playSkillRows ?? []).map((r: any) => r.skills).filter(Boolean);
+    if (corner.length > 0) return [...corner, ...lay];
+    const { data: allRows } = await supabase.from("agent_skills").select("skills ( name, instructions )").eq("agent_id", agentId);
+    // deno-lint-ignore no-explicit-any
+    return [...((allRows ?? []).map((r: any) => r.skills).filter(Boolean)), ...lay];
+  }
+
+  try {
 
     // ---- Target context: built per target type. ------------------------------
     let ctx = "";
@@ -250,51 +256,72 @@ Deno.serve(async (req: Request) => {
       ].filter(Boolean).join("\n");
     }
 
-    const skillsBlock = skills.length
-      ? `\n\nYOUR SKILLS (apply these playbooks):\n${skills.map((s) => `## ${s.name}\n${s.instructions ?? ""}`).join("\n\n")}`
-      : "";
-
-    const system = [
-      agent.system_prompt || `You are ${agent.name}${agent.role ? `, ${agent.role}` : ""}, an executive agent in SingleStack.`,
-      skillsBlock,
-      `\n\nYou are running the "${play.label}" analysis on this ${play.target}. ${play.focus}`,
-      `\n${play.sections_hint}`,
-      "\nRules: Be specific and concrete, never generic. Ground every claim in the provided context; in each section's `evidence`, list the exact signal/battlecard/matrix items you leaned on (or note 'thin evidence' honestly). headline = a one-line take. recommendations = concrete next steps. confidence = a short, honest read (e.g. 'Medium — matrix is filled but only 2 signals').",
-    ].join("");
-
+    // Run each agent in the chain in order. Each runs with its own (cornerstone +
+    // play) skills and sees the prior officers' headlines, so it adds its lens
+    // rather than repeating. One bounded call per agent.
     const anthropic = new Anthropic({ apiKey: key });
-    const resp = (await anthropic.messages.create({
-      model,
-      max_tokens: 3000,
-      thinking: { type: "adaptive" },
-      output_config: { effort: "high", format: { type: "json_schema", schema: SCHEMA } },
-      system: [{ type: "text", text: system, cache_control: { type: "ephemeral" } }],
-      messages: [{ role: "user", content: `${ctx}\n\nRun the ${play.label} analysis now.` }],
+    // deno-lint-ignore no-explicit-any
+    const results: { name: string; payload: any }[] = [];
+    let inTok = 0, outTok = 0, cost = 0;
+    let prior = "";
+    for (const ag of chain) {
+      const skills = await loadSkills(ag.id);
+      const skillsBlock = skills.length
+        ? `\n\nYOUR SKILLS (apply these playbooks):\n${skills.map((s) => `## ${s.name}\n${s.instructions ?? ""}`).join("\n\n")}`
+        : "";
+      const aModel = ag.model || DEFAULT_MODEL;
+      const system = [
+        ag.system_prompt || `You are ${ag.name}${ag.role ? `, ${ag.role}` : ""}, an executive agent in SingleStack.`,
+        skillsBlock,
+        `\n\nYou are running the "${play.label}" analysis on this ${play.target}. ${play.focus}`,
+        `\n${play.sections_hint}`,
+        chain.length > 1 ? `\nYou are one officer in a chain on this play.${prior ? ` Earlier officers found:${prior}` : " You go first."} Add YOUR distinct lens; don't repeat what's covered.` : "",
+        "\nRules: Be specific and concrete, never generic. Ground every claim in the provided context; in each section's `evidence`, list the exact signal/battlecard/matrix items you leaned on (or note 'thin evidence' honestly). headline = a one-line take. recommendations = concrete next steps. confidence = a short, honest read.",
+      ].join("");
+      const resp = (await anthropic.messages.create({
+        model: aModel,
+        max_tokens: 3000,
+        thinking: { type: "adaptive" },
+        output_config: { effort: "high", format: { type: "json_schema", schema: SCHEMA } },
+        system: [{ type: "text", text: system, cache_control: { type: "ephemeral" } }],
+        messages: [{ role: "user", content: `${ctx}\n\nRun your part of the ${play.label} now.` }],
+        // deno-lint-ignore no-explicit-any
+      } as any)) as Anthropic.Message;
+      const block = resp.content.find((b) => b.type === "text");
+      if (!block || block.type !== "text") throw new Error(`no analysis returned from ${ag.name}`);
+      const p = JSON.parse(block.text);
+      results.push({ name: ag.name, payload: p });
+      inTok += resp.usage.input_tokens; outTok += resp.usage.output_tokens;
+      const price = PRICING[aModel]; if (price) cost += (resp.usage.input_tokens * price.input + resp.usage.output_tokens * price.output) / 1_000_000;
+      prior += `\n  • ${ag.name}: ${p.headline ?? ""}`;
+    }
+
+    // Aggregate the chain into one artifact. With >1 agent, sections are attributed.
+    const multi = chain.length > 1;
+    const payload = {
+      headline: results[0]?.payload?.headline ?? "(analysis)",
       // deno-lint-ignore no-explicit-any
-    } as any)) as Anthropic.Message;
+      sections: results.flatMap((r) => (r.payload?.sections ?? []).map((s: any) => (multi ? { ...s, title: `${r.name} · ${s.title}` } : s))),
+      recommendations: results.flatMap((r) => r.payload?.recommendations ?? []),
+      confidence: multi ? results.map((r) => `${r.name}: ${r.payload?.confidence ?? "—"}`).join(" · ") : (results[0]?.payload?.confidence ?? ""),
+    };
 
-    const block = resp.content.find((b) => b.type === "text");
-    if (!block || block.type !== "text") throw new Error("no analysis returned");
-    const payload = JSON.parse(block.text);
-
-    // Log the run (so the outcome loop applies) + persist the artifact.
-    const price = PRICING[model];
-    const cost = price ? (resp.usage.input_tokens * price.input + resp.usage.output_tokens * price.output) / 1_000_000 : null;
+    // Log one run (primary agent, summed cost) + persist the artifact.
     const { data: run } = await supabase.from("agent_runs").insert({
-      org_id: orgId, agent_id: agent.id, status: "succeeded",
-      input: { kind: "play", function_key, target_type, target_id }, output: payload.headline ?? "(artifact)", model,
-      input_tokens: resp.usage.input_tokens, output_tokens: resp.usage.output_tokens, cost_usd: cost,
+      org_id: orgId, agent_id: chain[0].id, status: "succeeded",
+      input: { kind: "play", function_key, target_type, target_id, agents: chain.map((c) => c.name) }, output: payload.headline ?? "(artifact)", model: chain[0].model || DEFAULT_MODEL,
+      input_tokens: inTok, output_tokens: outTok, cost_usd: cost || null,
       finished_at: new Date().toISOString(),
     }).select("id").single();
 
     const title = `${play.label} · ${targetName}`;
     const { data: artifact, error: artErr } = await supabase.from("agent_artifacts").insert({
-      org_id: orgId, agent_id: agent.id, function_key, target_type, target_id, title,
+      org_id: orgId, agent_id: chain[0].id, function_key, target_type, target_id, title,
       status: "draft", payload, run_id: run?.id ?? null,
     }).select("id, function_key, title, status, payload, run_id, agent_id").single();
     if (artErr) throw artErr;
 
-    return json({ artifact, officer: agent.name });
+    return json({ artifact, officer: chain.map((c) => c.name).join(" → ") });
   } catch (e) {
     return json({ error: e instanceof Error ? e.message : String(e) }, 500);
   }

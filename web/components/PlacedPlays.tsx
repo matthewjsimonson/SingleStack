@@ -16,7 +16,7 @@ export default function PlacedPlays({ surfaceKey, targetType, targetId, targetNa
   const [plays, setPlays] = useState<PlayDef[]>([]);
 
   const load = useCallback(async () => {
-    await ensureBuiltInPlays(supabase); // built-ins present no matter where the user lands first
+    if (surfaceKey === "competitor_home") await ensureBuiltInPlays(supabase); // built-ins seed where they live
     const { data: placements } = await supabase.from("play_placements").select("play_id").eq("surface_key", surfaceKey);
     const ids = [...new Set((placements ?? []).map((r) => r.play_id))];
     if (ids.length === 0) { setPlays([]); return; }
