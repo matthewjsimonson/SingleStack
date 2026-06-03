@@ -11,7 +11,6 @@ import { Section, Chip, Banner, BackLink, Empty, Modal } from "@/components/ui";
 type Agent = { id: string; key: string; name: string; role: string | null; model: string | null; system_prompt: string | null; is_active: boolean };
 type Skill = { id: string; key: string; name: string; description: string | null; category: string | null; instructions: string | null };
 type Connection = { id: string; kind: string; label: string; area: string | null; mcp_url: string | null; status: string; config: { purpose?: string | null } | null; targets: { type?: string; ref: string; label?: string }[] | null; guidance: string | null };
-type Workflow = { id: string; name: string; description: string | null; trigger: string; target_type: string | null; is_active: boolean; last_run_at: string | null; skill_ids: string[] | null };
 type InitiativeOpt = { id: string; title: string; stage: string | null; scope: string | null };
 type WorkstreamOpt = { id: string; title: string; area: string | null; initiative_id: string; initiative_title?: string };
 type Alignment = { id: string; role: string; guidance: string | null; initiative_id: string | null; workstream_id: string | null; title: string; kind: "initiative" | "task"; sub: string | null };
@@ -33,7 +32,8 @@ export default function AgentDetail({ agentId }: { agentId: string }) {
   const [attached, setAttached] = useState<Set<string>>(new Set());
   const [cornerstones, setCornerstones] = useState<Set<string>>(new Set());
   const [connections, setConnections] = useState<Connection[]>([]);
-  const [workflows, setWorkflows] = useState<Workflow[]>([]);
+  const [allPlays, setAllPlays] = useState<{ id: string; label: string; description: string | null }[]>([]);
+  const [attachedPlayIds, setAttachedPlayIds] = useState<Set<string>>(new Set());
   const [alignments, setAlignments] = useState<Alignment[]>([]);
   const [initiatives, setInitiatives] = useState<InitiativeOpt[]>([]);
   const [workstreams, setWorkstreams] = useState<WorkstreamOpt[]>([]);
@@ -43,19 +43,21 @@ export default function AgentDetail({ agentId }: { agentId: string }) {
 
   const load = useCallback(async () => {
     const { data: a } = await supabase.from("agents").select("id, key, name, role, model, system_prompt, is_active").eq("id", agentId).maybeSingle();
-    const [{ data: sk }, { data: as }, { data: cs }, { data: wf }, { data: al }, { data: inits }, { data: ws }] = await Promise.all([
+    const [{ data: sk }, { data: as }, { data: cs }, { data: pls }, { data: al }, { data: inits }, { data: ws }, { data: pa }] = await Promise.all([
       supabase.from("skills").select("id, key, name, description, category, instructions").order("name"),
       supabase.from("agent_skills").select("skill_id, is_cornerstone").eq("agent_id", agentId),
       supabase.from("connections").select("id, kind, label, area, mcp_url, status, config, targets, guidance").eq("agent_id", agentId).order("created_at"),
-      supabase.from("workflows").select("id, name, description, trigger, target_type, is_active, last_run_at, skill_ids").eq("agent_id", agentId).order("created_at"),
+      supabase.from("plays").select("id, label, description").order("created_at"),
       supabase.from("agent_alignments").select("id, role, guidance, initiative_id, workstream_id, initiatives(title, stage), initiative_workstreams(title, area)").eq("agent_id", agentId).order("created_at"),
       supabase.from("initiatives").select("id, title, stage, scope").order("created_at", { ascending: false }).limit(200),
       supabase.from("initiative_workstreams").select("id, title, area, initiative_id").order("created_at", { ascending: false }).limit(400),
+      supabase.from("play_agents").select("play_id").eq("agent_id", agentId),
     ]);
     setAgent(a); setSkills(sk ?? []);
     setAttached(new Set((as ?? []).map((x) => x.skill_id)));
     setCornerstones(new Set((as ?? []).filter((x) => x.is_cornerstone).map((x) => x.skill_id)));
-    setConnections(cs ?? []); setWorkflows(wf ?? []);
+    setConnections(cs ?? []);
+    setAllPlays(pls ?? []); setAttachedPlayIds(new Set((pa ?? []).map((r) => r.play_id)));
     const initById = new Map((inits ?? []).map((i) => [i.id, i.title]));
     // deno-lint-ignore no-explicit-any
     setAlignments(((al ?? []) as any[]).map((r) => r.workstream_id
@@ -76,7 +78,7 @@ export default function AgentDetail({ agentId }: { agentId: string }) {
     ["skills", "Skills", attached.size],
     ["connections", "Connections", connections.length],
     ["alignment", "Alignment", alignments.length],
-    ["workflows", "Workflows", workflows.length],
+    ["workflows", "Workflows", attachedPlayIds.size],
   ];
 
   return (
@@ -107,7 +109,7 @@ export default function AgentDetail({ agentId }: { agentId: string }) {
       {tab === "skills" && <Skills agentId={agentId} skills={skills} attached={attached} cornerstones={cornerstones} reload={load} setError={setError} />}
       {tab === "connections" && <Connections agentId={agentId} connections={connections} reload={load} setError={setError} />}
       {tab === "alignment" && <Alignment agentId={agentId} alignments={alignments} initiatives={initiatives} workstreams={workstreams} reload={load} setError={setError} />}
-      {tab === "workflows" && <Workflows agentId={agentId} workflows={workflows} skills={skills.filter((s) => attached.has(s.id))} reload={load} setError={setError} />}
+      {tab === "workflows" && <Workflows agentId={agentId} plays={allPlays} attachedPlayIds={attachedPlayIds} reload={load} setError={setError} />}
     </div>
   );
 }
@@ -541,85 +543,49 @@ function ConnRow({ c, onRemove, reload, setError }: { c: Connection; onRemove: (
   );
 }
 
-// ---------- Workflows ----------
-const WF_TRIGGERS: [string, string][] = [
-  ["manual", "Manual (run on demand)"],
-  ["scheduled", "Scheduled"],
-  ["on_signal", "When a signal lands"],
-  ["on_release", "On release"],
-  ["on_capability_update", "On new capability"],
-];
-
-function Workflows({ agentId, workflows, skills, reload, setError }: { agentId: string; workflows: Workflow[]; skills: Skill[]; reload: () => void; setError: (s: string | null) => void }) {
+// ---------- Workflows (the plays this agent is attached to) ----------
+function Workflows({ agentId, plays, attachedPlayIds, reload, setError }: { agentId: string; plays: { id: string; label: string; description: string | null }[]; attachedPlayIds: Set<string>; reload: () => void; setError: (s: string | null) => void }) {
   const supabase = createClient();
-  const [creating, setCreating] = useState(false);
-  const [form, setForm] = useState<{ name: string; description: string; trigger: string; skill_ids: string[] }>({ name: "", description: "", trigger: "manual", skill_ids: [] });
-  const [busy, setBusy] = useState(false);
-
-  function toggleSkill(id: string) {
-    setForm((f) => ({ ...f, skill_ids: f.skill_ids.includes(id) ? f.skill_ids.filter((x) => x !== id) : [...f.skill_ids, id] }));
+  async function attach(playId: string) {
+    if (!playId) return;
+    setError(null);
+    const orgId = await getOrgId();
+    const { error } = await supabase.from("play_agents").insert({ org_id: orgId, play_id: playId, agent_id: agentId });
+    if (error && (error as { code?: string }).code !== "23505") setError(error.message);
+    reload();
   }
-
-  async function create(e: React.FormEvent) {
-    e.preventDefault(); if (!form.name.trim()) return;
-    setBusy(true); setError(null);
-    try {
-      const orgId = await getOrgId();
-      if (!orgId) throw new Error("Could not resolve your organization.");
-      const { error } = await supabase.from("workflows").insert({ org_id: orgId, agent_id: agentId, name: form.name.trim(), description: form.description.trim() || null, trigger: form.trigger, skill_ids: form.skill_ids });
-      if (error) throw error;
-      setCreating(false); setForm({ name: "", description: "", trigger: "manual", skill_ids: [] }); reload();
-    } catch (e) { setError(e instanceof Error ? e.message : "Could not create workflow."); }
-    finally { setBusy(false); }
+  async function detach(playId: string) {
+    setError(null);
+    await supabase.from("play_skills").delete().eq("play_id", playId).eq("agent_id", agentId);
+    await supabase.from("play_agents").delete().eq("play_id", playId).eq("agent_id", agentId);
+    reload();
   }
-  async function remove(id: string) { setError(null); await supabase.from("workflows").delete().eq("id", id); reload(); }
-
-  const skillName = (id: string) => skills.find((s) => s.id === id)?.name;
+  const on = plays.filter((p) => attachedPlayIds.has(p.id));
+  const available = plays.filter((p) => !attachedPlayIds.has(p.id));
 
   return (
-    <Section label="Workflows" action={!creating ? <button className="btn btn-secondary btn-sm" onClick={() => setCreating(true)}>+ New workflow</button> : undefined}>
-      <div className="t-sub t-muted" style={{ fontSize: 12.5, marginBottom: 12 }}>Saved tasks this agent runs — an agent + the skills it applies + a trigger. (Manual run today; scheduled, release &amp; capability triggers execute once the runtime ships.)</div>
-
-      {creating && (
-        <form onSubmit={create} className="card card-pad" style={{ marginBottom: "var(--sp-3)" }}>
-          <label className="field"><span className="t-label">Name</span><input className="input" autoFocus value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} placeholder="e.g. Weekly competitive refresh" /></label>
-          <label className="field"><span className="t-label">Description</span><input className="input" value={form.description} onChange={(e) => setForm({ ...form, description: e.target.value })} placeholder="What it does" /></label>
-          <label className="field"><span className="t-label">Trigger</span>
-            <select className="select" value={form.trigger} onChange={(e) => setForm({ ...form, trigger: e.target.value })}>
-              {WF_TRIGGERS.map(([k, label]) => <option key={k} value={k}>{label}</option>)}
-            </select></label>
-          {skills.length > 0 ? (
-            <div className="field">
-              <span className="t-label">Skills it applies</span>
-              <div className="row gap-2" style={{ flexWrap: "wrap", marginTop: 4 }}>
-                {skills.map((s) => {
-                  const on = form.skill_ids.includes(s.id);
-                  return <button type="button" key={s.id} onClick={() => toggleSkill(s.id)} className={`btn btn-sm ${on ? "" : "btn-secondary"}`}>{on ? "✓ " : ""}{s.name}</button>;
-                })}
-              </div>
-            </div>
-          ) : <div className="t-sub t-muted" style={{ fontSize: 12, marginBottom: 8 }}>Attach skills on the Skills tab to apply them in workflows.</div>}
-          <div className="row gap-2" style={{ marginTop: 8 }}><button className="btn" type="submit" disabled={busy}>{busy ? "Creating…" : "Create"}</button><button className="btn btn-secondary" type="button" onClick={() => setCreating(false)}>Cancel</button></div>
-        </form>
-      )}
-
-      {workflows.length === 0 && !creating ? <Empty title="No workflows yet" hint="Create a saved task for this agent." action={<button className="btn" onClick={() => setCreating(true)}>+ New workflow</button>} /> : (
+    <Section label="Workflows — plays this agent is on">
+      <div className="t-sub t-muted" style={{ fontSize: 12.5, marginBottom: 12 }}>The plays that deploy this agent. Layer play-specific skills on top of its cornerstones from the <a href="/plays" style={{ color: "var(--ac-text)", fontWeight: 600 }}>Plays</a> surface.</div>
+      {on.length === 0 ? (
+        <div className="t-sub t-muted" style={{ fontSize: 12.5, marginBottom: 10 }}>Not attached to any play yet.</div>
+      ) : (
         <div className="stack-3">
-          {workflows.map((w) => (
-            <div key={w.id} className="card card-pad row-between">
+          {on.map((p) => (
+            <div key={p.id} className="card card-pad row-between" style={{ gap: 12 }}>
               <div style={{ minWidth: 0 }}>
-                <div className="row gap-2" style={{ flexWrap: "wrap" }}><span style={{ fontSize: 14, fontWeight: 620 }}>{w.name}</span><Chip>{w.trigger}</Chip>{!w.is_active && <Chip tone="amber">paused</Chip>}</div>
-                {w.description && <div className="t-sub t-muted" style={{ fontSize: 12.5, marginTop: 2 }}>{w.description}</div>}
-                {(w.skill_ids?.length ?? 0) > 0 && (
-                  <div className="row gap-2" style={{ flexWrap: "wrap", marginTop: 6 }}>
-                    {w.skill_ids!.map((id) => { const n = skillName(id); return n ? <Chip key={id} tone="default">{n}</Chip> : null; })}
-                  </div>
-                )}
+                <a href="/plays" style={{ fontSize: 14, fontWeight: 620, color: "var(--tp)" }}>{p.label}</a>
+                {p.description && <div className="t-sub t-muted" style={{ fontSize: 12.5, marginTop: 2 }}>{p.description}</div>}
               </div>
-              <button className="btn btn-secondary btn-sm" onClick={() => remove(w.id)}>Remove</button>
+              <button className="btn btn-secondary btn-sm" onClick={() => detach(p.id)} style={{ color: "var(--rd-text)" }}>Detach</button>
             </div>
           ))}
         </div>
+      )}
+      {available.length > 0 && (
+        <select className="select" defaultValue="" onChange={(e) => { attach(e.target.value); e.target.value = ""; }} style={{ maxWidth: 320, marginTop: 12 }}>
+          <option value="">+ Attach to a play…</option>
+          {available.map((p) => <option key={p.id} value={p.id}>{p.label}</option>)}
+        </select>
       )}
     </Section>
   );
