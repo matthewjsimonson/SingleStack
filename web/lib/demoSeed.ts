@@ -330,18 +330,22 @@ export async function loadDemoData(supabase: SupabaseClient, orgId: string): Pro
     if (existing && existing.length) return "exist";
     const { data: ini } = await supabase.from("initiatives").select("id, lifecycle").eq("title", "Agent orchestration v1").maybeSingle();
     const { data: rel } = await supabase.from("releases").select("id").eq("name", "Agent orchestration").maybeSingle();
+    const { data: gtm } = await supabase.from("gtm_records").select("id").limit(1).maybeSingle();
     const { data: ppl } = await supabase.from("people").select("id, name");
     const who = (n: string) => ppl?.find((p) => p.name === n)?.id ?? null;
     const ls = ini?.lifecycle ?? "launch";
+    // A coordinated push the launch content rolls into — closes the campaign↔content loop.
+    let { data: camp } = await supabase.from("campaigns").select("id").eq("name", "Orchestration launch week").maybeSingle();
+    if (!camp) ({ data: camp } = await supabase.from("campaigns").insert({ org_id: orgId, name: "Orchestration launch week", objective: "Coordinated launch of agent orchestration across blog, video, and social.", channels: "LinkedIn, email, webinar", gtm_record_id: gtm?.id ?? null, status: "active" }).select("id").single());
     const rows = [
-      { content_type: "blog", title: "Launch blog — orchestration v1", stage: "active", assignee: who("Jordan Lee"), release_id: rel?.id ?? null, details: null },
-      { content_type: "video", title: "90s orchestration explainer", stage: "backlog", assignee: who("Jordan Lee"), release_id: rel?.id ?? null, details: { hook: "Your AI shouldn't need a babysitter for every step.", script: "", prompts: ["Cold open: messy multi-tool workflow", "Reveal: one agent orchestrating it"], descript_steps: [] } },
-      { content_type: "social", title: "Launch-week teaser thread", stage: "backlog", assignee: who("Jordan Lee"), release_id: null, details: null },
-      { content_type: "testimonial", title: "Design-partner testimonial — orchestration", stage: "backlog", assignee: who("Alex Kim"), release_id: null, details: null },
+      { content_type: "blog", title: "Launch blog — orchestration v1", stage: "active", assignee: who("Jordan Lee"), release_id: rel?.id ?? null, campaign_id: camp?.id ?? null, details: null },
+      { content_type: "video", title: "90s orchestration explainer", stage: "backlog", assignee: who("Jordan Lee"), release_id: rel?.id ?? null, campaign_id: camp?.id ?? null, details: { hook: "Your AI shouldn't need a babysitter for every step.", script: "", prompts: ["Cold open: messy multi-tool workflow", "Reveal: one agent orchestrating it"], descript_steps: [] } },
+      { content_type: "social", title: "Launch-week teaser thread", stage: "backlog", assignee: who("Jordan Lee"), release_id: null, campaign_id: camp?.id ?? null, details: null },
+      { content_type: "testimonial", title: "Design-partner testimonial — orchestration", stage: "backlog", assignee: who("Alex Kim"), release_id: null, campaign_id: null, details: null },
     ];
     await supabase.from("initiative_workstreams").insert(rows.map((r) => ({
       org_id: orgId, area: "gtm", title: r.title, content_type: r.content_type, stage: r.stage,
-      initiative_id: ini?.id ?? null, lifecycle_stage: ls, assignee_id: r.assignee, release_id: r.release_id, details: r.details,
+      initiative_id: ini?.id ?? null, lifecycle_stage: ls, assignee_id: r.assignee, release_id: r.release_id, campaign_id: r.campaign_id, details: r.details,
     })));
     return `+${rows.length}`;
   });

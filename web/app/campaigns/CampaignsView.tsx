@@ -9,14 +9,16 @@ import { PageHeader, Section, Chip, Banner } from "@/components/ui";
 
 type Campaign = { id: string; name: string; objective: string | null; status: string; channels: string | null; gtm_record_id: string | null; start_date: string | null; end_date: string | null };
 type Rec = { id: string; name: string };
+type Content = { id: string; title: string; content_type: string | null; stage: string; campaign_id: string | null };
 
 const STAGES = [["planning", "Planning"], ["active", "Active"], ["complete", "Complete"]] as const;
-const TONE: Record<string, "default" | "violet" | "green"> = { planning: "default", active: "violet", complete: "green" };
+const CTYPE: Record<string, string> = { social: "Social", video: "Video", blog: "Blog", thought_leadership: "Thought leadership", case_study: "Case study", white_paper: "White paper", testimonial: "Testimonial" };
 
 export default function CampaignsView() {
   const supabase = createClient();
   const [items, setItems] = useState<Campaign[]>([]);
   const [gtm, setGtm] = useState<Rec[]>([]);
+  const [content, setContent] = useState<Content[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [creating, setCreating] = useState(false);
@@ -24,11 +26,12 @@ export default function CampaignsView() {
   const [busy, setBusy] = useState(false);
 
   const load = useCallback(async () => {
-    const [{ data: cs }, { data: gtms }] = await Promise.all([
+    const [{ data: cs }, { data: gtms }, { data: ct }] = await Promise.all([
       supabase.from("campaigns").select("id, name, objective, status, channels, gtm_record_id, start_date, end_date").order("created_at", { ascending: false }),
       supabase.from("gtm_records").select("id, name"),
+      supabase.from("initiative_workstreams").select("id, title, content_type, stage, campaign_id").not("campaign_id", "is", null),
     ]);
-    setItems(cs ?? []); setGtm(gtms ?? []); setLoading(false);
+    setItems(cs ?? []); setGtm(gtms ?? []); setContent((ct ?? []) as Content[]); setLoading(false);
   }, [supabase]);
   useEffect(() => { load(); }, [load]);
 
@@ -47,6 +50,7 @@ export default function CampaignsView() {
   async function remove(id: string) { setError(null); await supabase.from("campaigns").delete().eq("id", id); await load(); }
 
   const gtmName = (id: string | null) => gtm.find((g) => g.id === id)?.name ?? null;
+  const contentFor = (id: string) => content.filter((c) => c.campaign_id === id);
 
   return (
     <div>
@@ -84,6 +88,26 @@ export default function CampaignsView() {
                         {gtmName(c.gtm_record_id) && <Chip tone="violet">{gtmName(c.gtm_record_id)}</Chip>}
                         {c.channels && <Chip>{c.channels}</Chip>}
                       </div>
+                      {(() => {
+                        const cc = contentFor(c.id);
+                        if (!cc.length) return null;
+                        const done = cc.filter((x) => x.stage === "done").length;
+                        return (
+                          <div style={{ borderTop: "1px solid var(--border)", paddingTop: 8, marginBottom: 8 }}>
+                            <div className="t-label" style={{ color: "var(--tm)", marginBottom: 6 }}>Content · {done}/{cc.length} published</div>
+                            <div className="stack-3">
+                              {cc.map((x) => (
+                                <div key={x.id} className="row gap-2" style={{ fontSize: 12.5, alignItems: "baseline" }}>
+                                  <span style={{ color: x.stage === "done" ? "var(--gn-text)" : "var(--tm)", fontWeight: 700, width: 12 }}>{x.stage === "done" ? "✓" : "○"}</span>
+                                  <span style={{ color: x.stage === "done" ? "var(--tp)" : "var(--tm)" }}>{x.title}</span>
+                                  {x.content_type && <span className="t-muted" style={{ fontSize: 11 }}>· {CTYPE[x.content_type] ?? x.content_type}</span>}
+                                </div>
+                              ))}
+                            </div>
+                            <a href="/content" className="t-sub" style={{ display: "inline-block", marginTop: 6, fontSize: 11.5, color: "var(--ac-text)", fontWeight: 600, textDecoration: "none" }}>Manage content →</a>
+                          </div>
+                        );
+                      })()}
                       <div className="row gap-2">
                         {stage !== "planning" && <button className="btn btn-secondary btn-sm" onClick={() => move(c.id, stage === "complete" ? "active" : "planning")}>←</button>}
                         {stage !== "complete" && <button className="btn btn-secondary btn-sm" onClick={() => move(c.id, stage === "planning" ? "active" : "complete")}>{stage === "planning" ? "Launch →" : "Complete →"}</button>}
