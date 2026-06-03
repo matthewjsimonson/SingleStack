@@ -155,7 +155,7 @@ export default function StrategyView() {
 
   return (
     <div>
-      <PageHeader title="Product strategy" meta="What should we build or enhance? Weigh every intelligence stream and the competitive matrix, then turn the strongest evidence into an investment thesis you ship to Build." />
+      <PageHeader title="Strategy" meta="What should we build or enhance? Weigh every intelligence stream and the competitive matrix, then turn the strongest evidence into an investment thesis you ship to Build." />
       <Banner>{error}</Banner>
       {notice && <div className="banner" style={{ marginBottom: "var(--sp-4)", background: "var(--gn-fill)", color: "var(--gn-text)" }}>{notice} <a href="/ship" style={{ fontWeight: 700, color: "inherit" }}>Open Ship →</a></div>}
 
