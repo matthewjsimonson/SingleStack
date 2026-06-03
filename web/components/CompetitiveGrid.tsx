@@ -30,8 +30,8 @@ export default function CompetitiveGrid({ competitors, capabilities, scores, com
   const QUAD: [number, number, string][] = [[0.5, 0.0, "Risers"], [1.0, 0.0, "Leaders"], [0.5, 1.0, "Niche"], [1.0, 1.0, "Established"]];
 
   return (
-    <div className="card" style={{ overflow: "hidden" }}>
-      <svg viewBox={`0 0 ${W} ${H}`} style={{ width: "100%", display: "block" }}>
+    <div className="card" style={{ overflow: "hidden", maxWidth: 600, margin: "0 auto" }}>
+      <svg viewBox={`0 0 ${W} ${H}`} style={{ width: "100%", display: "block", maxHeight: 380 }} preserveAspectRatio="xMidYMid meet">
         <defs>
           <radialGradient id="cg" cx="78%" cy="22%" r="80%"><stop offset="0%" stopColor="#16A34A" stopOpacity="0.06" /><stop offset="60%" stopColor="#fff" stopOpacity="0" /></radialGradient>
         </defs>
