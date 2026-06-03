@@ -16,8 +16,15 @@ type Theme = {
   state: string | null; momentum: string | null; conf_level: number | null; category: string | null; signal_ids: string[] | null;
 };
 type Sig = { id: string; title: string; conf_label: string | null };
+type ChatMsg = { role: "user" | "assistant"; content: string };
 
 const OFFICER = (cat: string | null) => (cat === "gtm" ? { key: "cro", name: "CRO" } : { key: "cpo", name: "CPO" });
+// Ready-made prompts so the operator doesn't have to think of how to ask.
+const PRESETS: { label: string; q: string }[] = [
+  { label: "What's the so-what?", q: "In 3–4 sentences: what's the 'so what' of this theme, and the single most important action you'd recommend?" },
+  { label: "Impact on initiatives", q: "How does this theme impact our current initiatives — does it reinforce, threaten, or reprioritize any of them? Name them if you can." },
+  { label: "What would make it wrong?", q: "Pressure-test this theme: what disconfirming evidence would make it wrong, and how strong is the case right now?" },
+];
 
 export default function ThemeDrawer({ themeId, onClose, onChanged }: { themeId: string | null; onClose: () => void; onChanged?: () => void }) {
   const supabase = createClient();
@@ -26,8 +33,9 @@ export default function ThemeDrawer({ themeId, onClose, onChanged }: { themeId: 
   const [signals, setSignals] = useState<Sig[]>([]);
   const [products, setProducts] = useState<{ id: string; name: string }[]>([]);
   const [gtms, setGtms] = useState<{ id: string; name: string }[]>([]);
-  const [take, setTake] = useState<string | null>(null);
-  const [thinking, setThinking] = useState(false);
+  const [thread, setThread] = useState<ChatMsg[]>([]);
+  const [chatInput, setChatInput] = useState("");
+  const [chatBusy, setChatBusy] = useState(false);
   const [rec, setRec] = useState<{ name: string; build: string; gtm: string; why: string } | null>(null);
   const [recBusy, setRecBusy] = useState(false);
   const [recDone, setRecDone] = useState<{ id: string } | null>(null);
@@ -35,7 +43,7 @@ export default function ThemeDrawer({ themeId, onClose, onChanged }: { themeId: 
 
   const load = useCallback(async () => {
     if (!themeId) return;
-    setError(null); setTake(null); setRec(null); setRecDone(null);
+    setError(null); setThread([]); setChatInput(""); setRec(null); setRecDone(null);
     const { data: t } = await supabase.from("signal_themes").select("id, title, summary, recommendation, state, momentum, conf_level, category, signal_ids").eq("id", themeId).maybeSingle();
     setTheme(t as Theme | null);
     const ids = (t?.signal_ids as string[] | null) ?? [];
@@ -52,22 +60,35 @@ export default function ThemeDrawer({ themeId, onClose, onChanged }: { themeId: 
   if (!themeId) return null;
   const officer = theme ? OFFICER(theme.category) : { key: "cpo", name: "CPO" };
 
-  async function ask() {
+  // The theme is the subject of the chat. Fold its details into the FIRST user
+  // turn only (keeps the visible thread clean and the roles alternating).
+  function payloadFor(t: ChatMsg[]): ChatMsg[] {
+    const preamble = `We're discussing ONE intelligence theme. Treat it as the subject of this conversation.\nTheme: ${theme?.title}\nSummary: ${theme?.summary || "—"}\nCurrent recommendation: ${theme?.recommendation || "—"}\nState: ${theme?.state}/${theme?.momentum} · backed by ${signals.length} signal(s): ${signals.slice(0, 6).map((x) => x.title).join("; ")}`;
+    return t.map((m, i) => (i === 0 && m.role === "user" ? { ...m, content: `${preamble}\n\n${m.content}` } : m));
+  }
+
+  async function ask(q: string) {
     if (!theme) return;
-    setThinking(true); setError(null); setTake(null);
+    const next: ChatMsg[] = [...thread, { role: "user", content: q }];
+    setThread(next); setChatBusy(true); setError(null);
     try {
       const { data: s } = await supabase.auth.getSession();
       const token = s.session?.access_token;
-      const prompt = `Interpret this intelligence theme for me. In 3–4 sentences: the "so what", and the single most important action.\n\nTheme: ${theme.title}\nSummary: ${theme.summary || "—"}\nCurrent recommendation: ${theme.recommendation || "—"}\nState: ${theme.state}/${theme.momentum} · backed by ${signals.length} signal(s): ${signals.slice(0, 6).map((x) => x.title).join("; ")}`;
       const { data, error } = await supabase.functions.invoke("agent-chat", {
-        body: { agent_key: officer.key, messages: [{ role: "user", content: prompt }], context: { area: "signals" } },
+        body: { agent_key: officer.key, messages: payloadFor(next), context: { area: "signals" } },
         headers: token ? { Authorization: `Bearer ${token}` } : undefined,
       });
       if (error) throw error;
       if (data?.error) throw new Error(data.error);
-      setTake(data.reply);
+      setThread([...next, { role: "assistant", content: data.reply }]);
     } catch (e) { setError(e instanceof Error ? e.message : "Could not reach the officer."); }
-    finally { setThinking(false); }
+    finally { setChatBusy(false); }
+  }
+  function sendFree() {
+    const q = chatInput.trim();
+    if (!q || chatBusy) return;
+    setChatInput("");
+    ask(q);
   }
 
   // Theme -> recommended initiative: the officer drafts a cross-functional PLG
@@ -124,12 +145,42 @@ export default function ThemeDrawer({ themeId, onClose, onChanged }: { themeId: 
           {error && <div className="banner banner-error">{error}</div>}
           {theme?.summary && <div className="t-sub" style={{ fontSize: 13, lineHeight: 1.55 }}>{theme.summary}</div>}
 
-          {/* The so-what + officer read */}
+          {/* The so-what + a real chat with the officer */}
           <div className="card card-pad" style={{ background: "var(--panel-2)" }}>
-            <div className="t-label" style={{ color: "var(--tm)", marginBottom: 6 }}>The “so what”</div>
+            <div className="row-between" style={{ alignItems: "center", marginBottom: 6 }}>
+              <span className="t-label" style={{ color: "var(--tm)" }}>The “so what” · ask {officer.name}</span>
+              {thread.length > 0 && <button className="btn btn-secondary btn-sm" onClick={() => { setThread([]); setChatInput(""); }}>Clear</button>}
+            </div>
             {theme?.recommendation ? <div className="t-body" style={{ fontSize: 13, lineHeight: 1.5, marginBottom: 10 }}>→ {theme.recommendation}</div> : <div className="t-sub t-muted" style={{ fontSize: 12.5, marginBottom: 10 }}>No recommendation yet.</div>}
-            <button className="btn btn-sm" onClick={ask} disabled={thinking} style={{ background: "var(--ac)", color: "#fff" }}>{thinking ? `${officer.name} is reading…` : `✦ Ask ${officer.name}`}</button>
-            {take && <div className="card card-pad" style={{ marginTop: 10, background: "var(--panel)" }}><div className="t-sub" style={{ fontSize: 13, lineHeight: 1.55, whiteSpace: "pre-wrap" }}>{take}</div></div>}
+
+            {/* Conversation */}
+            {thread.length > 0 && (
+              <div className="stack-3" style={{ marginBottom: 10 }}>
+                {thread.map((m, i) => (
+                  <div key={i} className="card card-pad" style={{ background: m.role === "user" ? "var(--panel)" : "var(--fill)", borderLeft: m.role === "assistant" ? "2px solid var(--ac)" : undefined }}>
+                    <div className="t-label" style={{ color: "var(--tm)", marginBottom: 4 }}>{m.role === "user" ? "You" : officer.name}</div>
+                    <div className="t-sub" style={{ fontSize: 13, lineHeight: 1.55, whiteSpace: "pre-wrap" }}>{m.content}</div>
+                  </div>
+                ))}
+                {chatBusy && <div className="t-sub t-muted" style={{ fontSize: 12.5 }}>{officer.name} is thinking…</div>}
+              </div>
+            )}
+
+            {/* Ready-made prompts */}
+            <div className="row gap-2" style={{ flexWrap: "wrap", marginBottom: 8 }}>
+              {PRESETS.map((p) => (
+                <button key={p.label} className="chip" style={{ cursor: "pointer" }} disabled={chatBusy} onClick={() => ask(p.q)}>{p.label}</button>
+              ))}
+            </div>
+
+            {/* Free-form question */}
+            <div className="row gap-2">
+              <input className="input" style={{ flex: 1 }} value={chatInput} disabled={chatBusy}
+                placeholder={`Ask ${officer.name} anything about this theme…`}
+                onChange={(e) => setChatInput(e.target.value)}
+                onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); sendFree(); } }} />
+              <button className="btn btn-sm" style={{ background: "var(--ac)", color: "#fff" }} disabled={chatBusy || !chatInput.trim()} onClick={sendFree}>Send</button>
+            </div>
           </div>
 
           {/* Theme -> recommended PLG initiative (rooted in this theme's evidence) */}
