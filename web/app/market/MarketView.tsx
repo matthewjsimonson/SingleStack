@@ -8,8 +8,7 @@ import { useEffect, useState, useCallback } from "react";
 import { createClient } from "@/lib/supabase/client";
 import { getOrgId } from "@/lib/org";
 import { fireWorkflows } from "@/lib/triggers";
-import { Section, Chip, Banner, Confidence } from "@/components/ui";
-import PageBar from "@/components/PageBar";
+import { Section, Chip, Banner, Confidence, SubTabs } from "@/components/ui";
 import TrackingTopics from "@/components/TrackingTopics";
 import SourceManager from "@/components/SourceManager";
 
@@ -71,10 +70,9 @@ export default function MarketView() {
 
   return (
     <div>
-      <PageBar
+      <SubTabs<Tab>
         tabs={[{ key: "overview", label: "Overview" }, { key: "signals", label: "Market signals" }]}
-        active={tab}
-        onTab={(k) => setTab(k as Tab)}
+        active={tab} onChange={setTab}
       />
       <Banner>{error}</Banner>
 

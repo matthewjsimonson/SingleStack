@@ -8,8 +8,7 @@
 import { useEffect, useState, useCallback } from "react";
 import { createClient } from "@/lib/supabase/client";
 import { getOrgId } from "@/lib/org";
-import { Section, Chip, Banner, Confidence, ConfirmDialog } from "@/components/ui";
-import PageBar from "@/components/PageBar";
+import { Section, Chip, Banner, Confidence, ConfirmDialog, SubTabs } from "@/components/ui";
 import TrackingTopics from "@/components/TrackingTopics";
 import SourceManager from "@/components/SourceManager";
 import CapabilityCellDrawer, { type Cell } from "@/components/CapabilityCellDrawer";
@@ -71,10 +70,9 @@ export default function CompetitiveView() {
 
   return (
     <div>
-      <PageBar
+      <SubTabs<Tab>
         tabs={[{ key: "dashboard", label: "Dashboard" }, { key: "competitors", label: "Competitors" }, { key: "feed", label: "Signal feed" }]}
-        active={tab}
-        onTab={(k) => setTab(k as Tab)}
+        active={tab} onChange={setTab}
       />
       <Banner>{error}</Banner>
 

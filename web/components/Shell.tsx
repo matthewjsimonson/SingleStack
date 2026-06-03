@@ -91,9 +91,8 @@ export default function Shell({
   const router = useRouter();
   const pathname = usePathname();
   const supabase = createClient();
-  // Callback-ref state for the bar slots, so PageBar portals become reactive
-  // (re-render once these DOM nodes mount).
-  const [tabsSlot, setTabsSlot] = useState<HTMLElement | null>(null);
+  // Callback-ref state for the command bar's action slot, so PageBar's portal
+  // becomes reactive (re-renders once the slot mounts). Tabs are NOT in the bar.
   const [actionsSlot, setActionsSlot] = useState<HTMLElement | null>(null);
 
   async function signOut() {
@@ -175,16 +174,14 @@ export default function Shell({
               </span>
             ))}
           </div>
-          {/* Module tabs — portaled up from the page */}
-          <div ref={setTabsSlot} style={{ display: "flex", alignItems: "stretch", height: "100%", marginLeft: 10 }} />
           <div style={{ flex: 1 }} />
-          {/* Page actions — portaled up from the page */}
+          {/* Page actions — portaled up from the page (not tabs; tabs live in-page) */}
           <div ref={setActionsSlot} className="row gap-2" style={{ alignItems: "center" }} />
           {/* Advisors — the officers relevant to where you are, one click away */}
           <AgentLauncher />
         </header>
         <main style={{ flex: 1, overflowY: "auto" }}>
-          <ChromeSlots.Provider value={{ tabsSlot, actionsSlot }}>
+          <ChromeSlots.Provider value={{ actionsSlot }}>
             <div style={{ maxWidth: 1000, margin: "0 auto", width: "100%", padding: "20px 28px 64px" }}>{children}</div>
           </ChromeSlots.Provider>
         </main>

@@ -9,8 +9,7 @@ import { useRouter } from "next/navigation";
 import { createClient } from "@/lib/supabase/client";
 import { useProductScope } from "@/lib/ProductContext";
 import { templateFor } from "@/lib/templates";
-import { Section } from "@/components/ui";
-import PageBar from "@/components/PageBar";
+import { Section, SubTabs } from "@/components/ui";
 import ExecutiveRow from "@/components/ExecutiveRow";
 import InitiativeLifecycleBoard from "@/components/InitiativeLifecycleBoard";
 import ReviewDrawer from "@/components/ReviewDrawer";
@@ -111,10 +110,9 @@ export default function FoundationView() {
 
   return (
     <div>
-      <PageBar
+      <SubTabs<"home" | "initiatives">
         tabs={[{ key: "home", label: "Homepage" }, { key: "initiatives", label: "Initiatives" }]}
-        active={tab}
-        onTab={(k) => selectTab(k as "home" | "initiatives")}
+        active={tab} onChange={selectTab}
       />
 
       {tab === "initiatives" ? (
