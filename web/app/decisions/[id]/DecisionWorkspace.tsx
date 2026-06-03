@@ -11,10 +11,11 @@ import { createClient } from "@/lib/supabase/client";
 import { getOrgId } from "@/lib/org";
 import { PageHeader, Section, Chip, Banner, BackLink, Spinner } from "@/components/ui";
 import { useAgentRun, AgentProgress } from "@/components/AgentProgress";
+import { spawnInitiative } from "@/lib/routing";
 
 type Decision = {
   id: string; title: string; question: string | null; status: string; scope: string;
-  theme_id: string | null; chosen_option_id: string | null; rationale: string | null; owner: string | null; product_id: string | null;
+  theme_id: string | null; chosen_option_id: string | null; rationale: string | null; owner: string | null; product_id: string | null; gtm_record_id: string | null;
 };
 type Option = { id: string; title: string; detail: string | null; tradeoffs: string | null; recommended: boolean; position: number };
 type Evidence = { id: string; theme_id: string | null; signal_id: string | null; label: string };
@@ -35,7 +36,7 @@ export default function DecisionWorkspace({ id }: { id: string }) {
 
   const load = useCallback(async () => {
     const { data: dec, error: dErr } = await supabase.from("decisions")
-      .select("id, title, question, status, scope, theme_id, chosen_option_id, rationale, owner, product_id").eq("id", id).single();
+      .select("id, title, question, status, scope, theme_id, chosen_option_id, rationale, owner, product_id, gtm_record_id").eq("id", id).single();
     if (dErr) setError(dErr.message);
     setD(dec ?? null);
     setRationale(dec?.rationale ?? "");
@@ -96,26 +97,26 @@ export default function DecisionWorkspace({ id }: { id: string }) {
     try {
       const orgId = await getOrgId(); if (!orgId) throw new Error("Could not resolve your organization.");
       const chosen = options.find((o) => o.id === d.chosen_option_id);
-      // Spawn an initiative carrying the decision's intent — lands in Plan on
-      // the cross-functional board; its build/GTM tasks execute from there.
-      const { data: item, error: iErr } = await supabase.from("initiatives").insert({
-        org_id: orgId, lane: "ship", title: chosen?.title || d.title, lifecycle: "plan", scope: "product", stage: "active",
-        priority: "medium", product_id: d.product_id, decision_id: d.id,
-      }).select("id").single();
-      if (iErr) throw iErr;
-      // Pre-fill the Why from the decision + chosen option + evidence.
       const evidenceText = evidence.map((e) => `• ${e.label}`).join("\n");
-      const whyFields = [
-        { field_key: "hypothesis", label: "Hypothesis", section: "Why", value: chosen?.detail || d.title, position: 0 },
-        { field_key: "problem", label: "Problem / opportunity", section: "Why", value: d.question || null, position: 1 },
-        { field_key: "evidence", label: "Evidence", section: "Why", value: evidenceText || `From decision: ${d.title}`, position: 3 },
-      ].filter((f) => f.value);
-      await supabase.from("initiative_fields").insert(whyFields.map((f) => ({ org_id: orgId, initiative_id: item.id, ...f })));
-      // Carry the decision's evidence signals onto the build item.
-      const sigIds = evidence.filter((e) => e.signal_id).map((e) => e.signal_id);
-      if (sigIds.length) await supabase.from("initiative_signals").insert(sigIds.map((sid) => ({ org_id: orgId, initiative_id: item.id, signal_id: sid })));
+      // Spawn a cross-functional initiative carrying the decision's intent — and
+      // SEED a real Build task so it lands on the Ship board and the lifecycle
+      // rollup can actually fire. (GTM-scoped decisions seed a GTM task.)
+      const area: "build" | "gtm" = d.scope === "gtm" ? "gtm" : "build";
+      const initId = await spawnInitiative(supabase, orgId, {
+        title: chosen?.title || d.title,
+        scope: d.scope === "gtm" ? "gtm" : "product",
+        lifecycle: "plan", priority: "medium",
+        productId: d.product_id, gtmRecordId: d.gtm_record_id, decisionId: d.id,
+        signalIds: evidence.filter((e) => e.signal_id).map((e) => e.signal_id as string),
+        tasks: [{ area, title: chosen?.title || d.title }],
+        fields: [
+          { field_key: "hypothesis", label: "Hypothesis", section: "Why", value: chosen?.detail || d.title },
+          { field_key: "problem", label: "Problem / opportunity", section: "Why", value: d.question || null },
+          { field_key: "evidence", label: "Evidence", section: "Why", value: evidenceText || `From decision: ${d.title}` },
+        ],
+      });
       await supabase.from("decisions").update({ status: "routed" }).eq("id", id);
-      router.push(`/ship/${item.id}`);
+      router.push(`/initiatives/${initId}`);
     } catch (e) { setError(e instanceof Error ? e.message : "Could not route to Ship."); setRouting(false); }
   }
 
