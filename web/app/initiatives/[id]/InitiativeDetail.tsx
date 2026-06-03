@@ -1,24 +1,26 @@
 "use client";
 
-// Build Item cockpit — TABBED by workflow step, not one long scroll. The build
-// workflow starts at PLAN (Signal lives upstream in Product Strategy); if it's
-// here, it's approved. Each tab is a DISTINCT step with its own job:
-//   Plan    → define the Product Scope (what/why) — the spec
-//   Build   → Technical Scope (context bundle, agent brief, readiness) + tasks
-//   Launch  → take it to market (GTM tasks) — only when there's GTM scope
-//   Live    → measure the outcome (Proof)
-//   Advisors→ officer analyses, compact (one column)
-// Status is DERIVED from real progress (scope %, readiness, build_state) — never
-// asserted. An item with no scope reads "Not started", not "Build".
+// Build Item cockpit — the BUILD (product) workflow, the SAME stages as the Ship
+// board: Scoped → Ready for agent → In build → Shipped. The status shown here is
+// the SAME derived stage that places the card on Ship (deriveBuildStage), so the
+// board and this page can never disagree. Each stage is a distinct step with its
+// own work, and the work carries forward:
+//   Scoped          → Product Scope (the spec)
+//   Ready for agent → Technical Scope (context bundle + readiness gate)
+//   In build        → build tasks + the agent brief handoff
+//   Shipped         → release + proof of outcome
+// Pure-GTM work is NOT here — it lives in the GTM area. (+ an Advisors tab.)
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useSearchParams } from "next/navigation";
 import { createClient } from "@/lib/supabase/client";
 import { getOrgId } from "@/lib/org";
-import { Chip, Banner, BackLink, Spinner, SubTabs } from "@/components/ui";
+import { Chip, Banner, BackLink, Spinner, SubTabs, Modal } from "@/components/ui";
 import PlaysPanel, { type PlayDef } from "@/components/PlaysPanel";
 import BuildScope from "@/components/BuildScope";
 import TechnicalScope from "@/components/TechnicalScope";
 import { BUILD_TEMPLATE } from "@/lib/templates";
+import { BUILD_STAGES, STAGE_LABEL, buildReadiness, deriveBuildStage, type BuildStage } from "@/lib/buildStage";
+import { buildAgentBrief, BUILD_KIND_LABEL } from "@/lib/agentBrief";
 
 const INITIATIVE_PLAYS: PlayDef[] = [
   { key: "initiative_review", label: "Initiative review", officer: "CPO", tone: "accent" },
@@ -30,27 +32,32 @@ type Initiative = { id: string; title: string; description: string | null; scope
 type Task = { id: string; area: string; title: string; stage: string; assignee_id: string | null };
 type Person = { id: string; name: string };
 type Field = { field_key: string; value: string | null };
-type Link = { kind: string };
+type Link = { kind: string; ref_table: string | null; path: string | null; label: string | null; note: string | null };
+type Release = { id: string; name: string; version: string | null };
 
-const KIND_LABEL: Record<string, string> = { bugfix: "Fix", enhancement: "Enhancement", feature: "New Feature", module: "New Module", product: "Product" };
 const SCOPE_KEYS = BUILD_TEMPLATE.flatMap((s) => s.fields.map((f) => f.key));
 const TASK_NEXT: Record<string, string> = { backlog: "active", active: "done" };
+const STAGE_TONE: Record<BuildStage, "amber" | "accent" | "green"> = { scoped: "amber", ready_for_agent: "accent", in_build: "accent", shipped: "green" };
 
 export default function InitiativeDetail({ id }: { id: string }) {
   const supabase = createClient();
   const params = useSearchParams();
-  const fromShip = params.get("from") === "ship";
+  const from = params.get("from"); // ship | enablement | (none)
+  const back = from === "ship" ? { href: "/ship", label: "Ship" } : from === "enablement" ? { href: "/enablement", label: "Go-to-market" } : { href: "/?tab=initiatives", label: "Initiatives" };
 
   const [ini, setIni] = useState<Initiative | null>(null);
   const [tasks, setTasks] = useState<Task[]>([]);
   const [people, setPeople] = useState<Person[]>([]);
   const [fields, setFields] = useState<Field[]>([]);
   const [links, setLinks] = useState<Link[]>([]);
+  const [release, setRelease] = useState<Release | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  const [tab, setTab] = useState<string>("plan");
-  const tabPinned = useRef(false); // don't override the user's tab choice on reload
+  const [tab, setTab] = useState<string>("scoped");
+  const tabPinned = useRef(false);
   const [newTask, setNewTask] = useState("");
+  const [brief, setBrief] = useState(false);
+  const [copied, setCopied] = useState(false);
 
   const load = useCallback(async () => {
     const [{ data: i }, { data: w }, { data: p }, { data: fl }, { data: lk }] = await Promise.all([
@@ -58,9 +65,11 @@ export default function InitiativeDetail({ id }: { id: string }) {
       supabase.from("initiative_workstreams").select("id, area, title, stage, assignee_id").eq("initiative_id", id),
       supabase.from("people").select("id, name").eq("is_active", true).order("name"),
       supabase.from("initiative_fields").select("field_key, value").eq("initiative_id", id),
-      supabase.from("build_context_links").select("kind").eq("initiative_id", id),
+      supabase.from("build_context_links").select("kind, ref_table, path, label, note").eq("initiative_id", id),
     ]);
     setIni(i as Initiative | null); setTasks((w ?? []) as Task[]); setPeople(p ?? []); setFields((fl ?? []) as Field[]); setLinks((lk ?? []) as Link[]);
+    const relId = (i as Initiative | null)?.release_id;
+    if (relId) { const { data: r } = await supabase.from("releases").select("id, name, version").eq("id", relId).maybeSingle(); setRelease(r as Release | null); } else setRelease(null);
     setLoading(false);
   }, [supabase, id]);
   useEffect(() => { load(); }, [load]);
@@ -70,113 +79,115 @@ export default function InitiativeDetail({ id }: { id: string }) {
 
   const ownerName = (pid: string | null) => people.find((p) => p.id === pid)?.name ?? null;
   const fv = new Map(fields.map((f) => [f.field_key, (f.value ?? "").trim()]));
+  const buildTasks = tasks.filter((t) => t.area === "build");
+  const { ready } = buildReadiness(fv, links);
+  const stage = deriveBuildStage({ buildState: ini.build_state, ready, buildTasks });
   const scopePct = Math.round((SCOPE_KEYS.filter((k) => fv.get(k)).length / SCOPE_KEYS.length) * 100);
-  const ready = links.length > 0 && links.some((l) => l.kind === "skill_ref") && !!fv.get("acceptance_criteria") && !!fv.get("test_approach");
-  const hasGtm = ini.scope === "gtm" || ini.scope === "both";
+  const relLabel = release ? (release.version ? `${release.version} · ${release.name}` : release.name) : null;
 
-  // Honest status, derived from real progress — never asserted.
-  const status = ((): { label: string; tone: "default" | "accent" | "violet" | "green" | "amber"; tab: string } => {
-    switch (ini.build_state) {
-      case "shipped": return { label: "Shipped", tone: "green", tab: "live" };
-      case "in_build": return { label: "In build", tone: "accent", tab: "build" };
-      case "ready_for_agent": return { label: "Ready for agent", tone: "green", tab: "build" };
-    }
-    if (scopePct === 0) return { label: "Not started", tone: "amber", tab: "plan" };
-    if (scopePct < 100) return { label: `Planning · scope ${scopePct}%`, tone: "amber", tab: "plan" };
-    return { label: "Scoped — ready to build", tone: "accent", tab: "build" };
-  })();
+  // Default the tab to the current stage, once.
+  if (!tabPinned.current) { tabPinned.current = true; setTab(stage); }
 
-  // Default the active tab to the honest current step, once.
-  if (!tabPinned.current) { tabPinned.current = true; setTab(status.tab); }
+  const tabs = [...BUILD_STAGES.map((s) => ({ key: s.key, label: s.label })), { key: "advisors", label: "Advisors" }];
+  const stageRank = (k: string) => BUILD_STAGES.findIndex((s) => s.key === k);
+  const curRank = stageRank(stage);
 
-  const tabs = [
-    { key: "plan", label: "Plan" },
-    { key: "build", label: "Build" },
-    ...(hasGtm ? [{ key: "launch", label: "Launch" }] : []),
-    { key: "live", label: "Live" },
-    { key: "advisors", label: "Advisors" },
-  ];
-
-  async function patchTask(t: Task, stage: string) {
+  async function patchTask(t: Task, st: string) {
     setError(null);
-    const { error } = await supabase.from("initiative_workstreams").update({ stage }).eq("id", t.id);
+    const { error } = await supabase.from("initiative_workstreams").update({ stage: st }).eq("id", t.id);
     if (error) { setError(error.message); return; }
     await load();
   }
-  async function addTask(area: "build" | "gtm") {
+  async function addTask() {
     if (!newTask.trim()) return;
     setError(null);
     const orgId = await getOrgId(); if (!orgId) { setError("Could not resolve your organization."); return; }
-    const { error } = await supabase.from("initiative_workstreams").insert({ org_id: orgId, initiative_id: id, area, lifecycle_stage: "build", title: newTask.trim(), stage: "backlog" });
+    const { error } = await supabase.from("initiative_workstreams").insert({ org_id: orgId, initiative_id: id, area: "build", lifecycle_stage: "build", title: newTask.trim(), stage: "backlog" });
     if (error) { setError(error.message); return; }
     setNewTask(""); await load();
   }
+  async function markShipped() {
+    setError(null);
+    const { error } = await supabase.from("initiatives").update({ build_state: "shipped" }).eq("id", id);
+    if (error) { setError(error.message); return; }
+    await load();
+  }
+
+  const briefText = buildAgentBrief({ title: ini.title, kind: ini.kind, releaseLabel: relLabel, fields: fv, links });
 
   return (
     <div>
-      <BackLink href={fromShip ? "/ship" : "/?tab=initiatives"} label={fromShip ? "Ship" : "Initiatives"} />
+      <BackLink href={back.href} label={back.label} />
       <div className="row gap-2" style={{ marginBottom: 4, flexWrap: "wrap", alignItems: "center" }}>
-        {ini.kind && <Chip>{KIND_LABEL[ini.kind] ?? ini.kind}</Chip>}
-        <Chip tone={status.tone}>{status.label}</Chip>
+        {ini.kind && <Chip>{BUILD_KIND_LABEL[ini.kind] ?? ini.kind}</Chip>}
+        <Chip tone={STAGE_TONE[stage]}>{STAGE_LABEL[stage]}</Chip>
         {ownerName(ini.assignee_id) ? <Chip tone="green">{ownerName(ini.assignee_id)}</Chip> : <Chip tone="amber">unowned</Chip>}
+        {relLabel && <Chip tone="violet">{relLabel}</Chip>}
         {ini.is_unevidenced && <span title="Scope entered manually with no linked Signal evidence."><Chip tone="amber">⚠ no evidence</Chip></span>}
       </div>
       <h1 className="t-page" style={{ marginBottom: 4 }}>{ini.title}</h1>
-      {ini.description && <div className="t-sub t-muted" style={{ marginBottom: "var(--sp-5)", maxWidth: 720 }}>{ini.description}</div>}
-      <Banner>{error}</Banner>
+      {ini.description && <div className="t-sub t-muted" style={{ marginBottom: "var(--sp-4)", maxWidth: 720 }}>{ini.description}</div>}
 
+      {/* stage rail — where this Build Item actually is */}
+      <div className="row" style={{ gap: 0, flexWrap: "wrap", marginBottom: "var(--sp-5)" }}>
+        {BUILD_STAGES.map((s, idx) => {
+          const state = idx < curRank ? "done" : idx === curRank ? "cur" : "todo";
+          return (
+            <div key={s.key} className="row" style={{ alignItems: "center", gap: 0 }}>
+              <div style={{ display: "flex", flexDirection: "column", alignItems: "center", padding: "0 8px" }}>
+                <span style={{ width: 24, height: 24, borderRadius: 999, display: "inline-flex", alignItems: "center", justifyContent: "center", fontSize: 11, fontWeight: 700, background: state === "cur" ? "var(--ac)" : state === "done" ? "var(--gn)" : "var(--fill-2)", color: state === "todo" ? "var(--tm)" : "#fff" }}>{state === "done" ? "✓" : idx + 1}</span>
+                <span className="t-mono-xs" style={{ marginTop: 4, fontWeight: state === "cur" ? 700 : 400, color: state === "cur" ? "var(--tp)" : "var(--tm)" }}>{s.label}</span>
+              </div>
+              {idx < BUILD_STAGES.length - 1 && <span style={{ width: 22, height: 2, background: idx < curRank ? "var(--gn)" : "var(--border)" }} />}
+            </div>
+          );
+        })}
+      </div>
+
+      <Banner>{error}</Banner>
       <SubTabs tabs={tabs} active={tab} onChange={setTab} />
 
-      {tab === "plan" && (
-        <StepIntro title="Plan — define what you're building"
-          body="Capture the Why / What / How / Proof. A complete scope is what makes this buildable; fill it in to move to Build." />
-      )}
-      {tab === "plan" && <BuildScope initiativeId={ini.id} />}
+      {tab === "scoped" && (<>
+        <StepIntro title="Scope — define what we're building" body="Capture the Why / What / How / Proof. This is the spec everything downstream carries forward." />
+        <BuildScope initiativeId={ini.id} />
+      </>)}
 
-      {tab === "build" && (
-        <StepIntro title="Build — get it agent-ready, then build it"
-          body="Assemble the Technical Scope — the context bundle and prompt a coding agent needs. When the readiness checks pass, hand off the build brief from Ship." />
-      )}
-      {tab === "build" && (
-        <>
-          <TechnicalScope initiativeId={ini.id} />
-          <TaskList area="build" title="Build tasks" tasks={tasks.filter((t) => t.area === "build")} ownerName={ownerName}
-            onAdvance={patchTask} value={newTask} setValue={setNewTask} onAdd={() => addTask("build")} />
-        </>
-      )}
+      {tab === "ready_for_agent" && (<>
+        <StepIntro title="Ready for agent — make it buildable" body={`Assemble the Technical Scope: the context bundle and prompt a coding agent needs. Scope is ${scopePct}% captured — it carries in from the previous step.`} />
+        <TechnicalScope initiativeId={ini.id} />
+      </>)}
 
-      {tab === "launch" && (
-        <>
-          <StepIntro title="Launch — take it to market"
-            body="The GTM work that ships alongside the build: messaging, content, enablement." />
-          <TaskList area="gtm" title="GTM tasks" tasks={tasks.filter((t) => t.area === "gtm")} ownerName={ownerName}
-            onAdvance={patchTask} value={newTask} setValue={setNewTask} onAdd={() => addTask("gtm")} />
-        </>
-      )}
+      {tab === "in_build" && (<>
+        <StepIntro title="In build — execute" body="Break the work into tasks and hand the agent its brief. The scope and context bundle carry forward into the brief." />
+        <div className="row gap-2" style={{ marginBottom: "var(--sp-4)" }}>
+          <button className="btn" disabled={!ready} title={ready ? "Assemble the coding-agent handoff" : "Finish the Technical Scope first"} onClick={() => { setBrief(true); setCopied(false); }}>Agent brief</button>
+          {stage === "in_build" && <button className="btn btn-secondary" onClick={markShipped}>Mark shipped →</button>}
+        </div>
+        <TaskList tasks={buildTasks} ownerName={ownerName} onAdvance={patchTask} value={newTask} setValue={setNewTask} onAdd={addTask} />
+      </>)}
 
-      {tab === "live" && (
-        <>
-          <StepIntro title="Live — measure the outcome"
-            body="The proof this worked. Pulled from the Proof section of your scope." />
-          <div className="card" style={{ overflow: "hidden" }}>
-            {[["success_metric", "Success metric"], ["validation", "Validation plan"]].map(([k, label], i) => (
-              <div key={k} style={{ padding: "14px 18px", borderTop: i === 0 ? "none" : "1px solid var(--border)" }}>
-                <div className="t-h2" style={{ fontSize: 13, fontWeight: 620, marginBottom: 4 }}>{label}</div>
-                {fv.get(k) ? <div className="t-body" style={{ lineHeight: 1.6, whiteSpace: "pre-wrap" }}>{fv.get(k)}</div>
-                  : <div className="t-sub t-muted" style={{ fontSize: 12.5 }}>Not defined yet — add it in the Plan step (Proof).</div>}
-              </div>
-            ))}
-          </div>
-        </>
-      )}
+      {tab === "shipped" && (<>
+        <StepIntro title="Shipped — the outcome" body="The release this shipped in, and the proof it worked." />
+        <div className="card" style={{ overflow: "hidden" }}>
+          <Row label="Release" value={relLabel ?? null} empty="Not tagged to a release yet — set one when you tag the work." />
+          <Row label="Success metric" value={fv.get("success_metric") ?? null} empty="Define it in Scope → Proof." />
+          <Row label="Validation plan" value={fv.get("validation") ?? null} empty="Define it in Scope → Proof." />
+        </div>
+        {stage !== "shipped" && <div className="t-sub t-muted" style={{ fontSize: 12.5, marginTop: 10 }}>Not shipped yet — finish the build in the “In build” step.</div>}
+      </>)}
 
-      {tab === "advisors" && (
-        <>
-          <StepIntro title="Advisors — the officers' read on this Build Item"
-            body="Each officer runs their own analysis — same evidence, different lens. Review, edit, ratify." />
-          <PlaysPanel targetType="initiative" targetId={ini.id} targetName={ini.title} plays={INITIATIVE_PLAYS} heading="Officer analyses" columns={1} />
-        </>
-      )}
+      {tab === "advisors" && (<>
+        <StepIntro title="Advisors — the officers' read" body="Each officer runs their own analysis — same evidence, different lens. Review, edit, ratify." />
+        <PlaysPanel targetType="initiative" targetId={ini.id} targetName={ini.title} plays={INITIATIVE_PLAYS} heading="Officer analyses" columns={1} />
+      </>)}
+
+      <Modal open={brief} onClose={() => setBrief(false)} title={`Agent brief — ${ini.title}`} width={680}>
+        <div className="row-between" style={{ marginBottom: 12, alignItems: "center" }}>
+          <span className="t-sub t-muted" style={{ fontSize: 12.5 }}>The executable handoff: scope, acceptance criteria, and the context bundle.</span>
+          <button className="btn btn-sm" onClick={() => { navigator.clipboard?.writeText(briefText); setCopied(true); setTimeout(() => setCopied(false), 2000); }}>{copied ? "Copied ✓" : "Copy"}</button>
+        </div>
+        <pre style={{ whiteSpace: "pre-wrap", fontSize: 12.5, lineHeight: 1.55, background: "var(--fill-2)", border: "1px solid var(--border)", borderRadius: 8, padding: 14, maxHeight: "55vh", overflowY: "auto", fontFamily: "var(--mono, monospace)" }}>{briefText}</pre>
+      </Modal>
     </div>
   );
 }
@@ -190,16 +201,24 @@ function StepIntro({ title, body }: { title: string; body: string }) {
   );
 }
 
-function TaskList({ area, title, tasks, ownerName, onAdvance, value, setValue, onAdd }: {
-  area: "build" | "gtm"; title: string; tasks: Task[]; ownerName: (id: string | null) => string | null;
+function Row({ label, value, empty }: { label: string; value: string | null; empty: string }) {
+  return (
+    <div style={{ padding: "14px 18px", borderTop: "1px solid var(--border)" }}>
+      <div className="t-h2" style={{ fontSize: 13, fontWeight: 620, marginBottom: 4 }}>{label}</div>
+      {value ? <div className="t-body" style={{ lineHeight: 1.6, whiteSpace: "pre-wrap" }}>{value}</div> : <div className="t-sub t-muted" style={{ fontSize: 12.5 }}>{empty}</div>}
+    </div>
+  );
+}
+
+function TaskList({ tasks, ownerName, onAdvance, value, setValue, onAdd }: {
+  tasks: Task[]; ownerName: (id: string | null) => string | null;
   onAdvance: (t: Task, stage: string) => void; value: string; setValue: (v: string) => void; onAdd: () => void;
 }) {
-  const tone = area === "build" ? "accent" : "violet";
   return (
-    <section className="section" style={{ marginTop: "var(--sp-5)" }}>
-      <div className="section-head"><span className="row gap-2"><span className="t-h2" style={{ fontSize: 14.5 }}>{title}</span><span className="chip">{tasks.length}</span></span></div>
+    <section className="section">
+      <div className="section-head"><span className="row gap-2"><span className="t-h2" style={{ fontSize: 14.5 }}>Build tasks</span><span className="chip">{tasks.length}</span></span></div>
       <div className="card" style={{ overflow: "hidden" }}>
-        {tasks.length === 0 && <div style={{ padding: "14px 18px" }} className="t-sub t-muted">No tasks yet. Break the work into steps below.</div>}
+        {tasks.length === 0 && <div style={{ padding: "14px 18px" }} className="t-sub t-muted">No tasks yet. Break the build into steps below.</div>}
         {tasks.map((t, i) => (
           <div key={t.id} className="row-between" style={{ padding: "10px 16px", borderTop: i === 0 ? "none" : "1px solid var(--border)", alignItems: "center", gap: 8 }}>
             <div className="row gap-2" style={{ alignItems: "center", minWidth: 0 }}>
@@ -215,7 +234,7 @@ function TaskList({ area, title, tasks, ownerName, onAdvance, value, setValue, o
           </div>
         ))}
         <div className="row gap-2" style={{ padding: "10px 16px", borderTop: "1px solid var(--border)" }}>
-          <input className="input" placeholder={area === "build" ? "Add a build task…" : "Add a GTM task…"} value={value} onChange={(e) => setValue(e.target.value)} onKeyDown={(e) => { if (e.key === "Enter") onAdd(); }} style={{ flex: 1, borderColor: `var(--${tone === "accent" ? "ac" : "vl"})` }} />
+          <input className="input" placeholder="Add a build task…" value={value} onChange={(e) => setValue(e.target.value)} onKeyDown={(e) => { if (e.key === "Enter") onAdd(); }} style={{ flex: 1 }} />
           <button className="btn btn-sm" onClick={onAdd}>Add</button>
         </div>
       </div>
