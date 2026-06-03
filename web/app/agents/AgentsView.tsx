@@ -7,6 +7,7 @@ import { getOrgId } from "@/lib/org";
 import { Chip, Banner, Empty } from "@/components/ui";
 import PageBar from "@/components/PageBar";
 import RosterReview from "@/components/RosterReview";
+import PlaysManager from "@/components/PlaysManager";
 
 type Agent = { id: string; key: string; name: string; role: string | null; model: string | null; system_prompt: string | null; is_active: boolean };
 type Align = { agent_id: string; initiative_id: string | null; workstream_id: string | null };
@@ -71,6 +72,7 @@ export default function AgentsView() {
       <PageBar actions={editing === null ? <button className="btn btn-sm" onClick={startNew}>+ New agent</button> : undefined} />
 
       {editing === null && <div style={{ marginBottom: "var(--sp-6)" }}><RosterReview onChanged={load} /></div>}
+      {editing === null && <div style={{ marginBottom: "var(--sp-6)" }}><PlaysManager /></div>}
 
       {/* Coverage — is the roster actually pointed at the work? */}
       {editing === null && inits.length > 0 && (

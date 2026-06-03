@@ -109,13 +109,24 @@ Deno.serve(async (req: Request) => {
   if (target_type !== "competitor") return json({ error: "v1 supports target_type 'competitor' only" }, 400);
   if (!target_id) return json({ error: "target_id is required" }, 400);
 
-  const play = PLAYS[function_key];
+  const def = PLAYS[function_key];
 
-  // The officer that runs this Play (its lens).
-  const { data: agent, error: aErr } = await supabase
-    .from("agents").select("id, org_id, name, role, model, system_prompt").eq("key", play.agent_key).eq("is_active", true).maybeSingle();
+  // Org config override (visible + editable in the Plays UI). Falls back to the
+  // code default when no row exists — existing orgs work with zero seeding.
+  const { data: cfg } = await supabase.from("plays").select("label, agent_id, focus, sections, is_active").eq("key", function_key).maybeSingle();
+  if (cfg && cfg.is_active === false) return json({ error: `the "${def.label}" play is turned off` }, 400);
+  const play = {
+    label: cfg?.label || def.label,
+    focus: cfg?.focus || def.focus,
+    sections_hint: cfg?.sections || def.sections_hint,
+  };
+
+  // The officer that runs this Play — the configured agent, else the default key.
+  let agentQ = supabase.from("agents").select("id, org_id, name, role, model, system_prompt").eq("is_active", true);
+  agentQ = cfg?.agent_id ? agentQ.eq("id", cfg.agent_id) : agentQ.eq("key", def.agent_key);
+  const { data: agent, error: aErr } = await agentQ.maybeSingle();
   if (aErr) return json({ error: `agent lookup failed: ${aErr.message}` }, 500);
-  if (!agent) return json({ error: `the officer for this Play (${play.agent_key}) isn't active` }, 404);
+  if (!agent) return json({ error: `the officer for the "${def.label}" play isn't active` }, 404);
 
   const model = (agent.model as string) || DEFAULT_MODEL;
   const orgId = agent.org_id as string;
