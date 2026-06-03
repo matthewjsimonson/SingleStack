@@ -26,16 +26,17 @@ const TRIGGER_LABEL: Record<string, string> = { on_release: "On release", on_cap
 
 // The brief handed to the officer — carries the event so the draft is grounded.
 function instructionFor(trigger: string, ctx: Ctx): string {
+  const label = ctx.label ?? "the event";
   const why = ctx.why ? ` Context: ${ctx.why}` : "";
   switch (trigger) {
     case "on_signal":
-      return `A new signal just landed: “${ctx.label}”.${why} Review this record against it and propose changes only if genuinely warranted — prefer restraint.`;
+      return `A new signal just landed: “${label}”.${why} Review this record against it and propose changes only if genuinely warranted — prefer restraint.`;
     case "on_capability_update":
-      return `A new frontier capability just landed: “${ctx.label}”.${why} Propose how this record should respond — what becomes newly possible, what to sharpen — only if warranted.`;
+      return `A new frontier capability just landed: “${label}”.${why} Propose how this record should respond — what becomes newly possible, what to sharpen — only if warranted.`;
     case "on_release":
-      return `“${ctx.label}” just shipped.${why} Propose the go-to-market follow-through for this record, only if warranted.`;
+      return `“${label}” just shipped.${why} Propose the go-to-market follow-through for this record, only if warranted.`;
     default:
-      return `Event: “${ctx.label}”.${why} Propose a response only if warranted.`;
+      return `Event: “${label}”.${why} Propose a response only if warranted.`;
   }
 }
 

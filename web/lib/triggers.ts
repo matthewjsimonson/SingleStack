@@ -79,7 +79,10 @@ export async function fireWorkflows(
   if (rows.length === 0) return 0;
 
   const { error } = await supabase.from("workflow_runs").insert(rows);
-  if (error) return 0;
+  // Firing is best-effort: it must never fail the user action that triggered it
+  // (logging a signal, shipping a release). Surface failures to the console so
+  // they're debuggable rather than wholly invisible.
+  if (error) { console.warn("fireWorkflows: could not enqueue workflow runs", error); return 0; }
   // Stamp last_run_at on the workflows that fired (first writer of this column).
   await supabase
     .from("workflows")
