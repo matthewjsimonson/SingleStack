@@ -6,7 +6,6 @@ import { createClient } from "@/lib/supabase/client";
 import { getOrgId } from "@/lib/org";
 import { PageHeader, Chip, Banner, Empty } from "@/components/ui";
 import RosterReview from "@/components/RosterReview";
-import WorkflowRunsReview from "@/components/WorkflowRunsReview";
 
 type Agent = { id: string; key: string; name: string; role: string | null; model: string | null; system_prompt: string | null; is_active: boolean };
 type Align = { agent_id: string; initiative_id: string | null; workstream_id: string | null };
@@ -74,7 +73,6 @@ export default function AgentsView() {
         actions={editing === null ? <button className="btn" onClick={startNew}>+ New agent</button> : undefined}
       />
 
-      {editing === null && <div style={{ marginBottom: "var(--sp-6)" }}><WorkflowRunsReview /></div>}
       {editing === null && <div style={{ marginBottom: "var(--sp-6)" }}><RosterReview onChanged={load} /></div>}
 
       {/* Coverage — is the roster actually pointed at the work? */}

@@ -9,6 +9,7 @@ import { createClient } from "@/lib/supabase/client";
 import { getOrgId } from "@/lib/org";
 import { PageHeader, Section, Chip, Banner, BackLink, Empty, Confidence } from "@/components/ui";
 import SourceManager from "@/components/SourceManager";
+import CompetitivePlays from "@/components/CompetitivePlays";
 
 type Competitor = { id: string; name: string; relationship: string; website: string | null; notes: string | null };
 type Card = { id: string; kind: string; title: string; detail: string | null };
@@ -72,6 +73,9 @@ export default function CompetitorDetail({ competitorId }: { competitorId: strin
           <div className="card card-pad t-body" style={{ lineHeight: 1.6 }}>{comp.notes || <span className="t-muted">No overview yet. Click Edit to add one.</span>}</div>
         )}
       </Section>
+
+      {/* The four officers each analyze this competitor through their own lens */}
+      <CompetitivePlays competitorId={competitorId} competitorName={comp.name} />
 
       {/* This competitor's sources (inline, scoped to them) */}
       <SourceManager scope={{ competitorId }} title={`${comp.name} sources`} />
