@@ -113,7 +113,11 @@ export default function WorkstreamBoard({ area, title, meta }: { area: "build" |
                     const ini = iniOf(t.initiative_id);
                     return (
                       <div key={t.id} className="card card-pad" style={{ borderLeft: `3px solid var(--${area === "build" ? "ac" : "vl"})` }}>
-                        <div style={{ fontSize: 13.5, fontWeight: 620, marginBottom: 6 }}>{t.title}</div>
+                        {ini ? (
+                          <a href={`/initiatives/${ini.id}`} title="Open Build Item — scope, technical bundle, readiness" style={{ display: "block", fontSize: 13.5, fontWeight: 620, marginBottom: 6, color: "var(--tp)", textDecoration: "none" }} onMouseEnter={(e) => (e.currentTarget.style.textDecoration = "underline")} onMouseLeave={(e) => (e.currentTarget.style.textDecoration = "none")}>{t.title}</a>
+                        ) : (
+                          <div style={{ fontSize: 13.5, fontWeight: 620, marginBottom: 6 }}>{t.title}</div>
+                        )}
                         {area === "gtm" && t.content_type && <div style={{ marginBottom: 6 }}><Chip tone="violet">{CONTENT_LABEL[t.content_type] ?? t.content_type}</Chip></div>}
                         <div className="row gap-2" style={{ alignItems: "center" }}>
                           <select className="select" value={t.assignee_id ?? ""} onChange={(e) => patch(t, { assignee_id: e.target.value || null })} style={{ flex: 1, fontSize: 12, padding: "4px 8px" }}>
