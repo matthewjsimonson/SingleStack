@@ -8,12 +8,14 @@ import { useCallback, useEffect, useState } from "react";
 import { createClient } from "@/lib/supabase/client";
 import { getOrgId } from "@/lib/org";
 import { Section, Chip, Banner, Empty, AgentBadge } from "@/components/ui";
+import { SURFACES, placementStatus } from "@/lib/surfaces";
 
 type Agent = { id: string; key: string; name: string };
 type Skill = { id: string; name: string; description: string | null; category: string | null; instructions: string | null };
-type Play = { id: string; key: string; label: string; description: string | null };
+type Play = { id: string; key: string; label: string; description: string | null; target_type: string | null };
 type PA = { play_id: string; agent_id: string };
 type PS = { id: string; play_id: string; agent_id: string; skill_id: string };
+type Placement = { play_id: string; surface_key: string };
 
 // The built-in analyses are plays too — seed them so this surface is the single
 // home for every play (authored + built-in). run-play reads the same rows.
@@ -34,6 +36,7 @@ export default function PlaysView() {
   const [skills, setSkills] = useState<Skill[]>([]);
   const [playAgents, setPlayAgents] = useState<PA[]>([]);
   const [playSkills, setPlaySkills] = useState<PS[]>([]);
+  const [placements, setPlacements] = useState<Placement[]>([]);
   const [cornerstones, setCornerstones] = useState<Record<string, Set<string>>>({}); // agent_id → cornerstone skill_ids
   const [active, setActive] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -45,14 +48,16 @@ export default function PlaysView() {
   const [descDraft, setDescDraft] = useState("");
 
   const load = useCallback(async () => {
-    const [{ data: pl }, { data: ag }, { data: sk }, { data: pa }, { data: ps }, { data: as }] = await Promise.all([
-      supabase.from("plays").select("id, key, label, description").order("created_at"),
+    const [{ data: pl }, { data: ag }, { data: sk }, { data: pa }, { data: ps }, { data: as }, { data: pp }] = await Promise.all([
+      supabase.from("plays").select("id, key, label, description, target_type").order("created_at"),
       supabase.from("agents").select("id, key, name").eq("is_active", true).order("name"),
       supabase.from("skills").select("id, name, description, category, instructions").order("name"),
       supabase.from("play_agents").select("play_id, agent_id"),
       supabase.from("play_skills").select("id, play_id, agent_id, skill_id"),
       supabase.from("agent_skills").select("agent_id, skill_id, is_cornerstone"),
+      supabase.from("play_placements").select("play_id, surface_key"),
     ]);
+    setPlacements(pp ?? []);
     const agentList = ag ?? [];
     // Seed any missing built-in plays so the surface is the single home.
     const have = new Set((pl ?? []).map((p) => p.key));
@@ -65,7 +70,7 @@ export default function PlaysView() {
           const { data: row } = await supabase.from("plays").insert({ org_id: orgId, key: b.key, label: b.label, description: b.description, agent_id: officer?.id ?? null, target_type: b.target }).select("id").maybeSingle();
           if (row && officer) await supabase.from("play_agents").insert({ org_id: orgId, play_id: row.id, agent_id: officer.id });
         }
-        const { data: pl2 } = await supabase.from("plays").select("id, key, label, description").order("created_at");
+        const { data: pl2 } = await supabase.from("plays").select("id, key, label, description, target_type").order("created_at");
         const { data: pa2 } = await supabase.from("play_agents").select("play_id, agent_id");
         setPlays(pl2 ?? []); setPlayAgents(pa2 ?? []);
       }
@@ -119,6 +124,19 @@ export default function PlaysView() {
     await load();
   }
   async function removePlaySkill(id: string) { setError(null); await supabase.from("play_skills").delete().eq("id", id); await load(); }
+
+  async function place(playId: string, surfaceKey: string) {
+    setError(null);
+    const orgId = await getOrgId();
+    const { error } = await supabase.from("play_placements").insert({ org_id: orgId, play_id: playId, surface_key: surfaceKey });
+    if (error && (error as { code?: string }).code !== "23505") setError(error.message);
+    await load();
+  }
+  async function unplace(playId: string, surfaceKey: string) {
+    setError(null);
+    await supabase.from("play_placements").delete().eq("play_id", playId).eq("surface_key", surfaceKey);
+    await load();
+  }
 
   async function saveDesc(playId: string) {
     setError(null);
@@ -252,6 +270,33 @@ export default function PlaysView() {
                     </select>
                   );
                 })()}
+              </Section>
+
+              {/* Placement — where this play lives, with suggestions + guardrails */}
+              <Section label="Placement">
+                <div className="t-sub t-muted" style={{ fontSize: 12.5, marginBottom: 10 }}>Where this play appears in the product. <strong>Suggested</strong> surfaces match what the play needs; guardrails block surfaces that can&rsquo;t provide its context.</div>
+                <div className="stack-3">
+                  {SURFACES.map((surf) => {
+                    const placed = placements.some((r) => r.play_id === activePlay.id && r.surface_key === surf.key);
+                    const { state, reason } = placementStatus(activePlay.target_type, surf);
+                    return (
+                      <div key={surf.key} className="card card-pad row-between" style={{ gap: 12, opacity: state === "blocked" && !placed ? 0.6 : 1 }}>
+                        <div style={{ minWidth: 0 }}>
+                          <div className="row gap-2" style={{ flexWrap: "wrap", alignItems: "center" }}>
+                            <span style={{ fontSize: 14, fontWeight: 620 }}>{surf.label}</span>
+                            {state === "suggested" && <Chip tone="green">Suggested</Chip>}
+                            {state === "blocked" && <Chip tone="amber">Blocked</Chip>}
+                            {placed && <Chip tone="accent">Placed</Chip>}
+                          </div>
+                          <div className="t-sub t-muted" style={{ fontSize: 12.5, marginTop: 2 }}>{surf.description}{state === "blocked" ? ` — ${reason}` : ""}</div>
+                        </div>
+                        {placed
+                          ? <button className="btn btn-secondary btn-sm" onClick={() => unplace(activePlay.id, surf.key)} style={{ color: "var(--rd-text)", flexShrink: 0 }}>Remove</button>
+                          : <button className="btn btn-sm" disabled={state === "blocked"} onClick={() => place(activePlay.id, surf.key)} style={{ flexShrink: 0, ...(state === "suggested" ? { background: "var(--gn)", color: "#fff" } : {}) }}>{state === "blocked" ? "Blocked" : "Place"}</button>}
+                      </div>
+                    );
+                  })}
+                </div>
               </Section>
             </div>
           )}
