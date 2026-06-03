@@ -46,3 +46,44 @@ export function deriveBuildStage(input: { buildState: string | null; ready: bool
 }
 
 export const STAGE_LABEL: Record<BuildStage, string> = Object.fromEntries(BUILD_STAGES.map((s) => [s.key, s.label])) as Record<BuildStage, string>;
+
+// ---------------------------------------------------------------------------
+// PLG workflow — the Initiatives board axis. Starts at Plan (Signal lives in
+// Product Strategy). An item's PLG stage is DERIVED from where its real build
+// AND GTM work are — never asserted. Spans build-only, gtm-only, and both.
+//   Plan   → being scoped / not yet building
+//   Build  → the product is actively being built (build stage = in_build)
+//   Launch → the build is done; GTM work is in flight (or pending)
+//   Live   → built and launched — shipped and measuring
+// ---------------------------------------------------------------------------
+export type PlgStage = "plan" | "build" | "launch" | "live";
+
+export const PLG_STAGES: { key: PlgStage; label: string; hint: string; tone: string }[] = [
+  { key: "plan", label: "Plan", hint: "Scoping the bet", tone: "var(--ac)" },
+  { key: "build", label: "Build", hint: "Building the product", tone: "var(--ac)" },
+  { key: "launch", label: "Launch", hint: "Taking it to market", tone: "var(--vl)" },
+  { key: "live", label: "Live", hint: "Shipped & measuring", tone: "var(--gn)" },
+];
+
+export function derivePlgStage(input: { scope: string; buildStage: BuildStage; gtmTasks: { stage: string }[] }): PlgStage {
+  const { scope, buildStage, gtmTasks } = input;
+  const hasBuild = scope === "product" || scope === "both";
+  const hasGtm = scope === "gtm" || scope === "both";
+  const gtmStarted = gtmTasks.some((t) => t.stage === "active" || t.stage === "done");
+  const gtmAllDone = gtmTasks.length > 0 && gtmTasks.every((t) => t.stage === "done");
+  const buildDone = !hasBuild || buildStage === "shipped";
+  const buildActive = hasBuild && buildStage === "in_build";
+  const gtmDone = !hasGtm || gtmAllDone;
+
+  // Live — every side that exists is complete (ignore empty shells with no work).
+  if (buildDone && gtmDone) {
+    const anyWork = hasBuild || gtmTasks.length > 0;
+    return anyWork ? "live" : "plan";
+  }
+  // Launch — product is built (or there is none); GTM work remains.
+  if (buildDone && hasGtm && !gtmDone) return gtmStarted || hasBuild ? "launch" : "plan";
+  // Build — actively building the product.
+  if (buildActive) return "build";
+  // Otherwise still planning.
+  return "plan";
+}
