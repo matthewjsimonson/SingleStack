@@ -7,6 +7,7 @@
 import { useEffect, useState, useCallback } from "react";
 import { createClient } from "@/lib/supabase/client";
 import { getOrgId } from "@/lib/org";
+import { fireWorkflows } from "@/lib/triggers";
 import { PageHeader, Section, Chip, Banner, Confidence, SubTabs } from "@/components/ui";
 import TrackingTopics from "@/components/TrackingTopics";
 import SourceManager from "@/components/SourceManager";
@@ -54,12 +55,14 @@ export default function MarketView() {
     try {
       const orgId = await getOrgId(); if (!orgId) throw new Error("Could not resolve your organization.");
       const lvl = parseFloat(form.conf);
-      const { error } = await supabase.from("signals").insert({
+      const { data: sig, error } = await supabase.from("signals").insert({
         org_id: orgId, scope: "org", title: form.title.trim(), why: form.why.trim() || null,
         conf_level: isNaN(lvl) ? null : lvl, conf_label: isNaN(lvl) ? null : lvl >= 0.75 ? "High" : lvl >= 0.5 ? "Medium" : "Low",
         observed_at: new Date().toISOString(), metadata: { domain: "market", lens: lane },
-      });
+      }).select("id").single();
       if (error) throw error;
+      // Market intel landing is a signal event — fire on_signal workflows (propose-only).
+      await fireWorkflows(supabase, orgId, "on_signal", { label: form.title.trim(), why: form.why.trim() || undefined, signalId: sig?.id });
       setLogging(null); setForm({ title: "", why: "", conf: "0.7" }); await load();
     } catch (e) { setError(e instanceof Error ? e.message : "Could not log."); }
     finally { setBusy(false); }

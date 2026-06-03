@@ -12,6 +12,7 @@
 import { useEffect, useState, useCallback } from "react";
 import { createClient } from "@/lib/supabase/client";
 import { getOrgId } from "@/lib/org";
+import { fireWorkflows } from "@/lib/triggers";
 import { useProductScope } from "@/lib/ProductContext";
 import { momentumGlyph, stateTone } from "@/lib/themeLife";
 import { PageHeader, Section, Chip, Banner, Confidence, Modal, SubTabs } from "@/components/ui";
@@ -137,15 +138,18 @@ export default function SignalsView() {
       // A signal tied to a product carries scope='product' + product_id (the
       // constraint couples them); otherwise it's company-wide (scope='org').
       const product = form.product_id || null;
-      const { error } = await supabase.from("signals").insert({
+      const { data: sig, error } = await supabase.from("signals").insert({
         org_id: orgId, scope: product ? "product" : "org", product_id: product,
         title: form.title.trim(), why: form.why.trim() || null,
         conf_level: isNaN(lvl) ? null : lvl,
         conf_label: isNaN(lvl) ? null : lvl >= 0.75 ? "High" : lvl >= 0.5 ? "Medium" : "Low",
         observed_at: new Date().toISOString(), source_id: form.source_id || null,
         category: form.category || null, origin: form.origin,
-      });
+      }).select("id").single();
       if (error) throw error;
+      // A signal landing is a real event — fire on_signal workflows (propose-only:
+      // they queue runs in Agents, and accepting has the officer draft a proposal).
+      await fireWorkflows(supabase, orgId, "on_signal", { label: form.title.trim(), why: form.why.trim() || undefined, signalId: sig?.id });
       setLogOpen(false); setForm({ title: "", why: "", conf: "0.7", source_id: "", category: "", origin: "internal", product_id: "" });
       await load();
     } catch (e) { setError(e instanceof Error ? e.message : "Could not log signal."); }

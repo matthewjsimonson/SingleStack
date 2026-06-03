@@ -12,6 +12,7 @@ export type TriggerKind = "on_signal" | "on_release" | "on_capability_update";
 
 export type TriggerCtx = {
   label: string;          // human-readable name of the thing that fired it
+  why?: string;           // the "so-what" — passed to the agent as context
   releaseId?: string;
   capabilityId?: string;
   signalId?: string;

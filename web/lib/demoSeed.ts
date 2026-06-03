@@ -369,6 +369,27 @@ export async function loadDemoData(supabase: SupabaseClient, orgId: string): Pro
         proposed_action: `Draft a GTM launch follow-through initiative for “${label}”.`,
       });
     }
+
+    // A product-targeted on_signal workflow — accepting has the product officer
+    // DRAFT a proposal on the record (agent-propose), the AI-maximizing path.
+    const cpo = agentId("cpo");
+    const { data: prod } = await supabase.from("product_records").select("id, name").limit(1).maybeSingle();
+    const { data: sig } = await supabase.from("signals").select("id, title, why").eq("category", "product").limit(1).maybeSingle();
+    if (cpo && prod) {
+      let { data: wf2 } = await supabase.from("workflows").select("id").eq("name", "Respond to product signals").maybeSingle();
+      if (!wf2) ({ data: wf2 } = await supabase.from("workflows").insert({
+        org_id: orgId, agent_id: cpo, name: "Respond to product signals", trigger: "on_signal",
+        function_key: "positioning", target_type: "product", target_id: prod.id, is_active: true,
+      }).select("id").single());
+      if (wf2 && sig) {
+        await supabase.from("workflow_runs").insert({
+          org_id: orgId, workflow_id: wf2.id, trigger: "on_signal", status: "pending",
+          context: { label: sig.title, why: sig.why ?? undefined, signalId: sig.id },
+          summary: `Respond to product signals — ${sig.title}`,
+          proposed_action: `Have the product officer draft a proposal on ${prod.name}.`,
+        });
+      }
+    }
     return "+1";
   });
 
