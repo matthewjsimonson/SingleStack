@@ -9,7 +9,8 @@ import { useRouter } from "next/navigation";
 import { createClient } from "@/lib/supabase/client";
 import { useProductScope } from "@/lib/ProductContext";
 import { templateFor } from "@/lib/templates";
-import { PageHeader, Section, SubTabs } from "@/components/ui";
+import { Section } from "@/components/ui";
+import PageBar from "@/components/PageBar";
 import ExecutiveRow from "@/components/ExecutiveRow";
 import InitiativeLifecycleBoard from "@/components/InitiativeLifecycleBoard";
 import ReviewDrawer from "@/components/ReviewDrawer";
@@ -110,9 +111,11 @@ export default function FoundationView() {
 
   return (
     <div>
-      <PageHeader title="Home" meta={tab === "home" ? "Your command center — what's moving, what needs you, and what to do next." : "Your product-led-growth motion — initiatives moving from signal to live, across Build and GTM."} />
-
-      <SubTabs<"home" | "initiatives"> tabs={[{ key: "home", label: "Homepage" }, { key: "initiatives", label: "Initiatives" }]} active={tab} onChange={selectTab} />
+      <PageBar
+        tabs={[{ key: "home", label: "Homepage" }, { key: "initiatives", label: "Initiatives" }]}
+        active={tab}
+        onTab={(k) => selectTab(k as "home" | "initiatives")}
+      />
 
       {tab === "initiatives" ? (
         <InitiativeLifecycleBoard />
