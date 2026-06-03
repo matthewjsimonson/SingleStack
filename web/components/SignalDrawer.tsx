@@ -7,6 +7,7 @@
 import { useCallback, useEffect, useState } from "react";
 import { createClient } from "@/lib/supabase/client";
 import { getOrgId } from "@/lib/org";
+import { spawnInitiative } from "@/lib/routing";
 import { Chip, Confidence } from "@/components/ui";
 
 export type DrawerSignal = {
@@ -18,13 +19,19 @@ const IMPACTS: Record<string, string[]> = {
   gtm: ["GTM & messaging", "Sales enablement"],
   both: ["Product strategy", "GTM & messaging"],
 };
-type Initiative = { id: string; title: string; lane: string; stage?: string | null };
+type Initiative = { id: string; title: string; scope: string; stage?: string | null };
 type LinkedTheme = { id: string; title: string; recommendation: string | null };
 
 const OFFICER = (cat: string | null) => (cat === "gtm" ? { key: "cro", name: "CRO" } : { key: "cpo", name: "CPO" });
-// Only lanes that actually have a board are valid destinations (no voids).
-const LANES: [string, string][] = [["ship", "Build (Ship)"], ["enablement", "GTM (Enablement)"]];
-const LANE_FOR = (cat: string | null) => (cat === "gtm" ? "enablement" : "ship");
+// An initiative is cross-functional — you choose its SCOPE (which sides have
+// work), not a single lane. Scope seeds a starter task on each chosen side.
+const SCOPES: [string, string][] = [["product", "Build"], ["gtm", "GTM"], ["both", "Both"]];
+const SCOPE_FOR = (cat: string | null) => (cat === "gtm" ? "gtm" : cat === "both" ? "both" : "product");
+const scopeLabel = (s: string) => SCOPES.find(([k]) => k === s)?.[1] ?? s;
+const tasksForScope = (scope: string, title: string): { area: "build" | "gtm"; title: string }[] =>
+  scope === "gtm" ? [{ area: "gtm", title }]
+    : scope === "both" ? [{ area: "build", title }, { area: "gtm", title }]
+    : [{ area: "build", title }];
 
 export default function SignalDrawer({ signal, onClose, onChanged }: { signal: DrawerSignal | null; onClose: () => void; onChanged: () => void }) {
   const supabase = createClient();
@@ -39,19 +46,19 @@ export default function SignalDrawer({ signal, onClose, onChanged }: { signal: D
   const [error, setError] = useState<string | null>(null);
   const [take, setTake] = useState<string | null>(null);
   const [thinking, setThinking] = useState(false);
-  const [lane, setLane] = useState("ship");
+  const [scope, setScope] = useState("product");
   const [source, setSource] = useState<{ label: string; icon: string } | null>(null);
 
   const load = useCallback(async () => {
     if (!signal) return;
     setError(null); setTake(null);
-    setLane(LANE_FOR(signal.category));
+    setScope(SCOPE_FOR(signal.category));
     setEdit({ title: signal.title, why: signal.why ?? "", conf_level: signal.conf_level != null ? String(signal.conf_level) : "", category: signal.category ?? "" });
     const [{ data: full }, { data: ls }, { data: lt }, { data: inits }, { data: src }] = await Promise.all([
       supabase.from("signals").select("metadata").eq("id", signal.id).maybeSingle(),
-      supabase.from("initiative_signals").select("initiatives ( id, title, lane, stage )").eq("signal_id", signal.id),
+      supabase.from("initiative_signals").select("initiatives ( id, title, scope, stage )").eq("signal_id", signal.id),
       supabase.from("theme_signals").select("signal_themes ( id, title, recommendation )").eq("signal_id", signal.id),
-      supabase.from("initiatives").select("id, title, lane").order("created_at", { ascending: false }).limit(100),
+      supabase.from("initiatives").select("id, title, scope").order("created_at", { ascending: false }).limit(100),
       signal.source_id ? supabase.from("sources").select("label, icon").eq("id", signal.source_id).maybeSingle() : Promise.resolve({ data: null }),
     ]);
     setSource(src ? { label: (src as { label?: string }).label ?? "Source", icon: (src as { icon?: string }).icon ?? "🔌" } : null);
@@ -122,12 +129,12 @@ export default function SignalDrawer({ signal, onClose, onChanged }: { signal: D
     setBusy("create"); setError(null);
     try {
       const orgId = await getOrgId(); if (!orgId) throw new Error("No org.");
-      const { data, error } = await supabase.from("initiatives").insert({
-        org_id: orgId, lane, title: edit.title.trim() || signal!.title,
-        description: edit.why?.trim() || null, product_id: signal!.product_id ?? null, stage: "backlog", priority: "medium",
-      }).select("id").single();
-      if (error) throw error;
-      await supabase.from("initiative_signals").insert({ org_id: orgId, initiative_id: data.id, signal_id: signal!.id });
+      const title = edit.title.trim() || signal!.title;
+      await spawnInitiative(supabase, orgId, {
+        title, description: edit.why?.trim() || null, scope: scope as "product" | "gtm" | "both",
+        priority: "medium", productId: signal!.product_id ?? null,
+        signalIds: [signal!.id], tasks: tasksForScope(scope, title),
+      });
       await load();
     } catch (e) { setError(e instanceof Error ? e.message : "Could not create initiative."); }
     setBusy(null);
@@ -193,7 +200,7 @@ export default function SignalDrawer({ signal, onClose, onChanged }: { signal: D
               <div className="stack-3" style={{ marginBottom: 10 }}>
                 {linked.map((i) => (
                   <div key={i.id} className="row-between" style={{ gap: 8 }}>
-                    <span className="row gap-2"><Chip>{i.lane}</Chip><span style={{ fontSize: 13, fontWeight: 600 }}>{i.title}</span></span>
+                    <span className="row gap-2"><Chip>{scopeLabel(i.scope)}</Chip><span style={{ fontSize: 13, fontWeight: 600 }}>{i.title}</span></span>
                     <button className="btn btn-secondary btn-sm" onClick={() => unlink(i.id)} disabled={busy === "link"}>Unlink</button>
                   </div>
                 ))}
@@ -203,15 +210,15 @@ export default function SignalDrawer({ signal, onClose, onChanged }: { signal: D
               {linkable.length > 0 && (
                 <select className="select" defaultValue="" onChange={(e) => { linkInitiative(e.target.value); e.target.value = ""; }} disabled={busy === "link"} style={{ maxWidth: 280 }}>
                   <option value="">+ Link existing initiative…</option>
-                  {linkable.map((i) => <option key={i.id} value={i.id}>{i.lane} · {i.title}</option>)}
+                  {linkable.map((i) => <option key={i.id} value={i.id}>{scopeLabel(i.scope)} · {i.title}</option>)}
                 </select>
               )}
-              <select className="select" value={lane} onChange={(e) => setLane(e.target.value)} style={{ maxWidth: 170 }}>
-                {LANES.map(([k, label]) => <option key={k} value={k}>{label}</option>)}
+              <select className="select" value={scope} onChange={(e) => setScope(e.target.value)} style={{ maxWidth: 170 }}>
+                {SCOPES.map(([k, label]) => <option key={k} value={k}>{label}</option>)}
               </select>
               <button className="btn btn-sm" onClick={createInitiative} disabled={busy === "create"}>{busy === "create" ? "Creating…" : "+ Create initiative"}</button>
             </div>
-            <div className="t-sub t-muted" style={{ fontSize: 11.5, marginTop: 8 }}>Lands in {lane === "ship" ? "Build → Ship" : "Go-to-market → Enablement"}, with this signal linked as its evidence.</div>
+            <div className="t-sub t-muted" style={{ fontSize: 11.5, marginTop: 8 }}>Seeds {scope === "both" ? "a Build and a GTM task" : scope === "gtm" ? "a GTM task" : "a Build task"} on the board{scope === "both" ? "s" : ""}, with this signal linked as its evidence.</div>
           </div>
 
           {/* Human context */}

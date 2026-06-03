@@ -17,10 +17,10 @@ type Theme = {
 };
 type Sig = { id: string; title: string; conf_label: string | null };
 type Decision = { id: string; title: string; status: string; rationale: string | null; input_context: string | null; assignee_id: string | null };
-type Routed = { id: string; title: string; lane: string };
+type Routed = { id: string; title: string; scope: string };
 export type Person = { id: string; name: string; title: string | null; area: string | null };
 export type Rec = { id: string; name: string };
-export type Init = { id: string; title: string; lane: string; product_id: string | null; gtm_record_id: string | null };
+export type Init = { id: string; title: string; scope: string; product_id: string | null; gtm_record_id: string | null };
 
 const OFFICER = (cat: string | null) => (cat === "gtm" ? { key: "cro", name: "CRO" } : { key: "cpo", name: "CPO" });
 
@@ -30,7 +30,7 @@ export default function ThemeDrawer({ themeId, onClose, onChanged }: { themeId: 
   const [theme, setTheme] = useState<Theme | null>(null);
   const [signals, setSignals] = useState<Sig[]>([]);
   const [decisions, setDecisions] = useState<Decision[]>([]);
-  const [routed, setRouted] = useState<Record<string, { id: string; title: string; lane: string }>>({});
+  const [routed, setRouted] = useState<Record<string, { id: string; title: string; scope: string }>>({});
   const [people, setPeople] = useState<Person[]>([]);
   const [products, setProducts] = useState<Rec[]>([]);
   const [gtms, setGtms] = useState<Rec[]>([]);
@@ -57,7 +57,7 @@ export default function ThemeDrawer({ themeId, onClose, onChanged }: { themeId: 
       supabase.from("people").select("id, name, title, area").eq("is_active", true).order("name"),
       supabase.from("product_records").select("id, name").order("created_at"),
       supabase.from("gtm_records").select("id, name").order("created_at"),
-      supabase.from("initiatives").select("id, title, lane, product_id, gtm_record_id").order("created_at", { ascending: false }).limit(100),
+      supabase.from("initiatives").select("id, title, scope, product_id, gtm_record_id").order("created_at", { ascending: false }).limit(100),
     ]);
     setPeople(pl ?? []); setProducts(pr ?? []); setGtms(gt ?? []); setInits((it ?? []) as Init[]);
     setSignals((sigs ?? []) as Sig[]);
@@ -68,9 +68,9 @@ export default function ThemeDrawer({ themeId, onClose, onChanged }: { themeId: 
     setDecisions(uniq);
     // routed initiatives (the impact / where each decision went)
     if (uniq.length) {
-      const { data: inits } = await supabase.from("initiatives").select("id, title, lane, decision_id").in("decision_id", uniq.map((d) => d.id));
-      const map: Record<string, { id: string; title: string; lane: string }> = {};
-      for (const it of inits ?? []) if (it.decision_id) map[it.decision_id] = { id: it.id, title: it.title, lane: it.lane };
+      const { data: inits } = await supabase.from("initiatives").select("id, title, scope, decision_id").in("decision_id", uniq.map((d) => d.id));
+      const map: Record<string, { id: string; title: string; scope: string }> = {};
+      for (const it of inits ?? []) if (it.decision_id) map[it.decision_id] = { id: it.id, title: it.title, scope: it.scope };
       setRouted(map);
     } else setRouted({});
   }, [supabase, themeId]);
@@ -309,7 +309,7 @@ function DecisionCard({ d, theme, signalCount, routed, people, products, gtms, i
   async function del() { setBusy("del"); await supabase.from("decisions").delete().eq("id", d.id); await reload(); setBusy(null); }
 
   const recs = rt.recordType === "gtm" ? gtms : products;
-  const targetInits = inits.filter((i) => i.lane === (rt.recordType === "gtm" ? "enablement" : "ship"));
+  const targetInits = inits.filter((i) => (rt.recordType === "gtm" ? i.scope === "gtm" || i.scope === "both" : i.scope === "product" || i.scope === "both"));
 
   const summary = `Decision: ${d.title}\n\nContext (theme): ${theme?.title ?? ""}\n${theme?.summary ? theme.summary + "\n" : ""}Backed by ${signalCount} signal(s).\n\nLeaning: ${rationale || "(undecided)"}\n\nWhat's your take? Reply and I'll fold it in.`;
   const mailto = `mailto:?subject=${encodeURIComponent("Input needed: " + d.title)}&body=${encodeURIComponent(summary)}`;
@@ -325,7 +325,7 @@ function DecisionCard({ d, theme, signalCount, routed, people, products, gtms, i
 
       {/* evidence + impact */}
       {routed ? (
-        <div className="t-sub" style={{ fontSize: 12, marginBottom: 8 }}>→ Routed to <strong>{routed.lane === "ship" ? "Build · Ship" : "GTM · Enablement"}</strong>: {routed.title}{ownerName(d.assignee_id) ? ` · owner ${ownerName(d.assignee_id)}` : ""}</div>
+        <div className="t-sub" style={{ fontSize: 12, marginBottom: 8 }}>→ Routed to <strong>{routed.scope === "gtm" ? "GTM · Enablement" : routed.scope === "both" ? "Build + GTM" : "Build · Ship"}</strong>: {routed.title}{ownerName(d.assignee_id) ? ` · owner ${ownerName(d.assignee_id)}` : ""}</div>
       ) : (
         <div className="t-sub t-muted" style={{ fontSize: 11.5, marginBottom: 8 }}>Evidence: this theme + {signalCount} signal{signalCount === 1 ? "" : "s"}. Write the call, assign an owner, then route it onto an initiative.</div>
       )}

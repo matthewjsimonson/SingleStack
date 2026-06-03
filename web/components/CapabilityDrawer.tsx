@@ -8,23 +8,26 @@
 import { useCallback, useEffect, useState } from "react";
 import { createClient } from "@/lib/supabase/client";
 import { getOrgId } from "@/lib/org";
+import { spawnInitiative } from "@/lib/routing";
 import { Chip } from "@/components/ui";
 
 export type DrawerCapability = {
   id: string; title: string; why: string | null; observed_at: string | null;
   metadata: { provider?: string; area?: string; url?: string; context?: string } | null;
 };
-type Initiative = { id: string; title: string; lane: string };
+type Initiative = { id: string; title: string; scope: string };
 
-// Officers who can interpret a capability. lane = where an initiative lands —
-// only lanes that actually have a board (Ship = build-side, Enablement = GTM).
-const OFFICERS = [
-  { key: "ceng", name: "Chief Engineering", lane: "ship" },
-  { key: "cpo", name: "CPO", lane: "ship" },
-  { key: "cro", name: "CRO", lane: "enablement" },
-  { key: "cco", name: "CCO", lane: "enablement" },
+// Officers who can interpret a capability. area = which side the work lands on
+// (build = product/Ship, gtm = Enablement). The initiative is cross-functional;
+// the officer just seeds the starter task on their side.
+const OFFICERS: { key: string; name: string; area: "build" | "gtm" }[] = [
+  { key: "ceng", name: "Chief Engineering", area: "build" },
+  { key: "cpo", name: "CPO", area: "build" },
+  { key: "cro", name: "CRO", area: "gtm" },
+  { key: "cco", name: "CCO", area: "gtm" },
 ];
-const LANE_LABEL: Record<string, string> = { ship: "Build → Ship", enablement: "GTM → Enablement" };
+const AREA_LABEL: Record<string, string> = { build: "Build", gtm: "GTM" };
+const scopeLabel = (s: string) => (s === "gtm" ? "GTM" : s === "both" ? "Both" : "Build");
 
 export default function CapabilityDrawer({ capability, onClose, onChanged }: { capability: DrawerCapability | null; onClose: () => void; onChanged: () => void }) {
   const supabase = createClient();
@@ -46,8 +49,8 @@ export default function CapabilityDrawer({ capability, onClose, onChanged }: { c
     setMeta(capability.metadata ?? {});
     setContext(typeof capability.metadata?.context === "string" ? capability.metadata.context : "");
     const [{ data: ls }, { data: inits }] = await Promise.all([
-      supabase.from("initiative_signals").select("initiatives ( id, title, lane )").eq("signal_id", capability.id),
-      supabase.from("initiatives").select("id, title, lane").order("created_at", { ascending: false }).limit(100),
+      supabase.from("initiative_signals").select("initiatives ( id, title, scope )").eq("signal_id", capability.id),
+      supabase.from("initiatives").select("id, title, scope").order("created_at", { ascending: false }).limit(100),
     ]);
     // deno-lint-ignore no-explicit-any
     setLinked(((ls ?? []) as any[]).map((r) => r.initiatives).filter(Boolean));
@@ -87,13 +90,13 @@ export default function CapabilityDrawer({ capability, onClose, onChanged }: { c
     setBusy("init"); setError(null); setDone(null);
     try {
       const orgId = await getOrgId(); if (!orgId) throw new Error("No org.");
-      const { data, error } = await supabase.from("initiatives").insert({
-        org_id: orgId, lane: officer.lane, title: `Leverage: ${capability!.title}`,
-        description: take ?? capability!.why ?? null, stage: "backlog", priority: "medium",
-      }).select("id").single();
-      if (error) throw error;
-      await supabase.from("initiative_signals").insert({ org_id: orgId, initiative_id: data.id, signal_id: capability!.id });
-      setDone(`Created a ${officer.lane} initiative and linked it.`);
+      const title = `Leverage: ${capability!.title}`;
+      await spawnInitiative(supabase, orgId, {
+        title, description: take ?? capability!.why ?? null,
+        scope: officer.area === "gtm" ? "gtm" : "product", priority: "medium",
+        signalIds: [capability!.id], tasks: [{ area: officer.area, title }],
+      });
+      setDone(`Created a ${AREA_LABEL[officer.area]} initiative and linked it.`);
       await load();
     } catch (e) { setError(e instanceof Error ? e.message : "Could not create initiative."); }
     setBusy(null);
@@ -173,19 +176,19 @@ export default function CapabilityDrawer({ capability, onClose, onChanged }: { c
               <div className="stack-3" style={{ marginBottom: 10 }}>
                 {linked.map((i) => (
                   <div key={i.id} className="row-between" style={{ gap: 8 }}>
-                    <span className="row gap-2"><Chip>{i.lane}</Chip><span style={{ fontSize: 13, fontWeight: 600 }}>{i.title}</span></span>
+                    <span className="row gap-2"><Chip>{scopeLabel(i.scope)}</Chip><span style={{ fontSize: 13, fontWeight: 600 }}>{i.title}</span></span>
                     <button className="btn btn-secondary btn-sm" onClick={() => unlink(i.id)} disabled={busy === "link"}>Unlink</button>
                   </div>
                 ))}
               </div>
             )}
             <div className="row gap-2" style={{ flexWrap: "wrap" }}>
-              <button className="btn btn-sm" onClick={createInitiative} disabled={busy === "init"}>{busy === "init" ? "Creating…" : `+ Create initiative (${LANE_LABEL[officer.lane] ?? officer.lane})`}</button>
+              <button className="btn btn-sm" onClick={createInitiative} disabled={busy === "init"}>{busy === "init" ? "Creating…" : `+ Create initiative (${AREA_LABEL[officer.area] ?? officer.area})`}</button>
               <button className="btn btn-secondary btn-sm" onClick={createWorkflow} disabled={busy === "wf"}>{busy === "wf" ? "Creating…" : `+ Workflow for ${officer.name}`}</button>
               {linkable.length > 0 && (
                 <select className="select" defaultValue="" onChange={(e) => { linkInitiative(e.target.value); e.target.value = ""; }} disabled={busy === "link"} style={{ maxWidth: 240 }}>
                   <option value="">Link existing initiative…</option>
-                  {linkable.map((i) => <option key={i.id} value={i.id}>{i.lane} · {i.title}</option>)}
+                  {linkable.map((i) => <option key={i.id} value={i.id}>{scopeLabel(i.scope)} · {i.title}</option>)}
                 </select>
               )}
             </div>
