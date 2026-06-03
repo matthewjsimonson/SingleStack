@@ -35,6 +35,10 @@ export default function CompetitiveView() {
   const [overview, setOverview] = useState<{ name: string; overview: string | null; valueProp: string | null } | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  // Opening a competitor from the Dashboard hands off to the inline Battlecards
+  // view (the single competitor surface) — no separate detail page.
+  const [focusComp, setFocusComp] = useState<string | null>(null);
+  const clearFocus = useCallback(() => setFocusComp(null), []);
 
   const load = useCallback(async () => {
     const [{ data: comp }, { data: caps }, { data: scs }, { data: cds }, { data: sigs }] = await Promise.all([
@@ -67,16 +71,16 @@ export default function CompetitiveView() {
       <Banner>{error}</Banner>
 
       {loading ? <div className="t-sub t-muted">Loading…</div>
-        : tab === "dashboard" ? <Dashboard competitors={competitors} capabilities={capabilities} scores={scores} compSignals={compSignals} overview={overview} reload={load} setError={setError} />
-        : tab === "battlecards" ? <Battlecards competitors={competitors} cards={cards} overview={overview} capabilities={capabilities} scores={scores} compSignals={compSignals} reload={load} setError={setError} />
+        : tab === "dashboard" ? <Dashboard competitors={competitors} capabilities={capabilities} scores={scores} compSignals={compSignals} overview={overview} reload={load} setError={setError} onOpenCompetitor={(id) => { setFocusComp(id); setTab("battlecards"); }} />
+        : tab === "battlecards" ? <Battlecards competitors={competitors} cards={cards} overview={overview} capabilities={capabilities} scores={scores} compSignals={compSignals} reload={load} setError={setError} initialScope={focusComp} onConsumeScope={clearFocus} />
         : <Feed signals={signals} />}
     </div>
   );
 }
 
 // ---------- Dashboard: competitors + capability heat-map ----------
-function Dashboard({ competitors, capabilities, scores, compSignals, overview, reload, setError }: {
-  competitors: Competitor[]; capabilities: Capability[]; scores: Score[]; compSignals: Signal[]; overview: { name: string; overview: string | null; valueProp: string | null } | null; reload: () => void; setError: (s: string | null) => void;
+function Dashboard({ competitors, capabilities, scores, compSignals, overview, reload, setError, onOpenCompetitor }: {
+  competitors: Competitor[]; capabilities: Capability[]; scores: Score[]; compSignals: Signal[]; overview: { name: string; overview: string | null; valueProp: string | null } | null; reload: () => void; setError: (s: string | null) => void; onOpenCompetitor: (id: string) => void;
 }) {
   const supabase = createClient();
   const [addingComp, setAddingComp] = useState(false);
@@ -293,15 +297,15 @@ function Dashboard({ competitors, capabilities, scores, compSignals, overview, r
                 <div className="t-label" style={{ marginBottom: 8 }}>{label as string} · {(list as Competitor[]).length}</div>
                 <div className="stack-3">
                   {(list as Competitor[]).map((c) => (
-                    <a key={c.id} href={`/competitive/${c.id}`} className="card card-link card-pad row-between">
+                    <div key={c.id} onClick={() => onOpenCompetitor(c.id)} className="card card-link card-pad row-between" style={{ cursor: "pointer" }}>
                       <span style={{ fontSize: 14, fontWeight: 600 }}>{c.name}</span>
                       <span className="row gap-2" style={{ alignItems: "center" }}>
                         <Chip tone={tone as "accent" | "violet"}>{c.relationship}</Chip>
                         <span className="t-sub" style={{ color: "var(--ac-text)", fontWeight: 600, fontSize: 12 }}>Open →</span>
-                        <button onClick={(e) => removeCompetitor(e, c)} title={`Remove ${c.name}`} aria-label={`Remove ${c.name}`}
+                        <button onClick={(e) => { e.stopPropagation(); removeCompetitor(e, c); }} title={`Remove ${c.name}`} aria-label={`Remove ${c.name}`}
                           style={{ background: "none", border: "none", cursor: "pointer", fontSize: 16, lineHeight: 1, color: "var(--tm)", padding: "0 2px" }}>×</button>
                       </span>
-                    </a>
+                    </div>
                   ))}
                   {(list as Competitor[]).length === 0 && <div className="t-sub t-muted" style={{ fontSize: 12.5 }}>None</div>}
                 </div>
@@ -321,13 +325,16 @@ function Dashboard({ competitors, capabilities, scores, compSignals, overview, r
 
 // ---------- Battlecards ----------
 type BcTab = "gtm" | "product" | "signals";
-function Battlecards({ competitors, cards, overview, capabilities, scores, compSignals, reload, setError }: {
+function Battlecards({ competitors, cards, overview, capabilities, scores, compSignals, reload, setError, initialScope, onConsumeScope }: {
   competitors: Competitor[]; cards: Card[]; overview: { name: string; overview: string | null; valueProp: string | null } | null;
   capabilities: Capability[]; scores: Score[]; compSignals: Signal[]; reload: () => void; setError: (s: string | null) => void;
+  initialScope?: string | null; onConsumeScope?: () => void;
 }) {
   const supabase = createClient();
   const [scope, setScope] = useState<string | null>(null); // selected competitor id; null = picker
   const [bcTab, setBcTab] = useState<BcTab>("gtm");
+  // Handoff from the Dashboard ("Open" a competitor) selects it here, then clears.
+  useEffect(() => { if (initialScope) { setScope(initialScope); onConsumeScope?.(); } }, [initialScope, onConsumeScope]);
   const [adding, setAdding] = useState<string | null>(null);
   const [form, setForm] = useState({ title: "", detail: "" });
 
