@@ -12,10 +12,13 @@ import { Section, Chip } from "@/components/ui";
 
 // Mirrors the run-play code defaults — what runs when a Play isn't configured.
 const DEFAULTS = [
-  { key: "product_standing", label: "Product standing", agentKey: "cpo", focus: "Assess where our product stands versus this competitor, capability by capability — where we clearly win, where we're at parity, where we lose. Ground every call in the matrix, battlecard, and signals.", sections: "Where we win, At parity, Where we lose, Biggest gap to close" },
-  { key: "build_to_beat", label: "Build-to-beat", agentKey: "ceng", focus: "From an engineering lens: what to build to catch up where we're behind and pull further ahead where we lead. Note rough effort and leverage/risk per move.", sections: "Catch-up builds, Leap-ahead builds, Sequencing & effort, Technical risks" },
-  { key: "narrative_angle", label: "Narrative angle", agentKey: "cco", focus: "How to tell our story against this competitor — amplify genuine strengths, honestly reframe weaknesses, find the narrative wedge. Concrete language, no hype.", sections: "Strengths to amplify, Weaknesses to reframe, The wedge, Messages to avoid" },
-  { key: "win_plan", label: "Win plan", agentKey: "cro", focus: "How to win deals against this competitor — where we win, traps to set, objection handling, and the proof points that close.", sections: "Where we win, Traps to set, Objection handling, Proof points" },
+  { key: "product_standing", label: "Product standing", target: "competitor", agentKey: "cpo", focus: "Assess where our product stands versus this competitor, capability by capability — where we clearly win, where we're at parity, where we lose. Ground every call in the matrix, battlecard, and signals.", sections: "Where we win, At parity, Where we lose, Biggest gap to close" },
+  { key: "build_to_beat", label: "Build-to-beat", target: "competitor", agentKey: "ceng", focus: "From an engineering lens: what to build to catch up where we're behind and pull further ahead where we lead. Note rough effort and leverage/risk per move.", sections: "Catch-up builds, Leap-ahead builds, Sequencing & effort, Technical risks" },
+  { key: "narrative_angle", label: "Narrative angle", target: "competitor", agentKey: "cco", focus: "How to tell our story against this competitor — amplify genuine strengths, honestly reframe weaknesses, find the narrative wedge. Concrete language, no hype.", sections: "Strengths to amplify, Weaknesses to reframe, The wedge, Messages to avoid" },
+  { key: "win_plan", label: "Win plan", target: "competitor", agentKey: "cro", focus: "How to win deals against this competitor — where we win, traps to set, objection handling, and the proof points that close.", sections: "Where we win, Traps to set, Objection handling, Proof points" },
+  { key: "initiative_review", label: "Initiative review", target: "initiative", agentKey: "cpo", focus: "Review this initiative as a bet: is the scope right, is it sequenced sensibly, what's the single biggest risk, and how strong is the evidence behind it?", sections: "The bet, Scope check, Sequencing, Biggest risk" },
+  { key: "delivery_risk", label: "Delivery risk", target: "initiative", agentKey: "ceng", focus: "From an engineering lens, what could derail delivery? Technical risks, dependencies, and the riskiest workstream, each with a de-risking move.", sections: "Technical risks, Dependencies, Riskiest workstream, De-risking moves" },
+  { key: "gtm_readiness", label: "GTM readiness", target: "initiative", agentKey: "cro", focus: "Is this initiative ready to win in-market? Positioning readiness, the proof we'll need, and the GTM gaps to close before launch.", sections: "Positioning readiness, Proof needed, GTM gaps, Launch checklist" },
 ];
 
 type Agent = { id: string; key: string; name: string };
@@ -82,6 +85,7 @@ export default function PlaysManager() {
               <div className="row-between" style={{ gap: 10 }}>
                 <div className="row gap-2" style={{ flexWrap: "wrap", alignItems: "center" }}>
                   <span style={{ fontSize: 14, fontWeight: 660 }}>{e.label}</span>
+                  <Chip tone={def.target === "initiative" ? "violet" : "default"}>{def.target}</Chip>
                   {e.agent && <Chip tone="accent">{e.agent.name}</Chip>}
                   {!e.is_active && <Chip tone="amber">off</Chip>}
                   {!e.configured && <span className="t-mono-xs" style={{ color: "var(--tm)" }}>default</span>}
