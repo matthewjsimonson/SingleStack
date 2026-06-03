@@ -350,6 +350,28 @@ export async function loadDemoData(supabase: SupabaseClient, orgId: string): Pro
     return `+${rows.length}`;
   });
 
+  // ---- Automations: an on_release workflow + one fired (pending) run ----
+  await step("automations", async () => {
+    const { data: existing } = await supabase.from("workflow_runs").select("id").limit(1);
+    if (existing && existing.length) return "exist";
+    const aid = agentId("cro"); if (!aid) return "no agent";
+    let { data: wf } = await supabase.from("workflows").select("id").eq("name", "Launch follow-through").maybeSingle();
+    if (!wf) ({ data: wf } = await supabase.from("workflows").insert({
+      org_id: orgId, agent_id: aid, name: "Launch follow-through", trigger: "on_release",
+      function_key: "enablement", target_type: "none", is_active: true,
+    }).select("id").single());
+    const { data: rel } = await supabase.from("releases").select("id, name, version").eq("name", "Agent orchestration").maybeSingle();
+    if (wf && rel) {
+      const label = rel.version ? `${rel.version} · ${rel.name}` : rel.name;
+      await supabase.from("workflow_runs").insert({
+        org_id: orgId, workflow_id: wf.id, trigger: "on_release", status: "pending",
+        context: { label, releaseId: rel.id }, summary: `Launch follow-through — ${label}`,
+        proposed_action: `Draft a GTM launch follow-through initiative for “${label}”.`,
+      });
+    }
+    return "+1";
+  });
+
   // ---- Durable themes ----
   await step("themes", async () => {
     const defs = [

@@ -10,6 +10,7 @@
 import { useCallback, useEffect, useState } from "react";
 import { createClient } from "@/lib/supabase/client";
 import { getOrgId } from "@/lib/org";
+import { fireWorkflows } from "@/lib/triggers";
 import { PageHeader, Section, Chip, Banner } from "@/components/ui";
 import CapabilityDrawer, { type DrawerCapability } from "@/components/CapabilityDrawer";
 
@@ -76,11 +77,14 @@ export default function FrontierView() {
     setBusy(true); setError(null);
     try {
       const orgId = await getOrgId(); if (!orgId) throw new Error("Could not resolve your organization.");
-      const { error } = await supabase.from("signals").insert({
+      const { data: sig, error } = await supabase.from("signals").insert({
         org_id: orgId, scope: "org", title: cap.title.trim(), why: cap.summary.trim() || null, observed_at: new Date().toISOString(),
         metadata: { domain: "capability", provider: cap.provider, area: cap.area.trim() || null, url: cap.url.trim() || null },
-      });
+      }).select("id").single();
       if (error) throw error;
+      // A new capability is a real event — fire on_capability_update workflows
+      // (propose-only: enqueues runs for human ratification in Agents).
+      await fireWorkflows(supabase, orgId, "on_capability_update", { label: cap.title.trim(), capabilityId: sig?.id });
       setLogging(false); setCap({ title: "", summary: "", provider: "anthropic", area: "", url: "" }); await load();
     } catch (e) { setError(e instanceof Error ? e.message : "Could not log capability."); }
     finally { setBusy(false); }

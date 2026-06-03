@@ -10,6 +10,7 @@ import { useEffect, useState, useCallback } from "react";
 import { createClient } from "@/lib/supabase/client";
 import { getOrgId } from "@/lib/org";
 import { useProductScope } from "@/lib/ProductContext";
+import { fireWorkflows } from "@/lib/triggers";
 import { PageHeader, Section, Chip, Banner } from "@/components/ui";
 
 type Release = { id: string; name: string; version: string | null; summary: string | null; stage: string; target_date: string | null; product_id: string | null };
@@ -64,7 +65,18 @@ export default function RoadmapView() {
     } catch (e) { setError(e instanceof Error ? e.message : "Could not create release."); }
     finally { setBusy(false); }
   }
-  async function move(id: string, stage: string) { setError(null); await supabase.from("releases").update({ stage }).eq("id", id); await load(); }
+  async function move(id: string, stage: string) {
+    setError(null);
+    await supabase.from("releases").update({ stage }).eq("id", id);
+    // Marking a release shipped is a real event — fire any on_release workflows
+    // (propose-only: they enqueue runs for a human to ratify in Agents).
+    if (stage === "released") {
+      const orgId = await getOrgId();
+      const rel = releases.find((r) => r.id === id);
+      if (orgId && rel) await fireWorkflows(supabase, orgId, "on_release", { label: rel.version ? `${rel.version} · ${rel.name}` : rel.name, releaseId: id });
+    }
+    await load();
+  }
   async function remove(id: string) { setError(null); await supabase.from("releases").delete().eq("id", id); await load(); }
 
   const productName = (id: string | null) => products.find((p) => p.id === id)?.name ?? null;
