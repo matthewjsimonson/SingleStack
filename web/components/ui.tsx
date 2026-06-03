@@ -120,6 +120,26 @@ export function Chip({
   return <span className={cls}>{children}</span>;
 }
 
+// Agent Badge — attributes work to a named agent. The identity color is a 2px
+// left border (never the fill — that competes with state colors). singlestack-ui §8.
+export function AgentBadge({ name, accent = "var(--ac)" }: { name: string; accent?: string }) {
+  return (
+    <span style={{ display: "inline-flex", alignItems: "center", fontSize: 12, fontWeight: 620, padding: "2px 8px", borderRadius: 6, background: "var(--fill)", borderLeft: `2px solid ${accent}`, color: "var(--tp)" }}>{name}</span>
+  );
+}
+
+// Source Chip — provenance for an AI-generated value: [icon] Source · when.
+// Timestamps in tabular mono. singlestack-ui §8 (provenance is visible).
+export function SourceChip({ icon, label, when }: { icon?: string | null; label: string; when?: string | null }) {
+  return (
+    <span style={{ display: "inline-flex", alignItems: "center", gap: 5, fontSize: 11.5, fontWeight: 600, padding: "2px 7px", borderRadius: 5, background: "var(--fill)", color: "var(--ts)", maxWidth: "100%" }}>
+      {icon && <span aria-hidden>{icon}</span>}
+      <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{label}</span>
+      {when && <span className="t-mono-xs" style={{ color: "var(--tm)", flexShrink: 0 }}>· {when}</span>}
+    </span>
+  );
+}
+
 export function Banner({ children }: { children: ReactNode }) {
   if (!children) return null;
   return <div className="banner banner-error" style={{ marginBottom: "var(--sp-4)" }}>{children}</div>;

@@ -9,7 +9,7 @@
 // run feeds the outcome loop.
 import { useCallback, useEffect, useState } from "react";
 import { createClient } from "@/lib/supabase/client";
-import { Section, Chip } from "@/components/ui";
+import { Section, Chip, AgentBadge, SourceChip } from "@/components/ui";
 
 type Sec = { title: string; body: string; evidence: string[] };
 type Payload = { headline: string; sections: Sec[]; recommendations: string[]; confidence: string };
@@ -100,7 +100,7 @@ export default function CompetitivePlays({ competitorId, competitorName }: { com
             <div key={p.key} className="card card-pad" style={{ display: "flex", flexDirection: "column", gap: 8 }}>
               <div className="row-between" style={{ gap: 8 }}>
                 <div className="row gap-2" style={{ flexWrap: "wrap" }}>
-                  <Chip tone={p.tone}>{p.officer}</Chip>
+                  <AgentBadge name={p.officer} accent={p.tone === "violet" ? "var(--vl)" : "var(--ac)"} />
                   <span style={{ fontSize: 14, fontWeight: 660 }}>{p.label}</span>
                   {a && <Chip tone={a.status === "ratified" ? "green" : a.status === "dismissed" ? "default" : "amber"}>{a.status}</Chip>}
                 </div>
@@ -135,8 +135,9 @@ export default function CompetitivePlays({ competitorId, competitorName }: { com
                       <div className="t-label" style={{ color: "var(--tm)", marginBottom: 2 }}>{s.title}</div>
                       <div className="t-sub" style={{ fontSize: 12.5, lineHeight: 1.5, whiteSpace: "pre-wrap" }}>{s.body}</div>
                       {(s.evidence ?? []).length > 0 && (
-                        <div className="row gap-2" style={{ flexWrap: "wrap", marginTop: 4 }}>
-                          {s.evidence.map((ev, j) => <span key={j} className="t-mono-xs" style={{ background: "var(--fill)", padding: "1px 6px", borderRadius: 5, color: "var(--tm)" }}>{ev}</span>)}
+                        <div className="row gap-2" style={{ flexWrap: "wrap", marginTop: 5, alignItems: "center" }}>
+                          <span className="t-label" style={{ color: "var(--tm)", fontSize: 10 }}>Evidence</span>
+                          {s.evidence.map((ev, j) => <SourceChip key={j} icon="◦" label={ev} />)}
                         </div>
                       )}
                     </div>
