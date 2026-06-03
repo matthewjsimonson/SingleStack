@@ -14,7 +14,15 @@ import TrackingTopics from "@/components/TrackingTopics";
 import SourceManager from "@/components/SourceManager";
 import CapabilityCellDrawer, { type Cell } from "@/components/CapabilityCellDrawer";
 import CompetitiveGrid from "@/components/CompetitiveGrid";
-import CompetitivePlays from "@/components/CompetitivePlays";
+import PlaysPanel, { type PlayDef } from "@/components/PlaysPanel";
+
+// The four officer lenses on a competitor.
+const COMPETITOR_PLAYS: PlayDef[] = [
+  { key: "product_standing", label: "Product standing", officer: "CPO", tone: "accent" },
+  { key: "build_to_beat", label: "Build-to-beat", officer: "Chief Eng", tone: "accent" },
+  { key: "narrative_angle", label: "Narrative angle", officer: "CCO", tone: "violet" },
+  { key: "win_plan", label: "Win plan", officer: "CRO", tone: "violet" },
+];
 
 type Competitor = { id: string; name: string; relationship: string; website: string | null; notes: string | null };
 type Capability = { id: string; name: string; category: string | null };
@@ -466,7 +474,7 @@ function Competitors({ competitors, cards, overview, capabilities, scores, compS
             </div>
 
             {/* the four officers each analyze this competitor through their own lens */}
-            {selected && <CompetitivePlays competitorId={selected.id} competitorName={selected.name} />}
+            {selected && <PlaysPanel targetType="competitor" targetId={selected.id} targetName={selected.name} plays={COMPETITOR_PLAYS} />}
           </div>
         );
       })() : cdTab === "gtm" ? (

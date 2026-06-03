@@ -10,6 +10,14 @@
 import { useCallback, useEffect, useState } from "react";
 import { createClient } from "@/lib/supabase/client";
 import { Chip, Banner, BackLink, Spinner } from "@/components/ui";
+import PlaysPanel, { type PlayDef } from "@/components/PlaysPanel";
+
+// Officer lenses on an initiative — review the bet, delivery risk, GTM readiness.
+const INITIATIVE_PLAYS: PlayDef[] = [
+  { key: "initiative_review", label: "Initiative review", officer: "CPO", tone: "accent" },
+  { key: "delivery_risk", label: "Delivery risk", officer: "Chief Eng", tone: "accent" },
+  { key: "gtm_readiness", label: "GTM readiness", officer: "CRO", tone: "violet" },
+];
 
 type Initiative = { id: string; title: string; description: string | null; scope: string; lifecycle: string; kind: string | null; assignee_id: string | null; objective_id: string | null };
 type Task = { id: string; area: string; lifecycle_stage: string; title: string; stage: string; assignee_id: string | null };
@@ -70,7 +78,7 @@ export default function InitiativeDetail({ id }: { id: string }) {
       <div className="row gap-2" style={{ marginBottom: 4, flexWrap: "wrap" }}>
         <Chip tone={ini.scope === "gtm" ? "violet" : "accent"}>{SCOPE_LABEL[ini.scope] ?? ini.scope}</Chip>
         {ini.kind && <Chip>{ini.kind}</Chip>}
-        {ownerName(ini.assignee_id) ? <Chip tone="green">👤 {ownerName(ini.assignee_id)}</Chip> : <Chip tone="amber">unowned</Chip>}
+        {ownerName(ini.assignee_id) ? <Chip tone="green">{ownerName(ini.assignee_id)}</Chip> : <Chip tone="amber">unowned</Chip>}
       </div>
       <h1 className="t-page" style={{ marginBottom: 4 }}>{ini.title}</h1>
       {ini.description && <div className="t-sub t-muted" style={{ marginBottom: "var(--sp-5)", maxWidth: 720 }}>{ini.description}</div>}
@@ -100,6 +108,11 @@ export default function InitiativeDetail({ id }: { id: string }) {
             {stageIdx < ORDER.length - 1 && <button className="btn btn-sm" disabled={blocking > 0} title={blocking > 0 ? "Finish this stage's tasks in the module boards first" : "Manual override"} onClick={() => moveStage(1)}>Advance to {LIFE[stageIdx + 1].label} →</button>}
           </div>
         </div>
+      </div>
+
+      {/* the officers analyze this initiative — review the bet, delivery risk, GTM readiness */}
+      <div style={{ marginBottom: "var(--sp-5)" }}>
+        <PlaysPanel targetType="initiative" targetId={ini.id} targetName={ini.title} plays={INITIATIVE_PLAYS} />
       </div>
 
       {/* current stage's work, per side (scope-aware) — READ-ONLY rollup. Do the

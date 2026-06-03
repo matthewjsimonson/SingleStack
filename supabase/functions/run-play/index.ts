@@ -35,31 +35,57 @@ const CORS = {
 const json = (b: unknown, s = 200) => new Response(JSON.stringify(b), { status: s, headers: { ...CORS, "content-type": "application/json" } });
 
 // The Play registry. Same output shape for every Play (one renderer); the lens
-// + focus differ. agent_key is the best-fit officer that runs it.
-const PLAYS: Record<string, { label: string; agent_key: string; focus: string; sections_hint: string }> = {
+// + focus + target differ. agent_key is the best-fit officer that runs it.
+const PLAYS: Record<string, { label: string; agent_key: string; target: string; focus: string; sections_hint: string }> = {
   product_standing: {
     label: "Product standing",
     agent_key: "cpo",
+    target: "competitor",
     focus: "Assess where OUR product stands versus this competitor, capability by capability — where we clearly win, where we're at parity, and where we lose. Be specific and honest (don't flatter us). Ground each call in the capability matrix scores, the battlecard, and the signals.",
     sections_hint: "Sections to produce: 'Where we win', 'At parity', 'Where we lose', 'Biggest gap to close'.",
   },
   build_to_beat: {
     label: "Build-to-beat",
     agent_key: "ceng",
+    target: "competitor",
     focus: "From an engineering lens: what should we BUILD to catch up where we're behind and pull further ahead where we lead? For each move, note rough effort (S/M/L) and the leverage or technical risk. Be buildable and concrete, not aspirational.",
     sections_hint: "Sections to produce: 'Catch-up builds', 'Leap-ahead builds', 'Sequencing & effort', 'Technical risks'.",
   },
   narrative_angle: {
     label: "Narrative angle",
     agent_key: "cco",
+    target: "competitor",
     focus: "How should we tell our story against this competitor? Amplify genuine strengths, honestly reframe (pad) weaknesses, and find the narrative wedge that reframes the category in our favor. No hype — concrete, human language.",
     sections_hint: "Sections to produce: 'Strengths to amplify', 'Weaknesses to reframe', 'The wedge (story arc)', 'Messages to avoid'.",
   },
   win_plan: {
     label: "Win plan",
     agent_key: "cro",
+    target: "competitor",
     focus: "How do we WIN deals against this competitor? Where we win, traps to set early, how to handle their strongest objections, and the proof points that close. Make it usable by a rep on a live deal.",
     sections_hint: "Sections to produce: 'Where we win', 'Traps to set', 'Objection handling', 'Proof points'.",
+  },
+  // ---- Initiative Plays — the same engine, pointed at the work itself. --------
+  initiative_review: {
+    label: "Initiative review",
+    agent_key: "cpo",
+    target: "initiative",
+    focus: "Review this initiative as a bet: is the scope right, is it sequenced sensibly, what is the single biggest risk to the outcome, and how strong is the evidence behind it? Be candid — say so if it looks thin or premature.",
+    sections_hint: "Sections to produce: 'The bet', 'Scope check', 'Sequencing', 'Biggest risk'.",
+  },
+  delivery_risk: {
+    label: "Delivery risk",
+    agent_key: "ceng",
+    target: "initiative",
+    focus: "From an engineering lens, what could derail delivery of this initiative? Call out technical risks, dependencies, and the riskiest workstream, each with a concrete de-risking move.",
+    sections_hint: "Sections to produce: 'Technical risks', 'Dependencies', 'Riskiest workstream', 'De-risking moves'.",
+  },
+  gtm_readiness: {
+    label: "GTM readiness",
+    agent_key: "cro",
+    target: "initiative",
+    focus: "Is this initiative ready to win in-market? Assess positioning readiness, the proof we will need, and the GTM gaps to close before launch.",
+    sections_hint: "Sections to produce: 'Positioning readiness', 'Proof needed', 'GTM gaps', 'Launch checklist'.",
   },
 };
 
@@ -106,8 +132,8 @@ Deno.serve(async (req: Request) => {
   try { input = await req.json(); } catch { return json({ error: "invalid JSON body" }, 400); }
   const { function_key, target_type, target_id } = input;
   if (!function_key || !PLAYS[function_key]) return json({ error: `unknown function_key '${function_key}'` }, 400);
-  if (target_type !== "competitor") return json({ error: "v1 supports target_type 'competitor' only" }, 400);
   if (!target_id) return json({ error: "target_id is required" }, 400);
+  if (target_type !== PLAYS[function_key].target) return json({ error: `the "${PLAYS[function_key].label}" play runs on a ${PLAYS[function_key].target}, not a ${target_type}` }, 400);
 
   const def = PLAYS[function_key];
 
@@ -132,50 +158,68 @@ Deno.serve(async (req: Request) => {
   const orgId = agent.org_id as string;
 
   try {
-    // ---- Target context: the competitor + its structured intel + signals. ----
-    const { data: comp } = await supabase.from("competitors").select("name, relationship, website, notes").eq("id", target_id).maybeSingle();
-    if (!comp) return json({ error: "competitor not found" }, 404);
-
-    const [{ data: skillRows }, { data: cards }, { data: caps }, { data: scores }, { data: rawSigs }] = await Promise.all([
-      supabase.from("agent_skills").select("skills ( name, instructions )").eq("agent_id", agent.id),
-      supabase.from("battlecard_items").select("kind, title, detail").eq("competitor_id", target_id),
-      supabase.from("capabilities").select("id, name").order("position"),
-      supabase.from("capability_scores").select("capability_id, competitor_id, score"),
-      supabase.from("signals").select("title, why, metadata").order("observed_at", { ascending: false, nullsFirst: false }).limit(120),
-    ]);
+    // Agent skills (shared across target types).
+    const { data: skillRows } = await supabase.from("agent_skills").select("skills ( name, instructions )").eq("agent_id", agent.id);
     // deno-lint-ignore no-explicit-any
     const skills = (skillRows ?? []).map((r: any) => r.skills).filter(Boolean);
 
-    // Capability matrix: us (competitor_id null) vs them, 0..3.
-    const SCORE_WORD = ["none", "partial", "good", "strong"];
-    const scoreMap = new Map<string, { us?: number; them?: number }>();
-    for (const s of scores ?? []) {
-      const cell = scoreMap.get(s.capability_id) ?? {};
-      if (s.competitor_id === null) cell.us = s.score;
-      else if (s.competitor_id === target_id) cell.them = s.score;
-      scoreMap.set(s.capability_id, cell);
+    // ---- Target context: built per target type. ------------------------------
+    let ctx = "";
+    let targetName = "";
+    if (def.target === "competitor") {
+      const { data: comp } = await supabase.from("competitors").select("name, relationship, website, notes").eq("id", target_id).maybeSingle();
+      if (!comp) return json({ error: "competitor not found" }, 404);
+      targetName = comp.name;
+      const [{ data: cards }, { data: caps }, { data: scores }, { data: rawSigs }] = await Promise.all([
+        supabase.from("battlecard_items").select("kind, title, detail").eq("competitor_id", target_id),
+        supabase.from("capabilities").select("id, name").order("position"),
+        supabase.from("capability_scores").select("capability_id, competitor_id, score"),
+        supabase.from("signals").select("title, why, metadata").order("observed_at", { ascending: false, nullsFirst: false }).limit(120),
+      ]);
+      const SCORE_WORD = ["none", "partial", "good", "strong"];
+      const scoreMap = new Map<string, { us?: number; them?: number }>();
+      for (const s of scores ?? []) {
+        const cell = scoreMap.get(s.capability_id) ?? {};
+        if (s.competitor_id === null) cell.us = s.score;
+        else if (s.competitor_id === target_id) cell.them = s.score;
+        scoreMap.set(s.capability_id, cell);
+      }
+      const matrixLines = (caps ?? []).map((c) => {
+        const cell = scoreMap.get(c.id);
+        if (!cell || (cell.us == null && cell.them == null)) return null;
+        const us = cell.us != null ? SCORE_WORD[cell.us] ?? cell.us : "—";
+        const them = cell.them != null ? SCORE_WORD[cell.them] ?? cell.them : "—";
+        return `  • ${c.name}: us=${us}, them=${them}`;
+      }).filter(Boolean);
+      // deno-lint-ignore no-explicit-any
+      const sigs = (rawSigs ?? []).filter((s: any) => s.metadata?.competitor_id === target_id).slice(0, 20);
+      const cardsByKind: Record<string, string[]> = {};
+      for (const c of cards ?? []) (cardsByKind[c.kind] ??= []).push(`${c.title}${c.detail ? ` — ${c.detail}` : ""}`);
+      ctx = [
+        `COMPETITOR: ${comp.name} (${comp.relationship})${comp.website ? ` · ${comp.website}` : ""}`,
+        comp.notes ? `Overview: ${comp.notes}` : "",
+        matrixLines.length ? `\nCapability matrix (our score vs theirs, none<partial<good<strong):\n${matrixLines.join("\n")}` : "",
+        Object.keys(cardsByKind).length ? `\nExisting battlecard:\n${Object.entries(cardsByKind).map(([k, v]) => `  [${k}] ${v.join(" | ")}`).join("\n")}` : "",
+        sigs.length ? `\nSignals about this competitor (use as evidence; cite by title):\n${sigs.map((s) => `  • ${s.title}${s.why ? ` — ${s.why}` : ""}`).join("\n")}` : "\n(No signals logged about this competitor yet — say so where evidence is thin.)",
+      ].filter(Boolean).join("\n");
+    } else {
+      // initiative — the work itself + its tasks + the signals behind it.
+      const { data: ini } = await supabase.from("initiatives").select("title, description, scope, stage, lifecycle").eq("id", target_id).maybeSingle();
+      if (!ini) return json({ error: "initiative not found" }, 404);
+      targetName = ini.title;
+      const [{ data: ws }, { data: links }] = await Promise.all([
+        supabase.from("initiative_workstreams").select("title, area, stage").eq("initiative_id", target_id),
+        supabase.from("initiative_signals").select("signals(title, why)").eq("initiative_id", target_id),
+      ]);
+      // deno-lint-ignore no-explicit-any
+      const isigs = ((links ?? []) as any[]).map((l) => l.signals).filter(Boolean);
+      ctx = [
+        `INITIATIVE: ${ini.title} (scope: ${ini.scope ?? "—"}${ini.stage ? `, stage ${ini.stage}` : ""}${ini.lifecycle ? `, ${ini.lifecycle}` : ""})`,
+        ini.description ? `Description: ${ini.description}` : "",
+        (ws ?? []).length ? `\nWorkstreams:\n${(ws ?? []).map((w) => `  • [${w.area}${w.stage ? `, ${w.stage}` : ""}] ${w.title}`).join("\n")}` : "\n(No workstreams yet.)",
+        isigs.length ? `\nSignals behind it (use as evidence; cite by title):\n${isigs.map((s) => `  • ${s.title}${s.why ? ` — ${s.why}` : ""}`).join("\n")}` : "\n(No signals linked — say so where evidence is thin.)",
+      ].filter(Boolean).join("\n");
     }
-    const matrixLines = (caps ?? []).map((c) => {
-      const cell = scoreMap.get(c.id);
-      if (!cell || (cell.us == null && cell.them == null)) return null;
-      const us = cell.us != null ? SCORE_WORD[cell.us] ?? cell.us : "—";
-      const them = cell.them != null ? SCORE_WORD[cell.them] ?? cell.them : "—";
-      return `  • ${c.name}: us=${us}, them=${them}`;
-    }).filter(Boolean);
-
-    // deno-lint-ignore no-explicit-any
-    const sigs = (rawSigs ?? []).filter((s: any) => s.metadata?.competitor_id === target_id).slice(0, 20);
-
-    const cardsByKind: Record<string, string[]> = {};
-    for (const c of cards ?? []) (cardsByKind[c.kind] ??= []).push(`${c.title}${c.detail ? ` — ${c.detail}` : ""}`);
-
-    const ctx = [
-      `COMPETITOR: ${comp.name} (${comp.relationship})${comp.website ? ` · ${comp.website}` : ""}`,
-      comp.notes ? `Overview: ${comp.notes}` : "",
-      matrixLines.length ? `\nCapability matrix (our score vs theirs, none<partial<good<strong):\n${matrixLines.join("\n")}` : "",
-      Object.keys(cardsByKind).length ? `\nExisting battlecard:\n${Object.entries(cardsByKind).map(([k, v]) => `  [${k}] ${v.join(" | ")}`).join("\n")}` : "",
-      sigs.length ? `\nSignals about this competitor (use as evidence; cite by title):\n${sigs.map((s) => `  • ${s.title}${s.why ? ` — ${s.why}` : ""}`).join("\n")}` : "\n(No signals logged about this competitor yet — say so where evidence is thin.)",
-    ].filter(Boolean).join("\n");
 
     const skillsBlock = skills.length
       ? `\n\nYOUR SKILLS (apply these playbooks):\n${skills.map((s) => `## ${s.name}\n${s.instructions ?? ""}`).join("\n\n")}`
@@ -184,7 +228,7 @@ Deno.serve(async (req: Request) => {
     const system = [
       agent.system_prompt || `You are ${agent.name}${agent.role ? `, ${agent.role}` : ""}, an executive agent in SingleStack.`,
       skillsBlock,
-      `\n\nYou are running the "${play.label}" analysis on a competitor. ${play.focus}`,
+      `\n\nYou are running the "${play.label}" analysis on this ${def.target}. ${play.focus}`,
       `\n${play.sections_hint}`,
       "\nRules: Be specific and concrete, never generic. Ground every claim in the provided context; in each section's `evidence`, list the exact signal/battlecard/matrix items you leaned on (or note 'thin evidence' honestly). headline = a one-line take. recommendations = concrete next steps. confidence = a short, honest read (e.g. 'Medium — matrix is filled but only 2 signals').",
     ].join("");
@@ -214,7 +258,7 @@ Deno.serve(async (req: Request) => {
       finished_at: new Date().toISOString(),
     }).select("id").single();
 
-    const title = `${play.label} vs ${comp.name}`;
+    const title = `${play.label} · ${targetName}`;
     const { data: artifact, error: artErr } = await supabase.from("agent_artifacts").insert({
       org_id: orgId, agent_id: agent.id, function_key, target_type, target_id, title,
       status: "draft", payload, run_id: run?.id ?? null,

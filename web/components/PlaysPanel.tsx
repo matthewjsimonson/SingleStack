@@ -1,12 +1,11 @@
 "use client";
 
-// Competitive Plays — the four officers each run their analytical function over
-// ONE competitor and return a STRUCTURED artifact (not a chat). Same engine, four
-// lenses: CPO product standing · CEng build-to-beat · CCO narrative · CRO win plan.
-// The runs fire in PARALLEL (each is its own bounded run-play call), so they land
+// PlaysPanel — officers each run a typed analysis over ONE target (a competitor,
+// an initiative) and return a STRUCTURED artifact (not a chat). Same engine, many
+// lenses. Runs fire in PARALLEL (each its own bounded run-play call), so they land
 // independently, are retriable one at a time, and keep latency flat. Each artifact
-// is reviewed HITL: edit it section by section, then ratify or dismiss. Rating the
-// run feeds the outcome loop.
+// is reviewed HITL: edit section by section, then ratify or dismiss; rating feeds
+// the outcome loop. Used for both competitor and initiative analyses.
 import { useCallback, useEffect, useState } from "react";
 import { createClient } from "@/lib/supabase/client";
 import { Section, Chip, AgentBadge, SourceChip } from "@/components/ui";
@@ -14,15 +13,11 @@ import { Section, Chip, AgentBadge, SourceChip } from "@/components/ui";
 type Sec = { title: string; body: string; evidence: string[] };
 type Payload = { headline: string; sections: Sec[]; recommendations: string[]; confidence: string };
 type Artifact = { id: string; function_key: string; title: string; status: string; payload: Payload; run_id: string | null };
+export type PlayDef = { key: string; label: string; officer: string; tone: "accent" | "violet" };
 
-const PLAYS = [
-  { key: "product_standing", label: "Product standing", officer: "CPO", tone: "accent" as const },
-  { key: "build_to_beat", label: "Build-to-beat", officer: "Chief Eng", tone: "accent" as const },
-  { key: "narrative_angle", label: "Narrative angle", officer: "CCO", tone: "violet" as const },
-  { key: "win_plan", label: "Win plan", officer: "CRO", tone: "violet" as const },
-];
-
-export default function CompetitivePlays({ competitorId, competitorName }: { competitorId: string; competitorName: string }) {
+export default function PlaysPanel({ targetType, targetId, targetName, plays, heading = "Officer analyses" }: {
+  targetType: string; targetId: string; targetName: string; plays: PlayDef[]; heading?: string;
+}) {
   const supabase = createClient();
   const [artifacts, setArtifacts] = useState<Record<string, Artifact>>({});
   const [running, setRunning] = useState<Record<string, boolean>>({});
@@ -34,12 +29,12 @@ export default function CompetitivePlays({ competitorId, competitorName }: { com
   const load = useCallback(async () => {
     const { data } = await supabase.from("agent_artifacts")
       .select("id, function_key, title, status, payload, run_id")
-      .eq("target_type", "competitor").eq("target_id", competitorId)
+      .eq("target_type", targetType).eq("target_id", targetId)
       .order("created_at", { ascending: false });
     const latest: Record<string, Artifact> = {};
     for (const a of (data ?? []) as Artifact[]) if (!latest[a.function_key]) latest[a.function_key] = a;
     setArtifacts(latest);
-  }, [supabase, competitorId]);
+  }, [supabase, targetType, targetId]);
   useEffect(() => { load(); }, [load]);
 
   async function token() {
@@ -52,7 +47,7 @@ export default function CompetitivePlays({ competitorId, competitorName }: { com
     try {
       const t = await token();
       const { data, error } = await supabase.functions.invoke("run-play", {
-        body: { function_key: key, target_type: "competitor", target_id: competitorId },
+        body: { function_key: key, target_type: targetType, target_id: targetId },
         headers: t ? { Authorization: `Bearer ${t}` } : undefined,
       });
       if (error) throw error;
@@ -61,7 +56,7 @@ export default function CompetitivePlays({ competitorId, competitorName }: { com
     } catch (e) { setError(e instanceof Error ? e.message : `Could not run ${key}.`); }
     finally { setRunning((r) => ({ ...r, [key]: false })); }
   }
-  function runAll() { for (const p of PLAYS) if (!running[p.key]) runPlay(p.key); }
+  function runAll() { for (const p of plays) if (!running[p.key]) runPlay(p.key); }
 
   async function setStatus(a: Artifact, status: "ratified" | "dismissed" | "draft") {
     setArtifacts((m) => ({ ...m, [a.function_key]: { ...a, status } }));
@@ -83,16 +78,16 @@ export default function CompetitivePlays({ competitorId, competitorName }: { com
 
   return (
     <Section
-      label="Officer analyses"
-      action={<button className="btn btn-sm" onClick={runAll} style={{ background: "var(--ac)", color: "#fff" }} disabled={PLAYS.some((p) => running[p.key])}>Run all four</button>}
+      label={heading}
+      action={<button className="btn btn-sm" onClick={runAll} style={{ background: "var(--ac)", color: "#fff" }} disabled={plays.some((p) => running[p.key])}>Run all</button>}
     >
       <div className="t-sub t-muted" style={{ fontSize: 12.5, marginBottom: 12 }}>
-        Each officer runs their own analysis on {competitorName} — same evidence, four lenses. Review, edit, and ratify each.
+        Each officer runs their own analysis on {targetName} — same evidence, different lenses. Review, edit, and ratify each.
       </div>
       {error && <div className="banner banner-error" style={{ marginBottom: 12 }}>{error}</div>}
 
       <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "var(--sp-4)" }}>
-        {PLAYS.map((p) => {
+        {plays.map((p) => {
           const a = artifacts[p.key];
           const isRunning = running[p.key];
           const isEditing = a && editing === a.id;
@@ -108,7 +103,7 @@ export default function CompetitivePlays({ competitorId, competitorName }: { com
               </div>
 
               {!a && !isRunning && <div className="t-sub t-muted" style={{ fontSize: 12.5 }}>Not run yet.</div>}
-              {isRunning && <div className="t-sub t-muted" style={{ fontSize: 12.5 }}>{p.officer} is analyzing {competitorName}…</div>}
+              {isRunning && <div className="t-sub t-muted" style={{ fontSize: 12.5 }}>{p.officer} is analyzing {targetName}…</div>}
 
               {a && !isRunning && isEditing && draft && (
                 <div className="stack-3">
