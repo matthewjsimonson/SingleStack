@@ -10,9 +10,10 @@
 // scaffold so the full IA is visible and navigable now.
 import { createClient } from "@/lib/supabase/client";
 import { useRouter, usePathname } from "next/navigation";
-import type { ReactNode } from "react";
+import { useState, type ReactNode } from "react";
 import { ProductProvider, useProductScope } from "@/lib/ProductContext";
 import AgentLauncher from "@/components/AgentLauncher";
+import { ChromeSlots } from "@/components/PageBar";
 
 // Active-product switcher — the cross-module "which line am I in?" selector.
 // Hidden for single-product orgs (no clutter when there's nothing to switch).
@@ -90,6 +91,10 @@ export default function Shell({
   const router = useRouter();
   const pathname = usePathname();
   const supabase = createClient();
+  // Callback-ref state for the bar slots, so PageBar portals become reactive
+  // (re-render once these DOM nodes mount).
+  const [tabsSlot, setTabsSlot] = useState<HTMLElement | null>(null);
+  const [actionsSlot, setActionsSlot] = useState<HTMLElement | null>(null);
 
   async function signOut() {
     await supabase.auth.signOut();
@@ -160,18 +165,28 @@ export default function Shell({
       </aside>
 
       <div style={{ flex: 1, display: "flex", flexDirection: "column", overflow: "hidden" }}>
-        <header style={{ height: 52, minHeight: 52, background: "var(--panel)", borderBottom: "1px solid var(--border)", display: "flex", alignItems: "center", padding: "0 24px", gap: 6 }}>
-          {trail.map((c, i) => (
-            <span key={i} className="row" style={{ gap: 6 }}>
-              {i > 0 && <span className="t-muted" style={{ fontSize: 13 }}>/</span>}
-              {c.href ? <a href={c.href} className="t-sub" style={{ fontWeight: 600 }}>{c.label}</a> : <span style={{ fontSize: 13, fontWeight: 600 }}>{c.label}</span>}
-            </span>
-          ))}
+        <header style={{ height: 52, minHeight: 52, background: "var(--panel)", borderBottom: "1px solid var(--border)", display: "flex", alignItems: "stretch", padding: "0 24px", gap: 4 }}>
+          {/* Title = the route's breadcrumb trail — no duplicate <h1> in the body */}
+          <div className="row" style={{ gap: 6, alignItems: "center", flexShrink: 0 }}>
+            {trail.map((c, i) => (
+              <span key={i} className="row" style={{ gap: 6, alignItems: "center" }}>
+                {i > 0 && <span className="t-muted" style={{ fontSize: 13 }}>/</span>}
+                {c.href ? <a href={c.href} className="t-sub" style={{ fontWeight: 600 }}>{c.label}</a> : <span style={{ fontSize: 14, fontWeight: 680 }}>{c.label}</span>}
+              </span>
+            ))}
+          </div>
+          {/* Module tabs — portaled up from the page */}
+          <div ref={setTabsSlot} style={{ display: "flex", alignItems: "stretch", height: "100%", marginLeft: 10 }} />
           <div style={{ flex: 1 }} />
+          {/* Page actions — portaled up from the page */}
+          <div ref={setActionsSlot} className="row gap-2" style={{ alignItems: "center" }} />
+          {/* Advisors — the officers relevant to where you are, one click away */}
           <AgentLauncher />
         </header>
         <main style={{ flex: 1, overflowY: "auto" }}>
-          <div style={{ maxWidth: 1000, margin: "0 auto", width: "100%", padding: "28px 28px 64px" }}>{children}</div>
+          <ChromeSlots.Provider value={{ tabsSlot, actionsSlot }}>
+            <div style={{ maxWidth: 1000, margin: "0 auto", width: "100%", padding: "20px 28px 64px" }}>{children}</div>
+          </ChromeSlots.Provider>
         </main>
       </div>
     </div>

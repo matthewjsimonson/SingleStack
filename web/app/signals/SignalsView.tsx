@@ -15,7 +15,8 @@ import { getOrgId } from "@/lib/org";
 import { fireWorkflows } from "@/lib/triggers";
 import { useProductScope } from "@/lib/ProductContext";
 import { momentumGlyph, stateTone } from "@/lib/themeLife";
-import { PageHeader, Section, Chip, Banner, Confidence, Modal, SubTabs } from "@/components/ui";
+import { Section, Chip, Banner, Confidence, Modal } from "@/components/ui";
+import PageBar from "@/components/PageBar";
 import TrackingTopics from "@/components/TrackingTopics";
 import SourceManager from "@/components/SourceManager";
 import IntelReview from "./IntelReview";
@@ -179,27 +180,23 @@ export default function SignalsView() {
 
   return (
     <div>
-      <PageHeader
-        title="Signals"
-        meta="Your intelligence dashboard — internal & external intel, sorted by what it informs, synthesized into what to do next."
+      <PageBar
+        tabs={[
+          { key: "home", label: "Homepage" },
+          { key: "map", label: "Map" },
+          { key: "product", label: "Product", count: signalsScoped.filter((s) => inLens(s, "product")).length },
+          { key: "gtm", label: "GTM", count: signalsScoped.filter((s) => inLens(s, "gtm")).length },
+        ]}
+        active={tab}
+        onTab={(k) => setTab(k as Tab)}
         actions={
           <>
-            <button className="btn btn-secondary" onClick={() => setTrackOpen(true)}>Tracking</button>
-            <button className="btn" onClick={() => setLogOpen(true)}>+ Log signal</button>
+            <button className="btn btn-secondary btn-sm" onClick={() => setTrackOpen(true)}>Tracking</button>
+            <button className="btn btn-sm" onClick={() => setLogOpen(true)}>+ Log signal</button>
           </>
         }
       />
       <Banner>{error}</Banner>
-
-      <SubTabs<Tab>
-        tabs={[
-          { key: "home", label: "Homepage" },
-          { key: "map", label: "Map" },
-          { key: "product", label: `Product · ${signalsScoped.filter((s) => inLens(s, "product")).length}` },
-          { key: "gtm", label: `GTM · ${signalsScoped.filter((s) => inLens(s, "gtm")).length}` },
-        ]}
-        active={tab} onChange={setTab}
-      />
 
       {loading ? <div className="t-sub t-muted">Loading…</div> : tab === "map" ? (
         <MapView productFilter={active} onOpenTheme={setOpenThemeId} />

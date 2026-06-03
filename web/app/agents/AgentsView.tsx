@@ -4,7 +4,8 @@
 import { useEffect, useState, useCallback } from "react";
 import { createClient } from "@/lib/supabase/client";
 import { getOrgId } from "@/lib/org";
-import { PageHeader, Chip, Banner, Empty } from "@/components/ui";
+import { Chip, Banner, Empty } from "@/components/ui";
+import PageBar from "@/components/PageBar";
 import RosterReview from "@/components/RosterReview";
 
 type Agent = { id: string; key: string; name: string; role: string | null; model: string | null; system_prompt: string | null; is_active: boolean };
@@ -67,11 +68,7 @@ export default function AgentsView() {
 
   return (
     <div style={{ maxWidth: 760, margin: "0 auto" }}>
-      <PageHeader
-        title="Agents"
-        meta="Agents read a record and propose changes. Each has a system prompt and a model."
-        actions={editing === null ? <button className="btn" onClick={startNew}>+ New agent</button> : undefined}
-      />
+      <PageBar actions={editing === null ? <button className="btn btn-sm" onClick={startNew}>+ New agent</button> : undefined} />
 
       {editing === null && <div style={{ marginBottom: "var(--sp-6)" }}><RosterReview onChanged={load} /></div>}
 
