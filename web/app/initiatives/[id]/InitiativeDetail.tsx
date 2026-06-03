@@ -1,15 +1,13 @@
 "use client";
 
-// Build Item cockpit — the BUILD (product) workflow, the SAME stages as the Ship
-// board: Scoped → Ready for agent → In build → Shipped. The status shown here is
-// the SAME derived stage that places the card on Ship (deriveBuildStage), so the
-// board and this page can never disagree. Each stage is a distinct step with its
-// own work, and the work carries forward:
-//   Scoped          → Product Scope (the spec)
-//   Ready for agent → Technical Scope (context bundle + readiness gate)
-//   In build        → build tasks + the agent brief handoff
-//   Shipped         → release + proof of outcome
-// Pure-GTM work is NOT here — it lives in the GTM area. (+ an Advisors tab.)
+// Build Item cockpit. A top segment picks the side present on the item:
+//   Build         → the build (product) workflow: Scoped → Ready for agent →
+//                   In build → Shipped, each step's own work, carrying forward.
+//   Go-to-market  → the GTM workflow (GtmWorkflow): Brief → In production →
+//                   Launched. Only when the item has GTM scope.
+//   Advisors      → the officers' analyses.
+// Status is DERIVED (deriveBuildStage / deriveGtmStage) — the SAME values that
+// place the card on the Ship and Enablement boards, so nothing can disagree.
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useSearchParams } from "next/navigation";
 import { createClient } from "@/lib/supabase/client";
@@ -18,8 +16,9 @@ import { Chip, Banner, BackLink, Spinner, SubTabs, Modal } from "@/components/ui
 import PlaysPanel, { type PlayDef } from "@/components/PlaysPanel";
 import BuildScope from "@/components/BuildScope";
 import TechnicalScope from "@/components/TechnicalScope";
+import GtmWorkflow from "@/components/GtmWorkflow";
 import { BUILD_TEMPLATE } from "@/lib/templates";
-import { BUILD_STAGES, STAGE_LABEL, buildReadiness, deriveBuildStage, type BuildStage } from "@/lib/buildStage";
+import { BUILD_STAGES, STAGE_LABEL, GTM_STAGE_LABEL, buildReadiness, deriveBuildStage, deriveGtmStage, type BuildStage } from "@/lib/buildStage";
 import { buildAgentBrief, BUILD_KIND_LABEL } from "@/lib/agentBrief";
 
 const INITIATIVE_PLAYS: PlayDef[] = [
@@ -28,7 +27,7 @@ const INITIATIVE_PLAYS: PlayDef[] = [
   { key: "gtm_readiness", label: "GTM readiness", officer: "CRO", tone: "violet" },
 ];
 
-type Initiative = { id: string; title: string; description: string | null; scope: string; kind: string | null; assignee_id: string | null; build_state: string | null; is_unevidenced: boolean; release_id: string | null };
+type Initiative = { id: string; title: string; description: string | null; scope: string; kind: string | null; assignee_id: string | null; build_state: string | null; is_unevidenced: boolean; release_id: string | null; gtm_record_id: string | null };
 type Task = { id: string; area: string; title: string; stage: string; assignee_id: string | null };
 type Person = { id: string; name: string };
 type Field = { field_key: string; value: string | null };
@@ -42,7 +41,7 @@ const STAGE_TONE: Record<BuildStage, "amber" | "accent" | "green"> = { scoped: "
 export default function InitiativeDetail({ id }: { id: string }) {
   const supabase = createClient();
   const params = useSearchParams();
-  const from = params.get("from"); // ship | enablement | (none)
+  const from = params.get("from");
   const back = from === "ship" ? { href: "/ship", label: "Ship" } : from === "enablement" ? { href: "/enablement", label: "Go-to-market" } : { href: "/?tab=initiatives", label: "Initiatives" };
 
   const [ini, setIni] = useState<Initiative | null>(null);
@@ -53,15 +52,16 @@ export default function InitiativeDetail({ id }: { id: string }) {
   const [release, setRelease] = useState<Release | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [side, setSide] = useState<string>("build");
   const [tab, setTab] = useState<string>("scoped");
-  const tabPinned = useRef(false);
+  const pinned = useRef(false);
   const [newTask, setNewTask] = useState("");
   const [brief, setBrief] = useState(false);
   const [copied, setCopied] = useState(false);
 
   const load = useCallback(async () => {
     const [{ data: i }, { data: w }, { data: p }, { data: fl }, { data: lk }] = await Promise.all([
-      supabase.from("initiatives").select("id, title, description, scope, kind, assignee_id, build_state, is_unevidenced, release_id").eq("id", id).maybeSingle(),
+      supabase.from("initiatives").select("id, title, description, scope, kind, assignee_id, build_state, is_unevidenced, release_id, gtm_record_id").eq("id", id).maybeSingle(),
       supabase.from("initiative_workstreams").select("id, area, title, stage, assignee_id").eq("initiative_id", id),
       supabase.from("people").select("id, name").eq("is_active", true).order("name"),
       supabase.from("initiative_fields").select("field_key, value").eq("initiative_id", id),
@@ -80,15 +80,27 @@ export default function InitiativeDetail({ id }: { id: string }) {
   const ownerName = (pid: string | null) => people.find((p) => p.id === pid)?.name ?? null;
   const fv = new Map(fields.map((f) => [f.field_key, (f.value ?? "").trim()]));
   const buildTasks = tasks.filter((t) => t.area === "build");
+  const gtmTasks = tasks.filter((t) => t.area === "gtm");
   const { ready } = buildReadiness(fv, links);
   const stage = deriveBuildStage({ buildState: ini.build_state, ready, buildTasks });
+  const gtmStage = deriveGtmStage(gtmTasks);
   const scopePct = Math.round((SCOPE_KEYS.filter((k) => fv.get(k)).length / SCOPE_KEYS.length) * 100);
   const relLabel = release ? (release.version ? `${release.version} · ${release.name}` : release.name) : null;
+  const hasBuild = ini.scope === "product" || ini.scope === "both";
+  const hasGtm = ini.scope === "gtm" || ini.scope === "both";
 
-  // Default the tab to the current stage, once.
-  if (!tabPinned.current) { tabPinned.current = true; setTab(stage); }
+  // Pick the side + build tab once, from where you arrived.
+  if (!pinned.current) {
+    pinned.current = true;
+    setSide(from === "enablement" && hasGtm ? "gtm" : hasBuild ? "build" : "gtm");
+    setTab(stage);
+  }
 
-  const tabs = [...BUILD_STAGES.map((s) => ({ key: s.key, label: s.label })), { key: "advisors", label: "Advisors" }];
+  const segments = [
+    ...(hasBuild ? [{ key: "build", label: "Build" }] : []),
+    ...(hasGtm ? [{ key: "gtm", label: "Go-to-market" }] : []),
+    { key: "advisors", label: "Advisors" },
+  ];
   const stageRank = (k: string) => BUILD_STAGES.findIndex((s) => s.key === k);
   const curRank = stageRank(stage);
 
@@ -120,63 +132,76 @@ export default function InitiativeDetail({ id }: { id: string }) {
       <BackLink href={back.href} label={back.label} />
       <div className="row gap-2" style={{ marginBottom: 4, flexWrap: "wrap", alignItems: "center" }}>
         {ini.kind && <Chip>{BUILD_KIND_LABEL[ini.kind] ?? ini.kind}</Chip>}
-        <Chip tone={STAGE_TONE[stage]}>{STAGE_LABEL[stage]}</Chip>
+        {hasBuild && <Chip tone={STAGE_TONE[stage]}>{STAGE_LABEL[stage]}</Chip>}
+        {hasGtm && <Chip tone="violet">GTM · {GTM_STAGE_LABEL[gtmStage]}</Chip>}
         {ownerName(ini.assignee_id) ? <Chip tone="green">{ownerName(ini.assignee_id)}</Chip> : <Chip tone="amber">unowned</Chip>}
-        {relLabel && <Chip tone="violet">{relLabel}</Chip>}
+        {relLabel && <Chip>{relLabel}</Chip>}
         {ini.is_unevidenced && <span title="Scope entered manually with no linked Signal evidence."><Chip tone="amber">⚠ no evidence</Chip></span>}
       </div>
       <h1 className="t-page" style={{ marginBottom: 4 }}>{ini.title}</h1>
       {ini.description && <div className="t-sub t-muted" style={{ marginBottom: "var(--sp-4)", maxWidth: 720 }}>{ini.description}</div>}
 
-      {/* stage rail — where this Build Item actually is */}
-      <div className="row" style={{ gap: 0, flexWrap: "wrap", marginBottom: "var(--sp-5)" }}>
-        {BUILD_STAGES.map((s, idx) => {
-          const state = idx < curRank ? "done" : idx === curRank ? "cur" : "todo";
-          return (
-            <div key={s.key} className="row" style={{ alignItems: "center", gap: 0 }}>
-              <div style={{ display: "flex", flexDirection: "column", alignItems: "center", padding: "0 8px" }}>
-                <span style={{ width: 24, height: 24, borderRadius: 999, display: "inline-flex", alignItems: "center", justifyContent: "center", fontSize: 11, fontWeight: 700, background: state === "cur" ? "var(--ac)" : state === "done" ? "var(--gn)" : "var(--fill-2)", color: state === "todo" ? "var(--tm)" : "#fff" }}>{state === "done" ? "✓" : idx + 1}</span>
-                <span className="t-mono-xs" style={{ marginTop: 4, fontWeight: state === "cur" ? 700 : 400, color: state === "cur" ? "var(--tp)" : "var(--tm)" }}>{s.label}</span>
-              </div>
-              {idx < BUILD_STAGES.length - 1 && <span style={{ width: 22, height: 2, background: idx < curRank ? "var(--gn)" : "var(--border)" }} />}
-            </div>
-          );
-        })}
-      </div>
-
-      <Banner>{error}</Banner>
-      <SubTabs tabs={tabs} active={tab} onChange={setTab} />
-
-      {tab === "scoped" && (<>
-        <StepIntro title="Scope — define what we're building" body="Capture the Why / What / How / Proof. This is the spec everything downstream carries forward." />
-        <BuildScope initiativeId={ini.id} />
-      </>)}
-
-      {tab === "ready_for_agent" && (<>
-        <StepIntro title="Ready for agent — make it buildable" body={`Assemble the Technical Scope: the context bundle and prompt a coding agent needs. Scope is ${scopePct}% captured — it carries in from the previous step.`} />
-        <TechnicalScope initiativeId={ini.id} />
-      </>)}
-
-      {tab === "in_build" && (<>
-        <StepIntro title="In build — execute" body="Break the work into tasks and hand the agent its brief. The scope and context bundle carry forward into the brief." />
+      {/* Side: which workflow you're working — Build, GTM, or the officers. */}
+      {segments.length > 1 && (
         <div className="row gap-2" style={{ marginBottom: "var(--sp-4)" }}>
-          <button className="btn" disabled={!ready} title={ready ? "Assemble the coding-agent handoff" : "Finish the Technical Scope first"} onClick={() => { setBrief(true); setCopied(false); }}>Agent brief</button>
-          {stage === "in_build" && <button className="btn btn-secondary" onClick={markShipped}>Mark shipped →</button>}
+          {segments.map((s) => (
+            <button key={s.key} className={`btn btn-sm ${side === s.key ? "" : "btn-secondary"}`} onClick={() => setSide(s.key)}>{s.label}</button>
+          ))}
         </div>
-        <TaskList tasks={buildTasks} ownerName={ownerName} onAdvance={patchTask} value={newTask} setValue={setNewTask} onAdd={addTask} />
-      </>)}
+      )}
+      <Banner>{error}</Banner>
 
-      {tab === "shipped" && (<>
-        <StepIntro title="Shipped — the outcome" body="The release this shipped in, and the proof it worked." />
-        <div className="card" style={{ overflow: "hidden" }}>
-          <Row label="Release" value={relLabel ?? null} empty="Not tagged to a release yet — set one when you tag the work." />
-          <Row label="Success metric" value={fv.get("success_metric") ?? null} empty="Define it in Scope → Proof." />
-          <Row label="Validation plan" value={fv.get("validation") ?? null} empty="Define it in Scope → Proof." />
-        </div>
-        {stage !== "shipped" && <div className="t-sub t-muted" style={{ fontSize: 12.5, marginTop: 10 }}>Not shipped yet — finish the build in the “In build” step.</div>}
-      </>)}
+      {side === "build" && hasBuild && (
+        <>
+          {/* build stage rail — where this Build Item actually is */}
+          <div className="row" style={{ gap: 0, flexWrap: "wrap", marginBottom: "var(--sp-5)" }}>
+            {BUILD_STAGES.map((s, idx) => {
+              const state = idx < curRank ? "done" : idx === curRank ? "cur" : "todo";
+              return (
+                <div key={s.key} className="row" style={{ alignItems: "center", gap: 0 }}>
+                  <div style={{ display: "flex", flexDirection: "column", alignItems: "center", padding: "0 8px" }}>
+                    <span style={{ width: 24, height: 24, borderRadius: 999, display: "inline-flex", alignItems: "center", justifyContent: "center", fontSize: 11, fontWeight: 700, background: state === "cur" ? "var(--ac)" : state === "done" ? "var(--gn)" : "var(--fill-2)", color: state === "todo" ? "var(--tm)" : "#fff" }}>{state === "done" ? "✓" : idx + 1}</span>
+                    <span className="t-mono-xs" style={{ marginTop: 4, fontWeight: state === "cur" ? 700 : 400, color: state === "cur" ? "var(--tp)" : "var(--tm)" }}>{s.label}</span>
+                  </div>
+                  {idx < BUILD_STAGES.length - 1 && <span style={{ width: 22, height: 2, background: idx < curRank ? "var(--gn)" : "var(--border)" }} />}
+                </div>
+              );
+            })}
+          </div>
 
-      {tab === "advisors" && (<>
+          <SubTabs tabs={BUILD_STAGES.map((s) => ({ key: s.key, label: s.label }))} active={tab} onChange={setTab} />
+
+          {tab === "scoped" && (<>
+            <StepIntro title="Scope — define what we're building" body="Capture the Why / What / How / Proof. This is the spec everything downstream carries forward." />
+            <BuildScope initiativeId={ini.id} />
+          </>)}
+          {tab === "ready_for_agent" && (<>
+            <StepIntro title="Ready for agent — make it buildable" body={`Assemble the Technical Scope: the context bundle and prompt a coding agent needs. Scope is ${scopePct}% captured — it carries in from the previous step.`} />
+            <TechnicalScope initiativeId={ini.id} />
+          </>)}
+          {tab === "in_build" && (<>
+            <StepIntro title="In build — execute" body="Break the work into tasks and hand the agent its brief. The scope and context bundle carry forward into the brief." />
+            <div className="row gap-2" style={{ marginBottom: "var(--sp-4)" }}>
+              <button className="btn" disabled={!ready} title={ready ? "Assemble the coding-agent handoff" : "Finish the Technical Scope first"} onClick={() => { setBrief(true); setCopied(false); }}>Agent brief</button>
+              {stage === "in_build" && <button className="btn btn-secondary" onClick={markShipped}>Mark shipped →</button>}
+            </div>
+            <TaskList tasks={buildTasks} ownerName={ownerName} onAdvance={patchTask} value={newTask} setValue={setNewTask} onAdd={addTask} />
+          </>)}
+          {tab === "shipped" && (<>
+            <StepIntro title="Shipped — the outcome" body="The release this shipped in, and the proof it worked." />
+            <div className="card" style={{ overflow: "hidden" }}>
+              <DRow label="Release" value={relLabel ?? null} empty="Not tagged to a release yet." />
+              <DRow label="Success metric" value={fv.get("success_metric") ?? null} empty="Define it in Scope → Proof." />
+              <DRow label="Validation plan" value={fv.get("validation") ?? null} empty="Define it in Scope → Proof." />
+            </div>
+            {stage !== "shipped" && <div className="t-sub t-muted" style={{ fontSize: 12.5, marginTop: 10 }}>Not shipped yet — finish the build in the “In build” step.</div>}
+          </>)}
+        </>
+      )}
+
+      {side === "gtm" && hasGtm && <GtmWorkflow initiativeId={ini.id} gtmRecordId={ini.gtm_record_id} />}
+
+      {side === "advisors" && (<>
         <StepIntro title="Advisors — the officers' read" body="Each officer runs their own analysis — same evidence, different lens. Review, edit, ratify." />
         <PlaysPanel targetType="initiative" targetId={ini.id} targetName={ini.title} plays={INITIATIVE_PLAYS} heading="Officer analyses" columns={1} />
       </>)}
@@ -201,7 +226,7 @@ function StepIntro({ title, body }: { title: string; body: string }) {
   );
 }
 
-function Row({ label, value, empty }: { label: string; value: string | null; empty: string }) {
+function DRow({ label, value, empty }: { label: string; value: string | null; empty: string }) {
   return (
     <div style={{ padding: "14px 18px", borderTop: "1px solid var(--border)" }}>
       <div className="t-h2" style={{ fontSize: 13, fontWeight: 620, marginBottom: 4 }}>{label}</div>

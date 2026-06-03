@@ -87,3 +87,28 @@ export function derivePlgStage(input: { scope: string; buildStage: BuildStage; g
   // Otherwise still planning.
   return "plan";
 }
+
+// ---------------------------------------------------------------------------
+// GTM workflow — the Go-to-market area axis, parallel to the build workflow.
+// Derived from the item's GTM tasks (content/campaign workstreams):
+//   brief         → message/audience/channels being defined; no production yet
+//   in_production → assets being produced (a task is active/done, not all done)
+//   launched      → all GTM work done — published and in market
+// ---------------------------------------------------------------------------
+export type GtmStage = "brief" | "in_production" | "launched";
+
+export const GTM_STAGES: { key: GtmStage; label: string; blurb: string; tone: string }[] = [
+  { key: "brief", label: "Brief", blurb: "Define the message, audience, and channels.", tone: "var(--vl)" },
+  { key: "in_production", label: "In production", blurb: "Produce the content and campaign assets.", tone: "var(--vl)" },
+  { key: "launched", label: "Launched", blurb: "Published and in market.", tone: "var(--vl)" },
+];
+
+export function deriveGtmStage(gtmTasks: { stage: string }[]): GtmStage {
+  const started = gtmTasks.some((t) => t.stage === "active" || t.stage === "done");
+  const allDone = gtmTasks.length > 0 && gtmTasks.every((t) => t.stage === "done");
+  if (allDone) return "launched";
+  if (started) return "in_production";
+  return "brief";
+}
+
+export const GTM_STAGE_LABEL: Record<GtmStage, string> = Object.fromEntries(GTM_STAGES.map((s) => [s.key, s.label])) as Record<GtmStage, string>;
