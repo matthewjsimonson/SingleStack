@@ -175,7 +175,7 @@ export default function ShipBoard() {
                           {it.kind && <Chip>{KIND_LABEL[it.kind] ?? it.kind}</Chip>}
                           {relLabel(it.release_id) && <Chip tone="violet">{relLabel(it.release_id)}</Chip>}
                         </div>
-                        <a href={`/initiatives/${it.id}`} title="Open the Build Item cockpit" style={{ display: "block", fontSize: 13.5, fontWeight: 640, marginBottom: 8, color: "var(--tp)", textDecoration: "none" }} onMouseEnter={(e) => (e.currentTarget.style.textDecoration = "underline")} onMouseLeave={(e) => (e.currentTarget.style.textDecoration = "none")}>{it.title}</a>
+                        <a href={`/initiatives/${it.id}?from=ship`} title="Open the Build Item cockpit" style={{ display: "block", fontSize: 13.5, fontWeight: 640, marginBottom: 8, color: "var(--tp)", textDecoration: "none" }} onMouseEnter={(e) => (e.currentTarget.style.textDecoration = "underline")} onMouseLeave={(e) => (e.currentTarget.style.textDecoration = "none")}>{it.title}</a>
 
                         {/* scope completeness */}
                         <div className="row-between" style={{ fontSize: 11, color: "var(--tm)", marginBottom: 3 }}><span>Scope</span><span>{d.scopePct}%</span></div>

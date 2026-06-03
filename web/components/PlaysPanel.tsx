@@ -15,8 +15,8 @@ type Payload = { headline: string; sections: Sec[]; recommendations: string[]; c
 type Artifact = { id: string; function_key: string; title: string; status: string; payload: Payload; run_id: string | null };
 export type PlayDef = { key: string; label: string; officer: string; tone: "accent" | "violet" };
 
-export default function PlaysPanel({ targetType, targetId, targetName, plays, heading = "Officer analyses" }: {
-  targetType: string; targetId: string; targetName: string; plays: PlayDef[]; heading?: string;
+export default function PlaysPanel({ targetType, targetId, targetName, plays, heading = "Officer analyses", columns = 2 }: {
+  targetType: string; targetId: string; targetName: string; plays: PlayDef[]; heading?: string; columns?: number;
 }) {
   const supabase = createClient();
   const [artifacts, setArtifacts] = useState<Record<string, Artifact>>({});
@@ -86,7 +86,7 @@ export default function PlaysPanel({ targetType, targetId, targetName, plays, he
       </div>
       {error && <div className="banner banner-error" style={{ marginBottom: 12 }}>{error}</div>}
 
-      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "var(--sp-4)" }}>
+      <div style={{ display: "grid", gridTemplateColumns: `repeat(${columns}, 1fr)`, gap: "var(--sp-4)" }}>
         {plays.map((p) => {
           const a = artifacts[p.key];
           const isRunning = running[p.key];
