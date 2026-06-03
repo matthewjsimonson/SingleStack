@@ -18,7 +18,7 @@ export type DrawerSignal = {
 };
 type Initiative = { id: string; title: string; scope: string; stage?: string | null };
 type LinkedTheme = { id: string; title: string; recommendation: string | null };
-type ChatMsg = { role: "user" | "assistant"; content: string };
+type ChatMsg = { role: "user" | "assistant"; content: string; runId?: string | null; rating?: "helpful" | "not_helpful" | null };
 type Rec = { name: string; scope: string; build: string; gtm: string; why: string };
 
 const OFFICER = (cat: string | null) => (cat === "gtm" ? { key: "cro", name: "CRO" } : { key: "cpo", name: "CPO" });
@@ -120,9 +120,15 @@ export default function SignalDrawer({ signal, onClose, onChanged }: { signal: D
       });
       if (error) throw error;
       if (data?.error) throw new Error(data.error);
-      setThread([...next, { role: "assistant", content: data.reply }]);
+      setThread([...next, { role: "assistant", content: data.reply, runId: data.run_id ?? null }]);
     } catch (e) { setError(e instanceof Error ? e.message : "Could not reach the officer."); }
     finally { setChatBusy(false); }
+  }
+  // Outcome loop: rate the officer's answer — feeds back into its future answers + skill evolution.
+  async function rate(i: number, rating: "helpful" | "not_helpful") {
+    const m = thread[i]; if (!m?.runId) return;
+    setThread((t) => t.map((x, j) => (j === i ? { ...x, rating } : x)));
+    await supabase.from("agent_runs").update({ rating, rated_at: new Date().toISOString() }).eq("id", m.runId);
   }
   function sendFree() {
     const q = chatInput.trim();
@@ -288,6 +294,13 @@ export default function SignalDrawer({ signal, onClose, onChanged }: { signal: D
                   <div key={i} className="card card-pad" style={{ background: m.role === "user" ? "var(--panel)" : "var(--fill)", borderLeft: m.role === "assistant" ? "2px solid var(--ac)" : undefined }}>
                     <div className="t-label" style={{ color: "var(--tm)", marginBottom: 4 }}>{m.role === "user" ? "You" : officer.name}</div>
                     <div className="t-sub" style={{ fontSize: 13, lineHeight: 1.55, whiteSpace: "pre-wrap" }}>{m.content}</div>
+                    {m.role === "assistant" && m.runId && (
+                      <div className="row gap-2" style={{ marginTop: 6 }}>
+                        {m.rating
+                          ? <span className="t-mono-xs" style={{ color: "var(--tm)" }}>{m.rating === "helpful" ? "marked helpful ✓" : "marked not helpful ✓"}</span>
+                          : <><button className="btn btn-secondary btn-sm" onClick={() => rate(i, "helpful")}>👍 Helpful</button><button className="btn btn-secondary btn-sm" onClick={() => rate(i, "not_helpful")}>👎 Not helpful</button></>}
+                      </div>
+                    )}
                   </div>
                 ))}
                 {chatBusy && <div className="t-sub t-muted" style={{ fontSize: 12.5 }}>{officer.name} is thinking…</div>}

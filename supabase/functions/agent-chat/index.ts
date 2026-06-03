@@ -119,6 +119,59 @@ Deno.serve(async (req: Request) => {
       ? { id: context.record_id, type: context.record_type, name: context.record_name, module: context.module }
       : null;
 
+    // ---- Alignment: the concrete WORK this agent is responsible for. ----------
+    // An explicit human assignment (agent_alignments) — surfaced regardless of
+    // area gating, because the operator pointed this agent here on purpose. We
+    // pull the aligned initiatives + tasks + the signals tied to those
+    // initiatives, so the agent reasons over its actual remit, not the whole org.
+    let alignBlock = "";
+    {
+      const { data: alignRows } = await supabase
+        .from("agent_alignments")
+        .select("role, guidance, initiative_id, workstream_id, initiatives(id, title, stage, description), initiative_workstreams(title, area, stage)")
+        .eq("agent_id", agent.id);
+      // deno-lint-ignore no-explicit-any
+      const rows = (alignRows ?? []) as any[];
+      if (rows.length) {
+        const initIds = [...new Set(rows.map((r) => r.initiative_id).filter(Boolean))] as string[];
+        const sigByInit: Record<string, string[]> = {};
+        if (initIds.length) {
+          const { data: links } = await supabase.from("initiative_signals").select("initiative_id, signals(title, why)").in("initiative_id", initIds);
+          // deno-lint-ignore no-explicit-any
+          for (const l of (links ?? []) as any[]) {
+            if (!l.signals) continue;
+            (sigByInit[l.initiative_id] ??= []).push(`${l.signals.title}${l.signals.why ? ` (${l.signals.why})` : ""}`);
+          }
+        }
+        // deno-lint-ignore no-explicit-any
+        const lines = rows.map((r: any) => {
+          if (r.workstream_id && r.initiative_workstreams) {
+            const w = r.initiative_workstreams;
+            return `  • [${r.role}] TASK: ${w.title} (${w.area}${w.stage ? `, ${w.stage}` : ""})${r.guidance ? ` — focus: ${r.guidance}` : ""}`;
+          }
+          const i = r.initiatives;
+          if (!i) return "";
+          const sigs = sigByInit[r.initiative_id] ?? [];
+          return `  • [${r.role}] INITIATIVE: ${i.title}${i.stage ? ` (${i.stage})` : ""}${i.description ? ` — ${i.description}` : ""}${r.guidance ? `\n      focus: ${r.guidance}` : ""}${sigs.length ? `\n      signals tied to it: ${sigs.slice(0, 6).join("; ")}` : ""}`;
+        }).filter(Boolean);
+        alignBlock = `WORK YOU ARE ALIGNED TO — you are accountable for items marked [owner] (proactively flag issues + recommend next steps on them); keep an eye on [watcher] items:\n${lines.join("\n")}`;
+      }
+    }
+
+    // ---- Outcome feedback: how the operator rated your recent answers. --------
+    let feedbackBlock = "";
+    {
+      const { data: fb } = await supabase
+        .from("agent_runs").select("rating, feedback, reason_tags")
+        .eq("agent_id", agent.id).not("rating", "is", null)
+        .order("rated_at", { ascending: false }).limit(8);
+      const rows = (fb ?? []) as { rating: string; feedback: string | null; reason_tags: string[] | null }[];
+      if (rows.length) {
+        const fmt = (r: typeof rows[number]) => `  • ${r.rating === "helpful" ? "helpful" : "NOT helpful"}${r.reason_tags?.length ? ` [${r.reason_tags.join(", ")}]` : ""}${r.feedback ? `: ${r.feedback}` : ""}`;
+        feedbackBlock = `OPERATOR FEEDBACK ON YOUR RECENT ANSWERS — lean into what was helpful, fix what wasn't:\n${rows.map(fmt).join("\n")}`;
+      }
+    }
+
     // ---- Build grounding context, scoped to the agent's areas + focus. -------
     const grounding: string[] = [];
 
@@ -204,7 +257,9 @@ Deno.serve(async (req: Request) => {
       "",
       accessLine,
       curation ? `\nYOUR CURATION — the operator has told you what to watch/prioritize/ignore. Honor it:\n${curation}` : "",
+      alignBlock ? `\n${alignBlock}` : "",
       skillsBlock,
+      feedbackBlock ? `\n${feedbackBlock}` : "",
       "",
       "ORGANIZATION CONTEXT:",
       grounding.join("\n"),
@@ -226,14 +281,15 @@ Deno.serve(async (req: Request) => {
     // Log the turn.
     const price = PRICING[model];
     const cost = price ? (resp.usage.input_tokens * price.input + resp.usage.output_tokens * price.output) / 1_000_000 : null;
-    await supabase.from("agent_runs").insert({
+    const { data: run } = await supabase.from("agent_runs").insert({
       org_id: orgId, agent_id: agent.id, status: "succeeded",
       input: { kind: "chat", messages, context: context ?? null, skills: skills.length, areas }, output: reply, model,
       input_tokens: resp.usage.input_tokens, output_tokens: resp.usage.output_tokens, cost_usd: cost,
       finished_at: new Date().toISOString(),
-    });
+    }).select("id").single();
 
-    return json({ reply });
+    // run_id lets the client attach a helpful/not-helpful verdict (the outcome loop).
+    return json({ reply, run_id: run?.id ?? null });
   } catch (e) {
     return json({ error: e instanceof Error ? e.message : String(e) }, 500);
   }

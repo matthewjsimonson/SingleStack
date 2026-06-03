@@ -136,6 +136,41 @@ Deno.serve(async (req: Request) => {
       return json({ revisions: [], new_skills: [], message: "No intelligence in this agent's areas yet — log/synthesize signals first, then evolve." });
     }
 
+    // The concrete WORK this agent is aligned to (initiatives/tasks) + the signals
+    // tied to it. Skills should sharpen against what the agent is actually on the
+    // hook for, not just ambient intelligence.
+    const { data: alignRows } = await supabase
+      .from("agent_alignments")
+      .select("role, initiative_id, workstream_id, initiatives(title, stage), initiative_workstreams(title, area)")
+      .eq("agent_id", agent.id);
+    // deno-lint-ignore no-explicit-any
+    const aRows = (alignRows ?? []) as any[];
+    let alignText = "";
+    if (aRows.length) {
+      const initIds = [...new Set(aRows.map((r) => r.initiative_id).filter(Boolean))] as string[];
+      const sigByInit: Record<string, string[]> = {};
+      if (initIds.length) {
+        const { data: links } = await supabase.from("initiative_signals").select("initiative_id, signals(title)").in("initiative_id", initIds);
+        // deno-lint-ignore no-explicit-any
+        for (const l of (links ?? []) as any[]) if (l.signals) (sigByInit[l.initiative_id] ??= []).push(l.signals.title);
+      }
+      // deno-lint-ignore no-explicit-any
+      alignText = aRows.map((r: any) => r.workstream_id && r.initiative_workstreams
+        ? `• [${r.role}] task: ${r.initiative_workstreams.title} (${r.initiative_workstreams.area})`
+        : r.initiatives ? `• [${r.role}] initiative: ${r.initiatives.title}${r.initiatives.stage ? ` (${r.initiatives.stage})` : ""}${(sigByInit[r.initiative_id] ?? []).length ? ` — signals: ${(sigByInit[r.initiative_id] ?? []).slice(0, 5).join("; ")}` : ""}` : "").filter(Boolean).join("\n");
+    }
+
+    // Outcome signal: answers the operator marked NOT helpful — the strongest cue
+    // for what a skill should fix. Evolution should not be blind to results.
+    const { data: fbRows } = await supabase
+      .from("agent_runs").select("feedback, reason_tags")
+      .eq("agent_id", agent.id).eq("rating", "not_helpful")
+      .order("rated_at", { ascending: false }).limit(8);
+    const negFeedback = (fbRows ?? []) as { feedback: string | null; reason_tags: string[] | null }[];
+    const feedbackText = negFeedback.length
+      ? negFeedback.map((r) => `• ${r.reason_tags?.length ? `[${r.reason_tags.join(", ")}] ` : ""}${r.feedback ?? "(marked not helpful)"}`).join("\n")
+      : "";
+
     const digest = [
       "RECONCILED THEMES (durable patterns — the substance of what has changed):",
       ...(themes ?? []).map((t) => `• [${t.state}/${t.momentum}${t.conf_level != null ? `, conf ${t.conf_level}` : ""}] (${t.category}) ${t.title}${t.summary ? ` — ${t.summary}` : ""}${t.recommendation ? ` → ${t.recommendation}` : ""}`),
@@ -145,6 +180,8 @@ Deno.serve(async (req: Request) => {
         ...capSigs.map((s) => `• ${s.metadata?.provider ? `[${s.metadata.provider}${s.metadata?.area ? `/${s.metadata.area}` : ""}] ` : ""}${s.title}${s.why ? ` — ${s.why}` : ""}`),
       ] : []),
       ...(seesSignals ? ["", "RECENT SIGNALS:", ...sigs.map((s) => `• ${s.title}${s.why ? ` (${s.why})` : ""}`)] : []),
+      ...(alignText ? ["", "WORK THIS AGENT IS ALIGNED TO (its standing remit — bias skills toward serving this well):", alignText] : []),
+      ...(feedbackText ? ["", "OPERATOR FEEDBACK — recent answers marked NOT helpful (evolve skills to fix the underlying pattern):", feedbackText] : []),
     ].join("\n");
 
     const skillList = skills.map((s) =>
