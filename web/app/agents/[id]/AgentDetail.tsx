@@ -92,7 +92,8 @@ export default function AgentDetail({ agentId }: { agentId: string }) {
 
       <PageBar tabs={TABS.map(([k, label, count]) => ({ key: k, label, count }))} active={tab} onTab={(k) => setTab(k as Tab)} />
 
-      {tab === "overview" && <Overview agent={agent} onSaved={load} setError={setError} />}
+      {tab === "overview" && <Overview agent={agent} onSaved={load} setError={setError}
+        skillsCount={attached.size} areas={connections.filter((c) => c.kind === "internal").map((c) => c.label)} alignCount={alignments.length} tabTo={setTab} />}
       {tab === "skills" && <Skills agentId={agentId} skills={skills} attached={attached} reload={load} setError={setError} />}
       {tab === "connections" && <Connections agentId={agentId} connections={connections} reload={load} setError={setError} />}
       {tab === "alignment" && <Alignment agentId={agentId} alignments={alignments} initiatives={initiatives} workstreams={workstreams} reload={load} setError={setError} />}
@@ -102,7 +103,7 @@ export default function AgentDetail({ agentId }: { agentId: string }) {
 }
 
 // ---------- Overview ----------
-function Overview({ agent, onSaved, setError }: { agent: Agent; onSaved: () => void; setError: (s: string | null) => void }) {
+function Overview({ agent, onSaved, setError, skillsCount, areas, alignCount, tabTo }: { agent: Agent; onSaved: () => void; setError: (s: string | null) => void; skillsCount: number; areas: string[]; alignCount: number; tabTo: (t: Tab) => void }) {
   const supabase = createClient();
   const [prompt, setPrompt] = useState(agent.system_prompt ?? "");
   const [role, setRole] = useState(agent.role ?? "");
@@ -113,7 +114,24 @@ function Overview({ agent, onSaved, setError }: { agent: Agent; onSaved: () => v
     if (error) setError(error.message); else onSaved();
     setBusy(false);
   }
+  // The four dials of how this agent is set up — objective, skills, access, focus.
+  const Dial = ({ label, value, hint, to }: { label: string; value: string; hint: string; to?: Tab }) => (
+    <button onClick={() => to && tabTo(to)} disabled={!to} className={to ? "card card-link card-pad" : "card card-pad"} style={{ textAlign: "left", cursor: to ? "pointer" : "default" }}>
+      <div className="t-label" style={{ color: "var(--tm)", marginBottom: 4 }}>{label}</div>
+      <div style={{ fontSize: 14, fontWeight: 660, marginBottom: 2 }}>{value}</div>
+      <div className="t-sub t-muted" style={{ fontSize: 11.5 }}>{hint}</div>
+    </button>
+  );
   return (
+    <>
+      <Section label="Setup at a glance">
+        <div style={{ display: "grid", gridTemplateColumns: "repeat(4, 1fr)", gap: "var(--sp-3)" }}>
+          <Dial label="Objective" value={agent.model ?? "—"} hint="model · identity & prompt below" />
+          <Dial label="Skills" value={String(skillsCount)} hint={skillsCount ? "playbooks it applies" : "none attached"} to="skills" />
+          <Dial label="Access" value={areas.length ? String(areas.length) : "all"} hint={areas.length ? areas.join(", ") : "full foundation"} to="connections" />
+          <Dial label="Focus" value={String(alignCount)} hint={alignCount ? "initiatives / tasks" : "no alignment"} to="alignment" />
+        </div>
+      </Section>
     <Section label="Identity & instructions">
       <div className="card card-pad">
         <label className="field"><span className="t-label">Role</span>
@@ -123,6 +141,7 @@ function Overview({ agent, onSaved, setError }: { agent: Agent; onSaved: () => v
         <button className="btn" onClick={save} disabled={busy}>{busy ? "Saving…" : "Save"}</button>
       </div>
     </Section>
+    </>
   );
 }
 
