@@ -10,7 +10,8 @@
 import { useEffect, useState, useCallback } from "react";
 import { createClient } from "@/lib/supabase/client";
 import { getOrgId } from "@/lib/org";
-import { PageHeader, Chip, Banner } from "@/components/ui";
+import { Chip, Banner } from "@/components/ui";
+import PageBar from "@/components/PageBar";
 
 type CType = "social" | "video" | "blog" | "thought_leadership" | "case_study" | "white_paper" | "testimonial";
 type VideoFlow = { hook?: string; script?: string; prompts?: string[]; descript_steps?: string[] };
@@ -81,7 +82,7 @@ export default function ContentView() {
 
   return (
     <div>
-      <PageHeader title="Content" meta="Social, video, blogs, thought leadership, case studies, white papers, testimonials — each a task that rolls up to its initiative and can ship with a release or campaign." actions={!creating ? <button className="btn" onClick={() => setCreating(true)}>+ New content</button> : undefined} />
+      <PageBar actions={!creating ? <button className="btn btn-sm" onClick={() => setCreating(true)}>+ New content</button> : undefined} />
       <Banner>{error}</Banner>
 
       {/* type filter */}

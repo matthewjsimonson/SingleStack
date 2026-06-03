@@ -5,7 +5,8 @@
 import { useEffect, useState, useCallback } from "react";
 import { createClient } from "@/lib/supabase/client";
 import { getOrgId } from "@/lib/org";
-import { PageHeader, Section, Chip, Banner } from "@/components/ui";
+import { Section, Chip, Banner } from "@/components/ui";
+import PageBar from "@/components/PageBar";
 
 type Campaign = { id: string; name: string; objective: string | null; status: string; channels: string | null; gtm_record_id: string | null; start_date: string | null; end_date: string | null };
 type Rec = { id: string; name: string };
@@ -54,7 +55,7 @@ export default function CampaignsView() {
 
   return (
     <div>
-      <PageHeader title="Campaigns" meta="Coordinated go-to-market pushes — tied to GTM records, powered by your content." actions={!creating ? <button className="btn" onClick={() => setCreating(true)}>+ New campaign</button> : undefined} />
+      <PageBar actions={!creating ? <button className="btn btn-sm" onClick={() => setCreating(true)}>+ New campaign</button> : undefined} />
       <Banner>{error}</Banner>
 
       {creating && (

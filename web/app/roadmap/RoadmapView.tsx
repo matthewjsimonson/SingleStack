@@ -11,7 +11,8 @@ import { createClient } from "@/lib/supabase/client";
 import { getOrgId } from "@/lib/org";
 import { useProductScope } from "@/lib/ProductContext";
 import { fireWorkflows } from "@/lib/triggers";
-import { PageHeader, Section, Chip, Banner } from "@/components/ui";
+import { Section, Chip, Banner } from "@/components/ui";
+import PageBar from "@/components/PageBar";
 
 type Release = { id: string; name: string; version: string | null; summary: string | null; stage: string; target_date: string | null; product_id: string | null };
 type Task = { id: string; title: string; stage: string; change_type: string | null; release_id: string | null };
@@ -86,7 +87,7 @@ export default function RoadmapView() {
 
   return (
     <div>
-      <PageHeader title="Roadmap" meta="What's shipping — releases and their changelog. The work happens in Ship; tag a build task to a release and finishing it lands here." actions={!creating ? <button className="btn" onClick={() => setCreating(true)}>+ New release</button> : undefined} />
+      <PageBar actions={!creating ? <button className="btn btn-sm" onClick={() => setCreating(true)}>+ New release</button> : undefined} />
       <Banner>{error}</Banner>
 
       {creating && (

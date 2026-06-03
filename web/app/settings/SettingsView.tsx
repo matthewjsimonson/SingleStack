@@ -5,7 +5,7 @@
 import { useEffect, useState, useCallback } from "react";
 import { createClient } from "@/lib/supabase/client";
 import { getOrgId } from "@/lib/org";
-import { PageHeader, Section, Chip, Banner } from "@/components/ui";
+import { Section, Chip, Banner } from "@/components/ui";
 import { SOURCE_CATALOG, type SourceDef } from "@/lib/sources";
 import { loadDemoData } from "@/lib/demoSeed";
 import TeamManager from "@/components/TeamManager";
@@ -65,7 +65,6 @@ export default function SettingsView() {
 
   return (
     <div>
-      <PageHeader title="Settings" meta="Connect the sources that feed your signals. Manual today; live connectors arrive with MCP." />
       <Banner>{error}</Banner>
 
       <Section label="Dogfood workspace (SingleStack)">

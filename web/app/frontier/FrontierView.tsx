@@ -11,7 +11,7 @@ import { useCallback, useEffect, useState } from "react";
 import { createClient } from "@/lib/supabase/client";
 import { getOrgId } from "@/lib/org";
 import { fireWorkflows } from "@/lib/triggers";
-import { PageHeader, Section, Chip, Banner } from "@/components/ui";
+import { Section, Chip, Banner } from "@/components/ui";
 import CapabilityDrawer, { type DrawerCapability } from "@/components/CapabilityDrawer";
 
 type Cap = { id: string; title: string; why: string | null; observed_at: string | null; metadata: { domain?: string; provider?: string; area?: string; url?: string } | null };
@@ -110,7 +110,6 @@ export default function FrontierView() {
 
   return (
     <div>
-      <PageHeader title="Frontier models" meta="What's newly possible — frontier model & platform capabilities — and what your agents do about it. Connect agents to this area and set workflows so releases turn into action." />
       <Banner>{error}</Banner>
 
       {/* 1. Capabilities radar */}

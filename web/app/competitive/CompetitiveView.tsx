@@ -8,7 +8,8 @@
 import { useEffect, useState, useCallback } from "react";
 import { createClient } from "@/lib/supabase/client";
 import { getOrgId } from "@/lib/org";
-import { PageHeader, Section, Chip, Banner, Confidence, SubTabs, ConfirmDialog } from "@/components/ui";
+import { Section, Chip, Banner, Confidence, ConfirmDialog } from "@/components/ui";
+import PageBar from "@/components/PageBar";
 import TrackingTopics from "@/components/TrackingTopics";
 import SourceManager from "@/components/SourceManager";
 import CapabilityCellDrawer, { type Cell } from "@/components/CapabilityCellDrawer";
@@ -58,9 +59,12 @@ export default function CompetitiveView() {
 
   return (
     <div>
-      <PageHeader title="Competitive intel" meta="The competitive landscape — what's moving, how you stack up, and why you win. Feeds your CRO & CCO agents and GTM record." />
+      <PageBar
+        tabs={[{ key: "dashboard", label: "Dashboard" }, { key: "battlecards", label: "Battlecards" }, { key: "feed", label: "Signal feed" }]}
+        active={tab}
+        onTab={(k) => setTab(k as Tab)}
+      />
       <Banner>{error}</Banner>
-      <SubTabs<Tab> tabs={[{ key: "dashboard", label: "Dashboard" }, { key: "battlecards", label: "Battlecards" }, { key: "feed", label: "Signal feed" }]} active={tab} onChange={setTab} />
 
       {loading ? <div className="t-sub t-muted">Loading…</div>
         : tab === "dashboard" ? <Dashboard competitors={competitors} capabilities={capabilities} scores={scores} compSignals={compSignals} overview={overview} reload={load} setError={setError} />
