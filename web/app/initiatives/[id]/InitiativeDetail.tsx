@@ -12,6 +12,7 @@ import { createClient } from "@/lib/supabase/client";
 import { Chip, Banner, BackLink, Spinner } from "@/components/ui";
 import PlaysPanel, { type PlayDef } from "@/components/PlaysPanel";
 import BuildScope from "@/components/BuildScope";
+import TechnicalScope from "@/components/TechnicalScope";
 
 // Officer lenses on an initiative — review the bet, delivery risk, GTM readiness.
 const INITIATIVE_PLAYS: PlayDef[] = [
@@ -120,6 +121,15 @@ export default function InitiativeDetail({ id }: { id: string }) {
         <div className="t-label" style={{ marginBottom: 8 }}>Product Scope</div>
         <BuildScope initiativeId={ini.id} />
       </section>
+
+      {/* Technical Scope — the executable context package + agent-readiness gate.
+          Only for Build Items with a product/build side. */}
+      {sides.includes("build") && (
+        <section style={{ marginBottom: "var(--sp-5)" }}>
+          <div className="t-label" style={{ marginBottom: 8 }}>Technical Scope</div>
+          <TechnicalScope initiativeId={ini.id} />
+        </section>
+      )}
 
       {/* the officers analyze this initiative — review the bet, delivery risk, GTM readiness */}
       <div style={{ marginBottom: "var(--sp-5)" }}>
