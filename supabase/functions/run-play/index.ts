@@ -128,45 +128,65 @@ Deno.serve(async (req: Request) => {
     { global: { headers: { Authorization: authHeader } } },
   );
 
-  let input: { function_key?: string; target_type?: string; target_id?: string };
+  let input: { function_key?: string; target_type?: string; target_id?: string; target_name?: string };
   try { input = await req.json(); } catch { return json({ error: "invalid JSON body" }, 400); }
-  const { function_key, target_type, target_id } = input;
-  if (!function_key || !PLAYS[function_key]) return json({ error: `unknown function_key '${function_key}'` }, 400);
+  const { function_key, target_type, target_id, target_name } = input;
+  if (!function_key) return json({ error: "function_key is required" }, 400);
   if (!target_id) return json({ error: "target_id is required" }, 400);
-  if (target_type !== PLAYS[function_key].target) return json({ error: `the "${PLAYS[function_key].label}" play runs on a ${PLAYS[function_key].target}, not a ${target_type}` }, 400);
 
-  const def = PLAYS[function_key];
+  const def = PLAYS[function_key]; // built-in default (undefined for authored plays)
 
-  // Org config override (visible + editable in the Plays UI). Falls back to the
-  // code default when no row exists — existing orgs work with zero seeding.
-  const { data: cfg } = await supabase.from("plays").select("label, agent_id, focus, sections, is_active").eq("key", function_key).maybeSingle();
-  if (cfg && cfg.is_active === false) return json({ error: `the "${def.label}" play is turned off` }, 400);
+  // The play row — authored plays exist only as rows; built-ins fall back to code.
+  const { data: cfg } = await supabase.from("plays").select("id, label, agent_id, focus, sections, description, target_type, is_active").eq("key", function_key).maybeSingle();
+  if (!cfg && !def) return json({ error: `unknown play '${function_key}'` }, 400);
+  if (cfg && cfg.is_active === false) return json({ error: `the "${cfg.label}" play is turned off` }, 400);
   const play = {
-    label: cfg?.label || def.label,
-    focus: cfg?.focus || def.focus,
-    sections_hint: cfg?.sections || def.sections_hint,
+    id: (cfg?.id as string | undefined) ?? null,
+    label: cfg?.label || def?.label || function_key,
+    focus: cfg?.focus || def?.focus || cfg?.description || "Run this play and report what matters, grounded in the context provided.",
+    sections_hint: cfg?.sections || def?.sections_hint || "",
+    target: cfg?.target_type || def?.target || "custom",
   };
+  if (target_type && target_type !== play.target) return json({ error: `the "${play.label}" play runs on a ${play.target}, not a ${target_type}` }, 400);
 
-  // The officer that runs this Play — the configured agent, else the default key.
+  // The PRIMARY agent — first attached agent (play_agents), else configured/default.
+  let primaryAgentId: string | null = null;
+  if (play.id) {
+    const { data: pas } = await supabase.from("play_agents").select("agent_id, position").eq("play_id", play.id).order("position").limit(1);
+    primaryAgentId = (pas?.[0]?.agent_id as string | undefined) ?? null;
+  }
   let agentQ = supabase.from("agents").select("id, org_id, name, role, model, system_prompt").eq("is_active", true);
-  agentQ = cfg?.agent_id ? agentQ.eq("id", cfg.agent_id) : agentQ.eq("key", def.agent_key);
+  agentQ = primaryAgentId ? agentQ.eq("id", primaryAgentId) : cfg?.agent_id ? agentQ.eq("id", cfg.agent_id) : def ? agentQ.eq("key", def.agent_key) : agentQ.limit(1);
   const { data: agent, error: aErr } = await agentQ.maybeSingle();
   if (aErr) return json({ error: `agent lookup failed: ${aErr.message}` }, 500);
-  if (!agent) return json({ error: `the officer for the "${def.label}" play isn't active` }, 404);
+  if (!agent) return json({ error: `no active agent to run the "${play.label}" play` }, 404);
 
   const model = (agent.model as string) || DEFAULT_MODEL;
   const orgId = agent.org_id as string;
 
   try {
-    // Agent skills (shared across target types).
-    const { data: skillRows } = await supabase.from("agent_skills").select("skills ( name, instructions )").eq("agent_id", agent.id);
+    // Skills the agent runs WITH: its CORNERSTONE skills + the PLAY-SPECIFIC skills
+    // layered onto it for this play (on top of cornerstones). That's the model.
+    const [{ data: cornerRows }, { data: playSkillRows }] = await Promise.all([
+      supabase.from("agent_skills").select("is_cornerstone, skills ( name, instructions )").eq("agent_id", agent.id).eq("is_cornerstone", true),
+      play.id ? supabase.from("play_skills").select("skills ( name, instructions )").eq("play_id", play.id).eq("agent_id", agent.id) : Promise.resolve({ data: [] as unknown[] }),
+    ]);
     // deno-lint-ignore no-explicit-any
-    const skills = (skillRows ?? []).map((r: any) => r.skills).filter(Boolean);
+    const cornerSkills = (cornerRows ?? []).map((r: any) => r.skills).filter(Boolean);
+    // deno-lint-ignore no-explicit-any
+    const laySkills = (playSkillRows ?? []).map((r: any) => r.skills).filter(Boolean);
+    let skills = [...cornerSkills, ...laySkills];
+    // Legacy fallback: agents with no cornerstone set still run with their skills.
+    if (cornerSkills.length === 0) {
+      const { data: allRows } = await supabase.from("agent_skills").select("skills ( name, instructions )").eq("agent_id", agent.id);
+      // deno-lint-ignore no-explicit-any
+      skills = [...((allRows ?? []).map((r: any) => r.skills).filter(Boolean)), ...laySkills];
+    }
 
     // ---- Target context: built per target type. ------------------------------
     let ctx = "";
     let targetName = "";
-    if (def.target === "competitor") {
+    if (play.target === "competitor") {
       const { data: comp } = await supabase.from("competitors").select("name, relationship, website, notes").eq("id", target_id).maybeSingle();
       if (!comp) return json({ error: "competitor not found" }, 404);
       targetName = comp.name;
@@ -202,7 +222,7 @@ Deno.serve(async (req: Request) => {
         Object.keys(cardsByKind).length ? `\nExisting battlecard:\n${Object.entries(cardsByKind).map(([k, v]) => `  [${k}] ${v.join(" | ")}`).join("\n")}` : "",
         sigs.length ? `\nSignals about this competitor (use as evidence; cite by title):\n${sigs.map((s) => `  • ${s.title}${s.why ? ` — ${s.why}` : ""}`).join("\n")}` : "\n(No signals logged about this competitor yet — say so where evidence is thin.)",
       ].filter(Boolean).join("\n");
-    } else {
+    } else if (play.target === "initiative") {
       // initiative — the work itself + its tasks + the signals behind it.
       const { data: ini } = await supabase.from("initiatives").select("title, description, scope, stage, lifecycle").eq("id", target_id).maybeSingle();
       if (!ini) return json({ error: "initiative not found" }, 404);
@@ -219,6 +239,15 @@ Deno.serve(async (req: Request) => {
         (ws ?? []).length ? `\nWorkstreams:\n${(ws ?? []).map((w) => `  • [${w.area}${w.stage ? `, ${w.stage}` : ""}] ${w.title}`).join("\n")}` : "\n(No workstreams yet.)",
         isigs.length ? `\nSignals behind it (use as evidence; cite by title):\n${isigs.map((s) => `  • ${s.title}${s.why ? ` — ${s.why}` : ""}`).join("\n")}` : "\n(No signals linked — say so where evidence is thin.)",
       ].filter(Boolean).join("\n");
+    } else {
+      // generic target (custom / campaign / content) — light context from the
+      // target's name + recent signals, so authored plays run on any surface.
+      targetName = target_name || "this item";
+      const { data: rawSigs } = await supabase.from("signals").select("title, why").order("observed_at", { ascending: false, nullsFirst: false }).limit(12);
+      ctx = [
+        `TARGET: ${targetName}`,
+        (rawSigs ?? []).length ? `\nRecent signals (cite by title where relevant):\n${(rawSigs ?? []).map((s) => `  • ${s.title}${s.why ? ` — ${s.why}` : ""}`).join("\n")}` : "\n(No recent signals.)",
+      ].filter(Boolean).join("\n");
     }
 
     const skillsBlock = skills.length
@@ -228,7 +257,7 @@ Deno.serve(async (req: Request) => {
     const system = [
       agent.system_prompt || `You are ${agent.name}${agent.role ? `, ${agent.role}` : ""}, an executive agent in SingleStack.`,
       skillsBlock,
-      `\n\nYou are running the "${play.label}" analysis on this ${def.target}. ${play.focus}`,
+      `\n\nYou are running the "${play.label}" analysis on this ${play.target}. ${play.focus}`,
       `\n${play.sections_hint}`,
       "\nRules: Be specific and concrete, never generic. Ground every claim in the provided context; in each section's `evidence`, list the exact signal/battlecard/matrix items you leaned on (or note 'thin evidence' honestly). headline = a one-line take. recommendations = concrete next steps. confidence = a short, honest read (e.g. 'Medium — matrix is filled but only 2 signals').",
     ].join("");

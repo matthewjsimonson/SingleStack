@@ -13,15 +13,7 @@ import TrackingTopics from "@/components/TrackingTopics";
 import SourceManager from "@/components/SourceManager";
 import CapabilityCellDrawer, { type Cell } from "@/components/CapabilityCellDrawer";
 import CompetitiveGrid from "@/components/CompetitiveGrid";
-import PlaysPanel, { type PlayDef } from "@/components/PlaysPanel";
-
-// The four officer lenses on a competitor.
-const COMPETITOR_PLAYS: PlayDef[] = [
-  { key: "product_standing", label: "Product standing", officer: "CPO", tone: "accent" },
-  { key: "build_to_beat", label: "Build-to-beat", officer: "Chief Eng", tone: "accent" },
-  { key: "narrative_angle", label: "Narrative angle", officer: "CCO", tone: "violet" },
-  { key: "win_plan", label: "Win plan", officer: "CRO", tone: "violet" },
-];
+import PlacedPlays from "@/components/PlacedPlays";
 
 type Competitor = { id: string; name: string; relationship: string; website: string | null; notes: string | null };
 type Capability = { id: string; name: string; category: string | null };
@@ -472,7 +464,7 @@ function Competitors({ competitors, cards, overview, capabilities, scores, compS
             </div>
 
             {/* the four officers each analyze this competitor through their own lens */}
-            {selected && <PlaysPanel targetType="competitor" targetId={selected.id} targetName={selected.name} plays={COMPETITOR_PLAYS} />}
+            {selected && <PlacedPlays surfaceKey="competitor_home" targetType="competitor" targetId={selected.id} targetName={selected.name} heading="Officer analyses" />}
           </div>
         );
       })() : cdTab === "gtm" ? (

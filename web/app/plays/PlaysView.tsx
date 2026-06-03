@@ -7,6 +7,7 @@
 import { useCallback, useEffect, useState } from "react";
 import { createClient } from "@/lib/supabase/client";
 import { getOrgId } from "@/lib/org";
+import { ensureBuiltInPlays } from "@/lib/ensurePlays";
 import { Section, Chip, Banner, Empty, AgentBadge } from "@/components/ui";
 import { SURFACES, placementStatus } from "@/lib/surfaces";
 
@@ -18,16 +19,8 @@ type PS = { id: string; play_id: string; agent_id: string; skill_id: string };
 type Placement = { play_id: string; surface_key: string };
 
 // The built-in analyses are plays too — seed them so this surface is the single
-// home for every play (authored + built-in). run-play reads the same rows.
-const BUILTINS = [
-  { key: "product_standing", label: "Product standing", target: "competitor", agentKey: "cpo", description: "Where our product stands versus a competitor, capability by capability." },
-  { key: "build_to_beat", label: "Build-to-beat", target: "competitor", agentKey: "ceng", description: "What to build to catch up where we're behind and pull ahead where we lead." },
-  { key: "narrative_angle", label: "Narrative angle", target: "competitor", agentKey: "cco", description: "How to tell our story against a competitor — amplify strengths, reframe weaknesses." },
-  { key: "win_plan", label: "Win plan", target: "competitor", agentKey: "cro", description: "How to win deals against a competitor — traps, objections, proof points." },
-  { key: "initiative_review", label: "Initiative review", target: "initiative", agentKey: "cpo", description: "Review an initiative as a bet — scope, sequencing, biggest risk, evidence." },
-  { key: "delivery_risk", label: "Delivery risk", target: "initiative", agentKey: "ceng", description: "What could derail delivery of an initiative — risks, dependencies, de-risking." },
-  { key: "gtm_readiness", label: "GTM readiness", target: "initiative", agentKey: "cro", description: "Is an initiative ready to win in-market — positioning, proof, GTM gaps." },
-];
+// home for every play (authored + built-in). Built-ins are seeded by
+// ensureBuiltInPlays; run-play reads the same rows.
 
 export default function PlaysView() {
   const supabase = createClient();
@@ -48,6 +41,7 @@ export default function PlaysView() {
   const [descDraft, setDescDraft] = useState("");
 
   const load = useCallback(async () => {
+    await ensureBuiltInPlays(supabase); // seed built-in plays (+ competitor placements) once
     const [{ data: pl }, { data: ag }, { data: sk }, { data: pa }, { data: ps }, { data: as }, { data: pp }] = await Promise.all([
       supabase.from("plays").select("id, key, label, description, target_type").order("created_at"),
       supabase.from("agents").select("id, key, name").eq("is_active", true).order("name"),
@@ -57,27 +51,8 @@ export default function PlaysView() {
       supabase.from("agent_skills").select("agent_id, skill_id, is_cornerstone"),
       supabase.from("play_placements").select("play_id, surface_key"),
     ]);
-    setPlacements(pp ?? []);
-    const agentList = ag ?? [];
-    // Seed any missing built-in plays so the surface is the single home.
-    const have = new Set((pl ?? []).map((p) => p.key));
-    const missing = BUILTINS.filter((b) => !have.has(b.key));
-    if (missing.length && agentList.length) {
-      const orgId = await getOrgId();
-      if (orgId) {
-        for (const b of missing) {
-          const officer = agentList.find((a) => a.key === b.agentKey);
-          const { data: row } = await supabase.from("plays").insert({ org_id: orgId, key: b.key, label: b.label, description: b.description, agent_id: officer?.id ?? null, target_type: b.target }).select("id").maybeSingle();
-          if (row && officer) await supabase.from("play_agents").insert({ org_id: orgId, play_id: row.id, agent_id: officer.id });
-        }
-        const { data: pl2 } = await supabase.from("plays").select("id, key, label, description, target_type").order("created_at");
-        const { data: pa2 } = await supabase.from("play_agents").select("play_id, agent_id");
-        setPlays(pl2 ?? []); setPlayAgents(pa2 ?? []);
-      }
-    } else {
-      setPlays(pl ?? []); setPlayAgents(pa ?? []);
-    }
-    setAgents(agentList); setSkills(sk ?? []); setPlaySkills(ps ?? []);
+    setPlays(pl ?? []); setPlayAgents(pa ?? []); setPlacements(pp ?? []);
+    setAgents(ag ?? []); setSkills(sk ?? []); setPlaySkills(ps ?? []);
     const corner: Record<string, Set<string>> = {};
     for (const r of as ?? []) if (r.is_cornerstone) (corner[r.agent_id] ??= new Set()).add(r.skill_id);
     setCornerstones(corner);

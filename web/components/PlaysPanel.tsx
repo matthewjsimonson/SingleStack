@@ -47,7 +47,7 @@ export default function PlaysPanel({ targetType, targetId, targetName, plays, he
     try {
       const t = await token();
       const { data, error } = await supabase.functions.invoke("run-play", {
-        body: { function_key: key, target_type: targetType, target_id: targetId },
+        body: { function_key: key, target_type: targetType, target_id: targetId, target_name: targetName },
         headers: t ? { Authorization: `Bearer ${t}` } : undefined,
       });
       if (error) throw error;
