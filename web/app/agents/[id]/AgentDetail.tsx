@@ -10,7 +10,7 @@ import { Section, Chip, Banner, BackLink, Empty, Modal } from "@/components/ui";
 import PageBar from "@/components/PageBar";
 
 type Agent = { id: string; key: string; name: string; role: string | null; model: string | null; system_prompt: string | null; is_active: boolean };
-type Skill = { id: string; key: string; name: string; description: string | null; category: string | null };
+type Skill = { id: string; key: string; name: string; description: string | null; category: string | null; instructions: string | null };
 type Connection = { id: string; kind: string; label: string; area: string | null; mcp_url: string | null; status: string; config: { purpose?: string | null } | null; targets: { type?: string; ref: string; label?: string }[] | null; guidance: string | null };
 type Workflow = { id: string; name: string; description: string | null; trigger: string; target_type: string | null; is_active: boolean; last_run_at: string | null; skill_ids: string[] | null };
 type InitiativeOpt = { id: string; title: string; stage: string | null; scope: string | null };
@@ -32,6 +32,7 @@ export default function AgentDetail({ agentId }: { agentId: string }) {
   const [agent, setAgent] = useState<Agent | null>(null);
   const [skills, setSkills] = useState<Skill[]>([]);
   const [attached, setAttached] = useState<Set<string>>(new Set());
+  const [cornerstones, setCornerstones] = useState<Set<string>>(new Set());
   const [connections, setConnections] = useState<Connection[]>([]);
   const [workflows, setWorkflows] = useState<Workflow[]>([]);
   const [alignments, setAlignments] = useState<Alignment[]>([]);
@@ -44,15 +45,17 @@ export default function AgentDetail({ agentId }: { agentId: string }) {
   const load = useCallback(async () => {
     const { data: a } = await supabase.from("agents").select("id, key, name, role, model, system_prompt, is_active").eq("id", agentId).maybeSingle();
     const [{ data: sk }, { data: as }, { data: cs }, { data: wf }, { data: al }, { data: inits }, { data: ws }] = await Promise.all([
-      supabase.from("skills").select("id, key, name, description, category").order("name"),
-      supabase.from("agent_skills").select("skill_id").eq("agent_id", agentId),
+      supabase.from("skills").select("id, key, name, description, category, instructions").order("name"),
+      supabase.from("agent_skills").select("skill_id, is_cornerstone").eq("agent_id", agentId),
       supabase.from("connections").select("id, kind, label, area, mcp_url, status, config, targets, guidance").eq("agent_id", agentId).order("created_at"),
       supabase.from("workflows").select("id, name, description, trigger, target_type, is_active, last_run_at, skill_ids").eq("agent_id", agentId).order("created_at"),
       supabase.from("agent_alignments").select("id, role, guidance, initiative_id, workstream_id, initiatives(title, stage), initiative_workstreams(title, area)").eq("agent_id", agentId).order("created_at"),
       supabase.from("initiatives").select("id, title, stage, scope").order("created_at", { ascending: false }).limit(200),
       supabase.from("initiative_workstreams").select("id, title, area, initiative_id").order("created_at", { ascending: false }).limit(400),
     ]);
-    setAgent(a); setSkills(sk ?? []); setAttached(new Set((as ?? []).map((x) => x.skill_id)));
+    setAgent(a); setSkills(sk ?? []);
+    setAttached(new Set((as ?? []).map((x) => x.skill_id)));
+    setCornerstones(new Set((as ?? []).filter((x) => x.is_cornerstone).map((x) => x.skill_id)));
     setConnections(cs ?? []); setWorkflows(wf ?? []);
     const initById = new Map((inits ?? []).map((i) => [i.id, i.title]));
     // deno-lint-ignore no-explicit-any
@@ -94,7 +97,7 @@ export default function AgentDetail({ agentId }: { agentId: string }) {
 
       {tab === "overview" && <Overview agent={agent} onSaved={load} setError={setError}
         skillsCount={attached.size} areas={connections.filter((c) => c.kind === "internal").map((c) => c.label)} alignCount={alignments.length} tabTo={setTab} />}
-      {tab === "skills" && <Skills agentId={agentId} skills={skills} attached={attached} reload={load} setError={setError} />}
+      {tab === "skills" && <Skills agentId={agentId} skills={skills} attached={attached} cornerstones={cornerstones} reload={load} setError={setError} />}
       {tab === "connections" && <Connections agentId={agentId} connections={connections} reload={load} setError={setError} />}
       {tab === "alignment" && <Alignment agentId={agentId} alignments={alignments} initiatives={initiatives} workstreams={workstreams} reload={load} setError={setError} />}
       {tab === "workflows" && <Workflows agentId={agentId} workflows={workflows} skills={skills.filter((s) => attached.has(s.id))} reload={load} setError={setError} />}
@@ -107,10 +110,11 @@ function Overview({ agent, onSaved, setError, skillsCount, areas, alignCount, ta
   const supabase = createClient();
   const [prompt, setPrompt] = useState(agent.system_prompt ?? "");
   const [role, setRole] = useState(agent.role ?? "");
+  const [model, setModel] = useState(agent.model ?? "claude-opus-4-8");
   const [busy, setBusy] = useState(false);
   async function save() {
     setBusy(true); setError(null);
-    const { error } = await supabase.from("agents").update({ system_prompt: prompt, role }).eq("id", agent.id);
+    const { error } = await supabase.from("agents").update({ system_prompt: prompt, role, model }).eq("id", agent.id);
     if (error) setError(error.message); else onSaved();
     setBusy(false);
   }
@@ -132,12 +136,20 @@ function Overview({ agent, onSaved, setError, skillsCount, areas, alignCount, ta
           <Dial label="Focus" value={String(alignCount)} hint={alignCount ? "initiatives / tasks" : "no alignment"} to="alignment" />
         </div>
       </Section>
-    <Section label="Identity & instructions">
+    <Section label="Base configuration">
       <div className="card card-pad">
-        <label className="field"><span className="t-label">Role</span>
-          <input className="input" value={role} onChange={(e) => setRole(e.target.value)} placeholder="What this agent is responsible for" /></label>
-        <label className="field"><span className="t-label">System prompt</span>
-          <textarea className="textarea" rows={8} value={prompt} onChange={(e) => setPrompt(e.target.value)} /></label>
+        <div style={{ display: "grid", gridTemplateColumns: "2fr 1fr", gap: "var(--sp-3)" }}>
+          <label className="field"><span className="t-label">Persona</span>
+            <input className="input" value={role} onChange={(e) => setRole(e.target.value)} placeholder="Who this agent is — e.g. Competitor Analyst" /></label>
+          <label className="field"><span className="t-label">Model</span>
+            <select className="select" value={model} onChange={(e) => setModel(e.target.value)}>
+              <option value="claude-opus-4-8">claude-opus-4-8 · most capable</option>
+              <option value="claude-sonnet-4-6">claude-sonnet-4-6 · faster, cheaper</option>
+              <option value="claude-haiku-4-5">claude-haiku-4-5 · cheapest</option>
+            </select></label>
+        </div>
+        <label className="field"><span className="t-label">Base prompt</span>
+          <textarea className="textarea" rows={8} value={prompt} onChange={(e) => setPrompt(e.target.value)} placeholder="The agent's core instructions — how it reasons and what it optimizes for." /></label>
         <button className="btn" onClick={save} disabled={busy}>{busy ? "Saving…" : "Save"}</button>
       </div>
     </Section>
@@ -145,14 +157,16 @@ function Overview({ agent, onSaved, setError, skillsCount, areas, alignCount, ta
   );
 }
 
-// ---------- Skills ----------
-function Skills({ agentId, skills, attached, reload, setError }: { agentId: string; skills: Skill[]; attached: Set<string>; reload: () => void; setError: (s: string | null) => void }) {
+// ---------- Skills (cornerstones + library) ----------
+function Skills({ agentId, skills, attached, cornerstones, reload, setError }: { agentId: string; skills: Skill[]; attached: Set<string>; cornerstones: Set<string>; reload: () => void; setError: (s: string | null) => void }) {
   const supabase = createClient();
   const [creating, setCreating] = useState(false);
   const [form, setForm] = useState({ name: "", description: "", instructions: "", category: "general" });
   const [busy, setBusy] = useState(false);
   const [evolving, setEvolving] = useState(false);
   const [histSkill, setHistSkill] = useState<Skill | null>(null);
+  const [openSkill, setOpenSkill] = useState<string | null>(null); // inspect/edit a skill's playbook
+  const [draft, setDraft] = useState("");
 
   async function toggle(skillId: string, on: boolean) {
     setError(null);
@@ -163,6 +177,18 @@ function Skills({ agentId, skills, attached, reload, setError }: { agentId: stri
       await supabase.from("agent_skills").delete().eq("agent_id", agentId).eq("skill_id", skillId);
     }
     reload();
+  }
+  async function toggleCornerstone(skillId: string, next: boolean) {
+    setError(null);
+    if (next && cornerstones.size >= 3) { setError("An agent has at most 3 cornerstone skills — unset one first."); return; }
+    await supabase.from("agent_skills").update({ is_cornerstone: next }).eq("agent_id", agentId).eq("skill_id", skillId);
+    reload();
+  }
+  function inspect(s: Skill) { if (openSkill === s.id) { setOpenSkill(null); return; } setOpenSkill(s.id); setDraft(s.instructions ?? ""); }
+  async function saveInstructions(s: Skill) {
+    setError(null);
+    const { error } = await supabase.from("skills").update({ instructions: draft }).eq("id", s.id);
+    if (error) setError(error.message); else { setOpenSkill(null); reload(); }
   }
 
   async function createSkill(e: React.FormEvent) {
@@ -181,16 +207,19 @@ function Skills({ agentId, skills, attached, reload, setError }: { agentId: stri
     finally { setBusy(false); }
   }
 
-  const attachedCount = skills.filter((s) => attached.has(s.id)).length;
+  const attachedSkills = skills.filter((s) => attached.has(s.id));
+  const library = skills.filter((s) => !attached.has(s.id));
 
   return (
     <Section label="Skills" action={!creating ? (
       <div className="row gap-2">
-        {attachedCount > 0 && <button className="btn btn-sm" onClick={() => setEvolving((v) => !v)} style={{ background: "var(--ac)", color: "#fff" }}>Evolve from signals</button>}
+        {attachedSkills.length > 0 && <button className="btn btn-sm" onClick={() => setEvolving((v) => !v)} style={{ background: "var(--ac)", color: "#fff" }}>Evolve from signals</button>}
         <button className="btn btn-secondary btn-sm" onClick={() => setCreating(true)}>+ New skill</button>
       </div>
     ) : undefined}>
-      <div className="t-sub t-muted" style={{ fontSize: 12.5, marginBottom: 12 }}>Reusable, tailorable capabilities. Attach what this agent should be able to do; author your own playbooks tailored to your company. <strong>Evolve from signals</strong> rewrites the attached playbooks as new intelligence lands — you review and ratify each change.</div>
+      <div className="t-sub t-muted" style={{ fontSize: 12.5, marginBottom: 12 }}>
+        <strong>Cornerstone skills</strong> (1–3, marked with ★) define this agent&rsquo;s core identity and run on every job. Inspect and tune any skill&rsquo;s playbook in place. <strong>Evolve from signals</strong> rewrites attached playbooks as new intelligence lands; you ratify each change. <span className="t-mono-xs">({cornerstones.size}/3 cornerstones)</span>
+      </div>
 
       {evolving && <EvolvePanel agentId={agentId} onApplied={reload} onClose={() => setEvolving(false)} setError={setError} />}
       {histSkill && <SkillHistory skill={histSkill} onClose={() => setHistSkill(null)} />}
@@ -210,23 +239,58 @@ function Skills({ agentId, skills, attached, reload, setError }: { agentId: stri
         </form>
       )}
 
-      {skills.length === 0 && !creating ? <Empty title="No skills yet" hint="Create a skill to give this agent a reusable capability." action={<button className="btn" onClick={() => setCreating(true)}>+ New skill</button>} /> : (
+      {attachedSkills.length === 0 && !creating ? (
+        <Empty title="No skills attached" hint="Attach a skill from the library below, then mark up to 3 as cornerstone." action={<button className="btn" onClick={() => setCreating(true)}>+ New skill</button>} />
+      ) : (
         <div className="stack-3">
-          {skills.map((s) => {
-            const on = attached.has(s.id);
+          {attachedSkills.map((s) => {
+            const corner = cornerstones.has(s.id);
+            const open = openSkill === s.id;
             return (
+              <div key={s.id} className="card card-pad" style={{ borderLeft: corner ? "2px solid var(--ac)" : undefined }}>
+                <div className="row-between" style={{ gap: 12 }}>
+                  <div style={{ minWidth: 0 }}>
+                    <div className="row gap-2" style={{ flexWrap: "wrap", alignItems: "center" }}>
+                      <button onClick={() => toggleCornerstone(s.id, !corner)} title={corner ? "Cornerstone — click to unset" : "Mark as cornerstone"} aria-label="Toggle cornerstone" style={{ background: "none", border: "none", cursor: "pointer", fontSize: 16, lineHeight: 1, color: corner ? "var(--ac)" : "var(--tm)" }}>{corner ? "★" : "☆"}</button>
+                      <span style={{ fontSize: 14, fontWeight: 620 }}>{s.name}</span>
+                      <Chip tone={s.category === "product" ? "accent" : s.category === "gtm" ? "violet" : "default"}>{s.category}</Chip>
+                      {corner && <Chip tone="accent">cornerstone</Chip>}
+                    </div>
+                    {s.description && <div className="t-sub t-muted" style={{ fontSize: 12.5, marginTop: 2 }}>{s.description}</div>}
+                  </div>
+                  <div className="row gap-2" style={{ flexShrink: 0 }}>
+                    <button className="btn btn-secondary btn-sm" onClick={() => inspect(s)}>{open ? "Close" : "Inspect"}</button>
+                    <button className="btn btn-secondary btn-sm" onClick={() => setHistSkill(s)}>History</button>
+                    <button className="btn btn-secondary btn-sm" onClick={() => toggle(s.id, false)} style={{ color: "var(--rd-text)" }}>Detach</button>
+                  </div>
+                </div>
+                {open && (
+                  <div style={{ marginTop: 10 }}>
+                    <span className="t-label" style={{ color: "var(--tm)" }}>Instructions (playbook)</span>
+                    <textarea className="textarea" rows={7} value={draft} onChange={(e) => setDraft(e.target.value)} style={{ marginTop: 4 }} placeholder="How the agent applies this skill — tailored to your company and goals." />
+                    <div className="row gap-2" style={{ marginTop: 8 }}><button className="btn btn-sm" onClick={() => saveInstructions(s)}>Save instructions</button><button className="btn btn-secondary btn-sm" onClick={() => setOpenSkill(null)}>Cancel</button></div>
+                  </div>
+                )}
+              </div>
+            );
+          })}
+        </div>
+      )}
+
+      {library.length > 0 && (
+        <div style={{ marginTop: "var(--sp-5)" }}>
+          <div className="t-label" style={{ color: "var(--tm)", marginBottom: 8 }}>Skill library</div>
+          <div className="stack-3">
+            {library.map((s) => (
               <div key={s.id} className="card card-pad row-between" style={{ gap: 12 }}>
                 <div style={{ minWidth: 0 }}>
                   <div className="row gap-2"><span style={{ fontSize: 14, fontWeight: 620 }}>{s.name}</span><Chip tone={s.category === "product" ? "accent" : s.category === "gtm" ? "violet" : "default"}>{s.category}</Chip></div>
                   {s.description && <div className="t-sub t-muted" style={{ fontSize: 12.5, marginTop: 2 }}>{s.description}</div>}
                 </div>
-                <div className="row gap-2">
-                  {on && <button className="btn btn-secondary btn-sm" onClick={() => setHistSkill(s)}>History</button>}
-                  <button className={`btn btn-sm ${on ? "btn-secondary" : ""}`} onClick={() => toggle(s.id, !on)}>{on ? "Attached ✓" : "Attach"}</button>
-                </div>
+                <button className="btn btn-sm" onClick={() => toggle(s.id, true)}>Attach</button>
               </div>
-            );
-          })}
+            ))}
+          </div>
         </div>
       )}
     </Section>
