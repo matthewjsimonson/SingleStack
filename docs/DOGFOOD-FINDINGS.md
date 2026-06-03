@@ -47,5 +47,13 @@ person at the keyboard and Claude.
   multi-product surfaces (switcher, cross-product themes, per-line scoping). Built
   and tested, but a single-product workspace won't surface them.
 - **Built-but-unwired** (don't file as bugs — known): one-click MCP source
-  connections, scheduled/on-signal workflows, agent-to-agent, agent skills at
-  runtime. See playbook's "LIVE vs UNBUILT".
+  connections, time-based *scheduled* workflows (no scheduler/pg_cron),
+  agent-to-agent. See playbook's "LIVE vs UNBUILT".
+  - **NOW WIRED (Phase 4):** *event*-triggered workflows fire for real —
+    `on_signal`, `on_release`, `on_capability_update` open a run (propose-only),
+    and the matching automation can draft with its agent (two-gate HITL: a human
+    accepts the run, the agent proposes, a human ratifies the proposal). Surfaced
+    in **Agents → Automations awaiting you**. The agent's own skills + connected
+    areas ARE injected into `agent-propose`/`agent-chat` at runtime; a *workflow's*
+    own `skill_ids` are not yet passed through to the draft (agent baseline skills
+    apply).
