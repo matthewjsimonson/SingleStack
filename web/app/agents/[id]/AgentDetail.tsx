@@ -6,7 +6,8 @@
 import { useEffect, useState, useCallback } from "react";
 import { createClient } from "@/lib/supabase/client";
 import { getOrgId } from "@/lib/org";
-import { PageHeader, Section, Chip, Banner, BackLink, Empty, Modal } from "@/components/ui";
+import { Section, Chip, Banner, BackLink, Empty, Modal } from "@/components/ui";
+import PageBar from "@/components/PageBar";
 
 type Agent = { id: string; key: string; name: string; role: string | null; model: string | null; system_prompt: string | null; is_active: boolean };
 type Skill = { id: string; key: string; name: string; description: string | null; category: string | null };
@@ -89,15 +90,7 @@ export default function AgentDetail({ agentId }: { agentId: string }) {
 
       <Banner>{error}</Banner>
 
-      {/* tabs */}
-      <div className="row gap-2" style={{ marginBottom: "var(--sp-5)", borderBottom: "1px solid var(--border)" }}>
-        {TABS.map(([k, label, count]) => (
-          <button key={k} onClick={() => setTab(k)}
-            style={{ background: "none", border: "none", borderBottom: tab === k ? "2px solid var(--ac)" : "2px solid transparent", color: tab === k ? "var(--tp)" : "var(--ts)", fontWeight: 640, fontSize: 13.5, padding: "8px 14px", cursor: "pointer", marginBottom: -1 }}>
-            {label}{count > 0 ? ` · ${count}` : ""}
-          </button>
-        ))}
-      </div>
+      <PageBar tabs={TABS.map(([k, label, count]) => ({ key: k, label, count }))} active={tab} onTab={(k) => setTab(k as Tab)} />
 
       {tab === "overview" && <Overview agent={agent} onSaved={load} setError={setError} />}
       {tab === "skills" && <Skills agentId={agentId} skills={skills} attached={attached} reload={load} setError={setError} />}
