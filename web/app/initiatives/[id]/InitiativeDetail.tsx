@@ -11,6 +11,7 @@ import { useCallback, useEffect, useState } from "react";
 import { createClient } from "@/lib/supabase/client";
 import { Chip, Banner, BackLink, Spinner } from "@/components/ui";
 import PlaysPanel, { type PlayDef } from "@/components/PlaysPanel";
+import BuildScope from "@/components/BuildScope";
 
 // Officer lenses on an initiative — review the bet, delivery risk, GTM readiness.
 const INITIATIVE_PLAYS: PlayDef[] = [
@@ -19,7 +20,7 @@ const INITIATIVE_PLAYS: PlayDef[] = [
   { key: "gtm_readiness", label: "GTM readiness", officer: "CRO", tone: "violet" },
 ];
 
-type Initiative = { id: string; title: string; description: string | null; scope: string; lifecycle: string; kind: string | null; assignee_id: string | null; objective_id: string | null };
+type Initiative = { id: string; title: string; description: string | null; scope: string; lifecycle: string; kind: string | null; assignee_id: string | null; objective_id: string | null; is_unevidenced: boolean };
 type Task = { id: string; area: string; lifecycle_stage: string; title: string; stage: string; assignee_id: string | null };
 type Person = { id: string; name: string };
 
@@ -33,6 +34,8 @@ const LIFE: { key: string; label: string; product: string; gtm: string }[] = [
 ];
 const ORDER = LIFE.map((s) => s.key);
 const SCOPE_LABEL: Record<string, string> = { product: "Product", gtm: "GTM", both: "Product + GTM" };
+// Build Item type discriminator → display label (see 20260603170000 migration).
+const KIND_LABEL: Record<string, string> = { bugfix: "Fix", enhancement: "Enhancement", feature: "New Feature", module: "New Module", product: "Product" };
 // Where you actually do the work for each side.
 const MODULE: Record<string, { href: string; name: string }> = { build: { href: "/ship", name: "Ship" }, gtm: { href: "/enablement", name: "Enablement" } };
 
@@ -46,7 +49,7 @@ export default function InitiativeDetail({ id }: { id: string }) {
 
   const load = useCallback(async () => {
     const [{ data: i }, { data: w }, { data: p }] = await Promise.all([
-      supabase.from("initiatives").select("id, title, description, scope, lifecycle, kind, assignee_id, objective_id").eq("id", id).maybeSingle(),
+      supabase.from("initiatives").select("id, title, description, scope, lifecycle, kind, assignee_id, objective_id, is_unevidenced").eq("id", id).maybeSingle(),
       supabase.from("initiative_workstreams").select("id, area, lifecycle_stage, title, stage, assignee_id").eq("initiative_id", id),
       supabase.from("people").select("id, name").eq("is_active", true).order("name"),
     ]);
@@ -77,8 +80,9 @@ export default function InitiativeDetail({ id }: { id: string }) {
       <BackLink href="/?tab=initiatives" label="Initiatives" />
       <div className="row gap-2" style={{ marginBottom: 4, flexWrap: "wrap" }}>
         <Chip tone={ini.scope === "gtm" ? "violet" : "accent"}>{SCOPE_LABEL[ini.scope] ?? ini.scope}</Chip>
-        {ini.kind && <Chip>{ini.kind}</Chip>}
+        {ini.kind && <Chip>{KIND_LABEL[ini.kind] ?? ini.kind}</Chip>}
         {ownerName(ini.assignee_id) ? <Chip tone="green">{ownerName(ini.assignee_id)}</Chip> : <Chip tone="amber">unowned</Chip>}
+        {ini.is_unevidenced && <span title="Scope was entered manually with no linked Signal evidence."><Chip tone="amber">⚠ no evidence</Chip></span>}
       </div>
       <h1 className="t-page" style={{ marginBottom: 4 }}>{ini.title}</h1>
       {ini.description && <div className="t-sub t-muted" style={{ marginBottom: "var(--sp-5)", maxWidth: 720 }}>{ini.description}</div>}
@@ -109,6 +113,13 @@ export default function InitiativeDetail({ id }: { id: string }) {
           </div>
         </div>
       </div>
+
+      {/* Product Scope — the Why/What/How/Proof spec this Build Item is built
+          from. Lives in initiative_fields; ratified field-by-field. */}
+      <section style={{ marginBottom: "var(--sp-5)" }}>
+        <div className="t-label" style={{ marginBottom: 8 }}>Product Scope</div>
+        <BuildScope initiativeId={ini.id} />
+      </section>
 
       {/* the officers analyze this initiative — review the bet, delivery risk, GTM readiness */}
       <div style={{ marginBottom: "var(--sp-5)" }}>

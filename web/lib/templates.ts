@@ -97,6 +97,52 @@ export const GTM_TEMPLATE: TemplateSection[] = [
   },
 ];
 
-export function templateFor(kind: "product" | "gtm") {
+// ---- BUILD ITEM: the Product Scope of an initiative ------------------------
+// Why / What / How / Proof — the spec a Build Item is built from. Lives in
+// initiative_fields (parallel to record_fields). Sections are data, so AI can
+// draft fields as proposals and humans ratify them field-by-field, exactly like
+// records. One template serves all Build Item types (Fix/Enhancement/Feature/
+// Module) today; type-specific defaults can layer on later.
+export const BUILD_TEMPLATE: TemplateSection[] = [
+  {
+    section: "Why",
+    blurb: "The case for building this — the problem, the evidence, who it's for.",
+    fields: [
+      { key: "problem", label: "Problem / opportunity", placeholder: "The core problem or opportunity, and why it matters now." },
+      { key: "who_for", label: "Who it's for", placeholder: "The users or segment this serves." },
+      { key: "evidence", label: "Evidence", placeholder: "Signals, data, or requests that back this — what makes it real, not a hunch." },
+    ],
+  },
+  {
+    section: "What",
+    blurb: "The scope — what ships, what doesn't, and how we'll know it's done.",
+    fields: [
+      { key: "summary", label: "Summary", placeholder: "What we're building, in a sentence or two." },
+      { key: "in_scope", label: "In scope", placeholder: "What this explicitly includes." },
+      { key: "out_of_scope", label: "Out of scope", placeholder: "What this explicitly does not cover — the line that keeps it shippable." },
+      { key: "acceptance_criteria", label: "Acceptance criteria", placeholder: "The conditions that must be true to call this done. Write them prompt-ready — an agent or engineer should act on them directly." },
+    ],
+  },
+  {
+    section: "How",
+    blurb: "The approach — how we'll build it, what it leans on, what could go wrong.",
+    fields: [
+      { key: "approach", label: "Approach", placeholder: "The intended technical approach, at a high level." },
+      { key: "dependencies", label: "Dependencies", placeholder: "What this relies on — other work, systems, or teams." },
+      { key: "risks", label: "Risks", placeholder: "What could derail this, and how we'd mitigate it." },
+    ],
+  },
+  {
+    section: "Proof",
+    blurb: "Validation — how we'll know it worked once it's live.",
+    fields: [
+      { key: "success_metric", label: "Success metric", placeholder: "The measurable outcome that proves this worked." },
+      { key: "validation", label: "Validation plan", placeholder: "How we'll confirm the outcome after launch." },
+    ],
+  },
+];
+
+export function templateFor(kind: "product" | "gtm" | "build") {
+  if (kind === "build") return BUILD_TEMPLATE;
   return kind === "product" ? PRODUCT_TEMPLATE : GTM_TEMPLATE;
 }
