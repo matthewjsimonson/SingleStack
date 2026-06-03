@@ -12,8 +12,11 @@ type Agent = { id: string; key: string; name: string; role: string | null; model
 type Skill = { id: string; key: string; name: string; description: string | null; category: string | null };
 type Connection = { id: string; kind: string; label: string; area: string | null; mcp_url: string | null; status: string; config: { purpose?: string | null } | null; targets: { type?: string; ref: string; label?: string }[] | null; guidance: string | null };
 type Workflow = { id: string; name: string; description: string | null; trigger: string; target_type: string | null; is_active: boolean; last_run_at: string | null; skill_ids: string[] | null };
+type InitiativeOpt = { id: string; title: string; stage: string | null; scope: string | null };
+type WorkstreamOpt = { id: string; title: string; area: string | null; initiative_id: string; initiative_title?: string };
+type Alignment = { id: string; role: string; guidance: string | null; initiative_id: string | null; workstream_id: string | null; title: string; kind: "initiative" | "task"; sub: string | null };
 
-type Tab = "overview" | "skills" | "connections" | "workflows";
+type Tab = "overview" | "skills" | "connections" | "alignment" | "workflows";
 
 const INTERNAL_AREAS = [
   { area: "products", label: "Product records" },
@@ -30,20 +33,34 @@ export default function AgentDetail({ agentId }: { agentId: string }) {
   const [attached, setAttached] = useState<Set<string>>(new Set());
   const [connections, setConnections] = useState<Connection[]>([]);
   const [workflows, setWorkflows] = useState<Workflow[]>([]);
+  const [alignments, setAlignments] = useState<Alignment[]>([]);
+  const [initiatives, setInitiatives] = useState<InitiativeOpt[]>([]);
+  const [workstreams, setWorkstreams] = useState<WorkstreamOpt[]>([]);
   const [loading, setLoading] = useState(true);
   const [tab, setTab] = useState<Tab>("overview");
   const [error, setError] = useState<string | null>(null);
 
   const load = useCallback(async () => {
     const { data: a } = await supabase.from("agents").select("id, key, name, role, model, system_prompt, is_active").eq("id", agentId).maybeSingle();
-    const [{ data: sk }, { data: as }, { data: cs }, { data: wf }] = await Promise.all([
+    const [{ data: sk }, { data: as }, { data: cs }, { data: wf }, { data: al }, { data: inits }, { data: ws }] = await Promise.all([
       supabase.from("skills").select("id, key, name, description, category").order("name"),
       supabase.from("agent_skills").select("skill_id").eq("agent_id", agentId),
       supabase.from("connections").select("id, kind, label, area, mcp_url, status, config, targets, guidance").eq("agent_id", agentId).order("created_at"),
       supabase.from("workflows").select("id, name, description, trigger, target_type, is_active, last_run_at, skill_ids").eq("agent_id", agentId).order("created_at"),
+      supabase.from("agent_alignments").select("id, role, guidance, initiative_id, workstream_id, initiatives(title, stage), initiative_workstreams(title, area)").eq("agent_id", agentId).order("created_at"),
+      supabase.from("initiatives").select("id, title, stage, scope").order("created_at", { ascending: false }).limit(200),
+      supabase.from("initiative_workstreams").select("id, title, area, initiative_id").order("created_at", { ascending: false }).limit(400),
     ]);
     setAgent(a); setSkills(sk ?? []); setAttached(new Set((as ?? []).map((x) => x.skill_id)));
-    setConnections(cs ?? []); setWorkflows(wf ?? []); setLoading(false);
+    setConnections(cs ?? []); setWorkflows(wf ?? []);
+    const initById = new Map((inits ?? []).map((i) => [i.id, i.title]));
+    // deno-lint-ignore no-explicit-any
+    setAlignments(((al ?? []) as any[]).map((r) => r.workstream_id
+      ? { id: r.id, role: r.role, guidance: r.guidance, initiative_id: r.initiative_id, workstream_id: r.workstream_id, kind: "task" as const, title: r.initiative_workstreams?.title ?? "Task", sub: r.initiative_workstreams?.area ?? null }
+      : { id: r.id, role: r.role, guidance: r.guidance, initiative_id: r.initiative_id, workstream_id: r.workstream_id, kind: "initiative" as const, title: r.initiatives?.title ?? "Initiative", sub: r.initiatives?.stage ?? null }));
+    setInitiatives((inits ?? []) as InitiativeOpt[]);
+    setWorkstreams(((ws ?? []) as WorkstreamOpt[]).map((w) => ({ ...w, initiative_title: initById.get(w.initiative_id) })));
+    setLoading(false);
   }, [supabase, agentId]);
 
   useEffect(() => { load(); }, [load]);
@@ -55,6 +72,7 @@ export default function AgentDetail({ agentId }: { agentId: string }) {
     ["overview", "Overview", 0],
     ["skills", "Skills", attached.size],
     ["connections", "Connections", connections.length],
+    ["alignment", "Alignment", alignments.length],
     ["workflows", "Workflows", workflows.length],
   ];
 
@@ -84,6 +102,7 @@ export default function AgentDetail({ agentId }: { agentId: string }) {
       {tab === "overview" && <Overview agent={agent} onSaved={load} setError={setError} />}
       {tab === "skills" && <Skills agentId={agentId} skills={skills} attached={attached} reload={load} setError={setError} />}
       {tab === "connections" && <Connections agentId={agentId} connections={connections} reload={load} setError={setError} />}
+      {tab === "alignment" && <Alignment agentId={agentId} alignments={alignments} initiatives={initiatives} workstreams={workstreams} reload={load} setError={setError} />}
       {tab === "workflows" && <Workflows agentId={agentId} workflows={workflows} skills={skills.filter((s) => attached.has(s.id))} reload={load} setError={setError} />}
     </div>
   );
@@ -199,6 +218,117 @@ function Skills({ agentId, skills, attached, reload, setError }: { agentId: stri
         </div>
       )}
     </Section>
+  );
+}
+
+// ---------- Alignment ----------
+// Point this agent at the concrete WORK it is responsible for — specific
+// initiatives or single tasks — not just broad areas. The binding is real
+// (agent_alignments), so coverage is auditable and (phase 2) scopes what the
+// agent sees in context.
+function Alignment({ agentId, alignments, initiatives, workstreams, reload, setError }: { agentId: string; alignments: Alignment[]; initiatives: InitiativeOpt[]; workstreams: WorkstreamOpt[]; reload: () => void; setError: (s: string | null) => void }) {
+  const supabase = createClient();
+  const [sel, setSel] = useState("");
+  const [role, setRole] = useState("watcher");
+  const [guidance, setGuidance] = useState("");
+  const [busy, setBusy] = useState(false);
+
+  const alignedInit = new Set(alignments.filter((a) => a.kind === "initiative").map((a) => a.initiative_id));
+  const alignedTask = new Set(alignments.filter((a) => a.kind === "task").map((a) => a.workstream_id));
+  const openInits = initiatives.filter((i) => !alignedInit.has(i.id));
+  const openTasks = workstreams.filter((w) => !alignedTask.has(w.id));
+
+  async function add() {
+    if (!sel) return;
+    setBusy(true); setError(null);
+    try {
+      const orgId = await getOrgId(); if (!orgId) throw new Error("Could not resolve your organization.");
+      const [type, id] = sel.split(":");
+      const row = type === "task"
+        ? { org_id: orgId, agent_id: agentId, workstream_id: id, initiative_id: workstreams.find((w) => w.id === id)?.initiative_id ?? null, role, guidance: guidance.trim() || null }
+        : { org_id: orgId, agent_id: agentId, initiative_id: id, role, guidance: guidance.trim() || null };
+      const { error } = await supabase.from("agent_alignments").insert(row);
+      if (error && (error as { code?: string }).code !== "23505") throw error;
+      setSel(""); setGuidance(""); setRole("watcher"); reload();
+    } catch (e) { setError(e instanceof Error ? e.message : "Could not align."); }
+    finally { setBusy(false); }
+  }
+  async function remove(id: string) { setError(null); await supabase.from("agent_alignments").delete().eq("id", id); reload(); }
+  async function flipRole(a: Alignment) { setError(null); await supabase.from("agent_alignments").update({ role: a.role === "owner" ? "watcher" : "owner" }).eq("id", a.id); reload(); }
+
+  const inits = alignments.filter((a) => a.kind === "initiative");
+  const tasks = alignments.filter((a) => a.kind === "task");
+
+  function row(a: Alignment) {
+    return (
+      <div key={a.id} className="card card-pad row-between" style={{ gap: 10, padding: "10px 12px" }}>
+        <div style={{ minWidth: 0 }}>
+          <div className="row gap-2" style={{ flexWrap: "wrap" }}>
+            <span style={{ fontSize: 13.5, fontWeight: 620 }}>{a.title}</span>
+            {a.sub && <Chip tone={a.kind === "task" ? (a.sub === "gtm" ? "violet" : "accent") : "default"}>{a.sub}</Chip>}
+          </div>
+          {a.guidance && <div className="t-sub t-muted" style={{ fontSize: 12, marginTop: 3 }}>{a.guidance}</div>}
+        </div>
+        <div className="row gap-2" style={{ flexShrink: 0 }}>
+          <button className="btn btn-secondary btn-sm" onClick={() => flipRole(a)} title="Toggle watcher / owner">
+            {a.role === "owner" ? "● owner" : "○ watcher"}
+          </button>
+          <button className="btn btn-secondary btn-sm" onClick={() => remove(a.id)} style={{ color: "var(--rd-text)" }}>Remove</button>
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <>
+      <Section label="Aligned to">
+        <div className="t-sub t-muted" style={{ fontSize: 12.5, marginBottom: 12 }}>
+          Point this agent at the work it answers for — whole initiatives or single tasks. <strong>Owner</strong> = accountable and proactive; <strong>watcher</strong> = keeps an eye and weighs in when asked.
+        </div>
+        {alignments.length === 0 ? (
+          <div className="t-sub t-muted" style={{ fontSize: 12.5, marginBottom: 12 }}>Not aligned to any initiative or task yet.</div>
+        ) : (
+          <div className="stack-3" style={{ marginBottom: 12 }}>
+            {inits.length > 0 && <>
+              <div className="t-label" style={{ color: "var(--tm)" }}>Initiatives · {inits.length}</div>
+              {inits.map(row)}
+            </>}
+            {tasks.length > 0 && <>
+              <div className="t-label" style={{ color: "var(--tm)", marginTop: inits.length > 0 ? 8 : 0 }}>Tasks · {tasks.length}</div>
+              {tasks.map(row)}
+            </>}
+          </div>
+        )}
+
+        {/* add a binding */}
+        <div className="card card-pad" style={{ background: "var(--panel-2)" }}>
+          <div style={{ display: "grid", gridTemplateColumns: "2fr 1fr", gap: "var(--sp-3)" }}>
+            <label className="field"><span className="t-label">Align to</span>
+              <select className="select" value={sel} onChange={(e) => setSel(e.target.value)}>
+                <option value="">— pick an initiative or task —</option>
+                {openInits.length > 0 && (
+                  <optgroup label="Initiatives">
+                    {openInits.map((i) => <option key={i.id} value={`init:${i.id}`}>{i.title}{i.stage ? ` · ${i.stage}` : ""}</option>)}
+                  </optgroup>
+                )}
+                {openTasks.length > 0 && (
+                  <optgroup label="Tasks">
+                    {openTasks.map((w) => <option key={w.id} value={`task:${w.id}`}>{w.initiative_title ? `${w.initiative_title} › ` : ""}{w.title}</option>)}
+                  </optgroup>
+                )}
+              </select></label>
+            <label className="field"><span className="t-label">Role</span>
+              <select className="select" value={role} onChange={(e) => setRole(e.target.value)}>
+                <option value="watcher">Watcher</option>
+                <option value="owner">Owner</option>
+              </select></label>
+          </div>
+          <label className="field"><span className="t-label">Focus (optional)</span>
+            <input className="input" value={guidance} onChange={(e) => setGuidance(e.target.value)} placeholder="What should it watch for on this work?" /></label>
+          <button className="btn btn-sm" onClick={add} disabled={busy || !sel}>{busy ? "Aligning…" : "+ Align"}</button>
+        </div>
+      </Section>
+    </>
   );
 }
 

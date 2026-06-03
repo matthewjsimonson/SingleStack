@@ -9,11 +9,14 @@ import RosterReview from "@/components/RosterReview";
 import WorkflowRunsReview from "@/components/WorkflowRunsReview";
 
 type Agent = { id: string; key: string; name: string; role: string | null; model: string | null; system_prompt: string | null; is_active: boolean };
+type Align = { agent_id: string; initiative_id: string | null; workstream_id: string | null };
 const BLANK = { key: "", name: "", role: "", model: "claude-opus-4-8", system_prompt: "", is_active: true };
 
 export default function AgentsView() {
   const supabase = createClient();
   const [agents, setAgents] = useState<Agent[]>([]);
+  const [aligns, setAligns] = useState<Align[]>([]);
+  const [inits, setInits] = useState<{ id: string; title: string }[]>([]);
   const [loading, setLoading] = useState(true);
   const [editing, setEditing] = useState<string | "new" | null>(null);
   const [form, setForm] = useState<typeof BLANK>(BLANK);
@@ -21,10 +24,23 @@ export default function AgentsView() {
   const [error, setError] = useState<string | null>(null);
 
   const load = useCallback(async () => {
-    const { data } = await supabase.from("agents").select("id, key, name, role, model, system_prompt, is_active").order("name");
-    setAgents(data ?? []); setLoading(false);
+    const [{ data }, { data: al }, { data: it }] = await Promise.all([
+      supabase.from("agents").select("id, key, name, role, model, system_prompt, is_active").order("name"),
+      supabase.from("agent_alignments").select("agent_id, initiative_id, workstream_id"),
+      supabase.from("initiatives").select("id, title").order("created_at", { ascending: false }).limit(200),
+    ]);
+    setAgents(data ?? []); setAligns(al ?? []); setInits(it ?? []); setLoading(false);
   }, [supabase]);
   useEffect(() => { load(); }, [load]);
+
+  // Coverage: which initiatives have at least one agent aligned, and per-agent counts.
+  const countsByAgent: Record<string, { inits: number; tasks: number }> = {};
+  for (const a of aligns) {
+    const c = (countsByAgent[a.agent_id] ??= { inits: 0, tasks: 0 });
+    if (a.workstream_id) c.tasks++; else c.inits++;
+  }
+  const coveredInits = new Set(aligns.map((a) => a.initiative_id).filter(Boolean) as string[]);
+  const uncovered = inits.filter((i) => !coveredInits.has(i.id));
 
   function startNew() { setForm(BLANK); setEditing("new"); setError(null); }
 
@@ -60,6 +76,21 @@ export default function AgentsView() {
 
       {editing === null && <div style={{ marginBottom: "var(--sp-6)" }}><WorkflowRunsReview /></div>}
       {editing === null && <div style={{ marginBottom: "var(--sp-6)" }}><RosterReview onChanged={load} /></div>}
+
+      {/* Coverage — is the roster actually pointed at the work? */}
+      {editing === null && inits.length > 0 && (
+        <div className="card card-pad" style={{ marginBottom: "var(--sp-6)" }}>
+          <div className="t-label" style={{ color: "var(--tm)", marginBottom: 6 }}>Initiative coverage</div>
+          <div className="t-sub" style={{ fontSize: 13 }}>
+            <strong>{coveredInits.size}</strong> of <strong>{inits.length}</strong> initiative{inits.length === 1 ? "" : "s"} have an agent aligned.
+          </div>
+          {uncovered.length > 0 && (
+            <div className="t-sub t-muted" style={{ fontSize: 12.5, marginTop: 6 }}>
+              No agent on: {uncovered.slice(0, 6).map((i) => i.title).join(", ")}{uncovered.length > 6 ? ` +${uncovered.length - 6} more` : ""}
+            </div>
+          )}
+        </div>
+      )}
 
       {editing !== null && (
         <form onSubmit={save} className="card card-pad" style={{ marginBottom: "var(--sp-6)" }}>
@@ -111,6 +142,9 @@ export default function AgentsView() {
                   <div className="t-sub" style={{ marginTop: 3 }}>
                     {a.role || <span className="t-muted">No role</span>}
                     <span className="t-mono-xs" style={{ marginLeft: 8 }}>{a.model}</span>
+                    {(() => { const c = countsByAgent[a.id]; return c && (c.inits || c.tasks)
+                      ? <span className="t-mono-xs" style={{ marginLeft: 8 }}>· aligned to {c.inits} init{c.inits === 1 ? "" : "s"}{c.tasks ? `, ${c.tasks} task${c.tasks === 1 ? "" : "s"}` : ""}</span>
+                      : <span className="t-mono-xs" style={{ marginLeft: 8, color: "var(--tm)" }}>· no alignment</span>; })()}
                   </div>
                 </div>
                 <span className="t-sub" style={{ color: "var(--ac-text)", fontWeight: 600, fontSize: 13 }}>Configure →</span>
