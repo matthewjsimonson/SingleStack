@@ -10,7 +10,7 @@ import { useCallback, useEffect, useState } from "react";
 import { createClient } from "@/lib/supabase/client";
 import { getOrgId } from "@/lib/org";
 import { spawnInitiative } from "@/lib/routing";
-import { Chip, Confidence, ConfirmDialog } from "@/components/ui";
+import { Chip, Confidence, ConfirmDialog, SourceChip } from "@/components/ui";
 
 export type DrawerSignal = {
   id: string; title: string; why: string | null; conf_label: string | null; conf_level: number | null;
@@ -264,8 +264,9 @@ export default function SignalDrawer({ signal, onClose, onChanged }: { signal: D
               ? <div className="t-body" style={{ fontSize: 13.5, lineHeight: 1.55, marginBottom: 10 }}>{signal.why}</div>
               : <div className="t-sub t-muted" style={{ fontSize: 12.5, marginBottom: 10 }}>No description.</div>}
             <div className="row gap-2" style={{ flexWrap: "wrap", alignItems: "center" }}>
-              {source ? <Chip>{source.icon} {source.label}</Chip> : <Chip tone="default">{signal.origin === "external" ? "External · unlinked" : "Manual entry"}</Chip>}
-              {signal.observed_at && <span className="t-mono-xs" style={{ color: "var(--tm)" }}>{new Date(signal.observed_at).toLocaleDateString()}</span>}
+              {source
+                ? <SourceChip icon={source.icon} label={source.label} when={signal.observed_at ? new Date(signal.observed_at).toLocaleDateString() : null} />
+                : <SourceChip label={signal.origin === "external" ? "External · unlinked" : "Manual entry"} when={signal.observed_at ? new Date(signal.observed_at).toLocaleDateString() : null} />}
               {link && <a href={link} target="_blank" rel="noreferrer" style={{ fontSize: 12.5, fontWeight: 600, color: "var(--ac-text)" }}>Open source ↗</a>}
             </div>
           </div>

@@ -5,7 +5,7 @@
 // record. Same drawer pattern as the agent drawer, for consistency.
 import { useEffect, useState, useCallback } from "react";
 import { createClient } from "@/lib/supabase/client";
-import { Confidence } from "@/components/ui";
+import { Confidence, AgentBadge } from "@/components/ui";
 
 type Pending = {
   id: string; title: string; rationale: string | null;
@@ -88,7 +88,10 @@ export default function ReviewDrawer({
                       <div style={{ fontSize: 14, fontWeight: 620 }}>{p.title}</div>
                       <Confidence label={p.conf_label} level={p.conf_level} />
                     </div>
-                    <div className="t-sub t-muted" style={{ fontSize: 12, marginBottom: 8 }}>{targetName(p)} · {p.proposed_by}</div>
+                    <div className="row gap-2" style={{ alignItems: "center", marginBottom: 8 }}>
+                      <AgentBadge name={p.proposed_by} />
+                      <span className="t-sub t-muted" style={{ fontSize: 12 }}>on {targetName(p)}</span>
+                    </div>
                     {p.rationale && <p className="t-sub" style={{ lineHeight: 1.5, marginBottom: 12 }}>{p.rationale}</p>}
                     <div className="row gap-2">
                       <button className="btn btn-success btn-sm" disabled={acceptingId !== null} onClick={() => accept(p.id)}>{acceptingId === p.id ? "Accepting…" : "Accept"}</button>
