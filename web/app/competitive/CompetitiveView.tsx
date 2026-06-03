@@ -13,6 +13,7 @@ import TrackingTopics from "@/components/TrackingTopics";
 import SourceManager from "@/components/SourceManager";
 import CapabilityCellDrawer, { type Cell } from "@/components/CapabilityCellDrawer";
 import CompetitiveGrid from "@/components/CompetitiveGrid";
+import CompetitivePlays from "@/components/CompetitivePlays";
 
 type Competitor = { id: string; name: string; relationship: string; website: string | null; notes: string | null };
 type Capability = { id: string; name: string; category: string | null };
@@ -323,8 +324,6 @@ function Battlecards({ competitors, cards, overview, capabilities, scores, compS
   const supabase = createClient();
   const [scope, setScope] = useState<string | null>(null); // selected competitor id; null = picker
   const [bcTab, setBcTab] = useState<BcTab>("gtm");
-  const [take, setTake] = useState<string | null>(null);
-  const [thinking, setThinking] = useState(false);
   const [adding, setAdding] = useState<string | null>(null);
   const [form, setForm] = useState({ title: "", detail: "" });
 
@@ -345,23 +344,6 @@ function Battlecards({ competitors, cards, overview, capabilities, scores, compS
   }
   async function remove(id: string) { setError(null); await supabase.from("battlecard_items").delete().eq("id", id); reload(); }
 
-  async function askCompetitor() {
-    if (!selected) return;
-    setThinking(true); setError(null); setTake(null);
-    try {
-      const { data: s } = await supabase.auth.getSession();
-      const token = s.session?.access_token;
-      const prompt = `Help me compete against "${selected.name}"${selected.notes ? ` (${selected.notes})` : ""}. Our product${overview?.valueProp ? `: ${overview.valueProp}` : ""}. In 4–5 sentences: where we clearly win, where they're strong (be honest), the sharpest way to reframe the conversation, and the one trap to avoid. Ground it in how a buyer would actually compare us.`;
-      const { data, error } = await supabase.functions.invoke("agent-chat", {
-        body: { agent_key: "cro", messages: [{ role: "user", content: prompt }], context: { area: "gtm" } },
-        headers: token ? { Authorization: `Bearer ${token}` } : undefined,
-      });
-      if (error) throw error;
-      if (data?.error) throw new Error(data.error);
-      setTake(data.reply);
-    } catch (e) { setError(e instanceof Error ? e.message : "Could not reach the CRO."); }
-    finally { setThinking(false); }
-  }
 
   // Competitor picker — battlecards are per-competitor, so choose one first.
   if (!scope) {
@@ -426,35 +408,12 @@ function Battlecards({ competitors, cards, overview, capabilities, scores, compS
                 <span className="t-mono-xs" style={{ color: theyLead.length ? "var(--am-text)" : "var(--gn-text)" }}>{theyLead.length ? `${theyLead.length} gap${theyLead.length === 1 ? "" : "s"} to close` : "ahead or even everywhere"}</span>
               </div>
             </div>
-            {/* signals moving this matchup */}
-            {matchup.length > 0 && (
-              <div className="card card-pad" style={{ marginTop: "var(--sp-3)", borderLeft: "3px solid var(--vl)" }}>
-                <div className="t-label" style={{ color: "var(--tm)", marginBottom: 8 }}>Signals moving this matchup</div>
-                <div className="stack-3">
-                  {matchup.slice(0, 3).map((s) => (
-                    <div key={s.id} className="row-between" style={{ gap: 10, alignItems: "flex-start" }}>
-                      <div style={{ minWidth: 0 }}>
-                        <div style={{ fontSize: 13, fontWeight: 600 }}>{s.title}</div>
-                        {s.why && <div className="t-sub t-muted" style={{ fontSize: 12 }}>{s.why}</div>}
-                      </div>
-                      <Confidence label={s.conf_label} level={s.conf_level} />
-                    </div>
-                  ))}
-                </div>
-              </div>
-            )}
           </div>
         );
       })()}
 
-      {/* Competitor agent — a CRO read on how to win this matchup */}
-      <div className="card card-pad" style={{ background: "var(--panel-2)", marginBottom: "var(--sp-5)" }}>
-        <div className="row-between" style={{ alignItems: "center", gap: 10 }}>
-          <span className="t-sub" style={{ fontSize: 12.5 }}>Get the CRO&rsquo;s read on how to win against {selected?.name}.</span>
-          <button className="btn btn-sm" onClick={askCompetitor} disabled={thinking} style={{ background: "var(--ac)", color: "#fff", flexShrink: 0 }}>{thinking ? "CRO is thinking…" : `✦ Ask the CRO`}</button>
-        </div>
-        {take && <div className="card card-pad" style={{ marginTop: 10, background: "var(--panel)" }}><div className="t-sub" style={{ fontSize: 13, lineHeight: 1.55, whiteSpace: "pre-wrap" }}>{take}</div></div>}
-      </div>
+      {/* The four officers each analyze this competitor through their own lens */}
+      {selected && <div style={{ marginBottom: "var(--sp-5)" }}><CompetitivePlays competitorId={selected.id} competitorName={selected.name} /></div>}
 
       {/* Tabbed box — GTM battlecard · Product eval · Competitor signals */}
       {/* tabbed box — same shape as the product record's modules box */}
