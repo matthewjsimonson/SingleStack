@@ -3,10 +3,9 @@
 // Theme detail — a living theme's trajectory. Restrained, in the house style:
 // the summary + recommendation, its evidence (grouped internal/external, newest
 // first), and the append-only trajectory (theme_events) — the theme's memory.
-// Curation is light: escalate, decay, or turn it into a decision. No charts,
+// Curation is light: escalate, let fade, or flip a piece of evidence. No charts,
 // no dashboards — just the data that earns its place.
 import { useEffect, useState, useCallback } from "react";
-import { useRouter } from "next/navigation";
 import { createClient } from "@/lib/supabase/client";
 import { getOrgId } from "@/lib/org";
 import { PageHeader, Section, Chip, Banner, BackLink, Spinner, Confidence } from "@/components/ui";
@@ -23,7 +22,6 @@ type Event = { id: string; kind: string; detail: Record<string, unknown> | null;
 
 export default function ThemeDetail({ id }: { id: string }) {
   const supabase = createClient();
-  const router = useRouter();
   const [theme, setTheme] = useState<Theme | null>(null);
   const [signals, setSignals] = useState<Sig[]>([]);
   const [strength, setStrength] = useState<Strength | null>(null);
@@ -85,20 +83,6 @@ export default function ThemeDetail({ id }: { id: string }) {
     await load();
   }
 
-  async function makeDecision() {
-    if (!theme) return;
-    setBusy(true); setError(null);
-    try {
-      const orgId = await getOrgId(); if (!orgId) throw new Error("no org");
-      const { data: dec, error } = await supabase.from("decisions").insert({ org_id: orgId, title: theme.title, status: "open", scope: "org", theme_id: theme.id }).select("id").single();
-      if (error) throw error;
-      const evidence: { org_id: string; decision_id: string; theme_id?: string; signal_id?: string }[] = [{ org_id: orgId, decision_id: dec.id, theme_id: theme.id }];
-      for (const s of signals) evidence.push({ org_id: orgId, decision_id: dec.id, signal_id: s.id });
-      await supabase.from("decision_evidence").insert(evidence);
-      router.push(`/decisions/${dec.id}`);
-    } catch (e) { setError(e instanceof Error ? e.message : "Could not create decision."); setBusy(false); }
-  }
-
   if (loading) return <Spinner label="Loading theme…" />;
   if (!theme) return <Banner>Theme not found.</Banner>;
 
@@ -112,7 +96,6 @@ export default function ThemeDetail({ id }: { id: string }) {
       <PageHeader
         title={theme.title}
         meta={theme.summary || undefined}
-        actions={<button className="btn btn-secondary btn-sm" disabled={busy} onClick={makeDecision}>Make a decision →</button>}
       />
       <Banner>{error}</Banner>
 

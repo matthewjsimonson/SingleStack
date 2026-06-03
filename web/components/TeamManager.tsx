@@ -1,7 +1,7 @@
 "use client";
 
-// Team — the org's people. Set up profiles (name / title / area) so decisions and
-// initiatives can be owned by a real person and agents can suggest owners. A
+// Team — the org's people. Set up profiles (name / title / area) so initiatives
+// can be owned by a real person and agents can suggest owners. A
 // profile links to a real login automatically when that user joins; you can also
 // add teammates who don't have accounts yet.
 import { useCallback, useEffect, useState } from "react";
@@ -44,7 +44,7 @@ export default function TeamManager() {
 
   return (
     <Section label="Team" action={!adding ? <button className="btn btn-secondary btn-sm" onClick={() => setAdding(true)}>+ Add person</button> : undefined}>
-      <div className="t-sub t-muted" style={{ fontSize: 12.5, marginBottom: 12 }}>Your people — so decisions &amp; initiatives can be owned, and agents can suggest the right owner. Profiles link to a real login automatically when that teammate joins.</div>
+      <div className="t-sub t-muted" style={{ fontSize: 12.5, marginBottom: 12 }}>Your people — so initiatives can be owned, and agents can suggest the right owner. Profiles link to a real login automatically when that teammate joins.</div>
       <Banner>{error}</Banner>
 
       {adding && (
