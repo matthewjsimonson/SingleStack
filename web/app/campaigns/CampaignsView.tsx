@@ -83,7 +83,7 @@ export default function CampaignsView() {
                   {col.length === 0 && <div className="t-sub t-muted" style={{ fontSize: 12.5 }}>Empty</div>}
                   {col.map((c) => (
                     <div key={c.id} className="card card-pad">
-                      <div className="row-between" style={{ alignItems: "flex-start", marginBottom: 6 }}><span style={{ fontSize: 14, fontWeight: 620 }}>{c.name}</span><button className="t-muted" onClick={() => remove(c.id)} style={{ background: "none", border: "none", cursor: "pointer", fontSize: 15 }}>×</button></div>
+                      <div className="row-between" style={{ alignItems: "flex-start", marginBottom: 6 }}><a href={`/campaigns/${c.id}`} style={{ fontSize: 14, fontWeight: 620, color: "var(--tp)" }}>{c.name}</a><button className="t-muted" onClick={() => remove(c.id)} style={{ background: "none", border: "none", cursor: "pointer", fontSize: 15 }}>×</button></div>
                       {c.objective && <div className="t-sub t-muted" style={{ fontSize: 12, lineHeight: 1.45, marginBottom: 8 }}>{c.objective}</div>}
                       <div className="row gap-2" style={{ flexWrap: "wrap", marginBottom: 8 }}>
                         {gtmName(c.gtm_record_id) && <Chip tone="violet">{gtmName(c.gtm_record_id)}</Chip>}
