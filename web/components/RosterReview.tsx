@@ -101,7 +101,7 @@ export default function RosterReview({ onChanged }: { onChanged?: () => void }) 
 
   return (
     <Section label="Chief of Staff — roster review"
-      action={<button className="btn btn-sm" onClick={run} disabled={running} style={{ background: "#D97706", color: "#fff" }}>{running ? "Reviewing…" : "✦ Run agent review"}</button>}>
+      action={<button className="btn btn-sm" onClick={run} disabled={running} style={{ background: "#D97706", color: "#fff" }}>{running ? "Reviewing…" : "Run agent review"}</button>}>
       <div className="t-sub t-muted" style={{ fontSize: 12.5, marginBottom: 12 }}>
         Reviews every agent&apos;s skills against durable intelligence &amp; new capabilities and proposes updates — <strong>with restraint</strong>. It changes little on purpose and records what it deliberately leaves alone. You ratify each change.
       </div>

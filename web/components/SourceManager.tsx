@@ -154,7 +154,7 @@ export default function SourceManager({ scope = {}, title = "Sources" }: { scope
         {/* STEP 2 — configure the picked source (tailoring + budget + security) */}
         {picked ? (
           <div style={{ display: "grid", gap: 10 }}>
-            {recipeNote && <div className="banner" style={{ marginBottom: 2, fontSize: 12.5 }}>✨ {recipeNote}</div>}
+            {recipeNote && <div className="banner" style={{ marginBottom: 2, fontSize: 12.5 }}>{recipeNote}</div>}
             <div className="card" style={{ padding: "10px 12px", background: "var(--panel-2)" }}>
               <div className="t-sub" style={{ fontSize: 12.5 }}>{picked.icon} {picked.blurb}</div>
               <div className="t-mono-xs" style={{ marginTop: 6, display: "flex", gap: 8, flexWrap: "wrap" }}>
@@ -254,7 +254,7 @@ export default function SourceManager({ scope = {}, title = "Sources" }: { scope
             {/* Source Recipe Builder — describe it, Claude drafts the source. No
                 config syntax, no server-building. The non-technical path in. */}
             <div className="card" style={{ padding: 12, marginBottom: 14, background: "var(--panel-2)" }}>
-              <div className="t-label" style={{ marginBottom: 6 }}>✨ Describe a signal you want</div>
+              <div className="t-label" style={{ marginBottom: 6 }}>Describe a signal you want</div>
               <textarea className="input" rows={2} value={describe} placeholder="e.g. Tell me when Acme changes their pricing page or starts hiring senior sales reps"
                 onChange={(e) => setDescribe(e.target.value)} style={{ marginBottom: 8 }} />
               <button className="btn btn-sm" disabled={building || describe.trim().length < 4} onClick={buildRecipe}>

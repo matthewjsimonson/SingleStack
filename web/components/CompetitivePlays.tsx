@@ -84,7 +84,7 @@ export default function CompetitivePlays({ competitorId, competitorName }: { com
   return (
     <Section
       label="Officer analyses"
-      action={<button className="btn btn-sm" onClick={runAll} style={{ background: "var(--ac)", color: "#fff" }} disabled={PLAYS.some((p) => running[p.key])}>✦ Run all four</button>}
+      action={<button className="btn btn-sm" onClick={runAll} style={{ background: "var(--ac)", color: "#fff" }} disabled={PLAYS.some((p) => running[p.key])}>Run all four</button>}
     >
       <div className="t-sub t-muted" style={{ fontSize: 12.5, marginBottom: 12 }}>
         Each officer runs their own analysis on {competitorName} — same evidence, four lenses. Review, edit, and ratify each.
@@ -156,8 +156,8 @@ export default function CompetitivePlays({ competitorId, competitorName }: { com
                       {a.status !== "dismissed" && <button className="btn btn-secondary btn-sm" onClick={() => setStatus(a, "dismissed")} style={{ color: "var(--rd-text)" }}>Dismiss</button>}
                     </div>
                     {a.run_id && (rated[a.run_id]
-                      ? <span className="t-mono-xs" style={{ color: "var(--tm)" }}>{rated[a.run_id] === "helpful" ? "👍 rated" : "👎 rated"}</span>
-                      : <div className="row gap-2"><button className="btn btn-secondary btn-sm" onClick={() => rate(a.run_id, "helpful")}>👍</button><button className="btn btn-secondary btn-sm" onClick={() => rate(a.run_id, "not_helpful")}>👎</button></div>)}
+                      ? <span className="t-mono-xs" style={{ color: "var(--tm)" }}>{rated[a.run_id] === "helpful" ? "Rated helpful" : "Rated not helpful"}</span>
+                      : <div className="row gap-2"><button className="btn btn-secondary btn-sm" onClick={() => rate(a.run_id, "helpful")}>Helpful</button><button className="btn btn-secondary btn-sm" onClick={() => rate(a.run_id, "not_helpful")}>Not helpful</button></div>)}
                   </div>
                 </>
               )}

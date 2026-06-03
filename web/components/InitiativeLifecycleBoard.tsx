@@ -59,7 +59,7 @@ export default function InitiativeLifecycleBoard() {
       {scoped.length === 0 ? (
         <div className="empty">
           <div className="t-body" style={{ fontWeight: 600, marginBottom: 6 }}>No initiatives yet</div>
-          <div className="t-sub" style={{ maxWidth: 480, marginInline: "auto" }}>Open a signal theme (Signals) and <strong>✦ Recommend an initiative</strong> — it lands here and moves across the lifecycle as you plan, ship, and launch it.</div>
+          <div className="t-sub" style={{ maxWidth: 480, marginInline: "auto" }}>Open a signal theme (Signals) and <strong>Recommend an initiative</strong> — it lands here and moves across the lifecycle as you plan, ship, and launch it.</div>
         </div>
       ) : (
         <div style={{ display: "grid", gridTemplateColumns: `repeat(${STAGES.length}, minmax(180px, 1fr))`, gap: "var(--sp-3)", overflowX: "auto" }}>

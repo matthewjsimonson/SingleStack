@@ -77,7 +77,7 @@ export default function Bridges({ onChange, productFilter = "all" }: { onChange?
         label={`Bridges${active.length ? ` · ${active.length}` : ""}`}
         action={bridgeRun.active
           ? <AgentProgress run={bridgeRun} compact />
-          : <button className="btn btn-accent btn-sm" onClick={find}>✨ Find bridges</button>}
+          : <button className="btn btn-accent btn-sm" onClick={find}>Find bridges</button>}
       >
         <div className="t-sub t-muted" style={{ marginBottom: "var(--sp-3)" }}>
           Where a product pattern and a go-to-market pattern are one reality. A bridge is only as strong as its weaker side.

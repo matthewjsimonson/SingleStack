@@ -164,7 +164,7 @@ export default function CapabilityDrawer({ capability, onClose, onChanged }: { c
               <select className="select" value={officerKey} onChange={(e) => setOfficerKey(e.target.value)} style={{ maxWidth: 200 }}>
                 {OFFICERS.map((o) => <option key={o.key} value={o.key}>{o.name}</option>)}
               </select>
-              <button className="btn btn-sm" onClick={ask} disabled={thinking} style={{ background: "var(--ac)", color: "#fff" }}>{thinking ? `${officer.name} is reading…` : `✦ Ask ${officer.name}`}</button>
+              <button className="btn btn-sm" onClick={ask} disabled={thinking} style={{ background: "var(--ac)", color: "#fff" }}>{thinking ? `${officer.name} is reading…` : `Ask ${officer.name}`}</button>
             </div>
             {take && <div className="card card-pad" style={{ background: "var(--panel)" }}><div className="t-sub" style={{ fontSize: 13, lineHeight: 1.55, whiteSpace: "pre-wrap" }}>{take}</div></div>}
           </div>

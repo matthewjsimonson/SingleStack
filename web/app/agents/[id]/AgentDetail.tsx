@@ -174,7 +174,7 @@ function Skills({ agentId, skills, attached, reload, setError }: { agentId: stri
   return (
     <Section label="Skills" action={!creating ? (
       <div className="row gap-2">
-        {attachedCount > 0 && <button className="btn btn-sm" onClick={() => setEvolving((v) => !v)} style={{ background: "var(--ac)", color: "#fff" }}>✦ Evolve from signals</button>}
+        {attachedCount > 0 && <button className="btn btn-sm" onClick={() => setEvolving((v) => !v)} style={{ background: "var(--ac)", color: "#fff" }}>Evolve from signals</button>}
         <button className="btn btn-secondary btn-sm" onClick={() => setCreating(true)}>+ New skill</button>
       </div>
     ) : undefined}>
@@ -634,7 +634,7 @@ function EvolvePanel({ agentId, onApplied, onClose, setError }: { agentId: strin
   return (
     <div className="card card-pad" style={{ marginBottom: "var(--sp-3)", borderColor: "var(--ac)", background: "var(--ac-fill)" }}>
       <div className="row-between" style={{ marginBottom: 10 }}>
-        <div className="row gap-2"><span style={{ color: "var(--ac-text)", fontWeight: 800 }}>✦</span><span style={{ fontWeight: 660 }}>Evolve skills from signals</span></div>
+        <div className="row gap-2"><span style={{ fontWeight: 660 }}>Evolve skills from signals</span></div>
         <div className="row gap-2">
           <button className="btn btn-secondary btn-sm" onClick={run} disabled={loading}>{loading ? "Analyzing…" : "Re-run"}</button>
           <button className="btn btn-secondary btn-sm" onClick={onClose}>Close</button>

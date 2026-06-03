@@ -170,7 +170,7 @@ export default function ThemeDrawer({ themeId, onClose, onChanged }: { themeId: 
                       <div className="row gap-2" style={{ marginTop: 6 }}>
                         {m.rating
                           ? <span className="t-mono-xs" style={{ color: "var(--tm)" }}>{m.rating === "helpful" ? "marked helpful ✓" : "marked not helpful ✓"}</span>
-                          : <><button className="btn btn-secondary btn-sm" onClick={() => rate(i, "helpful")}>👍 Helpful</button><button className="btn btn-secondary btn-sm" onClick={() => rate(i, "not_helpful")}>👎 Not helpful</button></>}
+                          : <><button className="btn btn-secondary btn-sm" onClick={() => rate(i, "helpful")}>Helpful</button><button className="btn btn-secondary btn-sm" onClick={() => rate(i, "not_helpful")}>Not helpful</button></>}
                       </div>
                     )}
                   </div>
@@ -214,7 +214,7 @@ export default function ThemeDrawer({ themeId, onClose, onChanged }: { themeId: 
             ) : (
               <>
                 <div className="t-sub t-muted" style={{ fontSize: 12.5, marginBottom: 8 }}>Turn this intelligence into a cross-functional effort — {officer.name} drafts the Build + GTM workstreams; you tailor and create.</div>
-                <button className="btn btn-sm" onClick={recommendInitiative} disabled={recBusy} style={{ background: "var(--gn)", color: "#fff" }}>{recBusy ? "Drafting…" : "✦ Recommend an initiative"}</button>
+                <button className="btn btn-sm" onClick={recommendInitiative} disabled={recBusy} style={{ background: "var(--gn)", color: "#fff" }}>{recBusy ? "Drafting…" : "Recommend an initiative"}</button>
               </>
             )}
           </div>

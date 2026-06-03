@@ -22,7 +22,7 @@ const STAGES = [["planned", "Planned"], ["in_dev", "In development"], ["released
 const STAGE_TONE: Record<string, "default" | "violet" | "green"> = { planned: "default", in_dev: "violet", released: "green" };
 // What a build task ships as — drives the changelog grouping.
 const CHANGE: Record<string, { label: string; tone: "accent" | "violet" | "green" | "amber" | "default"; icon: string }> = {
-  feature:        { label: "New feature",    tone: "accent",  icon: "✦" },
+  feature:        { label: "New feature",    tone: "accent",  icon: "◆" },
   feature_update: { label: "Feature update", tone: "violet",  icon: "↑" },
   module_update:  { label: "Module update",  tone: "violet",  icon: "▢" },
   enhancement:    { label: "Enhancement",    tone: "green",   icon: "+" },

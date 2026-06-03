@@ -201,7 +201,7 @@ function buildSuggestions(stats: { pending: number; fieldsCompletion: number; si
     list.push({ tag: "Review", text: `Review ${stats.pending} pending proposal${stats.pending === 1 ? "" : "s"} and accept what's ready`, icon: "📝", tint: "var(--vl-fill)", action: go("/?review=1") });
   if (stats.fieldsCompletion < 70)
     list.push({ tag: "Foundation", text: "Fill out your product record — completeness is low", icon: "◆", tint: "var(--ac-fill)", action: go("/products") });
-  list.push({ tag: "Product", text: "Ask the CPO agent to sharpen your positioning", icon: "✦", tint: "var(--ac-fill)", action: go("/") });
+  list.push({ tag: "Product", text: "Ask the CPO agent to sharpen your positioning", icon: "◆", tint: "var(--ac-fill)", action: go("/") });
   list.push({ tag: "GTM", text: "Draft hero messaging for a GTM record", icon: "◈", tint: "var(--vl-fill)", action: go("/gtm") });
   if (stats.signals7d === 0)
     list.push({ tag: "Signals", text: "Connect a signal source to start informing your agents", icon: "📡", tint: "var(--gn-fill)", action: go("/signals") });

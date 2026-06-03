@@ -172,11 +172,11 @@ export default function WorkflowRunsReview({ onChanged }: { onChanged?: () => vo
                 {r.context?.why && <div className="t-sub t-muted" style={{ fontSize: 12.5, marginBottom: 6 }}>{r.context.why}</div>}
                 <div className="t-sub" style={{ fontSize: 12.5, marginBottom: 8 }}>
                   <strong>On accept:</strong>{" "}
-                  {tgt ? <>✦ {tgt.agentName} drafts a proposal on <strong>{where}</strong> for your review.</> : (r.proposed_action ?? "Drafts a starter initiative.")}
+                  {tgt ? <>{tgt.agentName} drafts a proposal on <strong>{where}</strong> for your review.</> : (r.proposed_action ?? "Drafts a starter initiative.")}
                 </div>
                 <div className="row gap-2">
                   <button className="btn btn-sm" onClick={() => accept(r)} disabled={busy === r.id} style={{ background: "#D97706", color: "#fff" }}>
-                    {busy === r.id ? "Drafting…" : tgt ? "✦ Draft with agent" : "Create draft"}
+                    {busy === r.id ? "Drafting…" : tgt ? "Draft with agent" : "Create draft"}
                   </button>
                   <button className="btn btn-secondary btn-sm" onClick={() => dismiss(r)} disabled={busy === r.id}>Dismiss</button>
                 </div>

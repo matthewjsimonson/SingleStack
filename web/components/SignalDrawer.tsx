@@ -298,7 +298,7 @@ export default function SignalDrawer({ signal, onClose, onChanged }: { signal: D
                       <div className="row gap-2" style={{ marginTop: 6 }}>
                         {m.rating
                           ? <span className="t-mono-xs" style={{ color: "var(--tm)" }}>{m.rating === "helpful" ? "marked helpful ✓" : "marked not helpful ✓"}</span>
-                          : <><button className="btn btn-secondary btn-sm" onClick={() => rate(i, "helpful")}>👍 Helpful</button><button className="btn btn-secondary btn-sm" onClick={() => rate(i, "not_helpful")}>👎 Not helpful</button></>}
+                          : <><button className="btn btn-secondary btn-sm" onClick={() => rate(i, "helpful")}>Helpful</button><button className="btn btn-secondary btn-sm" onClick={() => rate(i, "not_helpful")}>Not helpful</button></>}
                       </div>
                     )}
                   </div>
@@ -361,7 +361,7 @@ export default function SignalDrawer({ signal, onClose, onChanged }: { signal: D
               </div>
             ) : (
               <div className="row gap-2" style={{ flexWrap: "wrap" }}>
-                <button className="btn btn-sm" style={{ background: "var(--gn)", color: "#fff" }} onClick={recommendInitiative} disabled={recBusy}>{recBusy ? "Drafting…" : `✦ Recommend an initiative`}</button>
+                <button className="btn btn-sm" style={{ background: "var(--gn)", color: "#fff" }} onClick={recommendInitiative} disabled={recBusy}>{recBusy ? "Drafting…" : `Recommend an initiative`}</button>
                 <select className="select" value={scope} onChange={(e) => setScope(e.target.value)} style={{ maxWidth: 150 }}>
                   {SCOPES.map(([k, label]) => <option key={k} value={k}>{label}</option>)}
                 </select>
