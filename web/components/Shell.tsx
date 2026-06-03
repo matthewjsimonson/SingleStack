@@ -63,6 +63,12 @@ const GROUPS: Group[] = [
     ],
   },
   {
+    label: "Strategy",
+    items: [
+      { label: "Product strategy", href: "/strategy" },
+    ],
+  },
+  {
     label: "Build",
     items: [
       { label: "Roadmap", href: "/roadmap" },

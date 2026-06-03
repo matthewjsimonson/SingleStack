@@ -10,7 +10,7 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { createClient } from "@/lib/supabase/client";
 import { getOrgId } from "@/lib/org";
-import { PageHeader, Chip, Banner, Modal } from "@/components/ui";
+import { PageHeader, Chip, Banner, Modal, ConfirmDialog } from "@/components/ui";
 import { BUILD_TEMPLATE } from "@/lib/templates";
 
 type Item = { id: string; title: string; kind: string | null; build_state: string | null; scope: string; release_id: string | null };
@@ -37,6 +37,7 @@ export default function ShipBoard() {
   const [copied, setCopied] = useState(false);
   const [adding, setAdding] = useState(false);
   const [form, setForm] = useState({ title: "", kind: "feature" });
+  const [delId, setDelId] = useState<string | null>(null);
 
   const load = useCallback(async () => {
     const [{ data: it }, { data: fl }, { data: lk }, { data: rel }] = await Promise.all([
@@ -193,6 +194,7 @@ export default function ShipBoard() {
                           {idx < STATE_ORDER.length - 1 && <button className="btn btn-secondary btn-sm" title={`Advance to ${STATES[idx + 1][1]}`} onClick={() => move(it, 1)}>{STATES[idx + 1][1]} →</button>}
                           <div style={{ flex: 1 }} />
                           {(it.build_state === "ready_for_agent" || it.build_state === "in_build") && <button className="btn btn-sm" title="Assemble the coding-agent handoff" onClick={() => { setBriefId(it.id); setCopied(false); }}>Agent brief</button>}
+                          <button className="btn btn-secondary btn-sm" title="Delete this Build Item" onClick={() => setDelId(it.id)} style={{ color: "var(--rd-text)" }}>✕</button>
                         </div>
                       </div>
                     );
@@ -211,6 +213,16 @@ export default function ShipBoard() {
         </div>
         <pre style={{ whiteSpace: "pre-wrap", fontSize: 12.5, lineHeight: 1.55, background: "var(--fill-2)", border: "1px solid var(--border)", borderRadius: 8, padding: 14, maxHeight: "55vh", overflowY: "auto", fontFamily: "var(--mono, monospace)" }}>{briefText}</pre>
       </Modal>
+
+      {delId && (
+        <ConfirmDialog
+          title="Delete Build Item?"
+          message="This removes the Build Item and its scope, tasks, and context bundle. This can't be undone."
+          confirmLabel="Delete"
+          onConfirm={async () => { const id = delId; setDelId(null); setError(null); const { error } = await supabase.from("initiatives").delete().eq("id", id); if (error) setError(error.message); await load(); }}
+          onCancel={() => setDelId(null)}
+        />
+      )}
     </div>
   );
 }

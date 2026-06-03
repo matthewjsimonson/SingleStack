@@ -266,88 +266,17 @@ export async function loadDemoData(supabase: SupabaseClient, orgId: string): Pro
     if (error) throw error; return `+${toAdd.length}`;
   });
 
-  // ---- Strategy: objective -> cross-functional initiatives -> workstreams ----
+  // ---- Strategy north star (objective only — no fake in-flight work) ----
+  // De-faked: we no longer seed pretend initiatives / roadmap / content. The
+  // Build workflow starts EMPTY and is filled for real by shipping bundles from
+  // Product Strategy (the seeded signals above are the raw intake). We keep one
+  // real objective as the strategic frame.
   await step("strategy", async () => {
     const OBJ = "Win the AI-native product + GTM category in 2026";
-    let { data: obj } = await supabase.from("objectives").select("id").eq("title", OBJ).maybeSingle();
-    if (!obj) ({ data: obj } = await supabase.from("objectives").insert({ org_id: orgId, title: OBJ, pillar: "Growth", description: "Be the living system of record for product + GTM before the category consolidates.", status: "active" }).select("id").single());
-    const { data: ppl } = await supabase.from("people").select("id, name");
-    const who = (n: string) => ppl?.find((p) => p.name === n)?.id ?? null;
-
-    const defs: { title: string; kind: string; lane: string; lifecycle: string; gtm: boolean; assignee: string | null; stage: string; ws: [string, string, string | null][] }[] = [
-      { title: "Agent orchestration v1", kind: "module", lane: "ship", lifecycle: "build", gtm: true, assignee: who("Maya Chen"), stage: "active", ws: [
-        ["build", "Ship multi-agent orchestration", who("Sam Rivera")], ["build", "Orchestration telemetry & guardrails", who("Sam Rivera")],
-        ["gtm", "Orchestration launch post + demo", who("Jordan Lee")], ["gtm", "Update competitive battlecards", who("Jordan Lee")],
-      ] },
-      { title: "Pricing clarity", kind: "feature", lane: "enablement", lifecycle: "plan", gtm: true, assignee: who("Jordan Lee"), stage: "backlog", ws: [
-        ["gtm", "Publish transparent pricing tiers", who("Jordan Lee")], ["gtm", "Pricing FAQ for demo follow-up", who("Jordan Lee")],
-        ["build", "Pricing page UX + mobile hero", who("Maya Chen")],
-      ] },
-    ];
-    let made = 0;
-    for (const d of defs) {
-      const { data: exi } = await supabase.from("initiatives").select("id").eq("title", d.title).maybeSingle();
-      if (exi) continue;
-      const { data: ini, error } = await supabase.from("initiatives").insert({
-        org_id: orgId, lane: d.lane, title: d.title, kind: d.kind, lifecycle: d.lifecycle, scope: "both", objective_id: obj?.id ?? null,
-        product_id: pid, gtm_record_id: d.gtm ? gtmId ?? null : null, assignee_id: d.assignee, stage: d.stage, priority: "high",
-      }).select("id").single();
-      if (error) throw error; made++;
-      await supabase.from("initiative_workstreams").insert(d.ws.map(([area, title, assignee], i) => ({ org_id: orgId, initiative_id: ini.id, area, lifecycle_stage: d.lifecycle, title, assignee_id: assignee, stage: i === 0 && d.stage === "active" ? "active" : "backlog" })));
-    }
-    return made ? `+${made}` : "exist";
-  });
-
-  // ---- Roadmap: releases populated by tagged build tasks (the changelog) ----
-  await step("roadmap", async () => {
-    const rels: { name: string; version: string; summary: string; stage: string; days: number }[] = [
-      { name: "Agent orchestration", version: "v1.0", summary: "Multi-agent orchestration ships — a single agent plans and runs multi-step product + GTM work.", stage: "in_dev", days: 21 },
-      { name: "Pricing & onboarding", version: "v1.1", summary: "Transparent pricing tiers and a mobile-first onboarding hero.", stage: "planned", days: 55 },
-    ];
-    const id: Record<string, string> = {};
-    let made = 0;
-    for (const r of rels) {
-      let { data: ex } = await supabase.from("releases").select("id").eq("name", r.name).maybeSingle();
-      if (!ex) { ({ data: ex } = await supabase.from("releases").insert({ org_id: orgId, product_id: pid, name: r.name, version: r.version, summary: r.summary, stage: r.stage, target_date: new Date(Date.now() + r.days * 864e5).toISOString().slice(0, 10) }).select("id").single()); made++; }
-      if (ex) id[r.version] = ex.id;
-    }
-    // Tag existing build tasks into releases with a change_type → the changelog.
-    const tag: [string, string, string][] = [
-      ["Ship multi-agent orchestration", "v1.0", "feature"],
-      ["Orchestration telemetry & guardrails", "v1.0", "enhancement"],
-      ["Pricing page UX + mobile hero", "v1.1", "feature_update"],
-    ];
-    for (const [title, ver, ct] of tag) {
-      if (!id[ver]) continue;
-      await supabase.from("initiative_workstreams").update({ release_id: id[ver], change_type: ct }).eq("area", "build").eq("title", title).is("release_id", null);
-    }
-    return made ? `+${made}` : "exist";
-  });
-
-  // ---- Content: typed content tasks that roll up to initiatives ----
-  await step("content", async () => {
-    const { data: existing } = await supabase.from("initiative_workstreams").select("id").not("content_type", "is", null).limit(1);
-    if (existing && existing.length) return "exist";
-    const { data: ini } = await supabase.from("initiatives").select("id, lifecycle").eq("title", "Agent orchestration v1").maybeSingle();
-    const { data: rel } = await supabase.from("releases").select("id").eq("name", "Agent orchestration").maybeSingle();
-    const { data: gtm } = await supabase.from("gtm_records").select("id").limit(1).maybeSingle();
-    const { data: ppl } = await supabase.from("people").select("id, name");
-    const who = (n: string) => ppl?.find((p) => p.name === n)?.id ?? null;
-    const ls = ini?.lifecycle ?? "launch";
-    // A coordinated push the launch content rolls into — closes the campaign↔content loop.
-    let { data: camp } = await supabase.from("campaigns").select("id").eq("name", "Orchestration launch week").maybeSingle();
-    if (!camp) ({ data: camp } = await supabase.from("campaigns").insert({ org_id: orgId, name: "Orchestration launch week", objective: "Coordinated launch of agent orchestration across blog, video, and social.", channels: "LinkedIn, email, webinar", gtm_record_id: gtm?.id ?? null, status: "active" }).select("id").single());
-    const rows = [
-      { content_type: "blog", title: "Launch blog — orchestration v1", stage: "active", assignee: who("Jordan Lee"), release_id: rel?.id ?? null, campaign_id: camp?.id ?? null, details: null },
-      { content_type: "video", title: "90s orchestration explainer", stage: "backlog", assignee: who("Jordan Lee"), release_id: rel?.id ?? null, campaign_id: camp?.id ?? null, details: { hook: "Your AI shouldn't need a babysitter for every step.", script: "", prompts: ["Cold open: messy multi-tool workflow", "Reveal: one agent orchestrating it"], descript_steps: [] } },
-      { content_type: "social", title: "Launch-week teaser thread", stage: "backlog", assignee: who("Jordan Lee"), release_id: null, campaign_id: camp?.id ?? null, details: null },
-      { content_type: "testimonial", title: "Design-partner testimonial — orchestration", stage: "backlog", assignee: who("Alex Kim"), release_id: null, campaign_id: null, details: null },
-    ];
-    await supabase.from("initiative_workstreams").insert(rows.map((r) => ({
-      org_id: orgId, area: "gtm", title: r.title, content_type: r.content_type, stage: r.stage,
-      initiative_id: ini?.id ?? null, lifecycle_stage: ls, assignee_id: r.assignee, release_id: r.release_id, campaign_id: r.campaign_id, details: r.details,
-    })));
-    return `+${rows.length}`;
+    const { data: obj } = await supabase.from("objectives").select("id").eq("title", OBJ).maybeSingle();
+    if (obj) return "exist";
+    await supabase.from("objectives").insert({ org_id: orgId, title: OBJ, pillar: "Growth", description: "Be the living system of record for product + GTM before the category consolidates.", status: "active" });
+    return "+1";
   });
 
   // ---- Automations: an on_release workflow + one fired (pending) run ----
