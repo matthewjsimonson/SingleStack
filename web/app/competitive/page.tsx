@@ -6,7 +6,7 @@ export default async function Page() {
   const supabase = await createClient();
   const { data: { user } } = await supabase.auth.getUser();
   return (
-    <Shell email={user?.email} crumbs={[{ label: "Competitive intel" }]}>
+    <Shell email={user?.email} crumbs={[{ label: "Competitive" }]}>
       <CompetitiveView />
     </Shell>
   );

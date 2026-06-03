@@ -20,9 +20,9 @@ type Competitor = { id: string; name: string; relationship: string; website: str
 type Capability = { id: string; name: string; category: string | null };
 type Score = { id: string; capability_id: string; competitor_id: string | null; score: number };
 type Card = { id: string; competitor_id: string | null; kind: string; title: string; detail: string | null };
-type Signal = { id: string; title: string; why: string | null; conf_label: string | null; conf_level: number | null; observed_at: string | null; metadata: { domain?: string } | null; source_id: string | null };
+type Signal = { id: string; title: string; why: string | null; conf_label: string | null; conf_level: number | null; observed_at: string | null; metadata: { domain?: string; competitor_id?: string } | null; source_id: string | null };
 
-type Tab = "dashboard" | "battlecards" | "feed";
+type Tab = "dashboard" | "competitors" | "feed";
 
 export default function CompetitiveView() {
   const supabase = createClient();
@@ -64,15 +64,15 @@ export default function CompetitiveView() {
   return (
     <div>
       <PageBar
-        tabs={[{ key: "dashboard", label: "Dashboard" }, { key: "battlecards", label: "Battlecards" }, { key: "feed", label: "Signal feed" }]}
+        tabs={[{ key: "dashboard", label: "Dashboard" }, { key: "competitors", label: "Competitors" }, { key: "feed", label: "Signal feed" }]}
         active={tab}
         onTab={(k) => setTab(k as Tab)}
       />
       <Banner>{error}</Banner>
 
       {loading ? <div className="t-sub t-muted">Loading…</div>
-        : tab === "dashboard" ? <Dashboard competitors={competitors} capabilities={capabilities} scores={scores} compSignals={compSignals} overview={overview} reload={load} setError={setError} onOpenCompetitor={(id) => { setFocusComp(id); setTab("battlecards"); }} />
-        : tab === "battlecards" ? <Battlecards competitors={competitors} cards={cards} overview={overview} capabilities={capabilities} scores={scores} compSignals={compSignals} reload={load} setError={setError} initialScope={focusComp} onConsumeScope={clearFocus} />
+        : tab === "dashboard" ? <Dashboard competitors={competitors} capabilities={capabilities} scores={scores} compSignals={compSignals} overview={overview} reload={load} setError={setError} onOpenCompetitor={(id) => { setFocusComp(id); setTab("competitors"); }} />
+        : tab === "competitors" ? <Competitors competitors={competitors} cards={cards} overview={overview} capabilities={capabilities} scores={scores} compSignals={compSignals} reload={load} setError={setError} initialScope={focusComp} onConsumeScope={clearFocus} />
         : <Feed signals={signals} />}
     </div>
   );
@@ -324,28 +324,47 @@ function Dashboard({ competitors, capabilities, scores, compSignals, overview, r
 }
 
 // ---------- Battlecards ----------
-type BcTab = "gtm" | "product" | "signals";
-function Battlecards({ competitors, cards, overview, capabilities, scores, compSignals, reload, setError, initialScope, onConsumeScope }: {
+type CdTab = "overview" | "gtm" | "product" | "signals";
+
+// Best-practice battlecard sections — the set is the suggestion; fill the ones
+// that help a rep win against each competitor.
+const KINDS: [string, string, string][] = [
+  ["win", "Why we win", "gn"],
+  ["lose", "Why we lose", "am"],
+  ["strength", "Their strengths", "vl"],
+  ["objection", "Objection handling", "bd"],
+  ["trap", "Landmines to set", "vl"],
+  ["pricing", "Pricing & packaging", "bd"],
+  ["proof", "Proof points", "gn"],
+  ["discovery", "Discovery questions", "bd"],
+];
+const TONE_BORDER: Record<string, string> = { gn: "var(--gn)", am: "var(--am-text)", vl: "var(--vl)", bd: "var(--border-strong)" };
+function Competitors({ competitors, cards, overview, capabilities, scores, compSignals, reload, setError, initialScope, onConsumeScope }: {
   competitors: Competitor[]; cards: Card[]; overview: { name: string; overview: string | null; valueProp: string | null } | null;
   capabilities: Capability[]; scores: Score[]; compSignals: Signal[]; reload: () => void; setError: (s: string | null) => void;
   initialScope?: string | null; onConsumeScope?: () => void;
 }) {
   const supabase = createClient();
-  const [scope, setScope] = useState<string | null>(null); // selected competitor id; null = picker
-  const [bcTab, setBcTab] = useState<BcTab>("gtm");
+  const [scope, setScope] = useState<string | null>(null); // selected competitor id; null = tile grid
+  const [cdTab, setCdTab] = useState<CdTab>("overview");
   // Handoff from the Dashboard ("Open" a competitor) selects it here, then clears.
-  useEffect(() => { if (initialScope) { setScope(initialScope); onConsumeScope?.(); } }, [initialScope, onConsumeScope]);
+  useEffect(() => { if (initialScope) { setScope(initialScope); setCdTab("overview"); onConsumeScope?.(); } }, [initialScope, onConsumeScope]);
   const [adding, setAdding] = useState<string | null>(null);
   const [form, setForm] = useState({ title: "", detail: "" });
+  const [openCell, setOpenCell] = useState<Cell | null>(null);
+  const [editNotes, setEditNotes] = useState(false);
+  const [notes, setNotes] = useState("");
 
-  const KINDS = [["win", "Why we win", "green"], ["lose", "Why we lose", "amber"], ["objection", "Objections", "default"], ["trap", "Traps to set", "violet"]] as const;
   const cardsFor = (kind: string) => cards.filter((c) => c.kind === kind && c.competitor_id === scope);
   const countFor = (compId: string) => cards.filter((c) => c.competitor_id === compId).length;
   const selected = competitors.find((c) => c.id === scope);
   const scoreOf = (capId: string, compId: string | null) => scores.find((s) => s.capability_id === capId && s.competitor_id === compId)?.score ?? 0;
   const heat = (s: number) => ["var(--fill)", "#FCE4C7", "#CDEBD6", "#9FD9B4"][s] || "var(--fill)";
   const heatText = (s: number) => ["—", "Partial", "Good", "Strong"][s] || "—";
-  const compFor = (c?: Competitor) => (c ? compSignals.filter((s) => (s.title + " " + (s.why ?? "")).toLowerCase().includes(c.name.toLowerCase())) : []);
+  // Real competitor↔signal link (metadata.competitor_id), not a name match.
+  const sigsFor = (compId: string | null) => (compId ? compSignals.filter((s) => s.metadata?.competitor_id === compId) : []);
+  const edge = (compId: string) => capabilities.reduce((a, c) => { const u = scoreOf(c.id, null), t = scoreOf(c.id, compId); return { we: a.we + (u > t ? 1 : 0), they: a.they + (t > u ? 1 : 0) }; }, { we: 0, they: 0 });
+  async function saveNotes() { if (!scope) return; setError(null); await supabase.from("competitors").update({ notes: notes.trim() || null }).eq("id", scope); setEditNotes(false); reload(); }
 
   async function add(kind: string) {
     if (!form.title.trim() || !scope) return;
@@ -356,23 +375,30 @@ function Battlecards({ competitors, cards, overview, capabilities, scores, compS
   async function remove(id: string) { setError(null); await supabase.from("battlecard_items").delete().eq("id", id); reload(); }
 
 
-  // Competitor picker — battlecards are per-competitor, so choose one first.
+  // Tile grid — pick a competitor to drill in.
   if (!scope) {
     return (
-      <Section label="Choose a competitor">
+      <Section label="Competitors">
         {competitors.length === 0 ? (
-          <div className="t-sub t-muted">No competitors yet. Add direct/adjacent competitors on the Dashboard, then build their battlecards here.</div>
+          <div className="t-sub t-muted">No competitors yet. Add direct and adjacent competitors on the Dashboard — each gets an overview, battlecard, product board, and signal feed here.</div>
         ) : (
           <div className="grid-cards">
-            {competitors.map((c) => (
-              <button key={c.id} className="card card-link card-pad" style={{ textAlign: "left" }} onClick={() => setScope(c.id)}>
-                <div className="row-between" style={{ marginBottom: 8 }}>
-                  <span style={{ fontSize: 15, fontWeight: 620 }}>{c.name}</span>
-                  <Chip tone={c.relationship === "direct" ? "accent" : "violet"}>{c.relationship}</Chip>
-                </div>
-                <div className="t-sub t-muted" style={{ fontSize: 12.5 }}>{countFor(c.id)} battlecard item{countFor(c.id) === 1 ? "" : "s"} · open →</div>
-              </button>
-            ))}
+            {competitors.map((c) => {
+              const e = edge(c.id);
+              return (
+                <button key={c.id} className="card card-link card-pad" style={{ textAlign: "left" }} onClick={() => { setScope(c.id); setCdTab("overview"); }}>
+                  <div className="row-between" style={{ marginBottom: 8 }}>
+                    <span style={{ fontSize: 15, fontWeight: 620 }}>{c.name}</span>
+                    <Chip tone={c.relationship === "direct" ? "accent" : "violet"}>{c.relationship}</Chip>
+                  </div>
+                  <div className="row gap-2" style={{ flexWrap: "wrap" }}>
+                    <span className="t-mono-xs" style={{ color: "var(--gn-text)" }}>we lead {e.we}</span>
+                    <span className="t-mono-xs" style={{ color: "var(--am-text)" }}>they lead {e.they}</span>
+                    <span className="t-mono-xs" style={{ color: "var(--tm)" }}>{countFor(c.id)} card{countFor(c.id) === 1 ? "" : "s"}</span>
+                  </div>
+                </button>
+              );
+            })}
           </div>
         )}
       </Section>
@@ -388,25 +414,44 @@ function Battlecards({ competitors, cards, overview, capabilities, scores, compS
         <div className="row gap-2"><span className="t-h2" style={{ fontSize: 15 }}>{selected?.name}</span>{selected && <Chip tone={selected.relationship === "direct" ? "accent" : "violet"}>{selected.relationship}</Chip>}</div>
       </div>
 
-      {/* Us vs Them — dynamic: live strengths from the matrix + the signals moving the matchup */}
-      {(() => {
+      <div className="card" style={{ overflow: "hidden" }}>
+        <div className="row" style={{ gap: 4, padding: "8px 8px 0", borderBottom: "1px solid var(--border)", flexWrap: "wrap" }}>
+          {([["overview", "Overview"], ["gtm", "GTM battlecard"], ["product", "Product board"], ["signals", `Signals${sigsFor(scope).length ? ` · ${sigsFor(scope).length}` : ""}`]] as [CdTab, string][]).map(([k, label]) => {
+            const on = cdTab === k;
+            return <button key={k} onClick={() => setCdTab(k)} style={{ background: "none", border: "none", borderBottom: on ? "2px solid var(--ac)" : "2px solid transparent", color: on ? "var(--tp)" : "var(--ts)", fontWeight: on ? 680 : 600, fontSize: 13, padding: "8px 14px", cursor: "pointer", marginBottom: -1 }}>{label}</button>;
+          })}
+        </div>
+        <div style={{ padding: "var(--sp-4)" }}>
+
+      {cdTab === "overview" ? (() => {
         const theirStrong = capabilities.filter((c) => scope && scoreOf(c.id, scope) >= 2);
         const weLead = capabilities.filter((c) => scope && scoreOf(c.id, null) > scoreOf(c.id, scope));
         const theyLead = capabilities.filter((c) => scope && scoreOf(c.id, scope) > scoreOf(c.id, null));
-        const matchup = compFor(selected);
         return (
-          <div style={{ marginBottom: "var(--sp-5)" }}>
+          <div className="stack-3">
+            {/* deep overview — editable */}
+            <div className="card card-pad" style={{ background: "var(--panel-2)" }}>
+              <div className="row-between" style={{ marginBottom: editNotes ? 8 : 4 }}>
+                <span className="t-label" style={{ color: "var(--tm)" }}>Overview</span>
+                {!editNotes && <button className="btn btn-secondary btn-sm" onClick={() => { setNotes(selected?.notes ?? ""); setEditNotes(true); }}>Edit</button>}
+              </div>
+              {editNotes ? (
+                <>
+                  <textarea className="textarea" rows={4} autoFocus value={notes} onChange={(e) => setNotes(e.target.value)} placeholder="Who they are, how they position, where they're strong and weak, recent moves." style={{ marginBottom: 8 }} />
+                  <div className="row gap-2"><button className="btn btn-sm" onClick={saveNotes}>Save</button><button className="btn btn-secondary btn-sm" onClick={() => setEditNotes(false)}>Cancel</button></div>
+                </>
+              ) : (
+                <div className="t-body" style={{ fontSize: 13, lineHeight: 1.6 }}>{selected?.notes || <span className="t-muted">No overview yet. Add who they are and how they position.</span>}</div>
+              )}
+            </div>
+
+            {/* us vs them */}
             <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "var(--sp-4)" }}>
               <div className="card card-pad" style={{ borderTop: "2px solid var(--vl)" }}>
                 <div className="t-label" style={{ color: "var(--tm)", marginBottom: 6 }}>Them · {selected?.name}</div>
-                <div className="t-sub" style={{ fontSize: 12.5, lineHeight: 1.5, marginBottom: 8 }}>{selected?.notes || <span className="t-muted">No overview yet.</span>}</div>
                 <div className="t-label" style={{ color: "var(--tm)", fontSize: 10.5, marginBottom: 4 }}>Strong on</div>
-                <div className="row gap-2" style={{ flexWrap: "wrap", marginBottom: 8 }}>
-                  {theirStrong.length ? theirStrong.map((c) => <Chip key={c.id} tone="violet">{c.name}</Chip>) : <span className="t-sub t-muted" style={{ fontSize: 12 }}>—</span>}
-                </div>
                 <div className="row gap-2" style={{ flexWrap: "wrap" }}>
-                  <span className="t-mono-xs">{matchup.length} recent move{matchup.length === 1 ? "" : "s"}</span>
-                  {selected?.website && <a href={selected.website} target="_blank" rel="noreferrer" className="t-sub" style={{ fontSize: 12, color: "var(--ac-text)", fontWeight: 600 }}>{selected.website.replace(/^https?:\/\//, "")} →</a>}
+                  {theirStrong.length ? theirStrong.map((c) => <Chip key={c.id} tone="violet">{c.name}</Chip>) : <span className="t-sub t-muted" style={{ fontSize: 12 }}>—</span>}
                 </div>
               </div>
               <div className="card card-pad" style={{ borderTop: "2px solid var(--ac)" }}>
@@ -419,50 +464,41 @@ function Battlecards({ competitors, cards, overview, capabilities, scores, compS
                 <span className="t-mono-xs" style={{ color: theyLead.length ? "var(--am-text)" : "var(--gn-text)" }}>{theyLead.length ? `${theyLead.length} gap${theyLead.length === 1 ? "" : "s"} to close` : "ahead or even everywhere"}</span>
               </div>
             </div>
+
+            {/* the four officers each analyze this competitor through their own lens */}
+            {selected && <CompetitivePlays competitorId={selected.id} competitorName={selected.name} />}
           </div>
         );
-      })()}
-
-      {/* The four officers each analyze this competitor through their own lens */}
-      {selected && <div style={{ marginBottom: "var(--sp-5)" }}><CompetitivePlays competitorId={selected.id} competitorName={selected.name} /></div>}
-
-      {/* Tabbed box — GTM battlecard · Product eval · Competitor signals */}
-      {/* tabbed box — same shape as the product record's modules box */}
-      <div className="card" style={{ overflow: "hidden" }}>
-        <div className="row" style={{ gap: 4, padding: "8px 8px 0", borderBottom: "1px solid var(--border)", flexWrap: "wrap" }}>
-          {([["gtm", "GTM battlecard"], ["product", "Product eval"], ["signals", `Signals${compFor(selected).length ? ` · ${compFor(selected).length}` : ""}`]] as [BcTab, string][]).map(([k, label]) => {
-            const on = bcTab === k;
-            return <button key={k} onClick={() => setBcTab(k)} style={{ background: "none", border: "none", borderBottom: on ? "2px solid var(--vl)" : "2px solid transparent", color: on ? "var(--tp)" : "var(--ts)", fontWeight: 600, fontSize: 13, padding: "8px 14px", cursor: "pointer", marginBottom: -1 }}>{label}</button>;
-          })}
-        </div>
-        <div style={{ padding: "var(--sp-4)" }}>
-      {bcTab === "gtm" ? (
-        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "var(--sp-4)" }}>
-          {KINDS.map(([kind, label, tone]) => (
-            <Section key={kind} label={label} action={adding !== kind ? <button className="btn btn-secondary btn-sm" onClick={() => { setAdding(kind); setForm({ title: "", detail: "" }); }}>+ Add</button> : undefined}>
-              {adding === kind && (
-                <div className="card card-pad" style={{ marginBottom: "var(--sp-3)" }}>
-                  <input className="input" autoFocus placeholder="Point" value={form.title} onChange={(e) => setForm({ ...form, title: e.target.value })} style={{ marginBottom: 8 }} />
-                  <textarea className="textarea" rows={2} placeholder="Detail (optional)" value={form.detail} onChange={(e) => setForm({ ...form, detail: e.target.value })} style={{ marginBottom: 8 }} />
-                  <div className="row gap-2"><button className="btn btn-sm" onClick={() => add(kind)}>Add</button><button className="btn btn-secondary btn-sm" onClick={() => setAdding(null)}>Cancel</button></div>
-                </div>
-              )}
-              <div className="stack-3">
-                {cardsFor(kind).map((c) => (
-                  <div key={c.id} className="card card-pad" style={{ borderLeft: `2px solid var(--${tone === "green" ? "gn" : tone === "amber" ? "am-text" : tone === "violet" ? "vl" : "border-strong"})` }}>
-                    <div className="row-between"><span style={{ fontSize: 13.5, fontWeight: 620 }}>{c.title}</span><button className="t-muted" onClick={() => remove(c.id)} style={{ background: "none", border: "none", cursor: "pointer", fontSize: 15 }}>×</button></div>
-                    {c.detail && <div className="t-sub" style={{ fontSize: 12.5, marginTop: 3 }}>{c.detail}</div>}
+      })() : cdTab === "gtm" ? (
+        <>
+          <div className="t-sub t-muted" style={{ fontSize: 12.5, marginBottom: 12 }}>Best-practice sections — fill the ones that help a rep win against {selected?.name}.</div>
+          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "var(--sp-4)" }}>
+            {KINDS.map(([kind, label, tone]) => (
+              <Section key={kind} label={label} action={adding !== kind ? <button className="btn btn-secondary btn-sm" onClick={() => { setAdding(kind); setForm({ title: "", detail: "" }); }}>+ Add</button> : undefined}>
+                {adding === kind && (
+                  <div className="card card-pad" style={{ marginBottom: "var(--sp-3)" }}>
+                    <input className="input" autoFocus placeholder="Point" value={form.title} onChange={(e) => setForm({ ...form, title: e.target.value })} style={{ marginBottom: 8 }} />
+                    <textarea className="textarea" rows={2} placeholder="Detail (optional)" value={form.detail} onChange={(e) => setForm({ ...form, detail: e.target.value })} style={{ marginBottom: 8 }} />
+                    <div className="row gap-2"><button className="btn btn-sm" onClick={() => add(kind)}>Add</button><button className="btn btn-secondary btn-sm" onClick={() => setAdding(null)}>Cancel</button></div>
                   </div>
-                ))}
-                {cardsFor(kind).length === 0 && adding !== kind && <div className="t-sub t-muted" style={{ fontSize: 12.5 }}>None yet.</div>}
-              </div>
-            </Section>
-          ))}
-        </div>
-      ) : bcTab === "product" ? (
-        <Section label="Product eval — feature-by-feature, us vs them">
+                )}
+                <div className="stack-3">
+                  {cardsFor(kind).map((c) => (
+                    <div key={c.id} className="card card-pad" style={{ borderLeft: `2px solid ${TONE_BORDER[tone] ?? "var(--border-strong)"}` }}>
+                      <div className="row-between"><span style={{ fontSize: 13.5, fontWeight: 620 }}>{c.title}</span><button className="t-muted" onClick={() => remove(c.id)} style={{ background: "none", border: "none", cursor: "pointer", fontSize: 15 }} aria-label="Remove">×</button></div>
+                      {c.detail && <div className="t-sub" style={{ fontSize: 12.5, marginTop: 3 }}>{c.detail}</div>}
+                    </div>
+                  ))}
+                  {cardsFor(kind).length === 0 && adding !== kind && <div className="t-sub t-muted" style={{ fontSize: 12.5 }}>None yet.</div>}
+                </div>
+              </Section>
+            ))}
+          </div>
+        </>
+      ) : cdTab === "product" ? (
+        <Section label="Product board — capability by capability, us vs them">
           {capabilities.length === 0 ? <div className="t-sub t-muted" style={{ fontSize: 12.5 }}>No capabilities defined yet. Add them on the Dashboard matrix.</div> : (
-            <div className="card" style={{ overflow: "hidden" }}>
+            <div className="card" style={{ overflowX: "auto" }}>
               <table style={{ borderCollapse: "collapse", width: "100%", fontSize: 13 }}>
                 <thead><tr>
                   <th style={{ textAlign: "left", padding: "10px 14px", fontSize: 11, fontWeight: 600, color: "var(--tm)", textTransform: "uppercase", letterSpacing: "0.05em" }}>Capability</th>
@@ -473,13 +509,17 @@ function Battlecards({ competitors, cards, overview, capabilities, scores, compS
                 <tbody>
                   {capabilities.map((cap) => {
                     const us = scoreOf(cap.id, null), them = scope ? scoreOf(cap.id, scope) : 0;
-                    const edge = us - them;
+                    const ed = us - them;
+                    const cell = (compId: string | null, sc: number, who: string) => (
+                      <button onClick={() => setOpenCell({ capabilityId: cap.id, capabilityName: cap.name, competitorId: compId, who, score: sc, competitorNotes: selected?.notes ?? null, productValueProp: overview?.valueProp ?? overview?.overview ?? null })}
+                        title={`${heatText(sc)} — open for the officer's read`} style={{ minWidth: 58, padding: "5px 10px", borderRadius: 6, border: "1px solid var(--border)", background: heat(sc), fontSize: 11, fontWeight: 600, cursor: "pointer" }}>{heatText(sc)}</button>
+                    );
                     return (
                       <tr key={cap.id} style={{ borderTop: "1px solid var(--border)" }}>
                         <td style={{ padding: "8px 14px", fontWeight: 600 }}>{cap.name}</td>
-                        <td style={{ padding: "6px 10px", textAlign: "center" }}><span style={{ display: "inline-block", minWidth: 58, padding: "5px 8px", borderRadius: 6, background: heat(us), fontSize: 11, fontWeight: 600 }}>{heatText(us)}</span></td>
-                        <td style={{ padding: "6px 10px", textAlign: "center" }}><span style={{ display: "inline-block", minWidth: 58, padding: "5px 8px", borderRadius: 6, background: heat(them), fontSize: 11, fontWeight: 600 }}>{heatText(them)}</span></td>
-                        <td style={{ padding: "6px 10px", textAlign: "center", fontWeight: 700, color: edge > 0 ? "var(--gn-text)" : edge < 0 ? "var(--rd-text)" : "var(--tm)" }}>{edge > 0 ? `+${edge}` : edge}</td>
+                        <td style={{ padding: "6px 10px", textAlign: "center" }}>{cell(null, us, "Us")}</td>
+                        <td style={{ padding: "6px 10px", textAlign: "center" }}>{cell(scope, them, selected?.name ?? "Competitor")}</td>
+                        <td style={{ padding: "6px 10px", textAlign: "center", fontWeight: 700, color: ed > 0 ? "var(--gn-text)" : ed < 0 ? "var(--rd-text)" : "var(--tm)" }}>{ed > 0 ? `+${ed}` : ed}</td>
                       </tr>
                     );
                   })}
@@ -487,13 +527,13 @@ function Battlecards({ competitors, cards, overview, capabilities, scores, compS
               </table>
             </div>
           )}
-          <div className="t-sub t-muted" style={{ fontSize: 11.5, marginTop: 8 }}>Ratings come from the Dashboard matrix — open a cell there for the agent&rsquo;s reasoning + sources.</div>
+          <div className="t-sub t-muted" style={{ fontSize: 11.5, marginTop: 8 }}>Click any cell for the officer&rsquo;s reasoning, sources, and the rating control.</div>
         </Section>
       ) : (
         <Section label={`Signals on ${selected?.name}`}>
-          {compFor(selected).length === 0 ? <div className="t-sub t-muted" style={{ fontSize: 12.5 }}>No competitive signals reference {selected?.name} yet. Log intel in the Signal feed.</div> : (
+          {sigsFor(scope).length === 0 ? <div className="t-sub t-muted" style={{ fontSize: 12.5 }}>No signals tagged to {selected?.name} yet. Log competitive intel in the Signal feed and tag it to them.</div> : (
             <div className="stack-3">
-              {compFor(selected).map((s) => (
+              {sigsFor(scope).map((s) => (
                 <div key={s.id} className="card card-pad signal-card" style={{ borderLeft: "3px solid var(--vl)" }}>
                   <div className="row-between" style={{ gap: 12, alignItems: "flex-start", marginBottom: 4 }}>
                     <span style={{ fontSize: 14, fontWeight: 620 }}>{s.title}</span>
@@ -508,6 +548,7 @@ function Battlecards({ competitors, cards, overview, capabilities, scores, compS
       )}
         </div>
       </div>
+      <CapabilityCellDrawer key={openCell ? `${openCell.capabilityId}:${openCell.competitorId}` : "none"} cell={openCell} onClose={() => setOpenCell(null)} onChanged={reload} />
     </div>
   );
 }
