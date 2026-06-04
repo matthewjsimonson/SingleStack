@@ -12,6 +12,7 @@ import { createClient } from "@/lib/supabase/client";
 import { getOrgId } from "@/lib/org";
 import { AgentBadge, Chip, SourceChip } from "@/components/ui";
 import { edgeErrorMessage } from "@/lib/edgeError";
+import { StepList, RUN_PHASES, CHAT_PHASES } from "@/components/alive";
 
 type Sec = { title: string; body: string; evidence: string[] };
 type Payload = { headline: string; sections: Sec[]; recommendations: string[]; confidence: string };
@@ -46,32 +47,6 @@ const PUSH_TARGETS: { key: string; label: string; run: Pusher }[] = [
     if (error) throw error; return `/content`;
   } },
 ];
-
-// Steps shown while work is in flight, so the wait reads as progress, not a dead
-// spinner. Different labels for a play run vs. a chat follow-up.
-const RUN_PHASES = ["Reading the context", "Weighing the evidence", "Forming the take", "Structuring the output"];
-const CHAT_PHASES = ["Reading your question", "Pulling the context", "Thinking it through", "Writing the reply"];
-const PulseDots = () => <span style={{ marginLeft: 1 }}><span className="pulse-dot">.</span><span className="pulse-dot">.</span><span className="pulse-dot">.</span></span>;
-
-// A live checklist: completed steps tick green, the current one is lit + pulsing.
-function StepList({ phases, active }: { phases: string[]; active: number }) {
-  return (
-    <div style={{ display: "flex", flexDirection: "column", gap: 7 }}>
-      {phases.map((label, i) => {
-        const state = i < active ? "done" : i === active ? "active" : "todo";
-        return (
-          <div key={label} className="row gap-2" style={{ alignItems: "center", opacity: state === "todo" ? 0.4 : 1, transition: "opacity .3s" }}>
-            <span style={{ width: 15, height: 15, borderRadius: "50%", flexShrink: 0, display: "grid", placeItems: "center", fontSize: 9, fontWeight: 700,
-              background: state === "done" ? "var(--gn)" : state === "active" ? "var(--ac)" : "var(--fill-2)", color: state === "todo" ? "var(--tm)" : "#fff", border: state === "todo" ? "1px solid var(--border)" : "none" }}>
-              {state === "done" ? "✓" : ""}
-            </span>
-            <span className="t-sub" style={{ fontSize: 12.5, fontWeight: state === "active" ? 600 : 400 }}>{label}{state === "active" ? <PulseDots /> : ""}</span>
-          </div>
-        );
-      })}
-    </div>
-  );
-}
 
 // The artifact as plain text — used to seed the follow-up chat and the push body.
 function artifactText(p: Payload): string {

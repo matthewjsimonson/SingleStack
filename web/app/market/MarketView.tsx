@@ -10,7 +10,8 @@ import { createClient } from "@/lib/supabase/client";
 import { getOrgId } from "@/lib/org";
 import { fireWorkflows } from "@/lib/triggers";
 import { Chip, Banner, Confidence, Modal } from "@/components/ui";
-import { fetchAgentKey, authHeader, errText } from "@/lib/strategy";
+import { fetchAgentKey, errText } from "@/lib/strategy";
+import { StepList, CHAT_PHASES, useStepPhase, useTypewriter, streamAgentChat } from "@/components/alive";
 
 type Meta = { domain?: string; lens?: string; industry?: string; persona?: string } | null;
 type Signal = { id: string; title: string; why: string | null; conf_label: string | null; conf_level: number | null; observed_at: string | null; origin: string; metadata: Meta };
@@ -41,6 +42,8 @@ export default function MarketView() {
   const [busy, setBusy] = useState(false);
   const [deep, setDeep] = useState<string | null>(null);
   const [deepBusy, setDeepBusy] = useState(false);
+  const tw = useTypewriter();
+  const deepPhase = useStepPhase(deepBusy && tw.display === "", CHAT_PHASES.length);
 
   const load = useCallback(async () => {
     const { data } = await supabase.from("signals").select("id, title, why, conf_label, conf_level, observed_at, origin, metadata").order("observed_at", { ascending: false, nullsFirst: false });
@@ -79,17 +82,20 @@ export default function MarketView() {
 
   // In-context PLAY: the analyst deepens the story into a briefing (real agent-chat).
   async function deepen(s: Signal) {
-    setDeepBusy(true); setDeep(null); setError(null);
+    setDeepBusy(true); setDeep(null); setError(null); tw.begin();
     try {
       if (!agentKey) throw new Error("No analyst available (seed agents first).");
       const tags = [s.metadata?.industry, s.metadata?.persona].filter(Boolean).join(" / ");
       const prompt = `You are a market analyst. Expand this market signal into a tight briefing (4–6 sentences): what's happening, why it matters for our product and positioning, and the specific implication${tags ? ` for ${tags}` : ""}. Return only the briefing prose.\n\nSignal: ${s.title}${s.why ? `\nContext: ${s.why}` : ""}\nSource: ${s.origin}`;
-      const { data, error } = await supabase.functions.invoke("agent-chat", { body: { agent_key: agentKey, messages: [{ role: "user", content: prompt }] }, headers: await authHeader(supabase) });
-      if (error) throw error; if (data?.error) throw new Error(data.error);
-      const reply = String(data?.reply ?? "").trim(); if (!reply) throw new Error("The analyst returned nothing.");
-      setDeep(reply);
-    } catch (e) { setError(errText(e, "Deepen failed.")); } finally { setDeepBusy(false); }
+      const { data: sess } = await supabase.auth.getSession();
+      await streamAgentChat({ agentKey, messages: [{ role: "user", content: prompt }], token: sess.session?.access_token, onChunk: tw.push });
+      tw.finish();
+    } catch (e) { tw.reset(); setError(errText(e, "Deepen failed.")); } finally { setDeepBusy(false); }
   }
+  // Commit the briefing once it's fully typed out.
+  useEffect(() => {
+    if (!deepBusy && !tw.typing && tw.display) { setDeep(tw.display); tw.reset(); }
+  }, [deepBusy, tw.typing, tw.display, tw]);
 
   const Pills = ({ value, set, options }: { value: string; set: (v: string) => void; options: string[] }) => (
     <div className="row gap-2" style={{ flexWrap: "wrap" }}>
@@ -119,7 +125,7 @@ export default function MarketView() {
       ) : (
         <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(300px, 1fr))", gap: "var(--sp-4)" }}>
           {feed.map((s) => (
-            <button key={s.id} onClick={() => { setOpen(s); setDeep(null); }} className="card card-link" style={{ textAlign: "left", padding: 0, overflow: "hidden", display: "flex", flexDirection: "column" }}>
+            <button key={s.id} onClick={() => { setOpen(s); setDeep(null); tw.reset(); }} className="card card-link" style={{ textAlign: "left", padding: 0, overflow: "hidden", display: "flex", flexDirection: "column" }}>
               <div style={{ padding: "14px 16px", flex: 1 }}>
                 <div className="row gap-2" style={{ marginBottom: 8, flexWrap: "wrap" }}>
                   <Chip tone={s.origin === "external" ? "violet" : "default"}>{s.origin}</Chip>
@@ -179,11 +185,17 @@ export default function MarketView() {
 
             {/* In-context play — a specific function, inline, not a floating box */}
             <div style={{ borderTop: "1px solid var(--border)", paddingTop: 14 }}>
-              <div className="row-between" style={{ alignItems: "center", marginBottom: deep ? 10 : 0 }}>
+              <div className="row-between" style={{ alignItems: "center", marginBottom: (deep || deepBusy || tw.typing) ? 10 : 0 }}>
                 <span className="t-label">Analyst · Deepen this story</span>
                 <button className="btn btn-sm" disabled={deepBusy} onClick={() => deepen(open)}>{deepBusy ? "Reading…" : deep ? "Re-run" : "✦ Deepen"}</button>
               </div>
-              {deep && <div className="t-body" style={{ lineHeight: 1.6, whiteSpace: "pre-wrap", background: "var(--fill-2)", border: "1px solid var(--border)", borderRadius: 8, padding: 14 }}>{deep}</div>}
+              {(deepBusy || tw.typing) ? (
+                <div className="t-body" style={{ lineHeight: 1.6, whiteSpace: "pre-wrap", background: "var(--fill-2)", border: "1px solid var(--border)", borderRadius: 8, padding: 14 }}>
+                  {tw.display === "" ? <StepList phases={CHAT_PHASES} active={deepPhase} /> : <>{tw.display}<span className="pulse-dot" style={{ fontWeight: 700 }}>▍</span></>}
+                </div>
+              ) : deep ? (
+                <div className="t-body" style={{ lineHeight: 1.6, whiteSpace: "pre-wrap", background: "var(--fill-2)", border: "1px solid var(--border)", borderRadius: 8, padding: 14 }}>{deep}</div>
+              ) : null}
             </div>
           </aside>
         </>

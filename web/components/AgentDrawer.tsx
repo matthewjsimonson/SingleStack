@@ -6,6 +6,7 @@
 import { useEffect, useRef, useState } from "react";
 import { createClient } from "@/lib/supabase/client";
 import type { Exec } from "@/lib/team";
+import { StepList, CHAT_PHASES, useStepPhase, useTypewriter, streamAgentChat } from "@/components/alive";
 
 type Msg = { role: "user" | "assistant"; content: string };
 export type AgentContext = {
@@ -35,6 +36,17 @@ export default function AgentDrawer({
   const [runs, setRuns] = useState(0);
   const [pending, setPending] = useState(0);
   const scrollRef = useRef<HTMLDivElement>(null);
+  const liveRef = useRef<HTMLDivElement>(null);   // the in-progress reply bubble, to bring into view
+  const tw = useTypewriter();
+  const chatPhase = useStepPhase(busy && tw.display === "", CHAT_PHASES.length);
+
+  // When the reply has fully typed out, commit it as a message and clear the live bubble.
+  useEffect(() => {
+    if (!busy && !tw.typing && tw.display) {
+      setMessages((prev) => [...prev, { role: "assistant", content: tw.display }]);
+      tw.reset();
+    }
+  }, [busy, tw.typing, tw.display, tw]);
 
   // reset + load light status whenever a different agent opens
   useEffect(() => {
@@ -53,23 +65,22 @@ export default function AgentDrawer({
     })();
   }, [open, exec, supabase]);
 
-  useEffect(() => { scrollRef.current?.scrollTo({ top: scrollRef.current.scrollHeight, behavior: "smooth" }); }, [messages, busy]);
+  // No scroll-to-bottom — on a new turn we bring the START of the reply into view
+  // (below) so you read top-down instead of being yanked to the end.
 
   async function send(text: string) {
     if (!exec || !text.trim()) return;
     const next = [...messages, { role: "user" as const, content: text.trim() }];
     setMessages(next); setInput(""); setBusy(true); setError(null);
+    tw.begin();
+    requestAnimationFrame(() => liveRef.current?.scrollIntoView({ block: "start", behavior: "smooth" }));
     try {
       const { data: s } = await supabase.auth.getSession();
       const token = s.session?.access_token;
-      const { data, error } = await supabase.functions.invoke("agent-chat", {
-        body: { agent_key: exec.key, messages: next, context: context ?? undefined },
-        headers: token ? { Authorization: `Bearer ${token}` } : undefined,
-      });
-      if (error) throw error;
-      if (data?.error) throw new Error(data.error);
-      setMessages([...next, { role: "assistant", content: data.reply }]);
+      await streamAgentChat({ agentKey: exec.key, messages: next, context: context ?? undefined, token, onChunk: tw.push });
+      tw.finish();
     } catch (e) {
+      tw.reset();
       setError(e instanceof Error ? e.message : "Chat failed.");
     } finally { setBusy(false); }
   }
@@ -132,7 +143,16 @@ export default function AgentDrawer({
                 }}>{m.content}</div>
               </div>
             ))}
-            {busy && <div className="t-sub t-muted" style={{ fontSize: 13 }}>{exec.short} is thinking…</div>}
+            {/* live reply — steps while it thinks, then types out */}
+            {(busy || tw.typing) && (
+              <div ref={liveRef} style={{ display: "flex", justifyContent: "flex-start" }}>
+                <div style={{ maxWidth: "90%", padding: "10px 12px", borderRadius: 12, borderBottomLeftRadius: 4, background: "var(--fill)", color: "var(--tp)", fontSize: 13.5, lineHeight: 1.55, whiteSpace: "pre-wrap" }}>
+                  {tw.display === ""
+                    ? <StepList phases={CHAT_PHASES} active={chatPhase} />
+                    : <>{tw.display}<span className="pulse-dot" style={{ fontWeight: 700 }}>▍</span></>}
+                </div>
+              </div>
+            )}
           </div>
         </div>
 
