@@ -100,12 +100,29 @@ jobs:
           supabase db push --db-url "postgresql://postgres.${PROJECT_REF}:${ENC_PW}@${POOLER_HOST}:5432/postgres?sslmode=require"
 
       - name: Deploy Edge Functions
-        # Deploys all functions if any exist; a no-op before the first function
-        # lands. Functions read their own secrets (e.g. ANTHROPIC_API_KEY) set
-        # per-project in the Supabase dashboard.
+        # Deploy each function INDIVIDUALLY rather than as one bulk command. A
+        # single bulk `functions deploy` is all-or-nothing: if one function fails
+        # to bundle, the command exits non-zero and NONE of them deploy — which
+        # silently breaks every AI feature (the client then gets "Failed to send
+        # a request to the Edge Function"). Looping isolates failures: the good
+        # functions still deploy, and the log names any that fail.
+        # Functions read their own secrets (e.g. ANTHROPIC_API_KEY) set per-
+        # project in the Supabase dashboard.
         run: |
-          if [ -d supabase/functions ] && [ -n "$(ls -A supabase/functions 2>/dev/null)" ]; then
-            supabase functions deploy --project-ref "$PROJECT_REF"
-          else
-            echo "No supabase/functions present — skipping function deploy."
-          fi
+          if [ ! -d supabase/functions ]; then echo "No supabase/functions — skipping."; exit 0; fi
+          failed=""
+          for dir in supabase/functions/*/; do
+            name=$(basename "$dir")
+            case "$name" in _*) continue;; esac          # skip _shared and the like
+            [ -f "${dir}index.ts" ] || { echo "skip ${name} (no index.ts)"; continue; }
+            echo "::group::deploy ${name}"
+            if supabase functions deploy "$name" --project-ref "$PROJECT_REF"; then
+              echo "deployed ${name}"
+            else
+              echo "::error::function ${name} failed to deploy"
+              failed="${failed} ${name}"
+            fi
+            echo "::endgroup::"
+          done
+          if [ -n "$failed" ]; then echo "::error::Functions that failed:${failed}"; exit 1; fi
+          echo "All functions deployed."
