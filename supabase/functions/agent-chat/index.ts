@@ -70,9 +70,9 @@ Deno.serve(async (req: Request) => {
     { global: { headers: { Authorization: authHeader } } },
   );
 
-  let input: { agent_key?: string; messages?: ChatMsg[]; context?: Ctx };
+  let input: { agent_key?: string; messages?: ChatMsg[]; context?: Ctx; stream?: boolean };
   try { input = await req.json(); } catch { return json({ error: "invalid JSON body" }, 400); }
-  const { agent_key, messages, context } = input;
+  const { agent_key, messages, context, stream } = input;
   if (!agent_key) return json({ error: "agent_key is required" }, 400);
   if (!Array.isArray(messages) || messages.length === 0) return json({ error: "messages required" }, 400);
 
@@ -266,6 +266,44 @@ Deno.serve(async (req: Request) => {
     ].join("\n");
 
     const anthropic = new Anthropic({ apiKey: anthropicKey });
+
+    // Streaming path: emit text deltas as they're generated so the UI types the
+    // reply out live (feels alive vs. a single block). Logs the run when done.
+    if (stream) {
+      const encoder = new TextEncoder();
+      const body = new ReadableStream({
+        async start(controller) {
+          let full = "";
+          try {
+            const s = anthropic.messages.stream({
+              model,
+              max_tokens: 2000,
+              thinking: { type: "adaptive" },
+              system: [{ type: "text", text: system, cache_control: { type: "ephemeral" } }],
+              messages: messages.map((m) => ({ role: m.role, content: m.content })),
+              // deno-lint-ignore no-explicit-any
+            } as any);
+            s.on("text", (t: string) => { full += t; controller.enqueue(encoder.encode(t)); });
+            const finalMsg = await s.finalMessage();
+            const u = finalMsg.usage;
+            const price = PRICING[model];
+            const cost = price ? (u.input_tokens * price.input + u.output_tokens * price.output) / 1_000_000 : null;
+            await supabase.from("agent_runs").insert({
+              org_id: orgId, agent_id: agent.id, status: "succeeded",
+              input: { kind: "chat", messages, context: context ?? null, skills: skills.length, areas }, output: full, model,
+              input_tokens: u.input_tokens, output_tokens: u.output_tokens, cost_usd: cost,
+              finished_at: new Date().toISOString(),
+            });
+          } catch (e) {
+            controller.enqueue(encoder.encode(`\n\n[error: ${e instanceof Error ? e.message : String(e)}]`));
+          } finally {
+            controller.close();
+          }
+        },
+      });
+      return new Response(body, { headers: { ...CORS, "content-type": "text/plain; charset=utf-8", "cache-control": "no-cache" } });
+    }
+
     const resp = (await anthropic.messages.create({
       model,
       max_tokens: 2000,

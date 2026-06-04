@@ -47,6 +47,10 @@ const PUSH_TARGETS: { key: string; label: string; run: Pusher }[] = [
   } },
 ];
 
+// Phases shown while a play runs, so the wait reads as progress, not a dead spinner.
+const RUN_PHASES = ["Reading the context", "Weighing the evidence", "Forming the take", "Structuring the output"];
+const PulseDots = () => <span style={{ marginLeft: 1 }}><span className="pulse-dot">.</span><span className="pulse-dot">.</span><span className="pulse-dot">.</span></span>;
+
 // The artifact as plain text — used to seed the follow-up chat and the push body.
 function artifactText(p: Payload): string {
   const secs = (p.sections ?? []).map((s) => `${s.title}\n${s.body}`).join("\n\n");
@@ -68,7 +72,15 @@ export default function PlayRunDrawer({ open, onClose, play, target }: {
   const [pushing, setPushing] = useState<string | null>(null);
   const [pushed, setPushed] = useState<{ label: string; href: string } | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [phase, setPhase] = useState(0); // cycling progress step while running
   const scrollRef = useRef<HTMLDivElement>(null);
+
+  // While a play runs, cycle through the real phases so the wait shows progress.
+  useEffect(() => {
+    if (!running) { setPhase(0); return; }
+    const id = setInterval(() => setPhase((p) => (p + 1) % RUN_PHASES.length), 1500);
+    return () => clearInterval(id);
+  }, [running]);
 
   async function token() { const { data } = await supabase.auth.getSession(); return data.session?.access_token; }
 
@@ -118,7 +130,8 @@ export default function PlayRunDrawer({ open, onClose, play, target }: {
     if (!input.trim() || !play?.agentKey || !artifact || !target) return;
     const userText = input.trim();
     const thread: Msg[] = [...chat, { role: "user", content: userText }];
-    setChat(thread); setInput(""); setChatBusy(true); setError(null);
+    // Add an empty assistant bubble to stream tokens into.
+    setChat([...thread, { role: "assistant", content: "" }]); setInput(""); setChatBusy(true); setError(null);
     try {
       const t = await token();
       // Ground the conversation in the play's output by folding it into the first
@@ -126,15 +139,32 @@ export default function PlayRunDrawer({ open, onClose, play, target }: {
       const payload = thread.map((m, i) => i === 0 && m.role === "user"
         ? { ...m, content: `You earlier produced this analysis of "${target.name}":\n\n${artifactText(artifact.payload)}\n\nUse it as the basis for this conversation.\n\nMy follow-up: ${m.content}` }
         : m);
-      const { data, error } = await supabase.functions.invoke("agent-chat", {
-        body: { agent_key: play.agentKey, messages: payload },
-        headers: t ? { Authorization: `Bearer ${t}` } : undefined,
+      // Stream the reply (text/plain deltas) so it types out live. functions.invoke
+      // buffers the whole body, so call the function URL directly and read the stream.
+      const url = `${process.env.NEXT_PUBLIC_SUPABASE_URL}/functions/v1/agent-chat`;
+      const resp = await fetch(url, {
+        method: "POST",
+        headers: {
+          "content-type": "application/json",
+          apikey: process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY ?? "",
+          ...(t ? { Authorization: `Bearer ${t}` } : {}),
+        },
+        body: JSON.stringify({ agent_key: play.agentKey, messages: payload, stream: true }),
       });
-      if (error) throw error;
-      if (data?.error) throw new Error(data.error);
-      setChat([...thread, { role: "assistant", content: String(data.reply ?? "") }]);
-    } catch (e) { setError(e instanceof Error ? e.message : "Chat failed."); }
-    finally { setChatBusy(false); }
+      if (!resp.ok || !resp.body) throw new Error((await resp.text().catch(() => "")) || `Chat failed (${resp.status}).`);
+      const reader = resp.body.getReader();
+      const decoder = new TextDecoder();
+      let acc = "";
+      for (;;) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        acc += decoder.decode(value, { stream: true });
+        setChat((prev) => { const next = [...prev]; next[next.length - 1] = { role: "assistant", content: acc }; return next; });
+      }
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Chat failed.");
+      setChat((prev) => prev.filter((m, i) => !(i === prev.length - 1 && m.role === "assistant" && m.content === ""))); // drop empty bubble
+    } finally { setChatBusy(false); }
   }
 
   async function pushTo(t: { key: string; label: string; run: Pusher }) {
@@ -168,11 +198,24 @@ export default function PlayRunDrawer({ open, onClose, play, target }: {
         <div ref={scrollRef} style={{ flex: 1, overflowY: "auto", padding: 20 }}>
           {error && <div className="banner banner-error" style={{ marginBottom: 12 }}>{error}</div>}
 
-          {/* 1 — WORK */}
+          {/* 1 — WORK: stepped progress so the wait reads as work in motion */}
           {running && (
             <div className="card card-pad" style={{ marginBottom: 14 }}>
-              <div className="t-sub" style={{ fontSize: 13, fontWeight: 600 }}>{play.officer} is running the play on {target.name}…</div>
-              <div className="t-sub t-muted" style={{ fontSize: 12, marginTop: 6 }}>Reading the context, forming the take, and structuring the output.</div>
+              <div className="t-sub" style={{ fontSize: 13, fontWeight: 600, marginBottom: 10 }}>{play.officer} is working on {target.name}</div>
+              <div style={{ display: "flex", flexDirection: "column", gap: 7 }}>
+                {RUN_PHASES.map((label, i) => {
+                  const state = i < phase ? "done" : i === phase ? "active" : "todo";
+                  return (
+                    <div key={label} className="row gap-2" style={{ alignItems: "center", opacity: state === "todo" ? 0.4 : 1, transition: "opacity .3s" }}>
+                      <span style={{ width: 15, height: 15, borderRadius: "50%", flexShrink: 0, display: "grid", placeItems: "center", fontSize: 9, fontWeight: 700,
+                        background: state === "done" ? "var(--gn)" : state === "active" ? "var(--ac)" : "var(--fill-2)", color: state === "todo" ? "var(--tm)" : "#fff", border: state === "todo" ? "1px solid var(--border)" : "none" }}>
+                        {state === "done" ? "✓" : ""}
+                      </span>
+                      <span className="t-sub" style={{ fontSize: 12.5, fontWeight: state === "active" ? 600 : 400 }}>{label}{state === "active" ? <PulseDots /> : ""}</span>
+                    </div>
+                  );
+                })}
+              </div>
             </div>
           )}
 
@@ -180,11 +223,11 @@ export default function PlayRunDrawer({ open, onClose, play, target }: {
           {a && (
             <div style={{ marginBottom: 16 }}>
               {/* headline */}
-              <div className="t-body" style={{ fontSize: 15, fontWeight: 680, lineHeight: 1.35, marginBottom: 14, paddingBottom: 14, borderBottom: "1px solid var(--border)" }}>{a.payload.headline}</div>
+              <div className="t-body reveal-up" style={{ fontSize: 15, fontWeight: 680, lineHeight: 1.35, marginBottom: 14, paddingBottom: 14, borderBottom: "1px solid var(--border)" }}>{a.payload.headline}</div>
 
-              {/* sections — each clearly separated */}
+              {/* sections — each clearly separated, revealed in sequence */}
               {(a.payload.sections ?? []).map((s, i) => (
-                <div key={i} style={{ marginBottom: 16 }}>
+                <div key={i} className="reveal-up" style={{ marginBottom: 16, animationDelay: `${(i + 1) * 90}ms` }}>
                   <div style={{ fontSize: 11, fontWeight: 700, letterSpacing: 0.4, textTransform: "uppercase", color: "var(--ac)", marginBottom: 5 }}>{s.title}</div>
                   <div className="t-body" style={{ fontSize: 13, lineHeight: 1.6, whiteSpace: "pre-wrap" }}>{s.body}</div>
                   {(s.evidence ?? []).length > 0 && (
@@ -198,7 +241,7 @@ export default function PlayRunDrawer({ open, onClose, play, target }: {
 
               {/* recommendations — set apart */}
               {(a.payload.recommendations ?? []).length > 0 && (
-                <div style={{ marginBottom: 12, padding: "12px 14px", background: "var(--fill-2)", border: "1px solid var(--border)", borderRadius: 8 }}>
+                <div className="reveal-up" style={{ marginBottom: 12, padding: "12px 14px", background: "var(--fill-2)", border: "1px solid var(--border)", borderRadius: 8, animationDelay: `${((a.payload.sections ?? []).length + 1) * 90}ms` }}>
                   <div style={{ fontSize: 11, fontWeight: 700, letterSpacing: 0.4, textTransform: "uppercase", color: "var(--tm)", marginBottom: 6 }}>Recommendations</div>
                   <ul style={{ margin: 0, paddingLeft: 18 }}>{a.payload.recommendations.map((r, i) => <li key={i} className="t-body" style={{ fontSize: 13, lineHeight: 1.6, marginBottom: 3 }}>{r}</li>)}</ul>
                 </div>
@@ -249,12 +292,18 @@ export default function PlayRunDrawer({ open, onClose, play, target }: {
               <div className="t-label" style={{ marginBottom: 8 }}>Follow up with {play.officer}</div>
               {!play.agentKey && <div className="t-sub t-muted" style={{ fontSize: 12 }}>No officer attached to this play — attach one in Agents → Plays to chat.</div>}
               <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
-                {chat.map((m, i) => (
-                  <div key={i} style={{ alignSelf: m.role === "user" ? "flex-end" : "flex-start", maxWidth: "90%", background: m.role === "user" ? "var(--ac-fill)" : "var(--fill-2)", border: "1px solid var(--border)", borderRadius: 8, padding: "8px 11px" }}>
-                    <div className="t-sub" style={{ fontSize: 12.5, lineHeight: 1.5, whiteSpace: "pre-wrap" }}>{m.content}</div>
-                  </div>
-                ))}
-                {chatBusy && <div className="t-sub t-muted" style={{ fontSize: 12 }}>{play.officer} is thinking…</div>}
+                {chat.map((m, i) => {
+                  const streamingHere = m.role === "assistant" && i === chat.length - 1 && chatBusy;
+                  return (
+                    <div key={i} style={{ alignSelf: m.role === "user" ? "flex-end" : "flex-start", maxWidth: "90%", background: m.role === "user" ? "var(--ac-fill)" : "var(--fill-2)", border: "1px solid var(--border)", borderRadius: 8, padding: "8px 11px" }}>
+                      {streamingHere && m.content === "" ? (
+                        <div className="t-sub t-muted" style={{ fontSize: 12.5 }}>{play.officer} is thinking<PulseDots /></div>
+                      ) : (
+                        <div className="t-sub" style={{ fontSize: 12.5, lineHeight: 1.5, whiteSpace: "pre-wrap" }}>{m.content}{streamingHere && <span className="pulse-dot" style={{ fontWeight: 700 }}>▍</span>}</div>
+                      )}
+                    </div>
+                  );
+                })}
               </div>
             </div>
           )}
