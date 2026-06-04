@@ -116,7 +116,7 @@ jobs:
             case "$name" in _*) continue;; esac          # skip _shared and the like
             [ -f "${dir}index.ts" ] || { echo "skip ${name} (no index.ts)"; continue; }
             echo "::group::deploy ${name}"
-            if supabase functions deploy "$name" --project-ref "$PROJECT_REF"; then
+            if supabase functions deploy "$name" --no-verify-jwt --project-ref "$PROJECT_REF"; then
               echo "deployed ${name}"
             else
               echo "::error::function ${name} failed to deploy"
