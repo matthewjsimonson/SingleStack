@@ -11,6 +11,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { createClient } from "@/lib/supabase/client";
 import { getOrgId } from "@/lib/org";
 import { AgentBadge, Chip, SourceChip } from "@/components/ui";
+import { edgeErrorMessage } from "@/lib/edgeError";
 
 type Sec = { title: string; body: string; evidence: string[] };
 type Payload = { headline: string; sections: Sec[]; recommendations: string[]; confidence: string };
@@ -80,7 +81,7 @@ export default function PlayRunDrawer({ open, onClose, play, target }: {
         body: { function_key: play.key, target_type: play.targetType ?? undefined, target_id: target.id, target_name: target.name },
         headers: t ? { Authorization: `Bearer ${t}` } : undefined,
       });
-      if (error) throw error;
+      if (error) { setError(await edgeErrorMessage(error, "run-play")); return; }
       if (data?.error) throw new Error(data.error);
       setArtifact(data.artifact); setRated(null);
     } catch (e) { setError(e instanceof Error ? e.message : "Run failed."); }

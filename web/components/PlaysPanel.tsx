@@ -9,6 +9,7 @@
 import { useCallback, useEffect, useState } from "react";
 import { createClient } from "@/lib/supabase/client";
 import { Section, Chip, AgentBadge, SourceChip } from "@/components/ui";
+import { edgeErrorMessage } from "@/lib/edgeError";
 
 type Sec = { title: string; body: string; evidence: string[] };
 type Payload = { headline: string; sections: Sec[]; recommendations: string[]; confidence: string };
@@ -50,7 +51,7 @@ export default function PlaysPanel({ targetType, targetId, targetName, plays, he
         body: { function_key: key, target_type: targetType, target_id: targetId, target_name: targetName },
         headers: t ? { Authorization: `Bearer ${t}` } : undefined,
       });
-      if (error) throw error;
+      if (error) { setError(await edgeErrorMessage(error, "run-play")); return; }
       if (data?.error) throw new Error(data.error);
       setArtifacts((a) => ({ ...a, [key]: data.artifact }));
     } catch (e) { setError(e instanceof Error ? e.message : `Could not run ${key}.`); }
