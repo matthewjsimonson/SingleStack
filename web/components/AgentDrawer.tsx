@@ -6,7 +6,7 @@
 import { useEffect, useRef, useState } from "react";
 import { createClient } from "@/lib/supabase/client";
 import type { Exec } from "@/lib/team";
-import { StepList, CHAT_PHASES, useStepPhase, useTypewriter, streamAgentChat } from "@/components/alive";
+import { LiveReply, useAliveReply, streamAgentChat } from "@/components/alive";
 
 type Msg = { role: "user" | "assistant"; content: string };
 export type AgentContext = {
@@ -37,16 +37,15 @@ export default function AgentDrawer({
   const [pending, setPending] = useState(0);
   const scrollRef = useRef<HTMLDivElement>(null);
   const liveRef = useRef<HTMLDivElement>(null);   // the in-progress reply bubble, to bring into view
-  const tw = useTypewriter();
-  const chatPhase = useStepPhase(busy && tw.display === "", CHAT_PHASES.length);
+  const reply = useAliveReply();
 
   // When the reply has fully typed out, commit it as a message and clear the live bubble.
   useEffect(() => {
-    if (!busy && !tw.typing && tw.display) {
-      setMessages((prev) => [...prev, { role: "assistant", content: tw.display }]);
-      tw.reset();
+    if (!busy && !reply.typing && reply.display) {
+      setMessages((prev) => [...prev, { role: "assistant", content: reply.display }]);
+      reply.reset();
     }
-  }, [busy, tw.typing, tw.display, tw]);
+  }, [busy, reply.typing, reply.display, reply.reset]);
 
   // reset + load light status whenever a different agent opens
   useEffect(() => {
@@ -72,15 +71,15 @@ export default function AgentDrawer({
     if (!exec || !text.trim()) return;
     const next = [...messages, { role: "user" as const, content: text.trim() }];
     setMessages(next); setInput(""); setBusy(true); setError(null);
-    tw.begin();
+    reply.begin();
     requestAnimationFrame(() => liveRef.current?.scrollIntoView({ block: "start", behavior: "smooth" }));
     try {
       const { data: s } = await supabase.auth.getSession();
       const token = s.session?.access_token;
-      await streamAgentChat({ agentKey: exec.key, messages: next, context: context ?? undefined, token, onChunk: tw.push });
-      tw.finish();
+      await streamAgentChat({ agentKey: exec.key, messages: next, context: context ?? undefined, token, onChunk: reply.onChunk, onThinking: reply.onThinking });
+      reply.finish();
     } catch (e) {
-      tw.reset();
+      reply.reset();
       setError(e instanceof Error ? e.message : "Chat failed.");
     } finally { setBusy(false); }
   }
@@ -143,13 +142,11 @@ export default function AgentDrawer({
                 }}>{m.content}</div>
               </div>
             ))}
-            {/* live reply — steps while it thinks, then types out */}
-            {(busy || tw.typing) && (
+            {/* live reply — real reasoning trace while it works, then the answer types out */}
+            {(busy || reply.typing) && (
               <div ref={liveRef} style={{ display: "flex", justifyContent: "flex-start" }}>
-                <div style={{ maxWidth: "90%", padding: "10px 12px", borderRadius: 12, borderBottomLeftRadius: 4, background: "var(--fill)", color: "var(--tp)", fontSize: 13.5, lineHeight: 1.55, whiteSpace: "pre-wrap" }}>
-                  {tw.display === ""
-                    ? <StepList phases={CHAT_PHASES} active={chatPhase} />
-                    : <>{tw.display}<span className="pulse-dot" style={{ fontWeight: 700 }}>▍</span></>}
+                <div style={{ maxWidth: "92%", padding: "10px 12px", borderRadius: 12, borderBottomLeftRadius: 4, background: "var(--fill)", color: "var(--tp)", fontSize: 13.5 }}>
+                  <LiveReply officer={exec.name.split(" ").slice(-1)[0]} thinking={reply.thinking} display={reply.display} typing={reply.typing} busy={busy} />
                 </div>
               </div>
             )}

@@ -4,7 +4,7 @@
 // the same way everywhere: a live step checklist while it thinks, and a client-
 // side typewriter that reveals the reply at a steady pace no matter how the bytes
 // arrive (streamed, gateway-buffered into one blob, or a JSON { reply }).
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState, type CSSProperties } from "react";
 
 export const CHAT_PHASES = ["Reading your question", "Pulling the context", "Thinking it through", "Writing the reply"];
 export const RUN_PHASES = ["Reading the context", "Weighing the evidence", "Forming the take", "Structuring the output"];
@@ -78,15 +78,19 @@ export function useTypewriter() {
   return { display, typing, begin, push, finish, reset };
 }
 
-// Call agent-chat with streaming on; feed each text chunk to onChunk. Falls back
-// to the JSON { reply } shape if the streaming function isn't deployed yet.
+const ANSWER_MARK = "␞"; // separates the reasoning trace from the answer (matches agent-chat)
+
+// Call agent-chat with streaming on. The stream is the model's REAL reasoning,
+// then ANSWER_MARK, then the answer — so onThinking() gets the live work and
+// onChunk() gets the answer. Falls back to JSON { reply } if the streaming
+// function isn't deployed yet (then there's no reasoning trace).
 export async function streamAgentChat(opts: {
   agentKey: string;
-  // deno-lint-ignore no-explicit-any
   messages: { role: string; content: string }[];
   context?: unknown;
   token?: string;
   onChunk: (s: string) => void;
+  onThinking?: (s: string) => void;
 }): Promise<void> {
   const base = process.env.NEXT_PUBLIC_SUPABASE_URL ?? "";
   const resp = await fetch(`${base}/functions/v1/agent-chat`, {
@@ -108,9 +112,63 @@ export async function streamAgentChat(opts: {
   if (!resp.body) return;
   const reader = resp.body.getReader();
   const dec = new TextDecoder();
+  let inAnswer = false;
   for (;;) {
     const { done, value } = await reader.read();
     if (done) break;
-    opts.onChunk(dec.decode(value, { stream: true }));
+    const s = dec.decode(value, { stream: true });
+    if (!s) continue;
+    if (inAnswer) { opts.onChunk(s); continue; }
+    const idx = s.indexOf(ANSWER_MARK);
+    if (idx === -1) { opts.onThinking?.(s); continue; } // still reasoning
+    const before = s.slice(0, idx);
+    const after = s.slice(idx + ANSWER_MARK.length);
+    if (before) opts.onThinking?.(before);
+    inAnswer = true;
+    if (after) opts.onChunk(after);
   }
+}
+
+// Bundles the reasoning trace + the typewriter answer for a single AI reply.
+export function useAliveReply() {
+  const tw = useTypewriter();
+  const [thinking, setThinking] = useState("");
+  const begin = useCallback(() => { setThinking(""); tw.begin(); }, [tw]);
+  const onThinking = useCallback((s: string) => setThinking((p) => p + s), []);
+  const reset = useCallback(() => { setThinking(""); tw.reset(); }, [tw]);
+  return { thinking, display: tw.display, typing: tw.typing, begin, onThinking, onChunk: tw.push, finish: tw.finish, reset };
+}
+
+// Renders an in-flight AI reply: the live reasoning trace while it works, then a
+// collapsible "reasoning" + the answer typing out.
+export function LiveReply({ officer, thinking, display, typing, busy }: {
+  officer?: string; thinking: string; display: string; typing: boolean; busy: boolean;
+}) {
+  const traceRef = useRef<HTMLDivElement>(null);
+  const [showReason, setShowReason] = useState(false);
+  useEffect(() => { traceRef.current?.scrollTo({ top: traceRef.current.scrollHeight }); }, [thinking]);
+  const traceStyle: CSSProperties = { fontSize: 11.5, lineHeight: 1.5, fontStyle: "italic", whiteSpace: "pre-wrap", borderLeft: "2px solid var(--border)", paddingLeft: 10, color: "var(--tm)" };
+  const working = busy && display === "";
+  return (
+    <div>
+      {working ? (
+        <div>
+          <div className="t-label" style={{ color: "var(--ac)", marginBottom: 6 }}>{officer ?? "Agent"} is working<PulseDots /></div>
+          {thinking
+            ? <div ref={traceRef} style={{ ...traceStyle, maxHeight: 120, overflowY: "auto" }}>{thinking}</div>
+            : <div className="t-sub t-muted" style={{ fontSize: 12 }}>Thinking it through<PulseDots /></div>}
+        </div>
+      ) : (
+        <>
+          {thinking && (
+            <div style={{ marginBottom: 7 }}>
+              <button className="btn btn-secondary btn-sm" onClick={() => setShowReason((v) => !v)}>{showReason ? "Hide reasoning" : "Show reasoning"}</button>
+              {showReason && <div style={{ ...traceStyle, marginTop: 7 }}>{thinking}</div>}
+            </div>
+          )}
+          <div style={{ whiteSpace: "pre-wrap", lineHeight: 1.55 }}>{display}{typing && <span className="pulse-dot" style={{ fontWeight: 700 }}>▍</span>}</div>
+        </>
+      )}
+    </div>
+  );
 }
