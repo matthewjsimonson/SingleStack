@@ -179,23 +179,28 @@ export default function PlayRunDrawer({ open, onClose, play, target }: {
           {/* 2 — OUTPUT */}
           {a && (
             <div style={{ marginBottom: 16 }}>
-              <div className="t-body" style={{ fontSize: 14.5, fontWeight: 660, lineHeight: 1.4, marginBottom: 10 }}>{a.payload.headline}</div>
+              {/* headline */}
+              <div className="t-body" style={{ fontSize: 15, fontWeight: 680, lineHeight: 1.35, marginBottom: 14, paddingBottom: 14, borderBottom: "1px solid var(--border)" }}>{a.payload.headline}</div>
+
+              {/* sections — each clearly separated */}
               {(a.payload.sections ?? []).map((s, i) => (
-                <div key={i} style={{ marginBottom: 10 }}>
-                  <div className="t-label" style={{ color: "var(--tm)", marginBottom: 2 }}>{s.title}</div>
-                  <div className="t-sub" style={{ fontSize: 13, lineHeight: 1.55, whiteSpace: "pre-wrap" }}>{s.body}</div>
+                <div key={i} style={{ marginBottom: 16 }}>
+                  <div style={{ fontSize: 11, fontWeight: 700, letterSpacing: 0.4, textTransform: "uppercase", color: "var(--ac)", marginBottom: 5 }}>{s.title}</div>
+                  <div className="t-body" style={{ fontSize: 13, lineHeight: 1.6, whiteSpace: "pre-wrap" }}>{s.body}</div>
                   {(s.evidence ?? []).length > 0 && (
-                    <div className="row gap-2" style={{ flexWrap: "wrap", marginTop: 5, alignItems: "center" }}>
-                      <span className="t-label" style={{ color: "var(--tm)", fontSize: 10 }}>Evidence</span>
+                    <div className="row gap-2" style={{ flexWrap: "wrap", marginTop: 7, alignItems: "center" }}>
+                      <span className="t-label" style={{ color: "var(--tm)", fontSize: 9.5 }}>Evidence</span>
                       {s.evidence.map((ev, j) => <SourceChip key={j} icon="◦" label={ev} />)}
                     </div>
                   )}
                 </div>
               ))}
+
+              {/* recommendations — set apart */}
               {(a.payload.recommendations ?? []).length > 0 && (
-                <div style={{ marginBottom: 10 }}>
-                  <div className="t-label" style={{ color: "var(--tm)", marginBottom: 2 }}>Recommendations</div>
-                  <ul style={{ margin: 0, paddingLeft: 16 }}>{a.payload.recommendations.map((r, i) => <li key={i} className="t-sub" style={{ fontSize: 13, lineHeight: 1.5 }}>{r}</li>)}</ul>
+                <div style={{ marginBottom: 12, padding: "12px 14px", background: "var(--fill-2)", border: "1px solid var(--border)", borderRadius: 8 }}>
+                  <div style={{ fontSize: 11, fontWeight: 700, letterSpacing: 0.4, textTransform: "uppercase", color: "var(--tm)", marginBottom: 6 }}>Recommendations</div>
+                  <ul style={{ margin: 0, paddingLeft: 18 }}>{a.payload.recommendations.map((r, i) => <li key={i} className="t-body" style={{ fontSize: 13, lineHeight: 1.6, marginBottom: 3 }}>{r}</li>)}</ul>
                 </div>
               )}
               {a.payload.confidence && <div className="t-mono-xs" style={{ color: "var(--tm)" }}>Confidence: {a.payload.confidence}</div>}

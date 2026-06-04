@@ -6,7 +6,7 @@
 import { useCallback, useEffect, useState } from "react";
 import { createClient } from "@/lib/supabase/client";
 import { Chip, Banner, BackLink, Spinner, Section } from "@/components/ui";
-import PlacedPlays from "@/components/PlacedPlays";
+import PlayActions from "@/components/PlayActions";
 
 type Campaign = { id: string; name: string; objective: string | null; status: string; channels: string | null; gtm_record_id: string | null; start_date: string | null; end_date: string | null };
 type Content = { id: string; title: string; content_type: string | null; stage: string };
@@ -92,7 +92,7 @@ export default function CampaignDetail({ id }: { id: string }) {
       </Section>
 
       {/* Plays placed on campaign records run against this campaign */}
-      <PlacedPlays surfaceKey="campaign_record" targetType="custom" targetId={c.id} targetName={c.name} heading="Plays" />
+      <PlayActions surfaceKey="campaign_record" targetId={c.id} targetName={c.name} heading="Plays" />
 
       <Section label={`Content · ${content.length}`}>
         {content.length === 0 ? <div className="t-sub t-muted" style={{ fontSize: 12.5 }}>No content tied to this campaign yet. Tie content to it in <a href="/content" style={{ color: "var(--ac-text)", fontWeight: 600 }}>Content</a>.</div> : (
