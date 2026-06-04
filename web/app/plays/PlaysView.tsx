@@ -250,28 +250,33 @@ export default function PlaysView() {
               {/* Placement — where this play lives, with suggestions + guardrails */}
               <Section label="Placement">
                 <div className="t-sub t-muted" style={{ fontSize: 12.5, marginBottom: 10 }}>Where this play appears in the product. <strong>Suggested</strong> surfaces match what the play needs; guardrails block surfaces that can&rsquo;t provide its context.</div>
-                <div className="stack-3">
-                  {SURFACES.map((surf) => {
-                    const placed = placements.some((r) => r.play_id === activePlay.id && r.surface_key === surf.key);
-                    const { state, reason } = placementStatus(activePlay.target_type, surf);
-                    return (
-                      <div key={surf.key} className="card card-pad row-between" style={{ gap: 12, opacity: state === "blocked" && !placed ? 0.6 : 1 }}>
-                        <div style={{ minWidth: 0 }}>
-                          <div className="row gap-2" style={{ flexWrap: "wrap", alignItems: "center" }}>
-                            <span style={{ fontSize: 14, fontWeight: 620 }}>{surf.label}</span>
-                            {state === "suggested" && <Chip tone="green">Suggested</Chip>}
-                            {state === "blocked" && <Chip tone="amber">Blocked</Chip>}
-                            {placed && <Chip tone="accent">Placed</Chip>}
+                {[...new Set(SURFACES.map((s) => s.module))].map((mod) => (
+                  <div key={mod} style={{ marginBottom: "var(--sp-3)" }}>
+                    <div className="t-label" style={{ color: "var(--tm)", marginBottom: 6 }}>{mod}</div>
+                    <div className="stack-3">
+                      {SURFACES.filter((s) => s.module === mod).map((surf) => {
+                        const placed = placements.some((r) => r.play_id === activePlay.id && r.surface_key === surf.key);
+                        const { state, reason } = placementStatus(activePlay.target_type, surf);
+                        return (
+                          <div key={surf.key} className="card card-pad row-between" style={{ gap: 12, opacity: state === "blocked" && !placed ? 0.6 : 1 }}>
+                            <div style={{ minWidth: 0 }}>
+                              <div className="row gap-2" style={{ flexWrap: "wrap", alignItems: "center" }}>
+                                <span style={{ fontSize: 14, fontWeight: 620 }}>{surf.label}</span>
+                                {state === "suggested" && <Chip tone="green">Suggested</Chip>}
+                                {state === "blocked" && <Chip tone="amber">Blocked</Chip>}
+                                {placed && <Chip tone="accent">Placed</Chip>}
+                              </div>
+                              <div className="t-sub t-muted" style={{ fontSize: 12.5, marginTop: 2 }}>{surf.description}{state === "blocked" ? ` — ${reason}` : ""}</div>
+                            </div>
+                            {placed
+                              ? <button className="btn btn-secondary btn-sm" onClick={() => unplace(activePlay.id, surf.key)} style={{ color: "var(--rd-text)", flexShrink: 0 }}>Remove</button>
+                              : <button className="btn btn-sm" disabled={state === "blocked"} onClick={() => place(activePlay.id, surf.key)} style={{ flexShrink: 0, ...(state === "suggested" ? { background: "var(--gn)", color: "#fff" } : {}) }}>{state === "blocked" ? "Blocked" : "Place"}</button>}
                           </div>
-                          <div className="t-sub t-muted" style={{ fontSize: 12.5, marginTop: 2 }}>{surf.description}{state === "blocked" ? ` — ${reason}` : ""}</div>
-                        </div>
-                        {placed
-                          ? <button className="btn btn-secondary btn-sm" onClick={() => unplace(activePlay.id, surf.key)} style={{ color: "var(--rd-text)", flexShrink: 0 }}>Remove</button>
-                          : <button className="btn btn-sm" disabled={state === "blocked"} onClick={() => place(activePlay.id, surf.key)} style={{ flexShrink: 0, ...(state === "suggested" ? { background: "var(--gn)", color: "#fff" } : {}) }}>{state === "blocked" ? "Blocked" : "Place"}</button>}
-                      </div>
-                    );
-                  })}
-                </div>
+                        );
+                      })}
+                    </div>
+                  </div>
+                ))}
               </Section>
             </div>
           )}

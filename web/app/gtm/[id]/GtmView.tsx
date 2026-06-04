@@ -11,6 +11,7 @@ import { createClient } from "@/lib/supabase/client";
 import { getOrgId } from "@/lib/org";
 import RecordWorkspace from "@/components/RecordWorkspace";
 import { Section, Chip, Confidence, Empty, Banner, BackLink } from "@/components/ui";
+import PlayActions from "@/components/PlayActions";
 
 type Gtm = { id: string; name: string; product_id: string };
 type Product = { id: string; name: string };
@@ -176,6 +177,8 @@ export default function GtmView({ gtmId }: { gtmId: string }) {
           </div>
         )}
       </Section>
+
+      <PlayActions surfaceKey="gtm_record" targetId={gtm.id} targetName={gtm.name} />
     </div>
   );
 }

@@ -14,6 +14,7 @@ import { createClient } from "@/lib/supabase/client";
 import { getOrgId } from "@/lib/org";
 import { Chip, Banner, BackLink, Spinner, SubTabs, Modal } from "@/components/ui";
 import PlaysPanel, { type PlayDef } from "@/components/PlaysPanel";
+import PlayActions from "@/components/PlayActions";
 import BuildScope from "@/components/BuildScope";
 import TechnicalScope from "@/components/TechnicalScope";
 import GtmWorkflow from "@/components/GtmWorkflow";
@@ -204,6 +205,7 @@ export default function InitiativeDetail({ id }: { id: string }) {
       {side === "advisors" && (<>
         <StepIntro title="Advisors — the officers' read" body="Each officer runs their own analysis — same evidence, different lens. Review, edit, ratify." />
         <PlaysPanel targetType="initiative" targetId={ini.id} targetName={ini.title} plays={INITIATIVE_PLAYS} heading="Officer analyses" columns={1} />
+        <PlayActions surfaceKey="build_item" targetId={ini.id} targetName={ini.title} heading="Mapped plays" />
       </>)}
 
       <Modal open={brief} onClose={() => setBrief(false)} title={`Agent brief — ${ini.title}`} width={680}>
