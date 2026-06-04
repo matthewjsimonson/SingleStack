@@ -147,7 +147,9 @@ Deno.serve(async (req: Request) => {
     sections_hint: cfg?.sections || def?.sections_hint || "",
     target: cfg?.target_type || def?.target || "custom",
   };
-  if (target_type && target_type !== play.target) return json({ error: `the "${play.label}" play runs on a ${play.target}, not a ${target_type}` }, 400);
+  // A typed play must match the surface; a "custom" play has no requirement and
+  // runs on any surface (generic context), so never reject it on type.
+  if (target_type && target_type !== play.target && play.target !== "custom") return json({ error: `the "${play.label}" play runs on a ${play.target}, not a ${target_type}` }, 400);
 
   // Resolve the agent CHAIN — every attached agent in order; fallback to the
   // configured/default officer as a one-agent chain.

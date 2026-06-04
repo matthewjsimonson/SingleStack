@@ -15,7 +15,7 @@ import { getOrgId } from "@/lib/org";
 import { ensureBuiltInPlays } from "@/lib/ensurePlays";
 import { ensureTeam } from "@/lib/ensureTeam";
 import { Section, Chip, Banner, Empty, AgentBadge } from "@/components/ui";
-import { SURFACES, placementStatus } from "@/lib/surfaces";
+import { SURFACES, placementStatus, PLAY_TARGET_TYPES, targetTypeMeta } from "@/lib/surfaces";
 
 type Agent = { id: string; key: string; name: string };
 type Skill = { id: string; name: string; description: string | null; category: string | null; instructions: string | null };
@@ -38,7 +38,7 @@ export default function PlaysView() {
   const [step, setStep] = useState(0);              // 0 Define · 1 Agents · 2 Skills · 3 Place
   const [guided, setGuided] = useState(false);      // gate steps (new-play setup) vs free nav (editing)
   const [error, setError] = useState<string | null>(null);
-  const [form, setForm] = useState({ label: "", focus: "", description: "" });
+  const [form, setForm] = useState({ label: "", focus: "", description: "", targetType: "custom" });
   const [descEdit, setDescEdit] = useState<string | null>(null);
   const [descDraft, setDescDraft] = useState("");
   const [focusEdit, setFocusEdit] = useState<string | null>(null);
@@ -84,9 +84,9 @@ export default function PlaysView() {
     const key = form.label.trim().toLowerCase().replace(/[^a-z0-9]+/g, "_").replace(/^_|_$/g, "") || `play_${Date.now()}`;
     const desc = form.description.trim();
     const focus = form.focus.trim() || desc || `Run the "${form.label.trim()}" play and report what matters, grounded in the provided context.`;
-    const { data, error } = await supabase.from("plays").insert({ org_id: orgId, key, label: form.label.trim(), description: desc || null, focus, target_type: "custom" }).select("id").single();
+    const { data, error } = await supabase.from("plays").insert({ org_id: orgId, key, label: form.label.trim(), description: desc || null, focus, target_type: form.targetType || "custom" }).select("id").single();
     if (error) { setError(error.message); return; }
-    setForm({ label: "", focus: "", description: "" });
+    setForm({ label: "", focus: "", description: "", targetType: "custom" });
     await load();
     if (data) { setActive(data.id); setCreating(false); setGuided(true); setStep(1); } // continue the guided setup
   }
@@ -165,7 +165,12 @@ export default function PlaysView() {
 
   // ---- navigation -----------------------------------------------------------
   function openPlay(id: string) { setActive(id); setCreating(false); setGuided(false); setStep(0); setError(null); setFocusEdit(null); setDescEdit(null); setAddingSkillFor(null); setEditSkill(null); }
-  function newPlay() { setCreating(true); setActive(null); setGuided(true); setStep(0); setForm({ label: "", focus: "", description: "" }); setError(null); }
+  function newPlay() { setCreating(true); setActive(null); setGuided(true); setStep(0); setForm({ label: "", focus: "", description: "", targetType: "custom" }); setError(null); }
+  async function saveTargetType(playId: string, value: string) {
+    setError(null);
+    const { error } = await supabase.from("plays").update({ target_type: value }).eq("id", playId);
+    if (error) setError(error.message); else await load();
+  }
   function backToGallery() { setActive(null); setCreating(false); setGuided(false); setStep(0); setError(null); }
 
   // ---- workflow gating ------------------------------------------------------
@@ -272,6 +277,12 @@ export default function PlaysView() {
               <div className="t-sub t-muted" style={{ fontSize: 12.5, marginBottom: 12 }}>Name the play and write its instruction — the single biggest lever on output quality. You&rsquo;ll add agents, skills, and placement next.</div>
               <label className="field"><span className="t-label">Play name</span><input className="input" autoFocus value={form.label} onChange={(e) => setForm({ ...form, label: e.target.value })} placeholder="e.g. Launch readiness review" /></label>
               <label className="field"><span className="t-label">Instruction — what the officer should do</span><textarea className="textarea" rows={5} value={form.focus} onChange={(e) => setForm({ ...form, focus: e.target.value })} placeholder="The analytical instruction this play runs on — be specific about the job, the lens, and what a great output contains." /></label>
+              <label className="field"><span className="t-label">Runs on — the context the officer gets</span>
+                <select className="select" value={form.targetType} onChange={(e) => setForm({ ...form, targetType: e.target.value })}>
+                  {PLAY_TARGET_TYPES.map((t) => <option key={t.value} value={t.value}>{t.label}</option>)}
+                </select>
+                <span className="t-sub t-muted" style={{ fontSize: 11.5, marginTop: 4 }}>{targetTypeMeta(form.targetType).hint}</span>
+              </label>
               <label className="field"><span className="t-label">Summary <span className="t-muted" style={{ fontWeight: 400 }}>(optional)</span></span><input className="input" value={form.description} onChange={(e) => setForm({ ...form, description: e.target.value })} placeholder="A short line for the gallery." /></label>
               <div className="row gap-2"><button className="btn btn-sm" type="submit" disabled={!form.label.trim()}>Create &amp; continue →</button><button className="btn btn-secondary btn-sm" type="button" onClick={backToGallery}>Cancel</button></div>
             </form>
@@ -290,6 +301,13 @@ export default function PlaysView() {
                 ) : (
                   <div className="t-body" style={{ fontSize: 13, lineHeight: 1.6, whiteSpace: "pre-wrap" }}>{activePlay.focus || <span className="t-muted">No instruction yet — this is the biggest lever on output quality.</span>}</div>
                 )}
+              </div>
+              <div className="card card-pad">
+                <span className="t-label" style={{ color: "var(--tm)" }}>Runs on — the context the officer gets</span>
+                <select className="select" value={activePlay.target_type ?? "custom"} onChange={(e) => saveTargetType(activePlay.id, e.target.value)} style={{ marginTop: 6, marginBottom: 4, maxWidth: 360 }}>
+                  {PLAY_TARGET_TYPES.map((t) => <option key={t.value} value={t.value}>{t.label}</option>)}
+                </select>
+                <div className="t-sub t-muted" style={{ fontSize: 11.5 }}>{targetTypeMeta(activePlay.target_type).hint} Changing this updates the suggested surfaces below.</div>
               </div>
               <div className="card card-pad">
                 <div className="row-between" style={{ marginBottom: descEdit === activePlay.id ? 8 : 0 }}>

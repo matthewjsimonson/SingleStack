@@ -50,6 +50,25 @@ export function playContextNeed(targetType: string | null | undefined): SurfaceC
 
 export type PlacementState = "suggested" | "allowed" | "blocked";
 
+// What a play RUNS ON — set when authoring. Drives the CONTEXT the officer
+// receives (run-play branches on this) and which surfaces are suggested. Only
+// "competitor" and "initiative" have a deep, dedicated context today; the rest
+// run on the target's name + recent signals (still typed, so suggestions and
+// guardrails line up). "custom" = no specific context, place anywhere.
+export const PLAY_TARGET_TYPES: { value: string; label: string; hint: string }[] = [
+  { value: "custom", label: "Anywhere (no specific context)", hint: "Runs on the item's name + recent signals. Can be placed on any surface." },
+  { value: "competitor", label: "Competitor", hint: "Deep context: the capability matrix, battlecard items, and signals for the competitor." },
+  { value: "initiative", label: "Build item / initiative", hint: "Deep context: the initiative's scope, stage, workstreams, and signals." },
+  { value: "theme", label: "Strategy theme", hint: "Runs against a theme (name + recent signals)." },
+  { value: "campaign", label: "Campaign", hint: "Runs against a campaign (name + recent signals)." },
+  { value: "content", label: "Content brief", hint: "Runs against a content brief (name + recent signals)." },
+  { value: "product", label: "Product record", hint: "Runs against a product (name + recent signals)." },
+  { value: "gtm_record", label: "GTM record", hint: "Runs against a GTM record (name + recent signals)." },
+  { value: "market_story", label: "Market story", hint: "Runs against a market story (name + recent signals)." },
+];
+export const targetTypeMeta = (value: string | null | undefined) =>
+  PLAY_TARGET_TYPES.find((t) => t.value === (value ?? "custom")) ?? PLAY_TARGET_TYPES[0];
+
 // Suggestion + guardrail for placing a play (by target_type) onto a surface.
 //  • suggested — the surface provides exactly the context the play needs.
 //  • allowed   — the play has no hard requirement; user may place it (override).
