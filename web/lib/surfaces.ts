@@ -16,13 +16,14 @@ export type Surface = {
 
 // Across the product, by module. Add more here as surfaces are wired to render
 // PlacedPlays.
+// NOTE: surfaces that already have NATIVE record advisors (GTM record, Product
+// record, Home) are intentionally NOT here — plays would duplicate the advisors
+// there. Plays live where there's no native advisor.
 export const SURFACES: Surface[] = [
   // Product / Strategy
   { key: "strategy_theme", label: "Strategy · Theme", module: "Product", context: "theme", description: "A theme's detail in Strategy — runs against that theme." },
   { key: "build_item", label: "Ship · Build Item", module: "Product", context: "initiative", description: "A Build Item in Ship — runs against that initiative." },
-  { key: "product_record", label: "Product record", module: "Product", context: "product", description: "A product record — runs against that product." },
   // Go-to-market
-  { key: "gtm_record", label: "GTM record", module: "Go-to-market", context: "gtm_record", description: "A GTM/messaging record — runs against that record." },
   { key: "campaign_record", label: "Campaign record", module: "Go-to-market", context: "campaign", description: "A campaign's record in Campaigns — runs against that campaign." },
   { key: "content_brief", label: "Content brief", module: "Go-to-market", context: "content", description: "Content ideation & review — runs against the brief." },
   // Intelligence
