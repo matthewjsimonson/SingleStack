@@ -5,6 +5,7 @@ import { useEffect, useState, useCallback } from "react";
 import { createClient } from "@/lib/supabase/client";
 import { getOrgId } from "@/lib/org";
 import { Chip, Banner, Empty } from "@/components/ui";
+import { ensureTeam } from "@/lib/ensureTeam";
 import PageBar from "@/components/PageBar";
 import RosterReview from "@/components/RosterReview";
 
@@ -24,6 +25,7 @@ export default function AgentsView() {
   const [error, setError] = useState<string | null>(null);
 
   const load = useCallback(async () => {
+    await ensureTeam(supabase); // seed the standard executive roster if this org has none
     const [{ data }, { data: al }, { data: it }] = await Promise.all([
       supabase.from("agents").select("id, key, name, role, model, system_prompt, is_active").order("name"),
       supabase.from("agent_alignments").select("agent_id, initiative_id, workstream_id"),
