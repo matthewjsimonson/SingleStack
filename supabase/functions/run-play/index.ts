@@ -175,12 +175,17 @@ Deno.serve(async (req: Request) => {
   async function loadSkills(agentId: string): Promise<{ name: string; instructions: string | null }[]> {
     const [{ data: cornerRows }, { data: playSkillRows }] = await Promise.all([
       supabase.from("agent_skills").select("is_cornerstone, skills ( name, instructions )").eq("agent_id", agentId).eq("is_cornerstone", true),
-      play.id ? supabase.from("play_skills").select("skills ( name, instructions )").eq("play_id", play.id).eq("agent_id", agentId) : Promise.resolve({ data: [] as unknown[] }),
+      play.id ? supabase.from("play_skills").select("name, instructions, skills ( name, instructions )").eq("play_id", play.id).eq("agent_id", agentId) : Promise.resolve({ data: [] as unknown[] }),
     ]);
     // deno-lint-ignore no-explicit-any
     const corner = (cornerRows ?? []).map((r: any) => r.skills).filter(Boolean);
+    // Play skills are bespoke (own name + instructions); fall back to a legacy
+    // library-linked skill for any rows authored before the bespoke model.
     // deno-lint-ignore no-explicit-any
-    const lay = (playSkillRows ?? []).map((r: any) => r.skills).filter(Boolean);
+    const lay = (playSkillRows ?? []).map((r: any) => ({
+      name: r.name ?? r.skills?.name ?? "Play skill",
+      instructions: r.instructions ?? r.skills?.instructions ?? null,
+    })).filter((s: { instructions: string | null }) => s.instructions);
     if (corner.length > 0) return [...corner, ...lay];
     const { data: allRows } = await supabase.from("agent_skills").select("skills ( name, instructions )").eq("agent_id", agentId);
     // deno-lint-ignore no-explicit-any
