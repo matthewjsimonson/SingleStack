@@ -35,6 +35,13 @@ export function gapsOf(caps: Cap[], scores: Score[], competitors: Competitor[]):
 export const confText = (x: { conf_level: number | null; conf_label?: string | null }) =>
   x.conf_label || (x.conf_level != null ? `${Math.round(x.conf_level * 100)}%` : null);
 
+// Product Strategy shows PRODUCT signals — everything except pure GTM-messaging
+// signals (gtm-categorized with no special domain). Competitive / market /
+// frontier and product/both/unsorted all inform what to build.
+export function isProductSignal(s: { category?: string | null; metadata: { domain?: string } | null }): boolean {
+  return !(s.category === "gtm" && !s.metadata?.domain);
+}
+
 export const errText = (e: unknown, f: string) =>
   e && typeof e === "object" && "message" in e ? String((e as { message: string }).message) : e instanceof Error ? e.message : f;
 
