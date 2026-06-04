@@ -13,13 +13,14 @@ import { useCallback, useEffect, useState } from "react";
 import { createClient } from "@/lib/supabase/client";
 import { getOrgId } from "@/lib/org";
 import { ensureBuiltInPlays } from "@/lib/ensurePlays";
+import { ensureTeam } from "@/lib/ensureTeam";
 import { Section, Chip, Banner, Empty, AgentBadge } from "@/components/ui";
 import { SURFACES, placementStatus } from "@/lib/surfaces";
 
 type Agent = { id: string; key: string; name: string };
 type Skill = { id: string; name: string; description: string | null; category: string | null; instructions: string | null };
 type Play = { id: string; key: string; label: string; description: string | null; focus: string | null; target_type: string | null };
-type PA = { play_id: string; agent_id: string };
+type PA = { id: string; play_id: string; agent_id: string; position: number };
 type PS = { id: string; play_id: string; agent_id: string; skill_id: string | null; name: string | null; instructions: string | null };
 type Placement = { play_id: string; surface_key: string };
 
@@ -47,14 +48,16 @@ export default function PlaysView() {
   const [newSkill, setNewSkill] = useState({ name: "", instructions: "" });
   const [editSkill, setEditSkill] = useState<string | null>(null);
   const [skillDraft, setSkillDraft] = useState({ name: "", instructions: "" });
+  const [dragId, setDragId] = useState<string | null>(null); // play_agent row being dragged (chain reorder)
 
   const load = useCallback(async () => {
+    await ensureTeam(supabase);        // the roster must exist before you can chain officers
     await ensureBuiltInPlays(supabase);
     const [{ data: pl }, { data: ag }, { data: sk }, { data: pa }, { data: ps }, { data: as }, { data: pp }] = await Promise.all([
       supabase.from("plays").select("id, key, label, description, focus, target_type").order("created_at"),
       supabase.from("agents").select("id, key, name").eq("is_active", true).order("name"),
       supabase.from("skills").select("id, name, description, category, instructions").order("name"),
-      supabase.from("play_agents").select("play_id, agent_id"),
+      supabase.from("play_agents").select("id, play_id, agent_id, position").order("position"),
       supabase.from("play_skills").select("id, play_id, agent_id, skill_id, name, instructions"),
       supabase.from("agent_skills").select("agent_id, skill_id, is_cornerstone"),
       supabase.from("play_placements").select("play_id, surface_key"),
@@ -101,6 +104,19 @@ export default function PlaysView() {
     setError(null);
     await supabase.from("play_skills").delete().eq("play_id", playId).eq("agent_id", agentId);
     await supabase.from("play_agents").delete().eq("play_id", playId).eq("agent_id", agentId);
+    await load();
+  }
+  // Reorder the chain (drag a row onto another). Persists each row's position so
+  // run-play executes officers in the new order.
+  async function reorderChain(playId: string, dragRowId: string, dropRowId: string) {
+    const rows = playAgents.filter((r) => r.play_id === playId).slice().sort((a, b) => a.position - b.position);
+    const from = rows.findIndex((r) => r.id === dragRowId);
+    const to = rows.findIndex((r) => r.id === dropRowId);
+    if (from < 0 || to < 0 || from === to) return;
+    const next = [...rows]; const [moved] = next.splice(from, 1); next.splice(to, 0, moved);
+    const repositioned = next.map((r, i) => ({ id: r.id, position: i }));
+    setPlayAgents((prev) => prev.map((r) => { const u = repositioned.find((x) => x.id === r.id); return u ? { ...r, position: u.position } : r; })); // optimistic
+    await Promise.all(repositioned.map((r) => supabase.from("play_agents").update({ position: r.position }).eq("id", r.id)));
     await load();
   }
 
@@ -294,46 +310,57 @@ export default function PlaysView() {
           ))}
 
           {/* ---- STEP 1 · AGENTS ---- */}
-          {step === 1 && activePlay && (
-            <div>
-              <Section label="Agents on this play">
-                <div className="t-sub t-muted" style={{ fontSize: 12.5, marginBottom: 10 }}>Attach the officer(s) that run this play. Multiple agents run as a <strong>chain</strong>, in order — each sees the prior officers&rsquo; take and adds its own lens. Two to three is the sweet spot.</div>
-                {agentsOn(activePlay.id).length === 0 && <div className="t-sub t-muted" style={{ fontSize: 12.5, marginBottom: 10 }}>No agents attached yet.</div>}
-                <div className="stack-3">
-                  {agentsOn(activePlay.id).map((ag, idx) => {
-                    const corner = [...(cornerstones[ag.id] ?? new Set())].map((id) => skillById(id)).filter(Boolean) as Skill[];
-                    return (
-                      <div key={ag.id} className="card card-pad">
-                        <div className="row-between" style={{ marginBottom: 8 }}>
-                          <div className="row gap-2" style={{ alignItems: "center" }}>
-                            <span className="t-mono-xs t-muted" style={{ flexShrink: 0 }}>{idx + 1}</span>
-                            <AgentBadge name={ag.name} />
+          {step === 1 && activePlay && (() => {
+            const chainRows = playAgents.filter((r) => r.play_id === activePlay.id).slice().sort((a, b) => a.position - b.position);
+            const onIds = new Set(chainRows.map((r) => r.agent_id));
+            const available = agents.filter((a) => !onIds.has(a.id));
+            return (
+              <div>
+                <Section label="Agents on this play">
+                  <div className="t-sub t-muted" style={{ fontSize: 12.5, marginBottom: 10 }}>Add one or more officers — they run as a <strong>chain</strong>, in order: each sees the prior officers&rsquo; take and adds its lens. <strong>Drag to reorder.</strong> Two to three is the sweet spot.</div>
+                  {chainRows.length === 0 && <div className="t-sub t-muted" style={{ fontSize: 12.5, marginBottom: 10 }}>No agents yet — add one or more below.</div>}
+                  <div className="stack-3">
+                    {chainRows.map((pa, idx) => {
+                      const ag = agentById(pa.agent_id); if (!ag) return null;
+                      const corner = [...(cornerstones[ag.id] ?? new Set())].map((id) => skillById(id)).filter(Boolean) as Skill[];
+                      return (
+                        <div key={pa.id} draggable
+                          onDragStart={() => setDragId(pa.id)}
+                          onDragOver={(e) => e.preventDefault()}
+                          onDrop={() => { if (dragId && dragId !== pa.id) reorderChain(activePlay.id, dragId, pa.id); setDragId(null); }}
+                          onDragEnd={() => setDragId(null)}
+                          className="card card-pad" style={{ opacity: dragId === pa.id ? 0.5 : 1 }}>
+                          <div className="row-between" style={{ marginBottom: 8 }}>
+                            <div className="row gap-2" style={{ alignItems: "center" }}>
+                              <span title="Drag to reorder" style={{ cursor: "grab", color: "var(--tm)", fontSize: 15, lineHeight: 1 }}>⠿</span>
+                              <span className="t-mono-xs t-muted" style={{ flexShrink: 0 }}>{idx + 1}</span>
+                              <AgentBadge name={ag.name} />
+                            </div>
+                            <button className="btn btn-secondary btn-sm" onClick={() => detachAgent(activePlay.id, ag.id)} style={{ color: "var(--rd-text)" }}>Detach</button>
                           </div>
-                          <button className="btn btn-secondary btn-sm" onClick={() => detachAgent(activePlay.id, ag.id)} style={{ color: "var(--rd-text)" }}>Detach</button>
+                          <div className="t-label" style={{ color: "var(--tm)", fontSize: 10.5, marginBottom: 4 }}>Cornerstone skills <span className="t-muted" style={{ fontWeight: 400 }}>— always on, from the agent</span></div>
+                          <div className="row gap-2" style={{ flexWrap: "wrap" }}>
+                            {corner.length ? corner.map((s) => <Chip key={s.id} tone="accent">{s.name}</Chip>) : <span className="t-sub t-muted" style={{ fontSize: 12 }}>none set on this agent</span>}
+                          </div>
                         </div>
-                        <div className="t-label" style={{ color: "var(--tm)", fontSize: 10.5, marginBottom: 4 }}>Cornerstone skills <span className="t-muted" style={{ fontWeight: 400 }}>— always on, from the agent</span></div>
-                        <div className="row gap-2" style={{ flexWrap: "wrap" }}>
-                          {corner.length ? corner.map((s) => <Chip key={s.id} tone="accent">{s.name}</Chip>) : <span className="t-sub t-muted" style={{ fontSize: 12 }}>none set on this agent</span>}
-                        </div>
+                      );
+                    })}
+                  </div>
+                  <div style={{ marginTop: 14 }}>
+                    <div className="t-label" style={{ color: "var(--tm)", marginBottom: 6 }}>Add officers</div>
+                    {available.length === 0 ? (
+                      <div className="t-sub t-muted" style={{ fontSize: 12 }}>All available agents are on this play.</div>
+                    ) : (
+                      <div className="row gap-2" style={{ flexWrap: "wrap" }}>
+                        {available.map((a) => <button key={a.id} className="btn btn-secondary btn-sm" onClick={() => attachAgent(activePlay.id, a.id)}>+ {a.name}</button>)}
                       </div>
-                    );
-                  })}
-                </div>
-                {(() => {
-                  const onIds = new Set(agentsOn(activePlay.id).map((a) => a.id));
-                  const available = agents.filter((a) => !onIds.has(a.id));
-                  if (available.length === 0) return <div className="t-sub t-muted" style={{ fontSize: 12, marginTop: 12 }}>All available agents are attached.</div>;
-                  return (
-                    <select className="select" defaultValue="" onChange={(e) => { attachAgent(activePlay.id, e.target.value); e.target.value = ""; }} style={{ maxWidth: 320, marginTop: 12 }}>
-                      <option value="">+ Attach an agent…</option>
-                      {available.map((a) => <option key={a.id} value={a.id}>{a.name}</option>)}
-                    </select>
-                  );
-                })()}
-              </Section>
-              <Footer i={1} />
-            </div>
-          )}
+                    )}
+                  </div>
+                </Section>
+                <Footer i={1} />
+              </div>
+            );
+          })()}
 
           {/* ---- STEP 2 · SKILLS ---- */}
           {step === 2 && activePlay && (
