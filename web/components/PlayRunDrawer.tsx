@@ -47,9 +47,31 @@ const PUSH_TARGETS: { key: string; label: string; run: Pusher }[] = [
   } },
 ];
 
-// Phases shown while a play runs, so the wait reads as progress, not a dead spinner.
+// Steps shown while work is in flight, so the wait reads as progress, not a dead
+// spinner. Different labels for a play run vs. a chat follow-up.
 const RUN_PHASES = ["Reading the context", "Weighing the evidence", "Forming the take", "Structuring the output"];
+const CHAT_PHASES = ["Reading your question", "Pulling the context", "Thinking it through", "Writing the reply"];
 const PulseDots = () => <span style={{ marginLeft: 1 }}><span className="pulse-dot">.</span><span className="pulse-dot">.</span><span className="pulse-dot">.</span></span>;
+
+// A live checklist: completed steps tick green, the current one is lit + pulsing.
+function StepList({ phases, active }: { phases: string[]; active: number }) {
+  return (
+    <div style={{ display: "flex", flexDirection: "column", gap: 7 }}>
+      {phases.map((label, i) => {
+        const state = i < active ? "done" : i === active ? "active" : "todo";
+        return (
+          <div key={label} className="row gap-2" style={{ alignItems: "center", opacity: state === "todo" ? 0.4 : 1, transition: "opacity .3s" }}>
+            <span style={{ width: 15, height: 15, borderRadius: "50%", flexShrink: 0, display: "grid", placeItems: "center", fontSize: 9, fontWeight: 700,
+              background: state === "done" ? "var(--gn)" : state === "active" ? "var(--ac)" : "var(--fill-2)", color: state === "todo" ? "var(--tm)" : "#fff", border: state === "todo" ? "1px solid var(--border)" : "none" }}>
+              {state === "done" ? "✓" : ""}
+            </span>
+            <span className="t-sub" style={{ fontSize: 12.5, fontWeight: state === "active" ? 600 : 400 }}>{label}{state === "active" ? <PulseDots /> : ""}</span>
+          </div>
+        );
+      })}
+    </div>
+  );
+}
 
 // The artifact as plain text — used to seed the follow-up chat and the push body.
 function artifactText(p: Payload): string {
@@ -72,8 +94,14 @@ export default function PlayRunDrawer({ open, onClose, play, target }: {
   const [pushing, setPushing] = useState<string | null>(null);
   const [pushed, setPushed] = useState<{ label: string; href: string } | null>(null);
   const [error, setError] = useState<string | null>(null);
-  const [phase, setPhase] = useState(0); // cycling progress step while running
+  const [phase, setPhase] = useState(0);     // progress step while a play runs
+  const [chatPhase, setChatPhase] = useState(0); // progress step while a reply is forming
+  const [typing, setTyping] = useState(false);   // chat reply still being revealed
   const scrollRef = useRef<HTMLDivElement>(null);
+  const lastMsgRef = useRef<HTMLDivElement>(null); // newest chat bubble, to bring into view
+  const targetRef = useRef("");            // full reply text received so far (stream or whole)
+  const doneRef = useRef(false);           // fetch finished
+  const typeTimer = useRef<ReturnType<typeof setInterval> | null>(null);
 
   // While a play runs, cycle through the real phases so the wait shows progress.
   useEffect(() => {
@@ -81,12 +109,21 @@ export default function PlayRunDrawer({ open, onClose, play, target }: {
     const id = setInterval(() => setPhase((p) => (p + 1) % RUN_PHASES.length), 1500);
     return () => clearInterval(id);
   }, [running]);
+  // Advance the chat steps until the first token arrives (then the reply types).
+  useEffect(() => {
+    const waiting = chatBusy && targetRef.current.length === 0;
+    if (!waiting) { setChatPhase(0); return; }
+    const id = setInterval(() => setChatPhase((p) => Math.min(p + 1, CHAT_PHASES.length - 1)), 900);
+    return () => clearInterval(id);
+  }, [chatBusy]);
+  useEffect(() => () => { if (typeTimer.current) clearInterval(typeTimer.current); }, []);
 
   async function token() { const { data } = await supabase.auth.getSession(); return data.session?.access_token; }
 
   const run = useCallback(async () => {
     if (!play || !target) return;
     setRunning(true); setError(null);
+    requestAnimationFrame(() => scrollRef.current?.scrollTo({ top: 0 })); // show the steps from the top
     try {
       const t = await token();
       const { data, error } = await supabase.functions.invoke("run-play", {
@@ -96,6 +133,7 @@ export default function PlayRunDrawer({ open, onClose, play, target }: {
       if (error) { setError(await edgeErrorMessage(error, "run-play")); return; }
       if (data?.error) throw new Error(data.error);
       setArtifact(data.artifact); setRated(null);
+      requestAnimationFrame(() => scrollRef.current?.scrollTo({ top: 0, behavior: "smooth" })); // reveal output from the headline
     } catch (e) { setError(e instanceof Error ? e.message : "Run failed."); }
     finally { setRunning(false); }
   // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -113,7 +151,8 @@ export default function PlayRunDrawer({ open, onClose, play, target }: {
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [open, play?.key, target?.id]);
 
-  useEffect(() => { scrollRef.current?.scrollTo({ top: scrollRef.current.scrollHeight, behavior: "smooth" }); }, [chat, chatBusy]);
+  // NOTE: no scroll-to-bottom. On a new run/reply we bring the START of the new
+  // content into view (below), so you read top-down instead of being dumped at the end.
 
   async function setStatus(status: "ratified" | "dismissed") {
     if (!artifact) return;
@@ -126,21 +165,51 @@ export default function PlayRunDrawer({ open, onClose, play, target }: {
     await supabase.from("agent_runs").update({ rating: r, rated_at: new Date().toISOString() }).eq("id", artifact.run_id);
   }
 
+  // Reveal the reply at a steady, readable pace — DECOUPLED from how the bytes
+  // arrive. Whether the function streams token-by-token or the gateway buffers and
+  // delivers it all at once, the user always sees it type out. Stops when caught
+  // up AND the fetch is done.
+  function startTypewriter() {
+    if (typeTimer.current) return;
+    setTyping(true);
+    typeTimer.current = setInterval(() => {
+      setChat((prev) => {
+        const next = [...prev];
+        const i = next.length - 1;
+        const last = next[i];
+        if (!last || last.role !== "assistant") return prev;
+        const full = targetRef.current;
+        if (last.content.length < full.length) {
+          const step = Math.max(2, Math.ceil((full.length - last.content.length) / 18)); // ease toward the end
+          next[i] = { role: "assistant", content: full.slice(0, last.content.length + step) };
+          // keep the growing reply in view without yanking to the very bottom
+          lastMsgRef.current?.scrollIntoView({ block: "nearest" });
+          return next;
+        }
+        if (doneRef.current) { // caught up and finished
+          if (typeTimer.current) { clearInterval(typeTimer.current); typeTimer.current = null; }
+          setTyping(false);
+        }
+        return prev;
+      });
+    }, 18);
+  }
+
   async function send() {
     if (!input.trim() || !play?.agentKey || !artifact || !target) return;
     const userText = input.trim();
     const thread: Msg[] = [...chat, { role: "user", content: userText }];
-    // Add an empty assistant bubble to stream tokens into.
     setChat([...thread, { role: "assistant", content: "" }]); setInput(""); setChatBusy(true); setError(null);
+    targetRef.current = ""; doneRef.current = false;
+    // Bring the new exchange to the top so you read the reply as it types, no scrolling.
+    requestAnimationFrame(() => lastMsgRef.current?.scrollIntoView({ block: "start", behavior: "smooth" }));
+    startTypewriter();
     try {
       const t = await token();
-      // Ground the conversation in the play's output by folding it into the first
-      // user turn (keeps a valid user-first message order).
+      // Ground the conversation in the play's output by folding it into the first user turn.
       const payload = thread.map((m, i) => i === 0 && m.role === "user"
         ? { ...m, content: `You earlier produced this analysis of "${target.name}":\n\n${artifactText(artifact.payload)}\n\nUse it as the basis for this conversation.\n\nMy follow-up: ${m.content}` }
         : m);
-      // Stream the reply (text/plain deltas) so it types out live. functions.invoke
-      // buffers the whole body, so call the function URL directly and read the stream.
       const url = `${process.env.NEXT_PUBLIC_SUPABASE_URL}/functions/v1/agent-chat`;
       const resp = await fetch(url, {
         method: "POST",
@@ -151,17 +220,27 @@ export default function PlayRunDrawer({ open, onClose, play, target }: {
         },
         body: JSON.stringify({ agent_key: play.agentKey, messages: payload, stream: true }),
       });
-      if (!resp.ok || !resp.body) throw new Error((await resp.text().catch(() => "")) || `Chat failed (${resp.status}).`);
-      const reader = resp.body.getReader();
-      const decoder = new TextDecoder();
-      let acc = "";
-      for (;;) {
-        const { done, value } = await reader.read();
-        if (done) break;
-        acc += decoder.decode(value, { stream: true });
-        setChat((prev) => { const next = [...prev]; next[next.length - 1] = { role: "assistant", content: acc }; return next; });
+      if (!resp.ok) throw new Error((await resp.text().catch(() => "")) || `Chat failed (${resp.status}).`);
+      // Streaming path = text/plain deltas. If the (older) function returns JSON,
+      // fall back to its { reply } so we never render raw JSON.
+      if ((resp.headers.get("content-type") ?? "").includes("application/json")) {
+        const data = await resp.json();
+        if (data?.error) throw new Error(data.error);
+        targetRef.current = String(data?.reply ?? "");
+      } else if (resp.body) {
+        const reader = resp.body.getReader();
+        const decoder = new TextDecoder();
+        for (;;) {
+          const { done, value } = await reader.read();
+          if (done) break;
+          targetRef.current += decoder.decode(value, { stream: true }); // typewriter reveals this
+        }
       }
+      doneRef.current = true;
     } catch (e) {
+      doneRef.current = true;
+      if (typeTimer.current) { clearInterval(typeTimer.current); typeTimer.current = null; }
+      setTyping(false);
       setError(e instanceof Error ? e.message : "Chat failed.");
       setChat((prev) => prev.filter((m, i) => !(i === prev.length - 1 && m.role === "assistant" && m.content === ""))); // drop empty bubble
     } finally { setChatBusy(false); }
@@ -202,25 +281,12 @@ export default function PlayRunDrawer({ open, onClose, play, target }: {
           {running && (
             <div className="card card-pad" style={{ marginBottom: 14 }}>
               <div className="t-sub" style={{ fontSize: 13, fontWeight: 600, marginBottom: 10 }}>{play.officer} is working on {target.name}</div>
-              <div style={{ display: "flex", flexDirection: "column", gap: 7 }}>
-                {RUN_PHASES.map((label, i) => {
-                  const state = i < phase ? "done" : i === phase ? "active" : "todo";
-                  return (
-                    <div key={label} className="row gap-2" style={{ alignItems: "center", opacity: state === "todo" ? 0.4 : 1, transition: "opacity .3s" }}>
-                      <span style={{ width: 15, height: 15, borderRadius: "50%", flexShrink: 0, display: "grid", placeItems: "center", fontSize: 9, fontWeight: 700,
-                        background: state === "done" ? "var(--gn)" : state === "active" ? "var(--ac)" : "var(--fill-2)", color: state === "todo" ? "var(--tm)" : "#fff", border: state === "todo" ? "1px solid var(--border)" : "none" }}>
-                        {state === "done" ? "✓" : ""}
-                      </span>
-                      <span className="t-sub" style={{ fontSize: 12.5, fontWeight: state === "active" ? 600 : 400 }}>{label}{state === "active" ? <PulseDots /> : ""}</span>
-                    </div>
-                  );
-                })}
-              </div>
+              <StepList phases={RUN_PHASES} active={phase} />
             </div>
           )}
 
-          {/* 2 — OUTPUT */}
-          {a && (
+          {/* 2 — OUTPUT (hidden while a re-run is in flight so the steps lead) */}
+          {a && !running && (
             <div style={{ marginBottom: 16 }}>
               {/* headline */}
               <div className="t-body reveal-up" style={{ fontSize: 15, fontWeight: 680, lineHeight: 1.35, marginBottom: 14, paddingBottom: 14, borderBottom: "1px solid var(--border)" }}>{a.payload.headline}</div>
@@ -293,13 +359,15 @@ export default function PlayRunDrawer({ open, onClose, play, target }: {
               {!play.agentKey && <div className="t-sub t-muted" style={{ fontSize: 12 }}>No officer attached to this play — attach one in Agents → Plays to chat.</div>}
               <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
                 {chat.map((m, i) => {
-                  const streamingHere = m.role === "assistant" && i === chat.length - 1 && chatBusy;
+                  const isLast = i === chat.length - 1;
+                  const waiting = isLast && m.role === "assistant" && m.content === "" && chatBusy; // before first token
+                  const stillTyping = isLast && m.role === "assistant" && m.content !== "" && typing;
                   return (
-                    <div key={i} style={{ alignSelf: m.role === "user" ? "flex-end" : "flex-start", maxWidth: "90%", background: m.role === "user" ? "var(--ac-fill)" : "var(--fill-2)", border: "1px solid var(--border)", borderRadius: 8, padding: "8px 11px" }}>
-                      {streamingHere && m.content === "" ? (
-                        <div className="t-sub t-muted" style={{ fontSize: 12.5 }}>{play.officer} is thinking<PulseDots /></div>
+                    <div key={i} ref={isLast ? lastMsgRef : undefined} style={{ alignSelf: m.role === "user" ? "flex-end" : "flex-start", maxWidth: "90%", background: m.role === "user" ? "var(--ac-fill)" : "var(--fill-2)", border: "1px solid var(--border)", borderRadius: 8, padding: "9px 12px" }}>
+                      {waiting ? (
+                        <StepList phases={CHAT_PHASES} active={chatPhase} />
                       ) : (
-                        <div className="t-sub" style={{ fontSize: 12.5, lineHeight: 1.5, whiteSpace: "pre-wrap" }}>{m.content}{streamingHere && <span className="pulse-dot" style={{ fontWeight: 700 }}>▍</span>}</div>
+                        <div className="t-sub" style={{ fontSize: 12.5, lineHeight: 1.5, whiteSpace: "pre-wrap" }}>{m.content}{stillTyping && <span className="pulse-dot" style={{ fontWeight: 700 }}>▍</span>}</div>
                       )}
                     </div>
                   );
