@@ -70,7 +70,11 @@ export default function PlaysView() {
     setError(null);
     const orgId = await getOrgId(); if (!orgId) { setError("Couldn't resolve your organization."); return; }
     const key = form.label.trim().toLowerCase().replace(/[^a-z0-9]+/g, "_").replace(/^_|_$/g, "") || `play_${Date.now()}`;
-    const { data, error } = await supabase.from("plays").insert({ org_id: orgId, key, label: form.label.trim(), description: form.description.trim() || null, target_type: "custom" }).select("id").single();
+    const desc = form.description.trim();
+    // focus is the analytical instruction (NOT NULL). Seed it from the author's
+    // description; fall back to a sensible default so the play still runs.
+    const focus = desc || `Run the "${form.label.trim()}" play and report what matters, grounded in the provided context.`;
+    const { data, error } = await supabase.from("plays").insert({ org_id: orgId, key, label: form.label.trim(), description: desc || null, focus, target_type: "custom" }).select("id").single();
     if (error) { setError(error.message); return; }
     setAuthoring(false); setForm({ label: "", description: "" });
     await load(); if (data) setActive(data.id);
