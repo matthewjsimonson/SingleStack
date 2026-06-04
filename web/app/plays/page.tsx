@@ -1,13 +1,6 @@
-import { createClient } from "@/lib/supabase/server";
-import Shell from "@/components/Shell";
-import PlaysView from "./PlaysView";
+import { redirect } from "next/navigation";
 
-export default async function Page() {
-  const supabase = await createClient();
-  const { data: { user } } = await supabase.auth.getUser();
-  return (
-    <Shell email={user?.email} crumbs={[{ label: "Plays" }]}>
-      <PlaysView />
-    </Shell>
-  );
+// Plays now live under Agents (consolidated). Keep the old URL working.
+export default function Page() {
+  redirect("/agents?tab=plays");
 }
