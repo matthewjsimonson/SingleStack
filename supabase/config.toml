@@ -42,23 +42,36 @@ enable_signup = true
 # No email confirmation locally, so test signups are instant.
 enable_confirmations = false
 
+# Browser-invoked functions: verify_jwt = false at the GATEWAY.
+#
+# Why not true: with verify_jwt = true the platform gateway rejects the CORS
+# preflight (OPTIONS carries no JWT), so the browser blocks the call and
+# supabase-js reports "Failed to send a request to the Edge Function" — for every
+# function, even though they're deployed.
+#
+# Why it's safe: each of these functions enforces auth ITSELF — it requires the
+# caller's Authorization header (401 otherwise) and creates its Supabase client
+# with that JWT, so every read/write is still org-scoped by RLS. The gateway
+# check was redundant with the function's own check.
 [functions.agent-propose]
-# Require a valid JWT (production-safe): callers pass the user's Supabase
-# session (org-scoped via RLS), or the service_role key for trusted
-# server-side/testing calls. The gateway rejects unauthenticated requests.
-verify_jwt = true
-
+verify_jwt = false
 [functions.agent-chat]
-# Requires a valid JWT (the user's session) so the agent's data reads are
-# org-scoped by RLS. Same posture as agent-propose.
-verify_jwt = true
-
+verify_jwt = false
 [functions.synthesize-signals]
-# Requires a valid JWT so signal reads + theme writes are org-scoped by RLS.
-verify_jwt = true
-
+verify_jwt = false
 [functions.run-play]
-# Runs a Play (typed agent analysis) as the caller — JWT forwarded so all reads
-# are org-scoped by RLS. Same posture as the other agent functions; declared
-# explicitly so it deploys with the intended settings.
-verify_jwt = true
+verify_jwt = false
+[functions.connector-runner]
+verify_jwt = false
+[functions.distill-lessons]
+verify_jwt = false
+[functions.evolve-skills]
+verify_jwt = false
+[functions.orchestrate-roster]
+verify_jwt = false
+[functions.propose-bridges]
+verify_jwt = false
+[functions.resolve-intel-update]
+verify_jwt = false
+[functions.source-recipe]
+verify_jwt = false
