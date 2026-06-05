@@ -58,6 +58,16 @@ const TOOLS = [
     input_schema: { type: "object", additionalProperties: false, properties: { scope: { type: "string", enum: ["internal", "external", "all"] }, limit: { type: "integer" } }, required: ["scope"] },
   },
   {
+    name: "list_themes",
+    description: "List the org's durable signal THEMES — corroborated patterns with a recommendation. The strongest evidence to ground strategy in. category filters product/gtm.",
+    input_schema: { type: "object", additionalProperties: false, properties: { category: { type: "string", enum: ["product", "gtm"] } }, required: [] },
+  },
+  {
+    name: "list_modules",
+    description: "List a product's modules and their features (the product's structure). Defaults to the product you're grounded in.",
+    input_schema: { type: "object", additionalProperties: false, properties: { product_id: { type: "string" } }, required: [] },
+  },
+  {
     name: "list_competitors",
     description: "List the competitors the org tracks (name, relationship, notes). Use when reasoning about positioning or who we're up against.",
     input_schema: { type: "object", additionalProperties: false, properties: {}, required: [] },
@@ -230,6 +240,28 @@ Deno.serve(async (req: Request) => {
       if (!rows.length) return "(no signals on record)";
       // deno-lint-ignore no-explicit-any
       return rows.map((r: any) => `[${origin(r)}] ${r.title}${r.why ? ` — ${r.why}` : ""}`).join("\n");
+    }
+    if (name === "list_themes") {
+      let q = supabase.from("signal_themes").select("title, summary, recommendation, category, conf_level").order("position", { ascending: true }).limit(30);
+      if (args.category) q = q.eq("category", args.category);
+      const { data } = await q;
+      if (!data?.length) return "(no themes)";
+      // deno-lint-ignore no-explicit-any
+      return data.map((t: any) => `[${t.category}${t.conf_level != null ? ` ${Math.round(t.conf_level * 100)}%` : ""}] ${t.title}${t.summary ? ` — ${t.summary}` : ""}${t.recommendation ? `\n  → ${t.recommendation}` : ""}`).join("\n");
+    }
+    if (name === "list_modules") {
+      const pid = args.product_id || (input.context?.record_type === "product" ? input.context.record_id : null);
+      if (!pid) return "No product in scope — pass product_id, or open this from a product record.";
+      const { data: mods } = await supabase.from("modules").select("id, name, description").eq("product_id", pid).order("created_at", { ascending: true });
+      if (!mods?.length) return "(no modules)";
+      // deno-lint-ignore no-explicit-any
+      const ids = (mods as any[]).map((m) => m.id);
+      const { data: feats } = await supabase.from("features").select("module_id, name").in("module_id", ids);
+      const byMod: Record<string, string[]> = {};
+      // deno-lint-ignore no-explicit-any
+      for (const f of (feats ?? []) as any[]) { (byMod[f.module_id] ??= []).push(f.name); }
+      // deno-lint-ignore no-explicit-any
+      return (mods as any[]).map((m) => `${m.name}${m.description ? ` — ${m.description}` : ""}${byMod[m.id]?.length ? `\n  features: ${byMod[m.id].join(", ")}` : ""}`).join("\n");
     }
     if (name === "list_competitors") {
       const { data } = await supabase.from("competitors").select("name, relationship, website, notes").order("position", { ascending: true }).limit(40);
