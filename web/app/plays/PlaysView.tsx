@@ -4,7 +4,7 @@
 // opening one drops into a stepped setup workflow:
 //   1 Define  — name + the instruction (focus) the officer runs on.
 //   2 Agents  — the agent(s) that run it (a chain; each adds a lens, in order).
-//   3 Skills  — bespoke play-specific instructions layered onto a specific agent.
+//   3 Skills  — attach each agent's play skills (authored on the agent) to this play.
 //   4 Place   — where the play appears across the product.
 // New plays are GUIDED (each step gates the next so setup is complete); an existing
 // play is free to navigate (editing shouldn't force a walk). The built-in analyses
@@ -33,6 +33,7 @@ export default function PlaysView() {
   const [playSkills, setPlaySkills] = useState<PS[]>([]);
   const [placements, setPlacements] = useState<Placement[]>([]);
   const [cornerstones, setCornerstones] = useState<Record<string, Set<string>>>({}); // agent_id → cornerstone skill_ids
+  const [agentSkills, setAgentSkills] = useState<Record<string, Set<string>>>({});   // agent_id → all attached skill_ids
   const [active, setActive] = useState<string | null>(null);
   const [creating, setCreating] = useState(false); // in the new-play wizard (no play id yet)
   const [step, setStep] = useState(0);              // 0 Define · 1 Agents · 2 Skills · 3 Place
@@ -43,11 +44,6 @@ export default function PlaysView() {
   const [descDraft, setDescDraft] = useState("");
   const [focusEdit, setFocusEdit] = useState<string | null>(null);
   const [focusDraft, setFocusDraft] = useState("");
-  // bespoke play-skill authoring/editing (per play_skills row)
-  const [addingSkillFor, setAddingSkillFor] = useState<string | null>(null);
-  const [newSkill, setNewSkill] = useState({ name: "", instructions: "" });
-  const [editSkill, setEditSkill] = useState<string | null>(null);
-  const [skillDraft, setSkillDraft] = useState({ name: "", instructions: "" });
   const [dragId, setDragId] = useState<string | null>(null); // play_agent row being dragged (chain reorder)
 
   const load = useCallback(async () => {
@@ -65,8 +61,12 @@ export default function PlaysView() {
     setPlays(pl ?? []); setPlayAgents(pa ?? []); setPlacements(pp ?? []);
     setAgents(ag ?? []); setSkills(sk ?? []); setPlaySkills(ps ?? []);
     const corner: Record<string, Set<string>> = {};
-    for (const r of as ?? []) if (r.is_cornerstone) (corner[r.agent_id] ??= new Set()).add(r.skill_id);
-    setCornerstones(corner);
+    const all: Record<string, Set<string>> = {};
+    for (const r of as ?? []) {
+      (all[r.agent_id] ??= new Set()).add(r.skill_id);
+      if (r.is_cornerstone) (corner[r.agent_id] ??= new Set()).add(r.skill_id);
+    }
+    setCornerstones(corner); setAgentSkills(all);
     // The landing is the gallery — keep a selection only if it still exists.
     setActive((cur) => (cur && (pl ?? []).some((p) => p.id === cur) ? cur : null));
   }, [supabase]);
@@ -120,20 +120,15 @@ export default function PlaysView() {
     await load();
   }
 
-  // Bespoke play skills — authored inline for one (play, agent). Never touch the library.
-  function startAddSkill(agentId: string) { setAddingSkillFor(agentId); setNewSkill({ name: "", instructions: "" }); setEditSkill(null); }
-  async function createPlaySkill(playId: string, agentId: string) {
-    if (!newSkill.name.trim() && !newSkill.instructions.trim()) return;
+  // Play skills are authored per-agent on the agent's Skills page; here you attach an
+  // agent's play skill to THIS play (a play_skills row referencing the skill). run-play
+  // reads the skill's name + instructions through the join.
+  async function attachPlaySkill(playId: string, agentId: string, skillId: string) {
     setError(null);
     const orgId = await getOrgId();
-    const { error } = await supabase.from("play_skills").insert({ org_id: orgId, play_id: playId, agent_id: agentId, name: newSkill.name.trim() || "Play skill", instructions: newSkill.instructions.trim() || null });
-    if (error) setError(error.message); else { setAddingSkillFor(null); await load(); }
-  }
-  function startEditSkill(r: PS) { setEditSkill(r.id); setSkillDraft({ name: r.name ?? "", instructions: r.instructions ?? "" }); setAddingSkillFor(null); }
-  async function savePlaySkill(id: string) {
-    setError(null);
-    const { error } = await supabase.from("play_skills").update({ name: skillDraft.name.trim() || "Play skill", instructions: skillDraft.instructions.trim() || null }).eq("id", id);
-    if (error) setError(error.message); else { setEditSkill(null); await load(); }
+    const { error } = await supabase.from("play_skills").insert({ org_id: orgId, play_id: playId, agent_id: agentId, skill_id: skillId });
+    if (error && (error as { code?: string }).code !== "23505") setError(error.message);
+    await load();
   }
   async function removePlaySkill(id: string) { setError(null); await supabase.from("play_skills").delete().eq("id", id); await load(); }
 
@@ -164,7 +159,7 @@ export default function PlaysView() {
   }
 
   // ---- navigation -----------------------------------------------------------
-  function openPlay(id: string) { setActive(id); setCreating(false); setGuided(false); setStep(0); setError(null); setFocusEdit(null); setDescEdit(null); setAddingSkillFor(null); setEditSkill(null); }
+  function openPlay(id: string) { setActive(id); setCreating(false); setGuided(false); setStep(0); setError(null); setFocusEdit(null); setDescEdit(null); }
   function newPlay() { setCreating(true); setActive(null); setGuided(true); setStep(0); setForm({ label: "", focus: "", description: "", targetType: "custom" }); setError(null); }
   async function saveTargetType(playId: string, value: string) {
     setError(null);
@@ -383,57 +378,72 @@ export default function PlaysView() {
           {/* ---- STEP 2 · SKILLS ---- */}
           {step === 2 && activePlay && (
             <div>
-              <Section label="Play-specific skills">
-                <div className="t-sub t-muted" style={{ fontSize: 12.5, marginBottom: 10 }}>Optional. Layer a bespoke instruction onto a <strong>specific agent</strong> for this play — on top of its cornerstones, scoped to this play, never touching the shared library. Skip it if the play&rsquo;s instruction is already sharp.</div>
+              <Section label="Play skills">
+                <div className="t-sub t-muted" style={{ fontSize: 12.5, marginBottom: 10 }}>For each officer, switch on the <strong>play skills</strong> it brings to this play — its task/process-specific skills, layered on top of its always-on cornerstones. Author and edit these on the agent&rsquo;s <strong>Skills</strong> page; here you choose which apply to this play.</div>
                 {agentsOn(activePlay.id).length === 0 ? (
-                  <div className="t-sub t-muted" style={{ fontSize: 12.5 }}>Attach an agent first (step 2) to layer skills onto it.</div>
+                  <div className="t-sub t-muted" style={{ fontSize: 12.5 }}>Add an agent first (step 1) to attach its play skills.</div>
                 ) : (
                   <div className="stack-3">
                     {agentsOn(activePlay.id).map((ag) => {
-                      const layered = playSkills.filter((r) => r.play_id === activePlay.id && r.agent_id === ag.id);
+                      const owned = [...(agentSkills[ag.id] ?? new Set<string>())].map(skillById).filter(Boolean) as Skill[];
+                      const corner = owned.filter((s) => cornerstones[ag.id]?.has(s.id));
+                      const pool = owned.filter((s) => !cornerstones[ag.id]?.has(s.id)); // the agent's play skills
+                      const rows = playSkills.filter((r) => r.play_id === activePlay.id && r.agent_id === ag.id);
+                      const rowBySkill = new Map(rows.filter((r) => r.skill_id).map((r) => [r.skill_id as string, r]));
+                      const legacy = rows.filter((r) => !r.skill_id); // bespoke rows authored before this change
                       return (
                         <div key={ag.id} className="card card-pad">
-                          <div style={{ marginBottom: 8 }}><AgentBadge name={ag.name} /></div>
-                          <div className="stack-3">
-                            {layered.map((r) => {
-                              const open = editSkill === r.id;
-                              return (
-                                <div key={r.id} className="card card-pad" style={{ padding: "10px 12px", background: "var(--panel-2)" }}>
-                                  {open ? (
-                                    <div className="stack-2">
-                                      <input className="input" value={skillDraft.name} placeholder="Skill name" onChange={(e) => setSkillDraft({ ...skillDraft, name: e.target.value })} />
-                                      <textarea className="textarea" rows={5} value={skillDraft.instructions} placeholder="The bespoke instruction — how this agent applies this skill in this play." onChange={(e) => setSkillDraft({ ...skillDraft, instructions: e.target.value })} />
-                                      <div className="row gap-2"><button className="btn btn-sm" onClick={() => savePlaySkill(r.id)}>Save</button><button className="btn btn-secondary btn-sm" onClick={() => setEditSkill(null)}>Cancel</button></div>
-                                    </div>
-                                  ) : (
-                                    <>
-                                      <div className="row-between" style={{ gap: 10 }}>
-                                        <div className="row gap-2" style={{ flexWrap: "wrap" }}>
-                                          <span style={{ fontSize: 13.5, fontWeight: 620 }}>{r.name || "Play skill"}</span>
-                                          <Chip tone="violet">Play: {activePlay.label}</Chip>
-                                        </div>
-                                        <div className="row gap-2">
-                                          <button className="btn btn-secondary btn-sm" onClick={() => startEditSkill(r)}>Edit</button>
-                                          <button className="btn btn-secondary btn-sm" onClick={() => removePlaySkill(r.id)} style={{ color: "var(--rd-text)" }}>Remove</button>
-                                        </div>
-                                      </div>
-                                      {r.instructions && <div className="t-sub" style={{ fontSize: 12.5, lineHeight: 1.55, whiteSpace: "pre-wrap", marginTop: 6 }}>{r.instructions}</div>}
-                                    </>
-                                  )}
-                                </div>
-                              );
-                            })}
-                            {layered.length === 0 && <div className="t-sub t-muted" style={{ fontSize: 12 }}>No play-specific skills on {ag.name} yet.</div>}
-                            {addingSkillFor === ag.id ? (
-                              <div className="card card-pad stack-2" style={{ background: "var(--panel-2)" }}>
-                                <input className="input" autoFocus value={newSkill.name} placeholder="Skill name (e.g. 'Positioning teardown')" onChange={(e) => setNewSkill({ ...newSkill, name: e.target.value })} />
-                                <textarea className="textarea" rows={5} value={newSkill.instructions} placeholder="The bespoke instruction — how this agent applies this skill in this play." onChange={(e) => setNewSkill({ ...newSkill, instructions: e.target.value })} />
-                                <div className="row gap-2"><button className="btn btn-sm" onClick={() => createPlaySkill(activePlay.id, ag.id)}>Add skill</button><button className="btn btn-secondary btn-sm" onClick={() => setAddingSkillFor(null)}>Cancel</button></div>
-                              </div>
-                            ) : (
-                              <button className="btn btn-secondary btn-sm" onClick={() => startAddSkill(ag.id)}>+ Add a play-specific skill</button>
-                            )}
+                          <div className="row-between" style={{ marginBottom: 8 }}>
+                            <AgentBadge name={ag.name} />
+                            <a href={`/agents/${ag.id}`} className="t-mono-xs" style={{ color: "var(--ac-text)", fontWeight: 600 }}>Edit skills →</a>
                           </div>
+
+                          {/* cornerstones — always on, not toggleable here */}
+                          <div className="t-label" style={{ color: "var(--tm)", fontSize: 10.5, marginBottom: 4 }}>Cornerstone skills <span className="t-muted" style={{ fontWeight: 400 }}>— always on</span></div>
+                          <div className="row gap-2" style={{ flexWrap: "wrap", marginBottom: 12 }}>
+                            {corner.length ? corner.map((s) => <Chip key={s.id} tone="accent">{s.name}</Chip>) : <span className="t-sub t-muted" style={{ fontSize: 12 }}>none set on this agent</span>}
+                          </div>
+
+                          {/* play skills — toggle which apply to this play */}
+                          <div className="t-label" style={{ color: "var(--tm)", fontSize: 10.5, marginBottom: 6 }}>Play skills <span className="t-muted" style={{ fontWeight: 400 }}>— switch on the ones for this play</span></div>
+                          {pool.length === 0 ? (
+                            <div className="t-sub t-muted" style={{ fontSize: 12 }}>No play skills on {ag.name} yet — <a href={`/agents/${ag.id}`} style={{ color: "var(--ac-text)", fontWeight: 600 }}>author one on its Skills page</a>.</div>
+                          ) : (
+                            <div className="stack-2">
+                              {pool.map((s) => {
+                                const on = rowBySkill.has(s.id);
+                                return (
+                                  <div key={s.id} className="card card-pad row-between" style={{ gap: 10, padding: "9px 12px", background: on ? "var(--vl-fill)" : "var(--panel-2)", border: on ? "1px solid var(--vl)" : undefined }}>
+                                    <div style={{ minWidth: 0 }}>
+                                      <div className="row gap-2" style={{ alignItems: "center" }}><span style={{ fontSize: 13.5, fontWeight: 620 }}>{s.name}</span><Chip tone={s.category === "product" ? "accent" : s.category === "gtm" ? "violet" : "default"}>{s.category}</Chip></div>
+                                      {s.description && <div className="t-sub t-muted" style={{ fontSize: 12, marginTop: 2 }}>{s.description}</div>}
+                                    </div>
+                                    {on
+                                      ? <button className="btn btn-secondary btn-sm" onClick={() => removePlaySkill(rowBySkill.get(s.id)!.id)} style={{ flexShrink: 0 }}>✓ On</button>
+                                      : <button className="btn btn-sm" onClick={() => attachPlaySkill(activePlay.id, ag.id, s.id)} style={{ flexShrink: 0 }}>Add to play</button>}
+                                  </div>
+                                );
+                              })}
+                            </div>
+                          )}
+
+                          {/* legacy bespoke play-skills authored before play skills moved to the agent */}
+                          {legacy.length > 0 && (
+                            <div style={{ marginTop: 12 }}>
+                              <div className="t-label" style={{ color: "var(--tm)", fontSize: 10.5, marginBottom: 4 }}>Bespoke (legacy)</div>
+                              <div className="stack-2">
+                                {legacy.map((r) => (
+                                  <div key={r.id} className="card card-pad row-between" style={{ gap: 10, padding: "9px 12px", background: "var(--panel-2)" }}>
+                                    <div style={{ minWidth: 0 }}>
+                                      <span style={{ fontSize: 13, fontWeight: 600 }}>{r.name || "Play skill"}</span>
+                                      {r.instructions && <div className="t-sub t-muted" style={{ fontSize: 12, marginTop: 2, whiteSpace: "pre-wrap" }}>{r.instructions}</div>}
+                                    </div>
+                                    <button className="btn btn-secondary btn-sm" onClick={() => removePlaySkill(r.id)} style={{ color: "var(--rd-text)", flexShrink: 0 }}>Remove</button>
+                                  </div>
+                                ))}
+                              </div>
+                            </div>
+                          )}
                         </div>
                       );
                     })}
