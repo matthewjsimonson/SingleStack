@@ -10,7 +10,7 @@ import { useEffect, useState, useCallback } from "react";
 import { createClient } from "@/lib/supabase/client";
 import { getOrgId } from "@/lib/org";
 import RecordWorkspace from "@/components/RecordWorkspace";
-import { Section, Chip, Confidence, Empty, Banner, BackLink } from "@/components/ui";
+import { Section, Chip, Confidence, Empty, Banner, BackLink, SubTabs } from "@/components/ui";
 
 type Gtm = { id: string; name: string; product_id: string };
 type Product = { id: string; name: string };
@@ -30,6 +30,7 @@ export default function GtmView({ gtmId }: { gtmId: string }) {
   const [notFound, setNotFound] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
+  const [view, setView] = useState<"workspace" | "messaging" | "signals">("workspace"); // top-level tabs — no long scroll
   const [activeTab, setActiveTab] = useState<string | null>(null);
   const [editing, setEditing] = useState(false);
   const [draft, setDraft] = useState("");
@@ -92,9 +93,15 @@ export default function GtmView({ gtmId }: { gtmId: string }) {
 
       <Banner>{error}</Banner>
 
-      <RecordWorkspace target={{ kind: "gtm", id: gtmId }} recordName={gtm.name} />
+      <SubTabs<typeof view>
+        tabs={[{ key: "workspace", label: "Workspace" }, { key: "messaging", label: `Messaging${tabs.length ? ` · ${tabs.length}` : ""}` }, { key: "signals", label: `Signals${signals.length ? ` · ${signals.length}` : ""}` }]}
+        active={view} onChange={setView}
+      />
+
+      {view === "workspace" && <RecordWorkspace target={{ kind: "gtm", id: gtmId }} recordName={gtm.name} />}
 
       {/* Messaging tabs — the GTM structure */}
+      {view === "messaging" && (
       <Section
         label="Messaging"
         action={!adding ? <button className="btn btn-secondary btn-sm" onClick={() => setAdding(true)}>+ Add section</button> : undefined}
@@ -156,8 +163,10 @@ export default function GtmView({ gtmId }: { gtmId: string }) {
           </div>
         ) : null}
       </Section>
+      )}
 
       {/* Signals */}
+      {view === "signals" && (
       <Section label="Signals">
         {signals.length === 0 ? (
           <div className="t-sub t-muted">No signals yet. Signals are the internal &amp; external evidence (observations, data points) that back this record and inform agents.</div>
@@ -176,6 +185,7 @@ export default function GtmView({ gtmId }: { gtmId: string }) {
           </div>
         )}
       </Section>
+      )}
     </div>
   );
 }

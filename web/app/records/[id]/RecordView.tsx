@@ -7,7 +7,7 @@ import { createClient } from "@/lib/supabase/client";
 import { getOrgId } from "@/lib/org";
 import RecordWorkspace from "@/components/RecordWorkspace";
 import Modules from "@/components/Modules";
-import { Section, Chip, Banner, Empty, BackLink } from "@/components/ui";
+import { Section, Chip, Banner, Empty, BackLink, SubTabs } from "@/components/ui";
 
 type Gtm = { id: string; name: string; created_at: string };
 
@@ -22,6 +22,7 @@ export default function RecordView({ recordId }: { recordId: string }) {
   const [loading, setLoading] = useState(true);
   const [notFound, setNotFound] = useState(false);
 
+  const [view, setView] = useState<"workspace" | "modules" | "gtm">("workspace"); // top-level tabs — no long scroll
   const [creating, setCreating] = useState(false);
   const [gtmName, setGtmName] = useState("");
   const [busy, setBusy] = useState(false);
@@ -58,10 +59,16 @@ export default function RecordView({ recordId }: { recordId: string }) {
       <div className="row" style={{ marginBottom: 6 }}><Chip tone="accent">Product record</Chip></div>
       <h1 className="t-page" style={{ marginBottom: "var(--sp-6)" }}>{record.name}</h1>
 
-      <RecordWorkspace target={target} recordName={record.name} />
+      <SubTabs<typeof view>
+        tabs={[{ key: "workspace", label: "Workspace" }, { key: "modules", label: "Modules" }, { key: "gtm", label: `GTM records${gtm.length ? ` · ${gtm.length}` : ""}` }]}
+        active={view} onChange={setView}
+      />
 
-      <Modules productId={recordId} />
+      {view === "workspace" && <RecordWorkspace target={target} recordName={record.name} />}
 
+      {view === "modules" && <Modules productId={recordId} />}
+
+      {view === "gtm" && (
       <Section label="GTM records" action={!creating ? <button className="btn btn-secondary btn-sm" onClick={() => setCreating(true)}>+ New GTM record</button> : undefined}>
         {creating && (
           <form onSubmit={createGtm} className="card card-pad" style={{ marginBottom: "var(--sp-3)" }}>
@@ -90,6 +97,7 @@ export default function RecordView({ recordId }: { recordId: string }) {
           </div>
         )}
       </Section>
+      )}
     </div>
   );
 }
