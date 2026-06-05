@@ -57,6 +57,34 @@ const TOOLS = [
     description: "Pull recent signals (evidence). scope filters by origin: internal (your systems), external (market), or all.",
     input_schema: { type: "object", additionalProperties: false, properties: { scope: { type: "string", enum: ["internal", "external", "all"] }, limit: { type: "integer" } }, required: ["scope"] },
   },
+  {
+    name: "propose_change",
+    description: "Draft a concrete change to the record you're grounded in. It goes to the record's REVIEW QUEUE (pending) for the human to accept or reject — you never apply changes directly. For an update, use the field's id from get_record; for a new field, give a snake_case field_key + human label.",
+    input_schema: {
+      type: "object", additionalProperties: false,
+      properties: {
+        title: { type: "string", description: "Short title for the proposed change" },
+        rationale: { type: "string", description: "Why — cite the records/signals/skills behind it" },
+        conf_label: { type: "string", description: "A short confidence read, e.g. High / Medium / Low" },
+        conf_level: { type: "number", description: "Confidence 0..1" },
+        changes: {
+          type: "array",
+          items: {
+            type: "object", additionalProperties: false,
+            properties: {
+              change_kind: { type: "string", enum: ["update_field", "add_field"] },
+              record_field_id: { type: "string", description: "update_field: the field's id from get_record" },
+              field_key: { type: "string", description: "add_field: a snake_case key" },
+              label: { type: "string", description: "add_field: a human label" },
+              proposed_value: { type: "string" },
+            },
+            required: ["change_kind", "proposed_value"],
+          },
+        },
+      },
+      required: ["title", "rationale", "changes"],
+    },
+  },
 ];
 
 Deno.serve(async (req: Request) => {
@@ -99,6 +127,7 @@ Deno.serve(async (req: Request) => {
     agent.system_prompt || `You are ${agent.name}${agent.role ? `, ${agent.role}` : ""}, an executive agent in SingleStack.`,
     "",
     "You operate AGENTICALLY: use the tools to gather what you need and to ground your work, then answer. Don't guess when a tool can tell you. Keep tool use purposeful — a few targeted calls, not exhaustive sweeps.",
+    "When you identify a concrete improvement to the record you're grounded in, draft it with propose_change — it goes to the record's review queue for the human to accept; you never apply changes yourself. Propose only when the operator wants a change or you've found a clear, well-grounded one; otherwise just answer.",
     "",
     "YOUR SKILLS — only the titles are shown. Before doing specialized work, load the relevant skill's full playbook with read_skill(skill_key):",
     skillCatalog,
@@ -173,7 +202,7 @@ Deno.serve(async (req: Request) => {
       const fk = args.record_type === "product" ? "product_id" : "gtm_record_id";
       const { data: rec } = await supabase.from(table).select("*").eq("id", args.record_id).maybeSingle();
       if (!rec) return `No ${args.record_type} record ${args.record_id}.`;
-      const { data: fields } = await supabase.from("record_fields").select("label, value, position").eq(fk, args.record_id).order("position", { ascending: true });
+      const { data: fields } = await supabase.from("record_fields").select("id, label, value, position").eq(fk, args.record_id).order("position", { ascending: true });
       return JSON.stringify({ record: rec, fields: fields ?? [] });
     }
     if (name === "search_signals") {
@@ -186,6 +215,40 @@ Deno.serve(async (req: Request) => {
       if (!rows.length) return "(no signals on record)";
       // deno-lint-ignore no-explicit-any
       return rows.map((r: any) => `[${origin(r)}] ${r.title}${r.why ? ` — ${r.why}` : ""}`).join("\n");
+    }
+    if (name === "propose_change") {
+      const ctx = input.context;
+      if (!ctx?.record_id || !(ctx.record_type === "product" || ctx.record_type === "gtm")) {
+        return "Can't propose: you're not grounded in a specific product or GTM record right now.";
+      }
+      const product_id = ctx.record_type === "product" ? ctx.record_id : null;
+      const gtm_record_id = ctx.record_type === "gtm" ? ctx.record_id : null;
+      const fk = ctx.record_type === "product" ? "product_id" : "gtm_record_id";
+      const { data: fieldRows } = await supabase.from("record_fields").select("id, value").eq(fk, ctx.record_id);
+      // deno-lint-ignore no-explicit-any
+      const known = new Map((fieldRows ?? []).map((f: any) => [f.id, f.value]));
+      const conf = Math.min(1, Math.max(0, Number(args.conf_level) || 0));
+      const { data: created, error: pErr } = await supabase.from("proposals").insert({
+        org_id: orgId, product_id, gtm_record_id,
+        title: args.title, rationale: args.rationale ?? null, conf_level: conf, conf_label: args.conf_label ?? null,
+        proposed_by: agent.name,
+      }).select("id").single();
+      if (pErr || !created) return `Could not create proposal: ${pErr?.message ?? "unknown error"}`;
+      const pid = created.id as string;
+      // deno-lint-ignore no-explicit-any
+      const rows: any[] = [];
+      for (const c of (args.changes ?? [])) {
+        if (c.change_kind === "update_field" && c.record_field_id && known.has(c.record_field_id)) {
+          rows.push({ org_id: orgId, proposal_id: pid, change_kind: "update_field", record_field_id: c.record_field_id, old_value: known.get(c.record_field_id) ?? null, field_key: null, label: null, proposed_value: c.proposed_value });
+        } else if (c.change_kind === "add_field" && c.field_key && c.label) {
+          rows.push({ org_id: orgId, proposal_id: pid, change_kind: "add_field", record_field_id: null, old_value: null, field_key: c.field_key, label: c.label, proposed_value: c.proposed_value });
+        }
+      }
+      if (rows.length > 0) {
+        const { error: cErr } = await supabase.from("proposal_changes").insert(rows);
+        if (cErr) { await supabase.from("proposals").delete().eq("id", pid); return `Could not save changes: ${cErr.message}`; }
+      }
+      return `Drafted proposal "${args.title}" with ${rows.length} change(s). It's now waiting in this record's review queue for the human to accept or reject — you did not apply it directly.`;
     }
     return `Unknown tool '${name}'.`;
   }
