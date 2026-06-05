@@ -90,6 +90,7 @@ button { font-family: inherit; cursor: pointer; }
 
 /* ---- card ---------------------------------------------------------------- */
 .card {
+  display: block; /* so a <button className="card"> fills its column instead of shrinking to its content */
   background: var(--panel);
   border: 1px solid var(--border);
   border-radius: var(--radius);
