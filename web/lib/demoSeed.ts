@@ -235,6 +235,44 @@ export async function loadDemoData(supabase: SupabaseClient, orgId: string): Pro
     return made ? `+${made}` : "exist";
   });
 
+  // ---- Agentic tasks (multi-step workflows) ----
+  // Real, ordered processes: each step is an officer applying its skills, drawing on
+  // internal/external signals; its output feeds the next. run-workflow executes them.
+  await step("agentic workflows", async () => {
+    const uid = () => (globalThis.crypto?.randomUUID?.() ?? `s_${Math.random().toString(36).slice(2)}`);
+    const A = (k: string) => agentId(k);
+    const { data: have } = await supabase.from("workflows").select("name");
+    const names = new Set((have ?? []).map((w) => w.name));
+    const defs: { name: string; description: string; steps: { agent: string; signals: "none" | "internal" | "external" | "both"; instruction: string }[] }[] = [
+      {
+        name: "Harden a GTM record",
+        description: "Three officers pass a GTM record forward: sharpen positioning, tighten the narrative, then check it against the product truth.",
+        steps: [
+          { agent: "cro", signals: "external", instruction: "Read the GTM record and the latest competitive + market signals. Sharpen the positioning against named competitors — where we win, where to reframe, the proof. Hand the tightened positioning to the narrative pass." },
+          { agent: "cco", signals: "none", instruction: "Take the CRO's positioning and make the narrative consistent, concrete, and human-in-the-loop across the record. Strip hype; keep the one story. Hand the polished narrative forward." },
+          { agent: "cpo", signals: "internal", instruction: "Verify the GTM claims align with the product record and the evidence. Flag anything overclaimed or unsupported, and note the single change that would most improve the record." },
+        ],
+      },
+      {
+        name: "Frontier capability sweep",
+        description: "Engineering scans what's newly possible; product turns it into priorities.",
+        steps: [
+          { agent: "ceng", signals: "both", instruction: "Review the recent frontier-model & platform capabilities. Flag what is newly buildable for us and what each unlocks — separate now from later, and note the dependency on each 'later'." },
+          { agent: "cpo", signals: "internal", instruction: "Translate engineering's read into product implications: which newly-possible capabilities map to corroborated demand, and the smallest change that would move the metric. Recommend the top one or two to prioritize." },
+        ],
+      },
+    ];
+    let made = 0;
+    for (const d of defs) {
+      if (names.has(d.name)) continue;
+      const steps = d.steps.flatMap((s) => { const id = A(s.agent); return id ? [{ id: uid(), agent_id: id, skill_id: null, signals: s.signals, instruction: s.instruction }] : []; });
+      if (!steps.length) continue;
+      const { error } = await supabase.from("workflows").insert({ org_id: orgId, agent_id: steps[0].agent_id, name: d.name, description: d.description, trigger: "manual", target_type: "none", steps, is_active: true });
+      if (!error) made++;
+    }
+    return made ? `+${made}` : "exist";
+  });
+
   // ---- Frontier workflow ----
   await step("frontier workflow", async () => {
     const cpoId = agentId("cpo"); if (!cpoId) return "no cpo";
