@@ -11,8 +11,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { createClient } from "@/lib/supabase/client";
 import { getOrgId } from "@/lib/org";
 import { AgentBadge, Chip, SourceChip } from "@/components/ui";
-import { edgeErrorMessage } from "@/lib/edgeError";
-import { StepList, RUN_PHASES, CHAT_PHASES } from "@/components/alive";
+import { StepList, CHAT_PHASES, streamStructured } from "@/components/alive";
 
 type Sec = { title: string; body: string; evidence: string[] };
 type Payload = { headline: string; sections: Sec[]; recommendations: string[]; confidence: string };
@@ -69,21 +68,17 @@ export default function PlayRunDrawer({ open, onClose, play, target }: {
   const [pushing, setPushing] = useState<string | null>(null);
   const [pushed, setPushed] = useState<{ label: string; href: string } | null>(null);
   const [error, setError] = useState<string | null>(null);
-  const [phase, setPhase] = useState(0);     // progress step while a play runs
+  const [runThinking, setRunThinking] = useState(""); // the officers' live reasoning during a run
   const [chatPhase, setChatPhase] = useState(0); // progress step while a reply is forming
   const [typing, setTyping] = useState(false);   // chat reply still being revealed
   const scrollRef = useRef<HTMLDivElement>(null);
+  const traceRef = useRef<HTMLDivElement>(null);   // run reasoning trace, to auto-scroll
   const lastMsgRef = useRef<HTMLDivElement>(null); // newest chat bubble, to bring into view
   const targetRef = useRef("");            // full reply text received so far (stream or whole)
   const doneRef = useRef(false);           // fetch finished
   const typeTimer = useRef<ReturnType<typeof setInterval> | null>(null);
 
-  // While a play runs, cycle through the real phases so the wait shows progress.
-  useEffect(() => {
-    if (!running) { setPhase(0); return; }
-    const id = setInterval(() => setPhase((p) => (p + 1) % RUN_PHASES.length), 1500);
-    return () => clearInterval(id);
-  }, [running]);
+  useEffect(() => { traceRef.current?.scrollTo({ top: traceRef.current.scrollHeight }); }, [runThinking]);
   // Advance the chat steps until the first token arrives (then the reply types).
   useEffect(() => {
     const waiting = chatBusy && targetRef.current.length === 0;
@@ -97,17 +92,17 @@ export default function PlayRunDrawer({ open, onClose, play, target }: {
 
   const run = useCallback(async () => {
     if (!play || !target) return;
-    setRunning(true); setError(null);
-    requestAnimationFrame(() => scrollRef.current?.scrollTo({ top: 0 })); // show the steps from the top
+    setRunning(true); setError(null); setRunThinking("");
+    requestAnimationFrame(() => scrollRef.current?.scrollTo({ top: 0 })); // show the work from the top
     try {
       const t = await token();
-      const { data, error } = await supabase.functions.invoke("run-play", {
+      const res = await streamStructured<{ artifact: Artifact }>({
+        fnName: "run-play",
+        token: t,
         body: { function_key: play.key, target_type: play.targetType ?? undefined, target_id: target.id, target_name: target.name },
-        headers: t ? { Authorization: `Bearer ${t}` } : undefined,
+        onThinking: (s) => setRunThinking((p) => p + s),
       });
-      if (error) { setError(await edgeErrorMessage(error, "run-play")); return; }
-      if (data?.error) throw new Error(data.error);
-      setArtifact(data.artifact); setRated(null);
+      setArtifact(res.artifact); setRated(null);
       requestAnimationFrame(() => scrollRef.current?.scrollTo({ top: 0, behavior: "smooth" })); // reveal output from the headline
     } catch (e) { setError(e instanceof Error ? e.message : "Run failed."); }
     finally { setRunning(false); }
@@ -252,11 +247,13 @@ export default function PlayRunDrawer({ open, onClose, play, target }: {
         <div ref={scrollRef} style={{ flex: 1, overflowY: "auto", padding: 20 }}>
           {error && <div className="banner banner-error" style={{ marginBottom: 12 }}>{error}</div>}
 
-          {/* 1 — WORK: stepped progress so the wait reads as work in motion */}
+          {/* 1 — WORK: the officers' real reasoning, streaming as they work */}
           {running && (
             <div className="card card-pad" style={{ marginBottom: 14 }}>
-              <div className="t-sub" style={{ fontSize: 13, fontWeight: 600, marginBottom: 10 }}>{play.officer} is working on {target.name}</div>
-              <StepList phases={RUN_PHASES} active={phase} />
+              <div className="t-label" style={{ color: "var(--ac)", marginBottom: 8 }}>{play.officer} is working on {target.name}…</div>
+              <div ref={traceRef} style={{ fontSize: 11.5, lineHeight: 1.5, fontStyle: "italic", whiteSpace: "pre-wrap", color: "var(--tm)", borderLeft: "2px solid var(--border)", paddingLeft: 10, maxHeight: 320, overflowY: "auto" }}>
+                {runThinking || "Reading the context…"}
+              </div>
             </div>
           )}
 

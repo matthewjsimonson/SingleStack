@@ -32,6 +32,8 @@ const CORS = {
   "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type, x-supabase-api-version",
   "Access-Control-Allow-Methods": "POST, OPTIONS",
 };
+// Separates the streamed reasoning trace from the final JSON artifact (client splits on it).
+const ANSWER_MARK = "␞";
 const json = (b: unknown, s = 200) => new Response(JSON.stringify(b), { status: s, headers: { ...CORS, "content-type": "application/json" } });
 
 // The Play registry. Same output shape for every Play (one renderer); the lens
@@ -128,7 +130,7 @@ Deno.serve(async (req: Request) => {
     { global: { headers: { Authorization: authHeader } } },
   );
 
-  let input: { function_key?: string; target_type?: string; target_id?: string; target_name?: string };
+  let input: { function_key?: string; target_type?: string; target_id?: string; target_name?: string; stream?: boolean };
   try { input = await req.json(); } catch { return json({ error: "invalid JSON body" }, 400); }
   const { function_key, target_type, target_id, target_name } = input;
   if (!function_key) return json({ error: "function_key is required" }, 400);
@@ -263,72 +265,105 @@ Deno.serve(async (req: Request) => {
       ].filter(Boolean).join("\n");
     }
 
-    // Run each agent in the chain in order. Each runs with its own (cornerstone +
-    // play) skills and sees the prior officers' headlines, so it adds its lens
-    // rather than repeating. One bounded call per agent.
+    // Generate the chain's artifact. Each officer runs with its own skills and sees
+    // the prior officers' headlines. If `emit` is given, the officer's REAL reasoning
+    // (extended-thinking) is streamed through it; the artifact is still persisted.
     const anthropic = new Anthropic({ apiKey: key });
-    // deno-lint-ignore no-explicit-any
-    const results: { name: string; payload: any }[] = [];
-    let inTok = 0, outTok = 0, cost = 0;
-    let prior = "";
-    for (const ag of chain) {
-      const skills = await loadSkills(ag.id);
-      const skillsBlock = skills.length
-        ? `\n\nYOUR SKILLS (apply these playbooks):\n${skills.map((s) => `## ${s.name}\n${s.instructions ?? ""}`).join("\n\n")}`
-        : "";
-      const aModel = ag.model || DEFAULT_MODEL;
-      const system = [
-        ag.system_prompt || `You are ${ag.name}${ag.role ? `, ${ag.role}` : ""}, an executive agent in SingleStack.`,
-        skillsBlock,
-        `\n\nYou are running the "${play.label}" analysis on this ${play.target}. ${play.focus}`,
-        `\n${play.sections_hint}`,
-        chain.length > 1 ? `\nYou are one officer in a chain on this play.${prior ? ` Earlier officers found:${prior}` : " You go first."} Add YOUR distinct lens; don't repeat what's covered.` : "",
-        "\nRules: Be specific and concrete, never generic. Ground every claim in the provided context; in each section's `evidence`, list the exact signal/battlecard/matrix items you leaned on (or note 'thin evidence' honestly). headline = a one-line take. recommendations = concrete next steps. confidence = a short, honest read.",
-      ].join("");
-      const resp = (await anthropic.messages.create({
-        model: aModel,
-        max_tokens: 3000,
-        thinking: { type: "adaptive" },
-        output_config: { effort: "high", format: { type: "json_schema", schema: SCHEMA } },
-        system: [{ type: "text", text: system, cache_control: { type: "ephemeral" } }],
-        messages: [{ role: "user", content: `${ctx}\n\nRun your part of the ${play.label} now.` }],
+    async function generate(emit?: (s: string) => void) {
+      // deno-lint-ignore no-explicit-any
+      const results: { name: string; payload: any }[] = [];
+      let inTok = 0, outTok = 0, cost = 0, prior = "";
+      for (const ag of chain) {
+        const skills = await loadSkills(ag.id);
+        const skillsBlock = skills.length
+          ? `\n\nYOUR SKILLS (apply these playbooks):\n${skills.map((s) => `## ${s.name}\n${s.instructions ?? ""}`).join("\n\n")}`
+          : "";
+        const aModel = ag.model || DEFAULT_MODEL;
+        const system = [
+          ag.system_prompt || `You are ${ag.name}${ag.role ? `, ${ag.role}` : ""}, an executive agent in SingleStack.`,
+          skillsBlock,
+          `\n\nYou are running the "${play.label}" analysis on this ${play.target}. ${play.focus}`,
+          `\n${play.sections_hint}`,
+          chain.length > 1 ? `\nYou are one officer in a chain on this play.${prior ? ` Earlier officers found:${prior}` : " You go first."} Add YOUR distinct lens; don't repeat what's covered.` : "",
+          "\nRules: Be specific and concrete, never generic. Ground every claim in the provided context; in each section's `evidence`, list the exact signal/battlecard/matrix items you leaned on (or note 'thin evidence' honestly). headline = a one-line take. recommendations = concrete next steps. confidence = a short, honest read.",
+        ].join("");
+        const body = {
+          model: aModel,
+          max_tokens: 3000,
+          thinking: { type: "adaptive" },
+          output_config: { effort: "high", format: { type: "json_schema", schema: SCHEMA } },
+          system: [{ type: "text", text: system, cache_control: { type: "ephemeral" } }],
+          messages: [{ role: "user", content: `${ctx}\n\nRun your part of the ${play.label} now.` }],
+        };
+        let resp: Anthropic.Message;
+        if (emit) {
+          if (chain.length > 1) emit(`\n— ${ag.name} —\n`);
+          // deno-lint-ignore no-explicit-any
+          const s = anthropic.messages.stream(body as any);
+          // deno-lint-ignore no-explicit-any
+          for await (const ev of s as any) {
+            if (ev.type === "content_block_delta" && ev.delta?.type === "thinking_delta" && ev.delta.thinking) emit(ev.delta.thinking);
+          }
+          resp = await s.finalMessage();
+        } else {
+          // deno-lint-ignore no-explicit-any
+          resp = (await anthropic.messages.create(body as any)) as Anthropic.Message;
+        }
+        const block = resp.content.find((b) => b.type === "text");
+        if (!block || block.type !== "text") throw new Error(`no analysis returned from ${ag.name}`);
+        const p = JSON.parse(block.text);
+        results.push({ name: ag.name, payload: p });
+        inTok += resp.usage.input_tokens; outTok += resp.usage.output_tokens;
+        const price = PRICING[aModel]; if (price) cost += (resp.usage.input_tokens * price.input + resp.usage.output_tokens * price.output) / 1_000_000;
+        prior += `\n  • ${ag.name}: ${p.headline ?? ""}`;
+      }
+
+      // Aggregate the chain into one artifact. With >1 agent, sections are attributed.
+      const multi = chain.length > 1;
+      const payload = {
+        headline: results[0]?.payload?.headline ?? "(analysis)",
         // deno-lint-ignore no-explicit-any
-      } as any)) as Anthropic.Message;
-      const block = resp.content.find((b) => b.type === "text");
-      if (!block || block.type !== "text") throw new Error(`no analysis returned from ${ag.name}`);
-      const p = JSON.parse(block.text);
-      results.push({ name: ag.name, payload: p });
-      inTok += resp.usage.input_tokens; outTok += resp.usage.output_tokens;
-      const price = PRICING[aModel]; if (price) cost += (resp.usage.input_tokens * price.input + resp.usage.output_tokens * price.output) / 1_000_000;
-      prior += `\n  • ${ag.name}: ${p.headline ?? ""}`;
+        sections: results.flatMap((r) => (r.payload?.sections ?? []).map((s: any) => (multi ? { ...s, title: `${r.name} · ${s.title}` } : s))),
+        recommendations: results.flatMap((r) => r.payload?.recommendations ?? []),
+        confidence: multi ? results.map((r) => `${r.name}: ${r.payload?.confidence ?? "—"}`).join(" · ") : (results[0]?.payload?.confidence ?? ""),
+      };
+
+      const { data: run } = await supabase.from("agent_runs").insert({
+        org_id: orgId, agent_id: chain[0].id, status: "succeeded",
+        input: { kind: "play", function_key, target_type, target_id, agents: chain.map((c) => c.name) }, output: payload.headline ?? "(artifact)", model: chain[0].model || DEFAULT_MODEL,
+        input_tokens: inTok, output_tokens: outTok, cost_usd: cost || null,
+        finished_at: new Date().toISOString(),
+      }).select("id").single();
+
+      const title = `${play.label} · ${targetName}`;
+      const { data: artifact, error: artErr } = await supabase.from("agent_artifacts").insert({
+        org_id: orgId, agent_id: chain[0].id, function_key, target_type, target_id, title,
+        status: "draft", payload, run_id: run?.id ?? null,
+      }).select("id, function_key, title, status, payload, run_id, agent_id").single();
+      if (artErr) throw artErr;
+      return artifact;
     }
 
-    // Aggregate the chain into one artifact. With >1 agent, sections are attributed.
-    const multi = chain.length > 1;
-    const payload = {
-      headline: results[0]?.payload?.headline ?? "(analysis)",
-      // deno-lint-ignore no-explicit-any
-      sections: results.flatMap((r) => (r.payload?.sections ?? []).map((s: any) => (multi ? { ...s, title: `${r.name} · ${s.title}` } : s))),
-      recommendations: results.flatMap((r) => r.payload?.recommendations ?? []),
-      confidence: multi ? results.map((r) => `${r.name}: ${r.payload?.confidence ?? "—"}`).join(" · ") : (results[0]?.payload?.confidence ?? ""),
-    };
+    const officer = chain.map((c) => c.name).join(" → ");
 
-    // Log one run (primary agent, summed cost) + persist the artifact.
-    const { data: run } = await supabase.from("agent_runs").insert({
-      org_id: orgId, agent_id: chain[0].id, status: "succeeded",
-      input: { kind: "play", function_key, target_type, target_id, agents: chain.map((c) => c.name) }, output: payload.headline ?? "(artifact)", model: chain[0].model || DEFAULT_MODEL,
-      input_tokens: inTok, output_tokens: outTok, cost_usd: cost || null,
-      finished_at: new Date().toISOString(),
-    }).select("id").single();
+    // Streaming: officers' reasoning → marker → the artifact JSON.
+    if (input.stream) {
+      const enc = new TextEncoder();
+      const stream = new ReadableStream({
+        async start(controller) {
+          try {
+            const artifact = await generate((s) => controller.enqueue(enc.encode(s)));
+            controller.enqueue(enc.encode(ANSWER_MARK + JSON.stringify({ artifact, officer })));
+          } catch (e) {
+            controller.enqueue(enc.encode(ANSWER_MARK + JSON.stringify({ error: e instanceof Error ? e.message : String(e) })));
+          } finally { controller.close(); }
+        },
+      });
+      return new Response(stream, { headers: { ...CORS, "content-type": "text/plain; charset=utf-8", "cache-control": "no-cache" } });
+    }
 
-    const title = `${play.label} · ${targetName}`;
-    const { data: artifact, error: artErr } = await supabase.from("agent_artifacts").insert({
-      org_id: orgId, agent_id: chain[0].id, function_key, target_type, target_id, title,
-      status: "draft", payload, run_id: run?.id ?? null,
-    }).select("id, function_key, title, status, payload, run_id, agent_id").single();
-    if (artErr) throw artErr;
-
-    return json({ artifact, officer: chain.map((c) => c.name).join(" → ") });
+    const artifact = await generate();
+    return json({ artifact, officer });
   } catch (e) {
     return json({ error: e instanceof Error ? e.message : String(e) }, 500);
   }
