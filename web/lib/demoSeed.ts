@@ -229,7 +229,13 @@ export async function loadDemoData(supabase: SupabaseClient, orgId: string): Pro
       let { data: sk } = await supabase.from("skills").insert({ org_id: orgId, key: s.key, name: s.name, description: s.description, category: s.category, instructions: s.instructions, source: "template" }).select("id").maybeSingle();
       if (!sk) { const { data: found } = await supabase.from("skills").select("id").eq("key", s.key).maybeSingle(); sk = found; } else made++;
       if (sk) {
-        for (const k of s.agents) { const aid = agentId(k); if (aid) await supabase.from("agent_skills").upsert({ org_id: orgId, agent_id: aid, skill_id: sk.id, is_cornerstone: s.cornerstone }, { onConflict: "agent_id,skill_id", ignoreDuplicates: true }); }
+        for (const k of s.agents) {
+          const aid = agentId(k); if (!aid) continue;
+          await supabase.from("agent_skills").upsert({ org_id: orgId, agent_id: aid, skill_id: sk.id, is_cornerstone: s.cornerstone }, { onConflict: "agent_id,skill_id", ignoreDuplicates: true });
+          // Backfill: the upsert above ignores existing rows, so set the cornerstone flag
+          // explicitly for already-attached skills (fixes orgs seeded before cornerstones).
+          if (s.cornerstone) await supabase.from("agent_skills").update({ is_cornerstone: true }).eq("agent_id", aid).eq("skill_id", sk.id);
+        }
       }
     }
     return made ? `+${made}` : "exist";

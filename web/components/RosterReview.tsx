@@ -117,7 +117,7 @@ export default function RosterReview({ onChanged }: { onChanged?: () => void }) 
           </div>
         }>
         <div className="t-sub t-muted" style={{ fontSize: 12.5 }}>
-          Reviews every agent&apos;s skills against durable intelligence &amp; new capabilities and proposes updates — <strong>with restraint</strong>. It changes little on purpose and records what it deliberately leaves alone. Completed reviews wait in the side panel; you ratify each change.
+          Tunes each agent&apos;s <strong>skills</strong> — cornerstone (always-on) &amp; play (task-specific) — against internal &amp; external signals, to make the agents and their workflows the best they can be for your users. <strong>With restraint:</strong> it changes little on purpose and records what it leaves alone. These are <strong>skill updates for your agents</strong> — separate from <em>proposals</em>, which update your Product/GTM records. Completed reviews wait in the side panel; you ratify each.
         </div>
 
         {error && <div className="banner banner-error" style={{ marginTop: 12 }}>{error}</div>}
@@ -138,7 +138,7 @@ export default function RosterReview({ onChanged }: { onChanged?: () => void }) 
             <div className="row-between" style={{ padding: "16px 20px", borderBottom: "1px solid var(--border)", alignItems: "center" }}>
               <div>
                 <div style={{ fontSize: 15, fontWeight: 660 }}>Roster reviews</div>
-                <div className="t-sub t-muted" style={{ fontSize: 12 }}>{changes.length} waiting{holds.length ? ` · ${holds.length} held` : ""}</div>
+                <div className="t-sub t-muted" style={{ fontSize: 12 }}>Agent skill updates · {changes.length} waiting{holds.length ? ` · ${holds.length} held` : ""}</div>
               </div>
               <button className="btn btn-secondary btn-sm" onClick={() => setOpen(false)}>Close</button>
             </div>
