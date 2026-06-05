@@ -148,6 +148,20 @@ Deno.serve(async (req: Request) => {
     ? skills.map((s) => `- ${s.key}: ${s.name}${s.description ? ` — ${s.description}` : ""}`).join("\n")
     : "(no skills attached)";
 
+  // MCP connectors attached to this agent. Claude uses their tools IN the loop —
+  // Anthropic executes them server-side (Messages API mcp_servers, beta). Gated:
+  // only passed when present, so non-connector agents are unaffected. Auth (Phase 1):
+  // optional bearer from config; secure store is Phase 1.5. See docs/mcp-connectors.md.
+  const { data: mcpRows } = await supabase.from("connections").select("label, mcp_url, config").eq("agent_id", agent.id).eq("kind", "mcp").neq("status", "disconnected");
+  // deno-lint-ignore no-explicit-any
+  const mcpServers = (mcpRows ?? []).filter((r: any) => r.mcp_url).map((r: any, i: number) => ({
+    type: "url",
+    name: String(r.label || `mcp_${i}`).toLowerCase().replace(/[^a-z0-9_]+/g, "_").replace(/^_|_$/g, "") || `mcp_${i}`,
+    url: r.mcp_url as string,
+    ...(r.config?.authorization_token ? { authorization_token: r.config.authorization_token } : {}),
+  }));
+  const mcpHeaders = mcpServers.length ? { headers: { "anthropic-beta": "mcp-client-2025-11-20" } } : undefined;
+
   const systemText = [
     agent.system_prompt || `You are ${agent.name}${agent.role ? `, ${agent.role}` : ""}, an executive agent in SingleStack.`,
     "",
@@ -156,6 +170,7 @@ Deno.serve(async (req: Request) => {
     "",
     "YOUR SKILLS — only the titles are shown. Before doing specialized work, load the relevant skill's full playbook with read_skill(skill_key):",
     skillCatalog,
+    mcpServers.length ? `\nYOUR CONNECTORS (external systems via MCP): ${mcpServers.map((m) => m.name).join(", ")}. Use them to reach those systems when the task calls for it.` : "",
     input.context?.record_id && input.context?.record_type
       ? `\nThe operator is currently looking at the ${input.context.record_type} record ${input.context.record_id}. Use get_record to read it when relevant.`
       : "",
@@ -177,16 +192,23 @@ Deno.serve(async (req: Request) => {
         thinking: { type: "adaptive", display: "summarized" }, // summarized → reasoning text is actually present on Opus 4.8
         system: [{ type: "text", text: systemText, cache_control: { type: "ephemeral" } }],
         tools: TOOLS,
+        ...(mcpServers.length ? { mcp_servers: mcpServers } : {}),
         messages,
         // deno-lint-ignore no-explicit-any
-      } as any)) as Anthropic.Message;
+      } as any, mcpHeaders)) as Anthropic.Message;
       inTok += resp.usage.input_tokens; outTok += resp.usage.output_tokens;
 
-      // surface the officer's real reasoning for this step
+      // surface the officer's real reasoning + any connector calls for this step
       for (const b of resp.content) {
         // deno-lint-ignore no-explicit-any
-        if ((b as any).type === "thinking" && (b as any).thinking) emit((b as any).thinking);
+        const bb = b as any;
+        if (bb.type === "thinking" && bb.thinking) emit(bb.thinking);
+        else if (bb.type === "mcp_tool_use") emit(`\n→ connector ${bb.server_name ?? ""}${bb.name ? `.${bb.name}` : ""}\n`);
       }
+
+      // pause_turn = a server-side tool (e.g. an MCP connector) hit the loop limit;
+      // re-send the assistant turn to let Anthropic resume.
+      if (resp.stop_reason === "pause_turn") { messages.push({ role: "assistant", content: resp.content }); continue; }
 
       if (resp.stop_reason !== "tool_use") {
         const answer = resp.content.filter((b) => b.type === "text").map((b) => (b.type === "text" ? b.text : "")).join("").trim();

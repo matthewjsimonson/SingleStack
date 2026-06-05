@@ -519,7 +519,7 @@ function Connections({ agentId, connections, reload, setError }: { agentId: stri
       </Section>
 
       <Section label="External tools (MCP)">
-        <div className="t-sub t-muted" style={{ fontSize: 12.5, marginBottom: 12 }}>Connect an MCP server so this agent can use external tools (web search, GitHub, your own). Live execution + auth arrive with the connector runtime; declared here now.</div>
+        <div className="t-sub t-muted" style={{ fontSize: 12.5, marginBottom: 12 }}>Connect an MCP server so this agent can use external tools (web search, GitHub, your own). <strong>Live now</strong> — a connected server&rsquo;s tools run inside the agent&rsquo;s loop. Public/no-auth servers work today; secured (token/OAuth) connectors land with the secure credential store. Whatever it gathers still flows through the review queue.</div>
         <form onSubmit={addMcp} className="card card-pad" style={{ marginBottom: "var(--sp-3)" }}>
           <div style={{ display: "grid", gridTemplateColumns: "1fr 2fr", gap: "var(--sp-3)" }}>
             <label className="field"><span className="t-label">Name</span><input className="input" value={mcp.label} onChange={(e) => setMcp({ ...mcp, label: e.target.value })} placeholder="e.g. Web search" /></label>
