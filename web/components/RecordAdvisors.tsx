@@ -7,7 +7,7 @@
 import { useState } from "react";
 import { EXEC_BY_KEY, type Exec } from "@/lib/team";
 import AgentDrawer, { type AgentContext } from "@/components/AgentDrawer";
-import { AgentProgress, useAgentRun } from "@/components/AgentProgress";
+import ProposeDrawer from "@/components/ProposeDrawer";
 import type { Target } from "@/components/RecordWorkspace";
 
 type AgentRow = { id: string; key: string; name: string; role: string | null };
@@ -18,17 +18,16 @@ const AREA_TEAM: Record<Target["kind"], string[]> = { product: ["cpo", "ceng"], 
 function initials(name: string) { return name.replace(/[^a-zA-Z ]/g, "").split(" ").filter(Boolean).slice(0, 2).map((w) => w[0]).join("").toUpperCase() || "AI"; }
 
 export default function RecordAdvisors({
-  target, recordName, agents, pendingByName, onRun, onRan, onError,
+  target, recordName, agents, pendingByName, onRan,
 }: {
   target: Target;
   recordName?: string;
   agents: AgentRow[];
   pendingByName: Record<string, number>;
-  onRun: (keys: string[]) => Promise<void>; // joint proposal: the pair's keys
   onRan: () => void;
-  onError: (msg: string | null) => void;
 }) {
   const [openExec, setOpenExec] = useState<Exec | null>(null);
+  const [proposeOpen, setProposeOpen] = useState(false);
 
   // The area's officers that actually exist in this org; fall back to whatever
   // active agents exist so the surface is never empty.
@@ -58,11 +57,18 @@ export default function RecordAdvisors({
               <AdvisorCard key={e.key} exec={e} onAsk={() => setOpenExec(e)} />
             ))}
           </div>
-          <JointPropose advisors={advisors} pending={totalPending} onRun={() => onRun(advisors.map((a) => a.key))} onRan={onRan} onError={onError} />
+          <ProposeBar advisors={advisors} pending={totalPending} onOpen={() => setProposeOpen(true)} />
         </>
       )}
 
       <AgentDrawer exec={openExec} open={!!openExec} onClose={() => setOpenExec(null)} context={context} />
+      <ProposeDrawer
+        open={proposeOpen}
+        onClose={() => setProposeOpen(false)}
+        target={{ kind: target.kind, id: target.id, name: recordName }}
+        advisors={advisors.map((a) => ({ key: a.key, name: a.name, short: a.short, accent: a.accent }))}
+        onDone={onRan}
+      />
     </div>
   );
 }
@@ -83,18 +89,9 @@ function AdvisorCard({ exec, onAsk }: { exec: Exec; onAsk: () => void }) {
   );
 }
 
-// The joint proposal: the pair draft one change to the record together.
-function JointPropose({ advisors, pending, onRun, onRan, onError }: {
-  advisors: Exec[]; pending: number; onRun: () => Promise<void>; onRan: () => void; onError: (m: string | null) => void;
-}) {
-  const run = useAgentRun("propose");
-  async function propose() {
-    onError(null);
-    try { await run.go(() => onRun()); onRan(); }
-    catch (e) { onError(e instanceof Error ? e.message : "Proposal failed."); }
-  }
+// The joint proposal entry point — opens the ProposeDrawer where it runs live.
+function ProposeBar({ advisors, pending, onOpen }: { advisors: Exec[]; pending: number; onOpen: () => void }) {
   const names = advisors.map((a) => a.name.split(" ").slice(-1)[0]).join(" + ");
-
   return (
     <div className="card card-pad" style={{ display: "flex", flexDirection: "column", gap: 10 }}>
       <div className="row-between" style={{ alignItems: "center", gap: 12, flexWrap: "wrap" }}>
@@ -106,19 +103,18 @@ function JointPropose({ advisors, pending, onRun, onRan, onError }: {
           </div>
           <div style={{ minWidth: 0 }}>
             <div style={{ fontSize: 14, fontWeight: 660 }}>Joint proposal</div>
-            <div className="t-sub t-muted" style={{ fontSize: 12 }}>{names} draft one change to this record together.</div>
+            <div className="t-sub t-muted" style={{ fontSize: 12 }}>{names} draft one change together — runs in a side panel, with their reasoning.</div>
           </div>
         </div>
         <div className="row gap-2" style={{ alignItems: "center" }}>
-          {pending > 0 && !run.active && (
+          {pending > 0 && (
             <span className="row gap-2" style={{ fontSize: 12, color: "var(--vl-text)", fontWeight: 600 }}>
               <span className="agent-progress-dot" style={{ background: "var(--vl)" }} aria-hidden />{pending} waiting
             </span>
           )}
-          <button className="btn btn-accent btn-sm" onClick={propose} disabled={run.active}>{run.active ? "Working…" : "✦ Propose"}</button>
+          <button className="btn btn-accent btn-sm" onClick={onOpen}>✦ Propose</button>
         </div>
       </div>
-      {run.active && <AgentProgress run={run} />}
     </div>
   );
 }

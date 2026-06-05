@@ -38,6 +38,10 @@ const CORS = {
   "Access-Control-Allow-Methods": "POST, OPTIONS",
 };
 
+// Separates the streamed reasoning trace from the final JSON result (the client
+// splits on the same glyph). Won't occur in normal model output.
+const ANSWER_MARK = "␞";
+
 // The shape we ask Claude to return (structured outputs guarantee valid JSON).
 // Mirrors proposals + proposal_changes. conf_level range is clamped in code
 // (structured outputs can't express numeric min/max).
@@ -282,6 +286,82 @@ Deno.serve(async (req: Request) => {
       recordIntelText,
       lenses.length ? `\nFELLOW OFFICERS' INPUT — co-authors' lenses; weigh them and fold the right parts into your proposal:\n${lenses.join("\n\n")}` : "",
     ].join("\n");
+
+    const requestBody = {
+      model,
+      max_tokens: 16000,
+      thinking: { type: "adaptive" },
+      output_config: { effort: "high", format: { type: "json_schema", schema: PROPOSAL_SCHEMA } },
+      system: [{ type: "text", text: systemText, cache_control: { type: "ephemeral" } }],
+      messages: [{ role: "user", content: userText }],
+    };
+    const jointBy = [agent.name, ...advisorNames].join(" + ");
+
+    // Persist a parsed proposal + its field changes; returns a compact summary
+    // (including a readable change list) used by both the streaming and JSON paths.
+    // deno-lint-ignore no-explicit-any
+    async function persist(proposal: any, usage: { input_tokens: number; output_tokens: number }) {
+      const confLevel = Math.min(1, Math.max(0, Number(proposal.conf_level) || 0));
+      const { data: createdProposal, error: propErr } = await supabase
+        .from("proposals").insert({
+          org_id: orgId, product_id: product_id ?? null, gtm_record_id: gtm_record_id ?? null,
+          title: proposal.title, rationale: proposal.rationale, conf_level: confLevel,
+          conf_label: proposal.conf_label, proposed_by: jointBy,
+        }).select("id").single();
+      if (propErr) throw new Error(`could not create proposal: ${propErr.message}`);
+      const pid = createdProposal.id as string;
+      const known = new Set((fields ?? []).map((f) => f.id));
+      // deno-lint-ignore no-explicit-any
+      const rows: any[] = []; const display: { label: string; kind: string; proposed_value: string }[] = [];
+      for (const c of (proposal.changes ?? [])) {
+        if (c.change_kind === "update_field" && c.record_field_id && known.has(c.record_field_id)) {
+          const ex = (fields ?? []).find((f) => f.id === c.record_field_id);
+          rows.push({ org_id: orgId, proposal_id: pid, change_kind: "update_field", record_field_id: c.record_field_id, old_value: ex?.value ?? null, field_key: null, label: null, proposed_value: c.proposed_value });
+          display.push({ label: ex?.label ?? "Field", kind: "update", proposed_value: c.proposed_value });
+        } else if (c.change_kind === "add_field" && c.field_key && c.label) {
+          rows.push({ org_id: orgId, proposal_id: pid, change_kind: "add_field", record_field_id: null, old_value: null, field_key: c.field_key, label: c.label, proposed_value: c.proposed_value });
+          display.push({ label: c.label, kind: "add", proposed_value: c.proposed_value });
+        }
+      }
+      if (rows.length > 0) {
+        const { error: chErr } = await supabase.from("proposal_changes").insert(rows);
+        if (chErr) { await supabase.from("proposals").delete().eq("id", pid); throw new Error(`could not save changes: ${chErr.message}`); }
+      }
+      const price = PRICING[model];
+      const cost = price ? (usage.input_tokens * price.input + usage.output_tokens * price.output) / 1_000_000 : null;
+      await supabase.from("agent_runs").update({ status: "succeeded", output: JSON.stringify(proposal), input_tokens: usage.input_tokens, output_tokens: usage.output_tokens, cost_usd: cost, finished_at: new Date().toISOString() }).eq("id", runId);
+      return { run_id: runId, proposal_id: pid, proposal: { title: proposal.title, rationale: proposal.rationale, conf_level: confLevel, conf_label: proposal.conf_label, proposed_by: jointBy, changes: display } };
+    }
+
+    // Streaming path: emit the author's REAL reasoning, then a marker, then the
+    // persisted proposal as JSON. (Advisor lenses above already ran.)
+    if (input.stream) {
+      const enc = new TextEncoder();
+      const stream = new ReadableStream({
+        async start(controller) {
+          try {
+            // deno-lint-ignore no-explicit-any
+            const s = anthropic.messages.stream(requestBody as any);
+            // deno-lint-ignore no-explicit-any
+            for await (const ev of s as any) {
+              if (ev.type === "content_block_delta" && ev.delta?.type === "thinking_delta" && ev.delta.thinking) {
+                controller.enqueue(enc.encode(ev.delta.thinking));
+              }
+            }
+            const message = await s.finalMessage();
+            const tb = message.content.find((b: { type: string }) => b.type === "text");
+            if (!tb || tb.type !== "text") throw new Error(`no proposal returned (stop_reason: ${message.stop_reason})`);
+            const summary = await persist(JSON.parse(tb.text), message.usage);
+            controller.enqueue(enc.encode(ANSWER_MARK + JSON.stringify(summary)));
+          } catch (e) {
+            const msg = e instanceof Error ? e.message : String(e);
+            await supabase.from("agent_runs").update({ status: "failed", error: msg, finished_at: new Date().toISOString() }).eq("id", runId);
+            controller.enqueue(enc.encode(ANSWER_MARK + JSON.stringify({ error: msg })));
+          } finally { controller.close(); }
+        },
+      });
+      return new Response(stream, { headers: { ...CORS, "content-type": "text/plain; charset=utf-8", "cache-control": "no-cache" } });
+    }
 
     // Cast the body to `any`: adaptive thinking / output_config / effort may be
     // newer than the pinned SDK's request types, but the SDK forwards the body

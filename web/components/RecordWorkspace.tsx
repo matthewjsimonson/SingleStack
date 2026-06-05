@@ -41,24 +41,6 @@ export default function RecordWorkspace({ target, recordName }: { target: Target
 
   useEffect(() => { load(); }, [load]);
 
-  // Run a JOINT proposal pass: the area's officers (CPO+Chief Eng / CCO+CRO) draft
-  // one proposal together. Throws on failure so the card shows its error state.
-  const proposeFor = useCallback(async (keys: string[]) => {
-    const { data: s } = await supabase.auth.getSession();
-    const token = s.session?.access_token;
-    // agent_key (first officer) kept for back-compat until the joint-aware
-    // function is deployed; agent_keys drives the joint chain once it is.
-    const base = { agent_keys: keys, agent_key: keys[0] };
-    const body = target.kind === "product"
-      ? { ...base, product_id: target.id }
-      : { ...base, gtm_record_id: target.id };
-    const { data, error } = await supabase.functions.invoke("agent-propose", {
-      body, headers: token ? { Authorization: `Bearer ${token}` } : undefined,
-    });
-    if (error) throw error;
-    if (data?.error) throw new Error(data.error);
-  }, [supabase, target]);
-
   async function accept(id: string) {
     setAcceptingId(id); setError(null);
     try {
@@ -80,7 +62,7 @@ export default function RecordWorkspace({ target, recordName }: { target: Target
 
       {/* Advisors — the agents that live on this record, aligned to its area */}
       {loading ? <div className="t-sub t-muted" style={{ marginBottom: "var(--sp-6)" }}>Loading…</div>
-        : <RecordAdvisors target={target} recordName={recordName} agents={agents} pendingByName={pendingByName} onRun={proposeFor} onRan={load} onError={setError} />}
+        : <RecordAdvisors target={target} recordName={recordName} agents={agents} pendingByName={pendingByName} onRan={load} />}
 
       {/* Structured content */}
       <SectionedFields key={fieldsNonce} target={target} />

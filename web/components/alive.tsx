@@ -129,6 +129,54 @@ export async function streamAgentChat(opts: {
   }
 }
 
+// Like streamAgentChat, but for STRUCTURED functions (run-play / agent-propose):
+// the stream is the real reasoning, then ANSWER_MARK, then the final JSON result.
+// onThinking() gets the live reasoning; the parsed result is returned. Falls back
+// to the plain JSON response if the function isn't streaming yet.
+export async function streamStructured<T = unknown>(opts: {
+  fnName: string;
+  body: Record<string, unknown>;
+  token?: string;
+  onThinking: (s: string) => void;
+}): Promise<T> {
+  const base = process.env.NEXT_PUBLIC_SUPABASE_URL ?? "";
+  const resp = await fetch(`${base}/functions/v1/${opts.fnName}`, {
+    method: "POST",
+    headers: {
+      "content-type": "application/json",
+      apikey: process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY ?? "",
+      ...(opts.token ? { Authorization: `Bearer ${opts.token}` } : {}),
+    },
+    body: JSON.stringify({ ...opts.body, stream: true }),
+  });
+  if (!resp.ok) throw new Error((await resp.text().catch(() => "")) || `${opts.fnName} failed (${resp.status}).`);
+  if ((resp.headers.get("content-type") ?? "").includes("application/json")) {
+    const data = await resp.json();
+    if (data?.error) throw new Error(data.error);
+    return data as T; // non-streaming fallback (no reasoning trace)
+  }
+  if (!resp.body) throw new Error("no response body");
+  const reader = resp.body.getReader();
+  const dec = new TextDecoder();
+  let inResult = false;
+  let resultBuf = "";
+  for (;;) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    const s = dec.decode(value, { stream: true });
+    if (!s) continue;
+    if (inResult) { resultBuf += s; continue; }
+    const idx = s.indexOf(ANSWER_MARK);
+    if (idx === -1) { opts.onThinking(s); continue; }
+    if (idx > 0) opts.onThinking(s.slice(0, idx));
+    inResult = true;
+    resultBuf += s.slice(idx + ANSWER_MARK.length);
+  }
+  const parsed = JSON.parse(resultBuf || "{}");
+  if (parsed?.error) throw new Error(parsed.error);
+  return parsed as T;
+}
+
 // Bundles the reasoning trace + the typewriter answer for a single AI reply.
 export function useAliveReply() {
   const tw = useTypewriter();
