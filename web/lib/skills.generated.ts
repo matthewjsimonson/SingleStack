@@ -59,9 +59,9 @@ export const SKILL_DEFS: SkillDef[] = [
   {
     "key": "demo_architecture_review",
     "name": "Architecture review",
-    "description": "Keep technical claims precise and buildable.",
+    "description": "Keep technical claims precise, feasible, and buildable.",
     "category": "general",
-    "instructions": "Review technical fields for accuracy and feasibility. Flag risk, keep stack/integration detail precise, and separate what's buildable now from later. Watch frontier-model capabilities for what's newly possible.",
+    "instructions": "# Architecture review\n\nKeep the record's technical claims precise and feasible, and separate what's buildable now from later.\n\n## How you do it\n1. **Audit for precision.** Stack, integrations, data model, security — every claim exact. Flag anything vague or aspirational stated as fact.\n2. **Now vs. later.** Split capabilities into shippable-now and aspirational. For each \"later,\" name the dependency or unlock it waits on.\n3. **Surface risk.** Call out technical risk, fragile integrations, and security exposure plainly — each with a concrete de-risking move.\n4. **Watch the frontier.** Check recent frontier-model/platform capabilities; when something is newly possible, say so and what it unlocks for the record.\n\n## What good looks like\nA technically honest record: precise claims, a clean now/later split, the single biggest risk named with a mitigation, and any newly-feasible capability flagged.",
     "agents": [
       "ceng"
     ],
@@ -70,9 +70,9 @@ export const SKILL_DEFS: SkillDef[] = [
   {
     "key": "demo_competitive_battlecard",
     "name": "Competitive battlecard",
-    "description": "Equip GTM to win against alternatives.",
+    "description": "Equip GTM to win against named alternatives.",
     "category": "gtm",
-    "instructions": "Frame the win against named competitors (Productboard, Crayon, Klue, Aha!, Gong): where we're clearly better, where to reframe, and the proof. Ground in competitive and market signals; keep it honest and specific.",
+    "instructions": "# Competitive battlecard\n\nEquip a rep to win a live deal against a named competitor — honest, specific, and usable.\n\n## How you do it\n1. **Frame by name.** Productboard, Crayon, Klue, Aha!, Gong — for each, where we clearly win, where we're at parity, and where we honestly reframe.\n2. **Ground in evidence.** Use the capability matrix, competitive signals, and market signals. Cite them; flag thin spots honestly rather than bluffing.\n3. **Set the trap.** The early question or proof point that frames the category our way before the competitor can.\n4. **Handle their best objection.** Name their strongest counter and the crisp, true response — plus the proof point that closes.\n\n## What good looks like\nSomething a rep can act on mid-call: win lines, the trap, objection handling, and proof — all true, all specific, no overclaiming (overclaiming loses deals).",
     "agents": [
       "cro"
     ],
@@ -81,9 +81,9 @@ export const SKILL_DEFS: SkillDef[] = [
   {
     "key": "demo_narrative_voice",
     "name": "Narrative & brand voice",
-    "description": "Keep the story consistent and compelling.",
+    "description": "Keep the story consistent, compelling, and on-voice.",
     "category": "gtm",
-    "instructions": "Keep the narrative consistent across records: confident, concrete, human-in-the-loop. Avoid AI hype; emphasize control and living truth.",
+    "instructions": "# Narrative & brand voice\n\nKeep one story across every record — confident, concrete, human-in-the-loop.\n\n## How you do it\n1. **One story, everywhere.** Reconcile the narrative across the product record, GTM records, and messaging. When two drift, fix the drift.\n2. **Concrete over hype.** Avoid AI-hype and empty superlatives. Emphasize what's actually differentiating: a *living* record, **human ratification**, and evidence-backed confidence.\n3. **Reframe, don't hide.** Turn weaknesses into honest reframes; find the wedge that bends the category our way.\n4. **Hold the voice.** Confident, concrete, human. Lead with the reader's outcome, not our cleverness.\n\n## What good looks like\nA consistent through-line a reader feels across surfaces: same wedge, same voice, no hype, weaknesses reframed rather than buried.",
     "agents": [
       "cco"
     ],
@@ -92,9 +92,9 @@ export const SKILL_DEFS: SkillDef[] = [
   {
     "key": "demo_persona_messaging",
     "name": "Persona messaging",
-    "description": "Tune messaging to each buyer.",
+    "description": "Tune the message to each buyer.",
     "category": "gtm",
-    "instructions": "Match the message to the persona. Lead with the outcome they care about, address their top objection, and use language pulled from real signals.",
+    "instructions": "# Persona messaging\n\nMatch the message to the buyer — their outcome, their objection, their words.\n\n## How you do it\n1. **Lead with their outcome.** Open with what *this* persona is accountable for, not our feature list. A product leader, an exec buyer, and an end user each need a different opening line.\n2. **Address the top objection.** Name the one thing that would stop them (\"is this just an AI wrapper?\", \"governance/audit?\") and answer it up front.\n3. **Use their language.** Pull phrasing from real signals (buyer intent, reviews, calls) rather than inventing it.\n4. **One ask.** End on the single next step that fits where they are in the journey.\n\n## What good looks like\nPer persona: a one-line hook tied to their outcome, the objection handled, language drawn from real signals, and one clear CTA. No generic \"AI for everyone\" copy.",
     "agents": [
       "cro"
     ],
@@ -103,9 +103,9 @@ export const SKILL_DEFS: SkillDef[] = [
   {
     "key": "demo_positioning_sharpening",
     "name": "Positioning sharpening",
-    "description": "Tighten how the product is positioned against alternatives.",
+    "description": "Tighten how the product is positioned against the alternatives.",
     "category": "product",
-    "instructions": "Sharpen positioning to be specific and defensible. Lead with the category we're reframing, name the alternative we are NOT (roadmapping tools, CI feeds, call analytics), and ground every claim in a signal. Avoid hype; prefer concrete proof.",
+    "instructions": "# Positioning sharpening\n\nMake the product's positioning specific, defensible, and impossible to confuse with the alternatives.\n\n## How you do it\n1. **Name the category we're reframing.** Lead with the shift — a *living system of record for product + GTM*, where agents propose and humans ratify.\n2. **Name what we are NOT.** Contrast explicitly with roadmapping tools (Aha!), CI feeds (Crayon, Klue), and call analytics (Gong). The reader should know in one line why we're a different kind of thing.\n3. **Ground every claim in a signal.** Each positioning statement should trace to a signal or theme. If it can't, it's a hypothesis — mark it as one.\n4. **Cut hype.** Replace adjectives with proof. \"AI-powered\" → the specific capability and the evidence it works.\n\n## What good looks like\nA positioning line a stranger could repeat accurately after reading once: the category, the wedge, and one concrete proof. No overlap with the alternatives, nothing unsupported.",
     "agents": [
       "cpo"
     ],
@@ -114,9 +114,9 @@ export const SKILL_DEFS: SkillDef[] = [
   {
     "key": "demo_roadmap_prioritization",
     "name": "Roadmap prioritization",
-    "description": "Decide what to build next from evidence.",
+    "description": "Decide what to build next, from evidence.",
     "category": "product",
-    "instructions": "Prioritize by corroborated demand (escalating themes), strategic fit, and buildability. Recommend the smallest change that moves the metric; cite the signals behind it.",
+    "instructions": "# Roadmap prioritization\n\nDecide what to build next from evidence, not opinion — and recommend the smallest move that shifts the metric.\n\n## How you do it\n1. **Weight by corroborated demand.** Escalating, multi-source themes beat one loud signal. Use the themes (and their confidence) as the demand signal.\n2. **Check strategic fit.** Does it advance the category we're claiming (living system of record), or is it a distraction?\n3. **Check buildability.** Pull the engineering read — what's buildable now vs. later, and the dependency on each \"later.\"\n4. **Pick the smallest unlock.** Recommend the minimal change that moves the outcome, and name the metric it moves.\n\n## What good looks like\nA ranked shortlist where each item carries: the theme/signals behind it, why now, the metric it moves, and a rough effort. Honest about what you're choosing *not* to do.",
     "agents": [
       "cpo"
     ],

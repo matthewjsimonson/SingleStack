@@ -226,8 +226,19 @@ export async function loadDemoData(supabase: SupabaseClient, orgId: string): Pro
     const skillDefs = SKILL_DEFS; // canonical source: web/skills/**/SKILL.md → skills.generated.ts
     let made = 0;
     for (const s of skillDefs) {
-      let { data: sk } = await supabase.from("skills").insert({ org_id: orgId, key: s.key, name: s.name, description: s.description, category: s.category, instructions: s.instructions, source: "template" }).select("id").maybeSingle();
-      if (!sk) { const { data: found } = await supabase.from("skills").select("id").eq("key", s.key).maybeSingle(); sk = found; } else made++;
+      // SKILL.md is the source of truth for built-in (template) skills: insert if missing,
+      // otherwise sync content — but never clobber a skill a human/agent has evolved.
+      let sk: { id: string } | null = null;
+      const { data: existing } = await supabase.from("skills").select("id, source").eq("key", s.key).maybeSingle();
+      if (existing) {
+        sk = { id: (existing as { id: string }).id };
+        if ((existing as { source?: string }).source === "template") {
+          await supabase.from("skills").update({ name: s.name, description: s.description, category: s.category, instructions: s.instructions }).eq("id", sk.id);
+        }
+      } else {
+        const { data: created } = await supabase.from("skills").insert({ org_id: orgId, key: s.key, name: s.name, description: s.description, category: s.category, instructions: s.instructions, source: "template" }).select("id").single();
+        if (created) { sk = { id: (created as { id: string }).id }; made++; }
+      }
       if (sk) {
         for (const k of s.agents) {
           const aid = agentId(k); if (!aid) continue;
