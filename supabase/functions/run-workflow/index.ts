@@ -162,7 +162,7 @@ Deno.serve(async (req: Request) => {
         `\nRun step ${idx + 1} now.`,
       ].filter(Boolean).join("\n");
       const body = {
-        model: aModel, max_tokens: 2600, thinking: { type: "adaptive", display: "summarized" },
+        model: aModel, max_tokens: 8000, thinking: { type: "adaptive", display: "summarized" },
         output_config: { effort: "high", format: { type: "json_schema", schema: SCHEMA } },
         system: [{ type: "text", text: system, cache_control: { type: "ephemeral" } }],
         messages: [{ role: "user", content: user }],
@@ -183,7 +183,9 @@ Deno.serve(async (req: Request) => {
       }
       const block = resp.content.find((b) => b.type === "text");
       if (!block || block.type !== "text") throw new Error(`step ${idx + 1} (${ag.name}) returned no analysis`);
-      const payload = JSON.parse(block.text);
+      if (resp.stop_reason === "max_tokens") throw new Error(`step ${idx + 1} (${ag.name}) ran out of room (hit the token cap before finishing). Try a tighter instruction.`);
+      let payload;
+      try { payload = JSON.parse(block.text); } catch { throw new Error(`step ${idx + 1} (${ag.name}) returned malformed output — likely truncated. Try a tighter instruction.`); }
       results.push({ agentName: ag.name as string, skillName: playSkill?.name ?? null, payload });
       inTok += resp.usage.input_tokens; outTok += resp.usage.output_tokens;
       const price = PRICING[aModel]; if (price) cost += (resp.usage.input_tokens * price.input + resp.usage.output_tokens * price.output) / 1_000_000;
