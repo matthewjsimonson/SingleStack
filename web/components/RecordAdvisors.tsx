@@ -27,7 +27,7 @@ export default function RecordAdvisors({
   onRan: () => void;
 }) {
   const [openExec, setOpenExec] = useState<Exec | null>(null);
-  const [proposeOpen, setProposeOpen] = useState(false);
+  const [propose, setPropose] = useState<null | "run" | "review">(null);
 
   // The area's officers that actually exist in this org; fall back to whatever
   // active agents exist so the surface is never empty.
@@ -57,14 +57,15 @@ export default function RecordAdvisors({
               <AdvisorCard key={e.key} exec={e} onAsk={() => setOpenExec(e)} />
             ))}
           </div>
-          <ProposeBar advisors={advisors} pending={totalPending} onOpen={() => setProposeOpen(true)} />
+          <ProposeBar advisors={advisors} pending={totalPending} onPropose={() => setPropose("run")} onReview={() => setPropose("review")} />
         </>
       )}
 
       <AgentDrawer exec={openExec} open={!!openExec} onClose={() => setOpenExec(null)} context={context} />
       <ProposeDrawer
-        open={proposeOpen}
-        onClose={() => setProposeOpen(false)}
+        open={propose !== null}
+        mode={propose ?? "run"}
+        onClose={() => setPropose(null)}
         target={{ kind: target.kind, id: target.id, name: recordName }}
         advisors={advisors.map((a) => ({ key: a.key, name: a.name, short: a.short, accent: a.accent }))}
         onDone={onRan}
@@ -89,8 +90,9 @@ function AdvisorCard({ exec, onAsk }: { exec: Exec; onAsk: () => void }) {
   );
 }
 
-// The joint proposal entry point — opens the ProposeDrawer where it runs live.
-function ProposeBar({ advisors, pending, onOpen }: { advisors: Exec[]; pending: number; onOpen: () => void }) {
+// The joint proposal entry point. Propose drafts a new one; the "N waiting" pill
+// opens the same drawer to review what's already pending. Both run in the side panel.
+function ProposeBar({ advisors, pending, onPropose, onReview }: { advisors: Exec[]; pending: number; onPropose: () => void; onReview: () => void }) {
   const names = advisors.map((a) => a.name.split(" ").slice(-1)[0]).join(" + ");
   return (
     <div className="card card-pad" style={{ display: "flex", flexDirection: "column", gap: 10 }}>
@@ -108,11 +110,11 @@ function ProposeBar({ advisors, pending, onOpen }: { advisors: Exec[]; pending: 
         </div>
         <div className="row gap-2" style={{ alignItems: "center" }}>
           {pending > 0 && (
-            <span className="row gap-2" style={{ fontSize: 12, color: "var(--vl-text)", fontWeight: 600 }}>
+            <button onClick={onReview} title="Review what's waiting" className="row gap-2" style={{ fontSize: 12, color: "var(--vl-text)", fontWeight: 600, background: "var(--vl-fill)", border: "1px solid var(--vl)", borderRadius: 999, padding: "4px 10px", cursor: "pointer" }}>
               <span className="agent-progress-dot" style={{ background: "var(--vl)" }} aria-hidden />{pending} waiting
-            </span>
+            </button>
           )}
-          <button className="btn btn-accent btn-sm" onClick={onOpen}>✦ Propose</button>
+          <button className="btn btn-accent btn-sm" onClick={onPropose}>✦ Propose</button>
         </div>
       </div>
     </div>

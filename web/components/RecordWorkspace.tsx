@@ -4,7 +4,7 @@
 // content (delegated to SectionedFields), and proposals to review/accept.
 import { useEffect, useState, useCallback } from "react";
 import { createClient } from "@/lib/supabase/client";
-import { Section, Chip, Banner, Confidence } from "@/components/ui";
+import { Section, Chip, Banner } from "@/components/ui";
 import SectionedFields from "@/components/SectionedFields";
 import RecordAdvisors from "@/components/RecordAdvisors";
 
@@ -25,7 +25,6 @@ export default function RecordWorkspace({ target, recordName }: { target: Target
   const [agents, setAgents] = useState<Agent[]>([]);
   const [proposals, setProposals] = useState<Proposal[]>([]);
   const [loading, setLoading] = useState(true);
-  const [acceptingId, setAcceptingId] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [fieldsNonce, setFieldsNonce] = useState(0); // bump to refresh SectionedFields after accept
 
@@ -41,16 +40,9 @@ export default function RecordWorkspace({ target, recordName }: { target: Target
 
   useEffect(() => { load(); }, [load]);
 
-  async function accept(id: string) {
-    setAcceptingId(id); setError(null);
-    try {
-      const { error } = await supabase.rpc("accept_proposal", { p_proposal: id, p_ratifier: "web" });
-      if (error) throw error;
-      await load();
-      setFieldsNonce((n) => n + 1); // field values changed — refresh the content panels
-    } catch (e) { setError(e instanceof Error ? e.message : "Accept failed."); }
-    finally { setAcceptingId(null); }
-  }
+  // Drawer actions (accept / reject / hide) call this: refresh proposal counts and,
+  // since an accept changes field values, re-mount the content panels.
+  const refresh = useCallback(() => { load(); setFieldsNonce((n) => n + 1); }, [load]);
 
   const pending = proposals.filter((p) => p.status === "pending");
   const resolved = proposals.filter((p) => p.status !== "pending");
@@ -62,33 +54,13 @@ export default function RecordWorkspace({ target, recordName }: { target: Target
 
       {/* Advisors — the agents that live on this record, aligned to its area */}
       {loading ? <div className="t-sub t-muted" style={{ marginBottom: "var(--sp-6)" }}>Loading…</div>
-        : <RecordAdvisors target={target} recordName={recordName} agents={agents} pendingByName={pendingByName} onRan={load} />}
+        : <RecordAdvisors target={target} recordName={recordName} agents={agents} pendingByName={pendingByName} onRan={refresh} />}
 
       {/* Structured content */}
       <SectionedFields key={fieldsNonce} target={target} />
 
-      {/* Proposals */}
-      <Section label={<span className="row gap-2" style={{ gap: 8 }}>Proposals {pending.length > 0 && <Chip tone="violet">{pending.length} pending</Chip>}</span>}>
-        {pending.length === 0 && <div className="t-sub t-muted">No pending proposals. Run an agent to generate one.</div>}
-        <div className="stack-3">
-          {pending.map((p) => (
-            <div key={p.id} className="card card-pad" style={{ borderLeft: "2px solid var(--vl)" }}>
-              <div className="row-between" style={{ gap: 12, marginBottom: 8, alignItems: "flex-start" }}>
-                <div style={{ fontSize: 15, fontWeight: 620 }}>{p.title}</div>
-                <Confidence label={p.conf_label} level={p.conf_level} />
-              </div>
-              {p.rationale && <p className="t-sub" style={{ lineHeight: 1.55, marginBottom: 14 }}>{p.rationale}</p>}
-              <div className="row gap-3">
-                <button className="btn btn-success" disabled={acceptingId !== null} onClick={() => accept(p.id)}>
-                  {acceptingId === p.id ? "Accepting…" : "Accept"}
-                </button>
-                <span className="t-mono-xs">{p.proposed_by} · {new Date(p.created_at).toLocaleDateString()}</span>
-              </div>
-            </div>
-          ))}
-        </div>
-      </Section>
-
+      {/* Pending proposals live in the Advisors' side drawer (the "N waiting" pill).
+          Only resolved proposals are logged here, as history. */}
       {resolved.length > 0 && (
         <Section label="History">
           <div className="stack-3">

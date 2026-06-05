@@ -1,24 +1,27 @@
 "use client";
 
-// ProposeDrawer — the joint proposal runs in a right pop-out: the officers' REAL
-// reasoning streams while they work, then the proposed changes appear to review
-// and Accept / Dismiss in place.
+// ProposeDrawer — the right pop-out for a record's proposals.
+//   mode="run"    → the officers draft a NEW proposal: their real reasoning streams,
+//                   then it lands in the waiting list below.
+//   mode="review" → just review what's already waiting.
+// Every waiting proposal can be Accepted (applied), Rejected (kept as rejected), or
+// Hidden (the record is deleted outright).
 import { useCallback, useEffect, useRef, useState } from "react";
 import { createClient } from "@/lib/supabase/client";
 import { Chip, Confidence } from "@/components/ui";
-import { PulseDots } from "@/components/alive";
-import { streamStructured } from "@/components/alive";
+import { PulseDots, streamStructured } from "@/components/alive";
 
 type Advisor = { key: string; name: string; short: string; accent: string };
-type Change = { label: string; kind: string; proposed_value: string };
-type Result = {
-  proposal_id: string;
-  proposal: { title: string; rationale: string; conf_level: number; conf_label: string; proposed_by: string; changes: Change[] };
+type Change = { label: string; kind: "add" | "update"; proposed_value: string };
+type Pending = {
+  id: string; title: string; rationale: string | null; conf_label: string | null;
+  conf_level: number | null; proposed_by: string; created_at: string; changes: Change[];
 };
 
-export default function ProposeDrawer({ open, onClose, target, advisors, onDone }: {
+export default function ProposeDrawer({ open, onClose, mode, target, advisors, onDone }: {
   open: boolean;
   onClose: () => void;
+  mode: "run" | "review";
   target: { kind: "product" | "gtm"; id: string; name?: string };
   advisors: Advisor[];
   onDone: () => void;
@@ -26,45 +29,69 @@ export default function ProposeDrawer({ open, onClose, target, advisors, onDone 
   const supabase = createClient();
   const [thinking, setThinking] = useState("");
   const [busy, setBusy] = useState(false);
-  const [result, setResult] = useState<Result | null>(null);
+  const [pending, setPending] = useState<Pending[]>([]);
+  const [loaded, setLoaded] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [acting, setActing] = useState(false);
+  const [acting, setActing] = useState<string | null>(null);
   const traceRef = useRef<HTMLDivElement>(null);
   const started = useRef(false);
 
+  const idKey = target.kind === "product" ? "product_id" : "gtm_record_id";
+
+  const loadPending = useCallback(async () => {
+    const { data } = await supabase
+      .from("proposals")
+      .select("id, title, rationale, conf_label, conf_level, proposed_by, created_at, proposal_changes ( change_kind, label, proposed_value, record_field_id, record_fields ( label ) )")
+      .eq(idKey, target.id).eq("status", "pending").order("created_at", { ascending: false });
+    // deno-lint-ignore no-explicit-any
+    const list: Pending[] = (data ?? []).map((p: any) => ({
+      id: p.id, title: p.title, rationale: p.rationale, conf_label: p.conf_label, conf_level: p.conf_level, proposed_by: p.proposed_by, created_at: p.created_at,
+      // deno-lint-ignore no-explicit-any
+      changes: (p.proposal_changes ?? []).map((c: any) => ({ label: c.label ?? c.record_fields?.label ?? "Field", kind: c.change_kind === "add_field" ? "add" : "update", proposed_value: c.proposed_value })),
+    }));
+    setPending(list); setLoaded(true);
+  }, [supabase, idKey, target.id]);
+
   const run = useCallback(async () => {
-    setBusy(true); setThinking(""); setResult(null); setError(null);
+    setBusy(true); setThinking(""); setError(null);
     try {
       const { data: sess } = await supabase.auth.getSession();
-      const idKey = target.kind === "product" ? "product_id" : "gtm_record_id";
-      const res = await streamStructured<Result>({
+      await streamStructured({
         fnName: "agent-propose",
         token: sess.session?.access_token,
         body: { agent_keys: advisors.map((a) => a.key), agent_key: advisors[0]?.key, [idKey]: target.id },
         onThinking: (s) => setThinking((p) => p + s),
       });
-      setResult(res);
+      await loadPending();
     } catch (e) { setError(e instanceof Error ? e.message : "Proposal failed."); }
     finally { setBusy(false); }
-  }, [supabase, target.kind, target.id, advisors]);
+  }, [supabase, advisors, idKey, target.id, loadPending]);
 
-  // Kick off once per open.
+  // On open: load what's waiting, and (run mode) kick off a fresh proposal once.
   useEffect(() => {
-    if (!open) { started.current = false; setThinking(""); setResult(null); setError(null); setBusy(false); return; }
-    if (started.current) return; started.current = true; run();
-  }, [open, run]);
+    if (!open) { started.current = false; setThinking(""); setBusy(false); setError(null); setPending([]); setLoaded(false); return; }
+    loadPending();
+    if (mode === "run" && !started.current) { started.current = true; run(); }
+  }, [open, mode, loadPending, run]);
   useEffect(() => { traceRef.current?.scrollTo({ top: traceRef.current.scrollHeight }); }, [thinking]);
 
-  async function accept() {
-    if (!result) return; setActing(true); setError(null);
-    const { error } = await supabase.rpc("accept_proposal", { p_proposal: result.proposal_id, p_ratifier: "web" });
-    if (error) { setError(error.message); setActing(false); return; }
-    onDone(); onClose();
+  async function accept(id: string) {
+    setActing(id); setError(null);
+    const { error } = await supabase.rpc("accept_proposal", { p_proposal: id, p_ratifier: "web" });
+    if (error) { setError(error.message); setActing(null); return; }
+    await loadPending(); onDone(); setActing(null);
   }
-  async function dismiss() {
-    if (!result) return; setActing(true);
-    await supabase.from("proposals").update({ status: "dismissed" }).eq("id", result.proposal_id);
-    onDone(); onClose();
+  async function reject(id: string) {
+    setActing(id); setError(null);
+    const { error } = await supabase.from("proposals").update({ status: "rejected" }).eq("id", id);
+    if (error) { setError(error.message); setActing(null); return; }
+    await loadPending(); onDone(); setActing(null);
+  }
+  async function hide(id: string) {
+    setActing(id); setError(null);
+    const { error } = await supabase.from("proposals").delete().eq("id", id); // hide = remove the record
+    if (error) { setError(error.message); setActing(null); return; }
+    await loadPending(); onDone(); setActing(null);
   }
 
   if (!open) return null;
@@ -81,7 +108,7 @@ export default function ProposeDrawer({ open, onClose, target, advisors, onDone 
               ))}
             </div>
             <div style={{ minWidth: 0 }}>
-              <div style={{ fontSize: 15, fontWeight: 660 }}>Joint proposal</div>
+              <div style={{ fontSize: 15, fontWeight: 660 }}>{mode === "run" ? "Joint proposal" : "Proposals waiting"}</div>
               <div className="t-sub t-muted" style={{ fontSize: 12 }}>{names} · {target.name}</div>
             </div>
           </div>
@@ -91,46 +118,58 @@ export default function ProposeDrawer({ open, onClose, target, advisors, onDone 
         <div style={{ flex: 1, overflowY: "auto", padding: 20 }}>
           {error && <div className="banner banner-error" style={{ marginBottom: 12 }}>{error}</div>}
 
-          {/* reasoning trace */}
-          {(busy || thinking) && (
-            <div style={{ marginBottom: result ? 16 : 0 }}>
-              <div className="t-label" style={{ color: "var(--ac)", marginBottom: 6 }}>{result ? "How they got here" : <>{names} are working<PulseDots /></>}</div>
-              <div ref={traceRef} style={{ fontSize: 11.5, lineHeight: 1.5, fontStyle: "italic", whiteSpace: "pre-wrap", color: "var(--tm)", borderLeft: "2px solid var(--border)", paddingLeft: 10, maxHeight: result ? 140 : 320, overflowY: "auto" }}>
+          {/* live reasoning while a new proposal is drafted */}
+          {(busy || (mode === "run" && thinking)) && (
+            <div style={{ marginBottom: 16 }}>
+              <div className="t-label" style={{ color: "var(--ac)", marginBottom: 6 }}>{busy ? <>{names} are working<PulseDots /></> : "How they got here"}</div>
+              <div ref={traceRef} style={{ fontSize: 11.5, lineHeight: 1.5, fontStyle: "italic", whiteSpace: "pre-wrap", color: "var(--tm)", borderLeft: "2px solid var(--border)", paddingLeft: 10, maxHeight: busy ? 300 : 120, overflowY: "auto" }}>
                 {thinking || "Thinking it through…"}
               </div>
             </div>
           )}
 
-          {/* the proposal */}
-          {result && (
-            <div className="reveal-up">
-              <div className="row-between" style={{ gap: 12, marginBottom: 8, alignItems: "flex-start" }}>
-                <div style={{ fontSize: 15.5, fontWeight: 660, lineHeight: 1.35 }}>{result.proposal.title}</div>
-                <Confidence label={result.proposal.conf_label} level={result.proposal.conf_level} />
-              </div>
-              {result.proposal.rationale && <p className="t-body" style={{ fontSize: 13, lineHeight: 1.6, marginBottom: 14 }}>{result.proposal.rationale}</p>}
-
-              <div className="t-label" style={{ color: "var(--tm)", marginBottom: 6 }}>Proposed changes</div>
-              <div className="stack-2" style={{ marginBottom: 16 }}>
-                {result.proposal.changes.length === 0 && <div className="t-sub t-muted" style={{ fontSize: 12.5 }}>No concrete field changes — see the rationale.</div>}
-                {result.proposal.changes.map((c, i) => (
-                  <div key={i} className="card card-pad" style={{ padding: "10px 12px" }}>
-                    <div className="row gap-2" style={{ marginBottom: 4, alignItems: "center" }}>
-                      <Chip tone={c.kind === "add" ? "green" : "accent"}>{c.kind === "add" ? "New field" : "Update"}</Chip>
-                      <span style={{ fontSize: 13, fontWeight: 620 }}>{c.label}</span>
-                    </div>
-                    <div className="t-sub" style={{ fontSize: 12.5, lineHeight: 1.5, whiteSpace: "pre-wrap" }}>{c.proposed_value}</div>
-                  </div>
-                ))}
-              </div>
-
-              <div className="row gap-2">
-                <button className="btn btn-success" disabled={acting} onClick={accept}>{acting ? "Accepting…" : "Accept"}</button>
-                <button className="btn btn-secondary" disabled={acting} onClick={dismiss} style={{ color: "var(--rd-text)" }}>Dismiss</button>
-                <button className="btn btn-secondary" disabled={acting || busy} onClick={run}>Re-run</button>
-              </div>
-            </div>
+          {/* the waiting proposals */}
+          {loaded && pending.length === 0 && !busy && (
+            <div className="t-sub t-muted" style={{ fontSize: 13 }}>Nothing waiting on this record.{mode === "review" ? " Run a joint proposal to draft one." : ""}</div>
           )}
+
+          <div className="stack-3">
+            {pending.map((p) => (
+              <div key={p.id} className="card card-pad reveal-up" style={{ borderLeft: "2px solid var(--vl)" }}>
+                <div className="row-between" style={{ gap: 12, marginBottom: 8, alignItems: "flex-start" }}>
+                  <div style={{ fontSize: 15, fontWeight: 660, lineHeight: 1.35 }}>{p.title}</div>
+                  <Confidence label={p.conf_label} level={p.conf_level} />
+                </div>
+                {p.rationale && <p className="t-sub" style={{ fontSize: 13, lineHeight: 1.6, marginBottom: 12 }}>{p.rationale}</p>}
+
+                {p.changes.length > 0 && (
+                  <div className="stack-2" style={{ marginBottom: 12 }}>
+                    {p.changes.map((c, i) => (
+                      <div key={i} style={{ borderLeft: "2px solid var(--border)", paddingLeft: 10 }}>
+                        <div className="row gap-2" style={{ marginBottom: 2, alignItems: "center" }}>
+                          <Chip tone={c.kind === "add" ? "green" : "accent"}>{c.kind === "add" ? "New field" : "Update"}</Chip>
+                          <span style={{ fontSize: 12.5, fontWeight: 620 }}>{c.label}</span>
+                        </div>
+                        <div className="t-sub" style={{ fontSize: 12, lineHeight: 1.5, whiteSpace: "pre-wrap" }}>{c.proposed_value}</div>
+                      </div>
+                    ))}
+                  </div>
+                )}
+
+                <div className="row gap-2" style={{ alignItems: "center" }}>
+                  <button className="btn btn-success btn-sm" disabled={acting === p.id} onClick={() => accept(p.id)}>{acting === p.id ? "…" : "Accept"}</button>
+                  <button className="btn btn-secondary btn-sm" disabled={acting === p.id} onClick={() => reject(p.id)} style={{ color: "var(--rd-text)" }}>Reject</button>
+                  <button className="btn btn-secondary btn-sm" disabled={acting === p.id} onClick={() => hide(p.id)} title="Delete this proposal entirely">Hide</button>
+                  <span className="t-mono-xs" style={{ marginLeft: "auto" }}>{p.proposed_by}</span>
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+
+        {/* footer — draft another proposal any time */}
+        <div className="row gap-2" style={{ padding: "12px 20px", borderTop: "1px solid var(--border)" }}>
+          <button className="btn btn-accent btn-sm" disabled={busy} onClick={run}>{busy ? "Working…" : "✦ New proposal"}</button>
         </div>
       </aside>
     </>
