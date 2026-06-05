@@ -87,7 +87,7 @@ export default function MarketView() {
       const tags = [s.metadata?.industry, s.metadata?.persona].filter(Boolean).join(" / ");
       const prompt = `You are a market analyst. Expand this market signal into a tight briefing (4–6 sentences): what's happening, why it matters for our product and positioning, and the specific implication${tags ? ` for ${tags}` : ""}. Return only the briefing prose.\n\nSignal: ${s.title}${s.why ? `\nContext: ${s.why}` : ""}\nSource: ${s.origin}`;
       const { data: sess } = await supabase.auth.getSession();
-      await streamAgentChat({ agentKey, messages: [{ role: "user", content: prompt }], token: sess.session?.access_token, onChunk: reply.onChunk, onThinking: reply.onThinking });
+      await streamAgentChat({ agentKey, messages: [{ role: "user", content: prompt }], token: sess.session?.access_token, onChunk: reply.onChunk, onThinking: reply.onThinking, fnName: "agent-run", fallbackFnName: "agent-chat" });
       reply.finish();
     } catch (e) { reply.reset(); setError(errText(e, "Deepen failed.")); } finally { setDeepBusy(false); }
   }

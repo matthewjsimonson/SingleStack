@@ -103,7 +103,7 @@ export default function AgentLauncher() {
         </div>
       )}
 
-      <AgentDrawer exec={exec} open={!!exec} onClose={() => setExec(null)} context={context} />
+      <AgentDrawer exec={exec} open={!!exec} onClose={() => setExec(null)} context={context} runner="agent-run" />
     </div>
   );
 }

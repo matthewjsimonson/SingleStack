@@ -148,7 +148,7 @@ export default function PlayRunDrawer({ open, onClose, play, target }: {
       const payload = thread.map((m, i) => i === 0 && m.role === "user"
         ? { ...m, content: `You earlier produced this analysis of "${target.name}":\n\n${artifactText(artifact.payload)}\n\nUse it as the basis for this conversation.\n\nMy follow-up: ${m.content}` }
         : m);
-      await streamAgentChat({ agentKey: play.agentKey, messages: payload, token: t, onChunk: reply.onChunk, onThinking: reply.onThinking });
+      await streamAgentChat({ agentKey: play.agentKey, messages: payload, token: t, onChunk: reply.onChunk, onThinking: reply.onThinking, fnName: "agent-run", fallbackFnName: "agent-chat" });
       reply.finish();
     } catch (e) {
       reply.reset();

@@ -58,6 +58,21 @@ const TOOLS = [
     input_schema: { type: "object", additionalProperties: false, properties: { scope: { type: "string", enum: ["internal", "external", "all"] }, limit: { type: "integer" } }, required: ["scope"] },
   },
   {
+    name: "list_competitors",
+    description: "List the competitors the org tracks (name, relationship, notes). Use when reasoning about positioning or who we're up against.",
+    input_schema: { type: "object", additionalProperties: false, properties: {}, required: [] },
+  },
+  {
+    name: "list_frontier_capabilities",
+    description: "List recent frontier-model & platform capabilities the org tracks (what's newly possible). Use to ground technical/roadmap reasoning in current capability.",
+    input_schema: { type: "object", additionalProperties: false, properties: { limit: { type: "integer" } }, required: [] },
+  },
+  {
+    name: "list_initiatives",
+    description: "List the org's initiatives (title, stage, lane, priority). Use to connect your work to the active roadmap/GTM efforts.",
+    input_schema: { type: "object", additionalProperties: false, properties: { limit: { type: "integer" } }, required: [] },
+  },
+  {
     name: "propose_change",
     description: "Draft a concrete change to the record you're grounded in. It goes to the record's REVIEW QUEUE (pending) for the human to accept or reject — you never apply changes directly. For an update, use the field's id from get_record; for a new field, give a snake_case field_key + human label.",
     input_schema: {
@@ -215,6 +230,26 @@ Deno.serve(async (req: Request) => {
       if (!rows.length) return "(no signals on record)";
       // deno-lint-ignore no-explicit-any
       return rows.map((r: any) => `[${origin(r)}] ${r.title}${r.why ? ` — ${r.why}` : ""}`).join("\n");
+    }
+    if (name === "list_competitors") {
+      const { data } = await supabase.from("competitors").select("name, relationship, website, notes").order("position", { ascending: true }).limit(40);
+      if (!data?.length) return "(no competitors tracked)";
+      // deno-lint-ignore no-explicit-any
+      return data.map((c: any) => `${c.name} [${c.relationship}]${c.notes ? ` — ${c.notes}` : ""}`).join("\n");
+    }
+    if (name === "list_frontier_capabilities") {
+      const lim = Math.min(40, Math.max(1, Number(args.limit) || 20));
+      const { data } = await supabase.from("capability_notes").select("title, content, category, observed_at").order("observed_at", { ascending: false, nullsFirst: false }).limit(lim);
+      if (!data?.length) return "(no frontier capabilities on record)";
+      // deno-lint-ignore no-explicit-any
+      return data.map((c: any) => `[${c.category}] ${c.title} — ${c.content}`).join("\n");
+    }
+    if (name === "list_initiatives") {
+      const lim = Math.min(60, Math.max(1, Number(args.limit) || 30));
+      const { data } = await supabase.from("initiatives").select("title, stage, lane, priority, description").order("created_at", { ascending: false }).limit(lim);
+      if (!data?.length) return "(no initiatives)";
+      // deno-lint-ignore no-explicit-any
+      return data.map((i: any) => `${i.title} · ${i.lane}/${i.stage} · ${i.priority}${i.description ? ` — ${i.description}` : ""}`).join("\n");
     }
     if (name === "propose_change") {
       const ctx = input.context;
