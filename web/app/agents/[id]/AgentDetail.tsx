@@ -78,7 +78,7 @@ export default function AgentDetail({ agentId }: { agentId: string }) {
     ["skills", "Skills", attached.size],
     ["connections", "Connections", connections.length],
     ["alignment", "Alignment", alignments.length],
-    ["workflows", "Workflows", attachedPlayIds.size],
+    ["workflows", "Plays", attachedPlayIds.size],
   ];
 
   return (
