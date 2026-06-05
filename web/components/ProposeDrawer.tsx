@@ -33,6 +33,7 @@ export default function ProposeDrawer({ open, onClose, mode, target, advisors, o
   const [loaded, setLoaded] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [acting, setActing] = useState<string | null>(null);
+  const [freshIds, setFreshIds] = useState<Set<string>>(new Set()); // proposals drafted in THIS session (run mode shows only these)
   const traceRef = useRef<HTMLDivElement>(null);
   const started = useRef(false);
 
@@ -56,12 +57,13 @@ export default function ProposeDrawer({ open, onClose, mode, target, advisors, o
     setBusy(true); setThinking(""); setError(null);
     try {
       const { data: sess } = await supabase.auth.getSession();
-      await streamStructured({
+      const res = await streamStructured<{ proposal_id?: string }>({
         fnName: "agent-propose",
         token: sess.session?.access_token,
         body: { agent_keys: advisors.map((a) => a.key), agent_key: advisors[0]?.key, [idKey]: target.id },
         onThinking: (s) => setThinking((p) => p + s),
       });
+      if (res?.proposal_id) setFreshIds((prev) => new Set(prev).add(res.proposal_id as string));
       await loadPending();
     } catch (e) { setError(e instanceof Error ? e.message : "Proposal failed."); }
     finally { setBusy(false); }
@@ -69,7 +71,7 @@ export default function ProposeDrawer({ open, onClose, mode, target, advisors, o
 
   // On open: load what's waiting, and (run mode) kick off a fresh proposal once.
   useEffect(() => {
-    if (!open) { started.current = false; setThinking(""); setBusy(false); setError(null); setPending([]); setLoaded(false); return; }
+    if (!open) { started.current = false; setThinking(""); setBusy(false); setError(null); setPending([]); setLoaded(false); setFreshIds(new Set()); return; }
     loadPending();
     if (mode === "run" && !started.current) { started.current = true; run(); }
   }, [open, mode, loadPending, run]);
@@ -96,6 +98,7 @@ export default function ProposeDrawer({ open, onClose, mode, target, advisors, o
 
   if (!open) return null;
   const names = advisors.map((a) => a.name.split(" ").slice(-1)[0]).join(" + ");
+  const shown = mode === "run" ? pending.filter((p) => freshIds.has(p.id)) : pending; // run = only this session's drafts
   return (
     <>
       <div onClick={onClose} style={{ position: "fixed", inset: 0, background: "rgba(11,12,14,0.32)", zIndex: 50 }} />
@@ -128,13 +131,13 @@ export default function ProposeDrawer({ open, onClose, mode, target, advisors, o
             </div>
           )}
 
-          {/* the waiting proposals */}
-          {loaded && pending.length === 0 && !busy && (
-            <div className="t-sub t-muted" style={{ fontSize: 13 }}>Nothing waiting on this record.{mode === "review" ? " Run a joint proposal to draft one." : ""}</div>
+          {/* run mode shows only what this session drafted; review mode shows the queue */}
+          {loaded && shown.length === 0 && !busy && (
+            <div className="t-sub t-muted" style={{ fontSize: 13 }}>{mode === "run" ? "No proposal drafted yet — use ✦ New proposal below." : "Nothing waiting on this record. Run a joint proposal to draft one."}</div>
           )}
 
           <div className="stack-3">
-            {pending.map((p) => (
+            {shown.map((p) => (
               <div key={p.id} className="card card-pad reveal-up" style={{ borderLeft: "2px solid var(--vl)" }}>
                 <div className="row-between" style={{ gap: 12, marginBottom: 8, alignItems: "flex-start" }}>
                   <div style={{ fontSize: 15, fontWeight: 660, lineHeight: 1.35 }}>{p.title}</div>

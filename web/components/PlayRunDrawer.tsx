@@ -87,7 +87,7 @@ export default function PlayRunDrawer({ open, onClose, play, target }: {
 
   const run = useCallback(async () => {
     if (!play || !target) return;
-    setRunning(true); setError(null); setRunThinking("");
+    setRunning(true); setError(null); setRunThinking(""); setArtifact(null); setRated(null); // clear the prior run — never show a stale artifact
     requestAnimationFrame(() => scrollRef.current?.scrollTo({ top: 0 })); // show the work from the top
     try {
       const t = await token();
