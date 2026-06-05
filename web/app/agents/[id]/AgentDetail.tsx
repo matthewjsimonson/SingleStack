@@ -183,15 +183,15 @@ function Skills({ agentId, agentName, skills, attached, cornerstones, reload, se
   const [histSkill, setHistSkill] = useState<Skill | null>(null);
   const [openSkill, setOpenSkill] = useState<string | null>(null); // which node's editor is open
   const [edit, setEdit] = useState({ name: "", description: "", instructions: "" });
-  const [usage, setUsage] = useState<Record<string, string[]>>({}); // skill_id -> play labels using it
+  const [usage, setUsage] = useState<Record<string, { id: string; label: string }[]>>({}); // skill_id -> plays using it
 
-  // Which plays each of this agent's skills is attached to (for the "in N plays" hint).
+  // Which plays each of this agent's skills is attached to (for the "in N plays" links).
   useEffect(() => {
     (async () => {
-      const { data } = await supabase.from("play_skills").select("skill_id, plays(label)").eq("agent_id", agentId);
-      const m: Record<string, string[]> = {};
+      const { data } = await supabase.from("play_skills").select("skill_id, plays(id, label)").eq("agent_id", agentId);
+      const m: Record<string, { id: string; label: string }[]> = {};
       // deno-lint-ignore no-explicit-any
-      for (const r of (data ?? []) as any[]) { if (r.skill_id) (m[r.skill_id] ??= []).push(r.plays?.label ?? "Play"); }
+      for (const r of (data ?? []) as any[]) { if (r.skill_id && r.plays?.id) (m[r.skill_id] ??= []).push({ id: r.plays.id, label: r.plays.label ?? "Play" }); }
       setUsage(m);
     })();
   }, [supabase, agentId, skills]);
@@ -264,7 +264,13 @@ function Skills({ agentId, agentName, skills, attached, cornerstones, reload, se
               <button className="btn btn-secondary btn-sm" onClick={() => setHistSkill(s)}>History</button>
               <button className="btn btn-secondary btn-sm" onClick={() => toggle(s.id, false)} style={{ color: "var(--rd-text)", marginLeft: "auto" }}>Detach</button>
             </div>
-            {kind === "play" && plays.length > 0 && <div className="t-sub t-muted" style={{ fontSize: 11.5, marginBottom: 8 }}>Used in: {plays.join(", ")}</div>}
+            {kind === "play" && plays.length > 0 && (
+              <div className="t-sub t-muted" style={{ fontSize: 11.5, marginBottom: 8 }}>
+                Used in: {plays.map((p, i) => (
+                  <span key={p.id}>{i ? ", " : ""}<a href={`/agents?tab=plays&play=${p.id}&step=2`} style={{ color: "var(--vl-text)", fontWeight: 600 }}>{p.label}</a></span>
+                ))}
+              </div>
+            )}
             <label className="field"><span className="t-label">Name</span><input className="input" value={edit.name} onChange={(e) => setEdit({ ...edit, name: e.target.value })} /></label>
             <label className="field"><span className="t-label">What it does</span><input className="input" value={edit.description} onChange={(e) => setEdit({ ...edit, description: e.target.value })} placeholder="A one-liner" /></label>
             <label className="field"><span className="t-label">Instructions (playbook)</span><textarea className="textarea" rows={7} value={edit.instructions} onChange={(e) => setEdit({ ...edit, instructions: e.target.value })} placeholder="How the agent applies this skill — tailored to your company and goals." /></label>

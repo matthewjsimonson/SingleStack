@@ -9,7 +9,8 @@
 // New plays are GUIDED (each step gates the next so setup is complete); an existing
 // play is free to navigate (editing shouldn't force a walk). The built-in analyses
 // are plays too (seeded by ensureBuiltInPlays); run-play reads the same rows.
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
+import { useSearchParams } from "next/navigation";
 import { createClient } from "@/lib/supabase/client";
 import { getOrgId } from "@/lib/org";
 import { ensureBuiltInPlays } from "@/lib/ensurePlays";
@@ -71,6 +72,20 @@ export default function PlaysView() {
     setActive((cur) => (cur && (pl ?? []).some((p) => p.id === cur) ? cur : null));
   }, [supabase]);
   useEffect(() => { load(); }, [load]);
+
+  // Deep link from elsewhere (e.g. an agent's play-skill node): /agents?tab=plays&play=<id>&step=2
+  // opens that play at the given step, once the plays have loaded.
+  const params = useSearchParams();
+  const deepLinked = useRef(false);
+  useEffect(() => {
+    if (deepLinked.current || plays.length === 0) return;
+    const pid = params.get("play");
+    if (!pid || !plays.some((p) => p.id === pid)) return;
+    deepLinked.current = true;
+    setActive(pid); setCreating(false); setGuided(false);
+    const s = parseInt(params.get("step") ?? "0", 10);
+    setStep(Number.isFinite(s) ? Math.max(0, Math.min(3, s)) : 0);
+  }, [params, plays]);
 
   const skillById = (id: string) => skills.find((s) => s.id === id);
   const agentById = (id: string) => agents.find((a) => a.id === id);
