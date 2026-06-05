@@ -16,11 +16,12 @@ import SignalsTab from "@/components/strategy/SignalsTab";
 import ThemesTab from "@/components/strategy/ThemesTab";
 import EpicsTab from "@/components/strategy/EpicsTab";
 
-type View = "signals" | "themes" | "epics";
+type View = "strategy" | "epics";
 
 export default function StrategyView() {
   const supabase = createClient();
-  const [view, setView] = useState<View>("themes");
+  const [view, setView] = useState<View>("strategy");
+  const [showSignals, setShowSignals] = useState(false); // signals feed in from elsewhere — collapsed by default
   const [startedEpicId, setStartedEpicId] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
 
@@ -59,13 +60,21 @@ export default function StrategyView() {
     <div>
       <div style={{ marginBottom: "var(--sp-3)" }}>
         <h1 className="t-page">Strategy</h1>
-        <div className="t-sub t-muted" style={{ fontSize: 12.5 }}>Read what&apos;s happening, merge signals into themes, group them, and craft epics to push to Ship.</div>
+        <div className="t-sub t-muted" style={{ fontSize: 12.5 }}>Product signals merge into themes, auto-bucketed by strategic group; craft the strongest into epics and push to Ship.</div>
       </div>
-      <SubTabs<View> tabs={[{ key: "signals", label: "Signals" }, { key: "themes", label: "Themes" }, { key: "epics", label: "Epics" }]} active={view} onChange={setView} />
+      <SubTabs<View> tabs={[{ key: "strategy", label: "Strategy" }, { key: "epics", label: "Epics" }]} active={view} onChange={setView} />
       <Banner>{error}</Banner>
 
-      {view === "signals" && <SignalsTab onStartEpicFromGap={startEpicFromGap} />}
-      {view === "themes" && <ThemesTab onStartEpic={startEpicFromTheme} />}
+      {view === "strategy" && (
+        <div>
+          {/* Signals feed in from the Signals area; here they're just inputs to themes. */}
+          <div style={{ marginBottom: "var(--sp-3)" }}>
+            <button className="btn btn-secondary btn-sm" onClick={() => setShowSignals((v) => !v)}>{showSignals ? "▾ Hide signals feeding in" : "▸ Signals feeding in"}</button>
+          </div>
+          {showSignals && <div className="card card-pad" style={{ marginBottom: "var(--sp-5)" }}><SignalsTab onStartEpicFromGap={startEpicFromGap} /></div>}
+          <ThemesTab onStartEpic={startEpicFromTheme} />
+        </div>
+      )}
       {view === "epics" && <EpicsTab initialEpicId={startedEpicId} />}
     </div>
   );

@@ -5,7 +5,7 @@
 // (source signals + how it was synthesized), add context, watch it, edit, push
 // signals in, delete, or push it into an epic. AI synthesizes & classifies;
 // humans merge & curate.
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { createClient } from "@/lib/supabase/client";
 import { getOrgId } from "@/lib/org";
 import { Chip, Banner, Modal, ConfirmDialog } from "@/components/ui";
@@ -46,6 +46,15 @@ export default function ThemesTab({ onStartEpic }: { onStartEpic: (themeId: stri
     setAgentKey(await fetchAgentKey(supabase)); setLoading(false);
   }, [supabase]);
   useEffect(() => { load(); }, [load]);
+
+  // Auto-place themes into their bucket: when any theme is ungrouped, classify them
+  // once (results persist, so this only fires when there's new ungrouped work).
+  const autoTried = useRef(false);
+  useEffect(() => {
+    if (loading || autoTried.current || !agentKey) return;
+    if (themes.some((t) => !t.group_label)) { autoTried.current = true; aiClassify(); }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [loading, themes, agentKey]);
 
   const orgIdOr = async () => { const o = await getOrgId(); if (!o) throw new Error("Could not resolve your organization."); return o; };
   const epicTitle = (id: string | null) => epics.find((e) => e.id === id)?.title || (id ? "an epic" : null);
@@ -122,45 +131,60 @@ export default function ThemesTab({ onStartEpic }: { onStartEpic: (themeId: stri
   if (loading) return <div className="t-sub t-muted">Loading…</div>;
   const inThemeIds = new Set(open?.signal_ids ?? []);
   const addable = signals.filter((s) => !inThemeIds.has(s.id));
-  const sectionOrder = [...GROUPS, { key: "__unsorted", label: "Unsorted", blurb: "Not yet grouped." }];
+  const unsorted = themes.filter((t) => !t.group_label);
+
+  const themeCard = (t: Theme) => (
+    <div key={t.id} className="card card-pad">
+      <div className="row-between" style={{ alignItems: "flex-start", gap: 6 }}>
+        <button onClick={() => openTheme(t)} style={{ background: "none", border: "none", textAlign: "left", padding: 0, cursor: "pointer", fontSize: 12.5, fontWeight: 640, color: "var(--tp)" }}>{t.title}</button>
+        <button title={t.watched ? "Watching" : "Watch"} onClick={() => toggleWatch(t)} style={{ background: "none", border: "none", cursor: "pointer", fontSize: 13, color: t.watched ? "var(--am-text, #b45309)" : "var(--tm)" }}>{t.watched ? "★" : "☆"}</button>
+      </div>
+      <div className="row gap-2" style={{ marginTop: 5, alignItems: "center", flexWrap: "wrap" }}>
+        {t.merged_by === "synthesis" && <Chip tone="violet">AI</Chip>}
+        {confText(t) && <Chip tone="green">{confText(t)}</Chip>}
+        <span className="t-mono-xs t-muted">{(t.signal_ids ?? []).length} sig</span>
+      </div>
+      <div className="row gap-2" style={{ marginTop: 6, alignItems: "center" }}>
+        {t.bundle_id ? <span className="t-mono-xs" style={{ color: "var(--ac-text)" }}>→ {epicTitle(t.bundle_id)}</span>
+          : <button className="btn btn-sm" onClick={() => onStartEpic(t.id)}>Start epic →</button>}
+      </div>
+    </div>
+  );
 
   return (
     <div>
       <div className="row gap-2" style={{ marginBottom: "var(--sp-3)", alignItems: "center", flexWrap: "wrap" }}>
-        <span className="t-label">Merged signals, sorted by group</span>
+        <span className="t-label">Themes — product signals, merged &amp; bucketed</span>
         <div style={{ flex: 1 }} />
         <button className="btn btn-secondary btn-sm" onClick={newTheme}>+ New theme</button>
-        <button className="btn btn-secondary btn-sm" disabled={busy === "classify"} onClick={aiClassify}>{busy === "classify" ? "Grouping…" : "✦ Group with AI"}</button>
         <button className="btn btn-secondary btn-sm" disabled={busy === "synth"} onClick={synthesize}>{busy === "synth" ? "Synthesizing…" : "↻ Synthesize"}</button>
       </div>
       <Banner>{error}</Banner>
 
-      <div style={{ display: "grid", gridTemplateColumns: `repeat(${sectionOrder.length}, minmax(190px, 1fr))`, gap: "var(--sp-3)", overflowX: "auto", alignItems: "start" }}>
-        {sectionOrder.map((g) => {
-          const list = themes.filter((t) => (g.key === "__unsorted" ? !t.group_label : t.group_label === g.key));
+      {/* Unsorted — auto-grouping runs on load; this holds what's left or newly arrived */}
+      {unsorted.length > 0 && (
+        <div className="card card-pad" style={{ marginBottom: "var(--sp-4)", background: "var(--panel-2)" }}>
+          <div className="row-between" style={{ alignItems: "center", marginBottom: 8, gap: 8, flexWrap: "wrap" }}>
+            <span className="t-label">Unsorted · {unsorted.length} <span className="t-muted" style={{ fontWeight: 400 }}>— not yet placed in a bucket</span></span>
+            <button className="btn btn-secondary btn-sm" disabled={busy === "classify"} onClick={aiClassify}>{busy === "classify" ? "Grouping…" : "✦ Group with AI"}</button>
+          </div>
+          <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(200px, 1fr))", gap: "var(--sp-2)" }}>
+            {unsorted.map(themeCard)}
+          </div>
+        </div>
+      )}
+
+      {/* The strategy swim lanes — one per bucket, responsive (no forced columns) */}
+      <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(210px, 1fr))", gap: "var(--sp-3)", alignItems: "start" }}>
+        {GROUPS.map((g) => {
+          const list = themes.filter((t) => t.group_label === g.key);
           return (
             <div key={g.key}>
               <div className="t-label">{g.label} · {list.length}</div>
               <div className="t-sub t-muted" style={{ fontSize: 11, marginBottom: "var(--sp-3)" }}>{g.blurb}</div>
               <div className="stack-2">
                 {list.length === 0 && <div className="t-sub t-muted" style={{ fontSize: 11.5 }}>—</div>}
-                {list.map((t) => (
-                  <div key={t.id} className="card card-pad">
-                    <div className="row-between" style={{ alignItems: "flex-start", gap: 6 }}>
-                      <button onClick={() => openTheme(t)} style={{ background: "none", border: "none", textAlign: "left", padding: 0, cursor: "pointer", fontSize: 12.5, fontWeight: 640, color: "var(--tp)" }}>{t.title}</button>
-                      <button title={t.watched ? "Watching" : "Watch"} onClick={() => toggleWatch(t)} style={{ background: "none", border: "none", cursor: "pointer", fontSize: 13, color: t.watched ? "var(--am-text, #b45309)" : "var(--tm)" }}>{t.watched ? "★" : "☆"}</button>
-                    </div>
-                    <div className="row gap-2" style={{ marginTop: 5, alignItems: "center", flexWrap: "wrap" }}>
-                      {t.merged_by === "synthesis" && <Chip tone="violet">AI</Chip>}
-                      {confText(t) && <Chip tone="green">{confText(t)}</Chip>}
-                      <span className="t-mono-xs t-muted">{(t.signal_ids ?? []).length} sig</span>
-                    </div>
-                    <div className="row gap-2" style={{ marginTop: 6, alignItems: "center" }}>
-                      {t.bundle_id ? <span className="t-mono-xs" style={{ color: "var(--ac-text)" }}>→ {epicTitle(t.bundle_id)}</span>
-                        : <button className="btn btn-sm" onClick={() => onStartEpic(t.id)}>Start epic →</button>}
-                    </div>
-                  </div>
-                ))}
+                {list.map(themeCard)}
               </div>
             </div>
           );
