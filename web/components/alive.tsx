@@ -91,41 +91,56 @@ export async function streamAgentChat(opts: {
   token?: string;
   onChunk: (s: string) => void;
   onThinking?: (s: string) => void;
+  fnName?: string;          // which function to hit (default "agent-chat")
+  fallbackFnName?: string;  // retried once if the primary fails BEFORE any output (e.g. not deployed)
 }): Promise<void> {
   const base = process.env.NEXT_PUBLIC_SUPABASE_URL ?? "";
-  const resp = await fetch(`${base}/functions/v1/agent-chat`, {
-    method: "POST",
-    headers: {
-      "content-type": "application/json",
-      apikey: process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY ?? "",
-      ...(opts.token ? { Authorization: `Bearer ${opts.token}` } : {}),
-    },
-    body: JSON.stringify({ agent_key: opts.agentKey, messages: opts.messages, context: opts.context, stream: true }),
-  });
-  if (!resp.ok) throw new Error((await resp.text().catch(() => "")) || `Chat failed (${resp.status}).`);
-  if ((resp.headers.get("content-type") ?? "").includes("application/json")) {
-    const data = await resp.json();
-    if (data?.error) throw new Error(data.error);
-    opts.onChunk(String(data?.reply ?? ""));
-    return;
+  let emitted = false; // once true, we're committed — no fallback mid-stream
+  const onChunk = (s: string) => { emitted = true; opts.onChunk(s); };
+  const onThinking = (s: string) => { emitted = true; opts.onThinking?.(s); };
+
+  async function once(fnName: string): Promise<void> {
+    const resp = await fetch(`${base}/functions/v1/${fnName}`, {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+        apikey: process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY ?? "",
+        ...(opts.token ? { Authorization: `Bearer ${opts.token}` } : {}),
+      },
+      body: JSON.stringify({ agent_key: opts.agentKey, messages: opts.messages, context: opts.context, stream: true }),
+    });
+    if (!resp.ok) throw new Error((await resp.text().catch(() => "")) || `Chat failed (${resp.status}).`);
+    if ((resp.headers.get("content-type") ?? "").includes("application/json")) {
+      const data = await resp.json();
+      if (data?.error) throw new Error(data.error);
+      onChunk(String(data?.reply ?? ""));
+      return;
+    }
+    if (!resp.body) return;
+    const reader = resp.body.getReader();
+    const dec = new TextDecoder();
+    let inAnswer = false;
+    for (;;) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      const s = dec.decode(value, { stream: true });
+      if (!s) continue;
+      if (inAnswer) { onChunk(s); continue; }
+      const idx = s.indexOf(ANSWER_MARK);
+      if (idx === -1) { onThinking(s); continue; } // still reasoning
+      const before = s.slice(0, idx);
+      const after = s.slice(idx + ANSWER_MARK.length);
+      if (before) onThinking(before);
+      inAnswer = true;
+      if (after) onChunk(after);
+    }
   }
-  if (!resp.body) return;
-  const reader = resp.body.getReader();
-  const dec = new TextDecoder();
-  let inAnswer = false;
-  for (;;) {
-    const { done, value } = await reader.read();
-    if (done) break;
-    const s = dec.decode(value, { stream: true });
-    if (!s) continue;
-    if (inAnswer) { opts.onChunk(s); continue; }
-    const idx = s.indexOf(ANSWER_MARK);
-    if (idx === -1) { opts.onThinking?.(s); continue; } // still reasoning
-    const before = s.slice(0, idx);
-    const after = s.slice(idx + ANSWER_MARK.length);
-    if (before) opts.onThinking?.(before);
-    inAnswer = true;
-    if (after) opts.onChunk(after);
+
+  try {
+    await once(opts.fnName ?? "agent-chat");
+  } catch (e) {
+    if (opts.fallbackFnName && !emitted) { await once(opts.fallbackFnName); return; } // graceful degrade
+    throw e;
   }
 }
 

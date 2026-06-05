@@ -61,7 +61,7 @@ export default function RecordAdvisors({
         </>
       )}
 
-      <AgentDrawer exec={openExec} open={!!openExec} onClose={() => setOpenExec(null)} context={context} />
+      <AgentDrawer exec={openExec} open={!!openExec} onClose={() => setOpenExec(null)} context={context} runner="agent-run" />
       <ProposeDrawer
         open={propose !== null}
         mode={propose ?? "run"}

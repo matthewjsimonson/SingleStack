@@ -26,11 +26,13 @@ export default function AgentDrawer({
   open,
   onClose,
   context,
+  runner,
 }: {
   exec: Exec | null;
   open: boolean;
   onClose: () => void;
   context?: AgentContext | null;
+  runner?: string; // edge function to drive chat (default "agent-chat"); e.g. "agent-run" for the agentic loop
 }) {
   const supabase = createClient();
   const [messages, setMessages] = useState<Msg[]>([]);
@@ -85,7 +87,7 @@ export default function AgentDrawer({
     try {
       const { data: s } = await supabase.auth.getSession();
       const token = s.session?.access_token;
-      await streamAgentChat({ agentKey: exec.key, messages: next, context: context ?? undefined, token, onChunk: reply.onChunk, onThinking: reply.onThinking });
+      await streamAgentChat({ agentKey: exec.key, messages: next, context: context ?? undefined, token, onChunk: reply.onChunk, onThinking: reply.onThinking, fnName: runner, fallbackFnName: runner ? "agent-chat" : undefined });
       reply.finish();
     } catch (e) {
       reply.reset();
