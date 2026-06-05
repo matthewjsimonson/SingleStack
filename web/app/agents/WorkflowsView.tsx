@@ -11,6 +11,7 @@ import { createClient } from "@/lib/supabase/client";
 import { getOrgId } from "@/lib/org";
 import { ensureTeam } from "@/lib/ensureTeam";
 import { Section, Chip, Banner, Empty, AgentBadge } from "@/components/ui";
+import WorkflowRunDrawer from "@/components/WorkflowRunDrawer";
 
 type Agent = { id: string; key: string; name: string };
 type Skill = { id: string; name: string; category: string | null };
@@ -35,6 +36,7 @@ export default function WorkflowsView() {
   const [addingStep, setAddingStep] = useState(false);
   const [editingStep, setEditingStep] = useState<string | null>(null);
   const [draft, setDraft] = useState<{ agent_id: string; skill_id: string; signals: Signals; instruction: string }>({ agent_id: "", skill_id: "", signals: "both", instruction: "" });
+  const [running, setRunning] = useState(false); // run drawer open
 
   const load = useCallback(async () => {
     await ensureTeam(supabase);
@@ -185,7 +187,12 @@ export default function WorkflowsView() {
       <Banner>{error}</Banner>
 
       <Section label={<input className="input" value={meta.name} onChange={(e) => setMeta({ ...meta, name: e.target.value })} onBlur={saveMeta} style={{ fontWeight: 660, fontSize: 15, maxWidth: 360 }} />}
-        action={<button className="btn btn-secondary btn-sm" onClick={() => deleteWorkflow(activeWf.id)} style={{ color: "var(--rd-text)" }}>Delete</button>}>
+        action={
+          <div className="row gap-2">
+            <button className="btn btn-sm" onClick={() => setRunning(true)} disabled={steps.length === 0} style={{ background: "var(--ac)", color: "#fff" }} title={steps.length === 0 ? "Add a step first" : "Run this workflow"}>▸ Run</button>
+            <button className="btn btn-secondary btn-sm" onClick={() => deleteWorkflow(activeWf.id)} style={{ color: "var(--rd-text)" }}>Delete</button>
+          </div>
+        }>
         <label className="field" style={{ marginBottom: "var(--sp-4)" }}><span className="t-label">Description</span>
           <input className="input" value={meta.description} onChange={(e) => setMeta({ ...meta, description: e.target.value })} onBlur={saveMeta} placeholder="What this workflow accomplishes" /></label>
 
@@ -224,6 +231,8 @@ export default function WorkflowsView() {
 
         {addingStep ? composer : <button className="btn btn-secondary btn-sm" onClick={startAdd}>+ Add step</button>}
       </Section>
+
+      <WorkflowRunDrawer open={running} onClose={() => setRunning(false)} workflow={activeWf ? { id: activeWf.id, name: activeWf.name } : null} onRan={load} />
     </div>
   );
 }
