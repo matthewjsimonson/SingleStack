@@ -289,7 +289,7 @@ Deno.serve(async (req: Request) => {
 
     const requestBody = {
       model,
-      max_tokens: 16000,
+      max_tokens: 24000,
       thinking: { type: "adaptive", display: "summarized" }, // summarized → reasoning text is populated on Opus 4.8
       output_config: { effort: "high", format: { type: "json_schema", schema: PROPOSAL_SCHEMA } },
       system: [{ type: "text", text: systemText, cache_control: { type: "ephemeral" } }],
@@ -351,7 +351,10 @@ Deno.serve(async (req: Request) => {
             const message = await s.finalMessage();
             const tb = message.content.find((b: { type: string }) => b.type === "text");
             if (!tb || tb.type !== "text") throw new Error(`no proposal returned (stop_reason: ${message.stop_reason})`);
-            const summary = await persist(JSON.parse(tb.text), message.usage);
+            if (message.stop_reason === "max_tokens") throw new Error("The proposal ran out of room before finishing (hit the token cap). Try again, or narrow what you asked for.");
+            let parsed;
+            try { parsed = JSON.parse(tb.text); } catch { throw new Error("The proposal came back malformed — likely truncated. Try again, or narrow what you asked for."); }
+            const summary = await persist(parsed, message.usage);
             controller.enqueue(enc.encode(ANSWER_MARK + JSON.stringify(summary)));
           } catch (e) {
             const msg = e instanceof Error ? e.message : String(e);
@@ -368,7 +371,7 @@ Deno.serve(async (req: Request) => {
     // verbatim, so the API receives them. Response is a (non-streaming) Message.
     const message = (await anthropic.messages.create({
       model,
-      max_tokens: 16000,
+      max_tokens: 24000,
       thinking: { type: "adaptive" },
       output_config: {
         effort: "high",
@@ -383,6 +386,7 @@ Deno.serve(async (req: Request) => {
     if (!textBlock || textBlock.type !== "text") {
       throw new Error(`Claude returned no text (stop_reason: ${message.stop_reason})`);
     }
+    if (message.stop_reason === "max_tokens") throw new Error("The proposal ran out of room before finishing (hit the token cap). Try again, or narrow what you asked for.");
     const proposal = JSON.parse(textBlock.text) as {
       title: string;
       rationale: string;
