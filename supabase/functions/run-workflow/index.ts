@@ -152,7 +152,7 @@ Deno.serve(async (req: Request) => {
         `\n\nYou are running step ${idx + 1} of ${steps.length} in the "${wf.name}" workflow${wf.description ? ` — ${wf.description}` : ""}.`,
         step.instruction ? `\nYour task this step: ${step.instruction}` : "\nDo your part of the workflow at this step.",
         steps.length > 1 ? `\nThis is a chain — build on the prior steps and hand off to the next; don't repeat what's covered.${prior ? ` Earlier steps produced:${prior}` : " You go first."}` : "",
-        "\nRules: be specific and concrete, grounded in the signals/context provided; in each section's `evidence`, cite the exact signals you leaned on (or note 'thin evidence' honestly). headline = a one-line take. recommendations = concrete next steps. confidence = a short, honest read.",
+        "\nRules: Stay strictly within THIS step's task and the workflow's stated purpose — do NOT wander into unrelated topics, other teams' problems, or tangents. Be specific and concrete, grounded in the signals/context; in each section's `evidence`, cite the exact signals you leaned on (or note 'thin evidence' honestly). headline = a one-line take. recommendations = at most 3–5 concrete next steps, each clearly serving THIS workflow's goal — don't pad the list. confidence = a short, honest read.",
       ].join("");
       const sigText = signalsFor(step.signals);
       const user = [
@@ -194,12 +194,22 @@ Deno.serve(async (req: Request) => {
 
     if (results.length === 0) throw new Error("no runnable steps (officers may have been removed)");
 
-    // Aggregate the steps into one artifact, attributing each section to its step.
+    // Aggregate: ONE clean section per step (its headline + sub-sections folded into
+    // the body), and the FINAL step's recommendations (the synthesis) — not a pile
+    // flattened from every step.
     const payload = {
       headline: results[results.length - 1]?.payload?.headline ?? wf.name,
-      // deno-lint-ignore no-explicit-any
-      sections: results.flatMap((r, i) => (r.payload?.sections ?? []).map((s: any) => ({ ...s, title: `Step ${i + 1} · ${r.agentName}${r.skillName ? ` · ${r.skillName}` : ""} — ${s.title}` }))),
-      recommendations: results.flatMap((r) => r.payload?.recommendations ?? []),
+      sections: results.map((r, i) => ({
+        title: `Step ${i + 1} · ${r.agentName}${r.skillName ? ` · ${r.skillName}` : ""}`,
+        body: [
+          r.payload?.headline ? `**${r.payload.headline}**` : "",
+          // deno-lint-ignore no-explicit-any
+          ...((r.payload?.sections ?? []) as any[]).map((s) => `${s.title}: ${s.body}`),
+        ].filter(Boolean).join("\n\n"),
+        // deno-lint-ignore no-explicit-any
+        evidence: ((r.payload?.sections ?? []) as any[]).flatMap((s) => s.evidence ?? []),
+      })),
+      recommendations: results[results.length - 1]?.payload?.recommendations ?? [],
       confidence: results.map((r, i) => `Step ${i + 1}: ${r.payload?.confidence ?? "—"}`).join(" · "),
     };
 
