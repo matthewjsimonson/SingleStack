@@ -106,7 +106,7 @@ export default function AgentDetail({ agentId }: { agentId: string }) {
 
       {tab === "overview" && <Overview agent={agent} onSaved={load} setError={setError}
         skillsCount={attached.size} areas={connections.filter((c) => c.kind === "internal").map((c) => c.label)} alignCount={alignments.length} tabTo={setTab} />}
-      {tab === "skills" && <Skills agentId={agentId} skills={skills} attached={attached} cornerstones={cornerstones} reload={load} setError={setError} />}
+      {tab === "skills" && <Skills agentId={agentId} agentName={agent.name} skills={skills} attached={attached} cornerstones={cornerstones} reload={load} setError={setError} />}
       {tab === "connections" && <Connections agentId={agentId} connections={connections} reload={load} setError={setError} />}
       {tab === "alignment" && <Alignment agentId={agentId} alignments={alignments} initiatives={initiatives} workstreams={workstreams} reload={load} setError={setError} />}
       {tab === "workflows" && <Workflows agentId={agentId} plays={allPlays} attachedPlayIds={attachedPlayIds} reload={load} setError={setError} />}
@@ -167,7 +167,7 @@ function Overview({ agent, onSaved, setError, skillsCount, areas, alignCount, ta
 }
 
 // ---------- Skills (cornerstones + library) ----------
-function Skills({ agentId, skills, attached, cornerstones, reload, setError }: { agentId: string; skills: Skill[]; attached: Set<string>; cornerstones: Set<string>; reload: () => void; setError: (s: string | null) => void }) {
+function Skills({ agentId, agentName, skills, attached, cornerstones, reload, setError }: { agentId: string; agentName: string; skills: Skill[]; attached: Set<string>; cornerstones: Set<string>; reload: () => void; setError: (s: string | null) => void }) {
   const supabase = createClient();
   const [creating, setCreating] = useState(false);
   const [form, setForm] = useState({ name: "", description: "", instructions: "", category: "general" });
@@ -217,6 +217,7 @@ function Skills({ agentId, skills, attached, cornerstones, reload, setError }: {
   }
 
   const attachedSkills = skills.filter((s) => attached.has(s.id));
+  const cornerstoneSkills = attachedSkills.filter((s) => cornerstones.has(s.id));
   const library = skills.filter((s) => !attached.has(s.id));
 
   return (
@@ -229,6 +230,8 @@ function Skills({ agentId, skills, attached, cornerstones, reload, setError }: {
       <div className="t-sub t-muted" style={{ fontSize: 12.5, marginBottom: 12 }}>
         <strong>Cornerstone skills</strong> (1–3, marked with ★) define this agent&rsquo;s core identity and run on every job. Inspect and tune any skill&rsquo;s playbook in place. <strong>Evolve from signals</strong> rewrites attached playbooks as new intelligence lands; you ratify each change. <span className="t-mono-xs">({cornerstones.size}/3 cornerstones)</span>
       </div>
+
+      <SkillHierarchy agentId={agentId} agentName={agentName} cornerstoneSkills={cornerstoneSkills} />
 
       {evolving && <EvolvePanel agentId={agentId} onApplied={reload} onClose={() => setEvolving(false)} setError={setError} />}
       {histSkill && <SkillHistory skill={histSkill} onClose={() => setHistSkill(null)} />}
@@ -303,6 +306,87 @@ function Skills({ agentId, skills, attached, cornerstones, reload, setError }: {
         </div>
       )}
     </Section>
+  );
+}
+
+// ---------- Skill stack (hierarchy: cornerstones → play skills) ----------
+// A read-only "map" of how this agent's skills layer: its cornerstone skills are
+// the trunk (always on, every job); each play it runs hangs its own bespoke skills
+// off that trunk as children. Makes the cornerstone-vs-play concept legible.
+function SkillHierarchy({ agentId, agentName, cornerstoneSkills }: { agentId: string; agentName: string; cornerstoneSkills: Skill[] }) {
+  const supabase = createClient();
+  const [plays, setPlays] = useState<{ id: string; label: string; skills: { id: string; name: string }[] }[]>([]);
+
+  useEffect(() => {
+    (async () => {
+      const { data } = await supabase.from("play_skills").select("id, name, play_id, skills(name), plays(label)").eq("agent_id", agentId);
+      const byPlay = new Map<string, { id: string; label: string; skills: { id: string; name: string }[] }>();
+      // deno-lint-ignore no-explicit-any
+      for (const r of (data ?? []) as any[]) {
+        if (!byPlay.has(r.play_id)) byPlay.set(r.play_id, { id: r.play_id, label: r.plays?.label ?? "Play", skills: [] });
+        byPlay.get(r.play_id)!.skills.push({ id: r.id, name: r.name ?? r.skills?.name ?? "Play skill" });
+      }
+      setPlays([...byPlay.values()]);
+    })();
+  }, [supabase, agentId]);
+
+  const tone = (c: string | null) => (c === "product" ? "accent" : c === "gtm" ? "violet" : "default");
+
+  return (
+    <div className="card card-pad" style={{ marginBottom: "var(--sp-4)", background: "var(--panel-2)" }}>
+      <div className="t-label" style={{ marginBottom: 12 }}>Skill stack</div>
+
+      {/* root: the agent */}
+      <div className="row gap-2" style={{ alignItems: "center", marginBottom: 4 }}>
+        <span style={{ width: 26, height: 26, borderRadius: 7, background: "var(--ac)", color: "#fff", display: "inline-flex", alignItems: "center", justifyContent: "center", fontWeight: 800, fontSize: 11 }}>{agentName.slice(0, 2).toUpperCase()}</span>
+        <span style={{ fontWeight: 680, fontSize: 14 }}>{agentName}</span>
+      </div>
+
+      {/* trunk */}
+      <div style={{ marginLeft: 13, borderLeft: "2px solid var(--border)", paddingLeft: 16, paddingTop: 8, display: "flex", flexDirection: "column", gap: 14 }}>
+        {/* cornerstone branch — always on */}
+        <div>
+          <div className="row gap-2" style={{ alignItems: "center", marginBottom: 6 }}>
+            <span style={{ color: "var(--ac)", fontSize: 13 }}>★</span>
+            <span style={{ fontWeight: 660, fontSize: 13 }}>Cornerstone skills</span>
+            <span className="t-mono-xs t-muted">always on · every job</span>
+          </div>
+          <div style={{ marginLeft: 6, display: "flex", flexDirection: "column", gap: 5 }}>
+            {cornerstoneSkills.length ? cornerstoneSkills.map((s) => (
+              <div key={s.id} className="row gap-2" style={{ alignItems: "center" }}>
+                <span style={{ color: "var(--ac)", opacity: 0.65 }}>▸</span>
+                <span style={{ fontSize: 13, fontWeight: 600 }}>{s.name}</span>
+                <Chip tone={tone(s.category)}>{s.category}</Chip>
+              </div>
+            )) : <span className="t-sub t-muted" style={{ fontSize: 12 }}>None yet — mark up to 3 skills with ★ below.</span>}
+          </div>
+        </div>
+
+        {/* a branch per play this agent runs — bespoke skills layered on top */}
+        {plays.map((p) => (
+          <div key={p.id}>
+            <div className="row gap-2" style={{ alignItems: "center", marginBottom: 6 }}>
+              <span style={{ color: "var(--vl)", fontSize: 12 }}>▣</span>
+              <span style={{ fontWeight: 660, fontSize: 13 }}>{p.label}</span>
+              <Chip tone="violet">play</Chip>
+              <span className="t-mono-xs t-muted">layered on top · this play only</span>
+            </div>
+            <div style={{ marginLeft: 6, display: "flex", flexDirection: "column", gap: 5 }}>
+              {p.skills.map((s) => (
+                <div key={s.id} className="row gap-2" style={{ alignItems: "center" }}>
+                  <span style={{ color: "var(--vl)", opacity: 0.65 }}>▸</span>
+                  <span style={{ fontSize: 13 }}>{s.name}</span>
+                </div>
+              ))}
+            </div>
+          </div>
+        ))}
+      </div>
+
+      <div className="t-sub t-muted" style={{ fontSize: 11.5, marginTop: 12, lineHeight: 1.5 }}>
+        <strong style={{ color: "var(--ac-text)" }}>Cornerstones</strong> are the agent&rsquo;s core — they run on every job. <strong style={{ color: "var(--vl-text)" }}>Play skills</strong> hang off them, bespoke to a single play and active only when that play runs.
+      </div>
+    </div>
   );
 }
 
