@@ -44,12 +44,13 @@ for (const name of readdirSync(skillsDir).sort()) {
     category: fm.category ?? "general",
     instructions: body,
     agents: (fm.agents ?? "").split(",").map((s) => s.trim()).filter(Boolean),
+    cornerstone: fm.cornerstone === "true",
   });
 }
 
 const banner = "// AUTO-GENERATED from web/skills/**/SKILL.md by scripts/build-skills.mjs — do not edit by hand.\n";
 const ts = banner +
-  "export type SkillDef = { key: string; name: string; description: string; category: string; instructions: string; agents: string[] };\n" +
+  "export type SkillDef = { key: string; name: string; description: string; category: string; instructions: string; agents: string[]; cornerstone: boolean };\n" +
   "export const SKILL_DEFS: SkillDef[] = " + JSON.stringify(defs, null, 2) + ";\n";
 writeFileSync(outFile, ts);
 console.log(`Wrote ${defs.length} skills → web/lib/skills.generated.ts`);
