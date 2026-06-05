@@ -69,7 +69,7 @@ Deno.serve(async (req: Request) => {
     { global: { headers: { Authorization: authHeader } } },
   );
 
-  let input: { workflow_id?: string; stream?: boolean };
+  let input: { workflow_id?: string; target_type?: string; target_id?: string; stream?: boolean };
   try { input = await req.json(); } catch { return json({ error: "invalid JSON body" }, 400); }
   const { workflow_id } = input;
   if (!workflow_id) return json({ error: "workflow_id is required" }, 400);
@@ -80,6 +80,24 @@ Deno.serve(async (req: Request) => {
   const steps = (wf.steps ?? []) as Step[];
   if (!steps.length) return json({ error: `the "${wf.name}" workflow has no steps` }, 400);
   const orgId = wf.org_id as string;
+
+  // Optional runtime target: when launched from a record's chat, focus the whole
+  // workflow on that record (its fields become shared context for every step). The
+  // runtime target overrides the workflow's own configured target.
+  let recordContext = "";
+  let runTargetType = (wf.target_type as string) || "workflow";
+  let runTargetId = (wf.target_id as string) ?? wf.id;
+  if (input.target_id && (input.target_type === "product" || input.target_type === "gtm")) {
+    const table = input.target_type === "product" ? "product_records" : "gtm_records";
+    const fk = input.target_type === "product" ? "product_id" : "gtm_record_id";
+    const { data: rec } = await supabase.from(table).select("*").eq("id", input.target_id).maybeSingle();
+    if (rec) {
+      const { data: fields } = await supabase.from("record_fields").select("label, value, position").eq(fk, input.target_id).order("position", { ascending: true });
+      recordContext = `THE RECORD THIS WORKFLOW IS FOCUSED ON (${input.target_type === "gtm" ? "GTM record" : "Product record"}: ${(rec as { name?: string }).name ?? input.target_id}):\n${JSON.stringify({ record: rec, fields: fields ?? [] }, null, 2)}`;
+      runTargetType = input.target_type;
+      runTargetId = input.target_id;
+    }
+  }
 
   // Officers referenced by the steps.
   const agentIds = [...new Set(steps.map((s) => s.agent_id).filter(Boolean))];
@@ -138,10 +156,11 @@ Deno.serve(async (req: Request) => {
       ].join("");
       const sigText = signalsFor(step.signals);
       const user = [
+        recordContext ? `${recordContext}\n` : "",
         step.signals === "none" ? "(this step uses no signals)" : `SIGNALS (${SIGNAL_PROMPT[step.signals]}):\n${sigText}`,
         prior ? `\nWHAT EARLIER STEPS PRODUCED (build on this):${prior}` : "",
         `\nRun step ${idx + 1} now.`,
-      ].join("\n");
+      ].filter(Boolean).join("\n");
       const body = {
         model: aModel, max_tokens: 2600, thinking: { type: "adaptive" },
         output_config: { effort: "high", format: { type: "json_schema", schema: SCHEMA } },
@@ -191,7 +210,7 @@ Deno.serve(async (req: Request) => {
 
     const { data: artifact, error: artErr } = await supabase.from("agent_artifacts").insert({
       org_id: orgId, agent_id: firstAgentId, function_key: `workflow:${wf.id}`,
-      target_type: (wf.target_type as string) || "workflow", target_id: (wf.target_id as string) ?? wf.id,
+      target_type: runTargetType, target_id: runTargetId,
       title: wf.name, status: "draft", payload, run_id: run?.id ?? null,
     }).select("id, function_key, title, status, payload, run_id, agent_id").single();
     if (artErr) throw artErr;

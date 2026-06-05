@@ -215,7 +215,8 @@ export default function AgentDrawer({
         )}
       </aside>
 
-      <WorkflowRunDrawer open={!!runWf} onClose={() => setRunWf(null)} workflow={runWf} />
+      <WorkflowRunDrawer open={!!runWf} onClose={() => setRunWf(null)} workflow={runWf}
+        target={context?.record_id && context?.record_type ? { type: context.record_type, id: context.record_id, name: context.record_name } : null} />
     </>
   );
 }

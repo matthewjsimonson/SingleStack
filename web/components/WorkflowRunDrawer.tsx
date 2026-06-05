@@ -13,10 +13,11 @@ type Section = { title: string; body: string; evidence?: string[] };
 type Artifact = { title?: string; payload: { headline?: string; sections?: Section[]; recommendations?: string[]; confidence?: string } };
 type Result = { artifact: Artifact; officer?: string };
 
-export default function WorkflowRunDrawer({ open, onClose, workflow, onRan }: {
+export default function WorkflowRunDrawer({ open, onClose, workflow, target, onRan }: {
   open: boolean;
   onClose: () => void;
   workflow: { id: string; name: string } | null;
+  target?: { type: "product" | "gtm"; id: string; name?: string } | null;
   onRan?: () => void;
 }) {
   const supabase = createClient();
@@ -35,13 +36,13 @@ export default function WorkflowRunDrawer({ open, onClose, workflow, onRan }: {
       const res = await streamStructured<Result>({
         fnName: "run-workflow",
         token: sess.session?.access_token,
-        body: { workflow_id: workflow.id },
+        body: { workflow_id: workflow.id, ...(target ? { target_type: target.type, target_id: target.id } : {}) },
         onThinking: (s) => setThinking((p) => p + s),
       });
       setResult(res); onRan?.();
     } catch (e) { setError(e instanceof Error ? e.message : "Workflow run failed."); }
     finally { setBusy(false); }
-  }, [supabase, workflow, onRan]);
+  }, [supabase, workflow, target, onRan]);
 
   useEffect(() => {
     if (!open) { started.current = false; setThinking(""); setResult(null); setError(null); setBusy(false); return; }
@@ -58,7 +59,7 @@ export default function WorkflowRunDrawer({ open, onClose, workflow, onRan }: {
         <div className="row-between" style={{ padding: "16px 20px", borderBottom: "1px solid var(--border)", alignItems: "center" }}>
           <div style={{ minWidth: 0 }}>
             <div style={{ fontSize: 15, fontWeight: 660 }}>{workflow.name}</div>
-            <div className="t-sub t-muted" style={{ fontSize: 12 }}>{result?.officer || "Running workflow…"}</div>
+            <div className="t-sub t-muted" style={{ fontSize: 12 }}>{target?.name ? `Focused on ${target.name} · ` : ""}{result?.officer || "Running workflow…"}</div>
           </div>
           <button className="btn btn-secondary btn-sm" onClick={onClose}>Close</button>
         </div>
