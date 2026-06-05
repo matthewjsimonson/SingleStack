@@ -285,7 +285,7 @@ Deno.serve(async (req: Request) => {
             const s = anthropic.messages.stream({
               model,
               max_tokens: 2000,
-              thinking: { type: "adaptive" },
+              thinking: { type: "adaptive", display: "summarized" }, // summarized → reasoning text is populated on Opus 4.8
               system: [{ type: "text", text: system, cache_control: { type: "ephemeral" } }],
               messages: messages.map((m) => ({ role: m.role, content: m.content })),
               // deno-lint-ignore no-explicit-any

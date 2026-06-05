@@ -162,7 +162,7 @@ Deno.serve(async (req: Request) => {
         `\nRun step ${idx + 1} now.`,
       ].filter(Boolean).join("\n");
       const body = {
-        model: aModel, max_tokens: 2600, thinking: { type: "adaptive" },
+        model: aModel, max_tokens: 2600, thinking: { type: "adaptive", display: "summarized" },
         output_config: { effort: "high", format: { type: "json_schema", schema: SCHEMA } },
         system: [{ type: "text", text: system, cache_control: { type: "ephemeral" } }],
         messages: [{ role: "user", content: user }],

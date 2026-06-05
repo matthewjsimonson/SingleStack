@@ -290,7 +290,7 @@ Deno.serve(async (req: Request) => {
     const requestBody = {
       model,
       max_tokens: 16000,
-      thinking: { type: "adaptive" },
+      thinking: { type: "adaptive", display: "summarized" }, // summarized → reasoning text is populated on Opus 4.8
       output_config: { effort: "high", format: { type: "json_schema", schema: PROPOSAL_SCHEMA } },
       system: [{ type: "text", text: systemText, cache_control: { type: "ephemeral" } }],
       messages: [{ role: "user", content: userText }],
