@@ -194,22 +194,29 @@ Deno.serve(async (req: Request) => {
 
     if (results.length === 0) throw new Error("no runnable steps (officers may have been removed)");
 
-    // Aggregate: ONE clean section per step (its headline + sub-sections folded into
-    // the body), and the FINAL step's recommendations (the synthesis) — not a pile
-    // flattened from every step.
+    // Aggregate as ONE self-contained block per agent: each step's headline, its
+    // analysis, ITS OWN recommendations, and its confidence fold into a single
+    // section. No flattened top-level recommendations pile. headline = the final
+    // step's one-line take (the chain's landing point).
     const payload = {
       headline: results[results.length - 1]?.payload?.headline ?? wf.name,
-      sections: results.map((r, i) => ({
-        title: `Step ${i + 1} · ${r.agentName}${r.skillName ? ` · ${r.skillName}` : ""}`,
-        body: [
-          r.payload?.headline ? `**${r.payload.headline}**` : "",
-          // deno-lint-ignore no-explicit-any
-          ...((r.payload?.sections ?? []) as any[]).map((s) => `${s.title}: ${s.body}`),
-        ].filter(Boolean).join("\n\n"),
+      sections: results.map((r, i) => {
         // deno-lint-ignore no-explicit-any
-        evidence: ((r.payload?.sections ?? []) as any[]).flatMap((s) => s.evidence ?? []),
-      })),
-      recommendations: results[results.length - 1]?.payload?.recommendations ?? [],
+        const subs = (r.payload?.sections ?? []) as any[];
+        const recs = (r.payload?.recommendations ?? []) as string[];
+        const body = [
+          r.payload?.headline ? `**${r.payload.headline}**` : "",
+          ...subs.map((s) => `${s.title}: ${s.body}`),
+          recs.length ? `**Recommendations**\n${recs.map((x) => `• ${x}`).join("\n")}` : "",
+          r.payload?.confidence ? `_Confidence: ${r.payload.confidence}_` : "",
+        ].filter(Boolean).join("\n\n");
+        return {
+          title: `Step ${i + 1} · ${r.agentName}${r.skillName ? ` · ${r.skillName}` : ""}`,
+          body,
+          evidence: subs.flatMap((s) => s.evidence ?? []),
+        };
+      }),
+      recommendations: [],
       confidence: results.map((r, i) => `Step ${i + 1}: ${r.payload?.confidence ?? "—"}`).join(" · "),
     };
 
