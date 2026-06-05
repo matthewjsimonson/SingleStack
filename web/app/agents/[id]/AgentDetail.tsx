@@ -166,16 +166,35 @@ function Overview({ agent, onSaved, setError, skillsCount, areas, alignCount, ta
   );
 }
 
-// ---------- Skills (cornerstones + library) ----------
+// ---------- Skills — the per-agent editor for cornerstone + play skills ----------
+// Rendered as a clickable, editable hierarchy: the agent is the root; its 1–3
+// CORNERSTONE skills (always on, every job) are one branch; its PLAY SKILLS
+// (task/process-specific, attached to plays over in Plays) are another. Click any
+// branch to edit that skill in place (name, what it does, the playbook), promote/
+// demote it to a cornerstone, see its history, or detach it.
+const catTone = (c: string | null) => (c === "product" ? "accent" : c === "gtm" ? "violet" : "default");
+
 function Skills({ agentId, agentName, skills, attached, cornerstones, reload, setError }: { agentId: string; agentName: string; skills: Skill[]; attached: Set<string>; cornerstones: Set<string>; reload: () => void; setError: (s: string | null) => void }) {
   const supabase = createClient();
   const [creating, setCreating] = useState(false);
-  const [form, setForm] = useState({ name: "", description: "", instructions: "", category: "general" });
+  const [form, setForm] = useState({ name: "", description: "", instructions: "", category: "general", cornerstone: false });
   const [busy, setBusy] = useState(false);
   const [evolving, setEvolving] = useState(false);
   const [histSkill, setHistSkill] = useState<Skill | null>(null);
-  const [openSkill, setOpenSkill] = useState<string | null>(null); // inspect/edit a skill's playbook
-  const [draft, setDraft] = useState("");
+  const [openSkill, setOpenSkill] = useState<string | null>(null); // which node's editor is open
+  const [edit, setEdit] = useState({ name: "", description: "", instructions: "" });
+  const [usage, setUsage] = useState<Record<string, string[]>>({}); // skill_id -> play labels using it
+
+  // Which plays each of this agent's skills is attached to (for the "in N plays" hint).
+  useEffect(() => {
+    (async () => {
+      const { data } = await supabase.from("play_skills").select("skill_id, plays(label)").eq("agent_id", agentId);
+      const m: Record<string, string[]> = {};
+      // deno-lint-ignore no-explicit-any
+      for (const r of (data ?? []) as any[]) { if (r.skill_id) (m[r.skill_id] ??= []).push(r.plays?.label ?? "Play"); }
+      setUsage(m);
+    })();
+  }, [supabase, agentId, skills]);
 
   async function toggle(skillId: string, on: boolean) {
     setError(null);
@@ -193,10 +212,10 @@ function Skills({ agentId, agentName, skills, attached, cornerstones, reload, se
     await supabase.from("agent_skills").update({ is_cornerstone: next }).eq("agent_id", agentId).eq("skill_id", skillId);
     reload();
   }
-  function inspect(s: Skill) { if (openSkill === s.id) { setOpenSkill(null); return; } setOpenSkill(s.id); setDraft(s.instructions ?? ""); }
-  async function saveInstructions(s: Skill) {
+  function openEditor(s: Skill) { if (openSkill === s.id) { setOpenSkill(null); return; } setOpenSkill(s.id); setEdit({ name: s.name, description: s.description ?? "", instructions: s.instructions ?? "" }); }
+  async function saveSkill(s: Skill) {
     setError(null);
-    const { error } = await supabase.from("skills").update({ instructions: draft }).eq("id", s.id);
+    const { error } = await supabase.from("skills").update({ name: edit.name.trim() || s.name, description: edit.description.trim() || null, instructions: edit.instructions }).eq("id", s.id);
     if (error) setError(error.message); else { setOpenSkill(null); reload(); }
   }
 
@@ -206,11 +225,12 @@ function Skills({ agentId, agentName, skills, attached, cornerstones, reload, se
     try {
       const orgId = await getOrgId();
       if (!orgId) throw new Error("Could not resolve your organization.");
+      if (form.cornerstone && cornerstones.size >= 3) throw new Error("An agent has at most 3 cornerstone skills — unset one first.");
       const key = form.name.trim().toLowerCase().replace(/[^a-z0-9]+/g, "_").replace(/^_|_$/g, "") || `skill_${Date.now()}`;
       const { data, error } = await supabase.from("skills").insert({ org_id: orgId, key, name: form.name.trim(), description: form.description.trim() || null, instructions: form.instructions.trim() || null, category: form.category }).select("id").single();
       if (error) throw error;
-      await supabase.from("agent_skills").insert({ org_id: orgId, agent_id: agentId, skill_id: data.id });
-      setCreating(false); setForm({ name: "", description: "", instructions: "", category: "general" });
+      await supabase.from("agent_skills").insert({ org_id: orgId, agent_id: agentId, skill_id: data.id, is_cornerstone: form.cornerstone });
+      setCreating(false); setForm({ name: "", description: "", instructions: "", category: "general", cornerstone: false });
       reload();
     } catch (e) { setError(e instanceof Error ? e.message : "Could not create skill."); }
     finally { setBusy(false); }
@@ -218,7 +238,44 @@ function Skills({ agentId, agentName, skills, attached, cornerstones, reload, se
 
   const attachedSkills = skills.filter((s) => attached.has(s.id));
   const cornerstoneSkills = attachedSkills.filter((s) => cornerstones.has(s.id));
+  const playSkills = attachedSkills.filter((s) => !cornerstones.has(s.id));
   const library = skills.filter((s) => !attached.has(s.id));
+
+  // One editable node in the tree. Clicking the row opens the inline editor.
+  const node = (s: Skill, kind: "cornerstone" | "play") => {
+    const open = openSkill === s.id;
+    const accent = kind === "cornerstone" ? "var(--ac)" : "var(--vl)";
+    const plays = usage[s.id] ?? [];
+    return (
+      <div key={s.id}>
+        <div className="row gap-2" onClick={() => openEditor(s)} style={{ alignItems: "center", cursor: "pointer", padding: "3px 0", flexWrap: "wrap" }}>
+          <span style={{ color: accent, opacity: 0.7 }}>▸</span>
+          <span style={{ fontSize: 13, fontWeight: 600 }}>{s.name}</span>
+          <Chip tone={catTone(s.category)}>{s.category}</Chip>
+          {kind === "play" && (plays.length
+            ? <span className="t-mono-xs" style={{ color: "var(--vl-text)" }}>in {plays.length} play{plays.length > 1 ? "s" : ""}</span>
+            : <span className="t-mono-xs t-muted">not in a play yet</span>)}
+          <span className="t-mono-xs" style={{ color: "var(--ac-text)", marginLeft: "auto" }}>{open ? "Close" : "Edit"}</span>
+        </div>
+        {open && (
+          <div className="card card-pad" style={{ marginTop: 6, marginBottom: 6, background: "var(--panel)" }}>
+            <div className="row gap-2" style={{ marginBottom: 10, flexWrap: "wrap" }}>
+              <button className="btn btn-secondary btn-sm" onClick={() => toggleCornerstone(s.id, kind !== "cornerstone")} title={kind === "cornerstone" ? "Demote to a play skill" : "Promote to cornerstone (always on)"}>{kind === "cornerstone" ? "★ Cornerstone — unset" : "☆ Make cornerstone"}</button>
+              <button className="btn btn-secondary btn-sm" onClick={() => setHistSkill(s)}>History</button>
+              <button className="btn btn-secondary btn-sm" onClick={() => toggle(s.id, false)} style={{ color: "var(--rd-text)", marginLeft: "auto" }}>Detach</button>
+            </div>
+            {kind === "play" && plays.length > 0 && <div className="t-sub t-muted" style={{ fontSize: 11.5, marginBottom: 8 }}>Used in: {plays.join(", ")}</div>}
+            <label className="field"><span className="t-label">Name</span><input className="input" value={edit.name} onChange={(e) => setEdit({ ...edit, name: e.target.value })} /></label>
+            <label className="field"><span className="t-label">What it does</span><input className="input" value={edit.description} onChange={(e) => setEdit({ ...edit, description: e.target.value })} placeholder="A one-liner" /></label>
+            <label className="field"><span className="t-label">Instructions (playbook)</span><textarea className="textarea" rows={7} value={edit.instructions} onChange={(e) => setEdit({ ...edit, instructions: e.target.value })} placeholder="How the agent applies this skill — tailored to your company and goals." /></label>
+            <div className="row gap-2" style={{ marginTop: 4 }}><button className="btn btn-sm" onClick={() => saveSkill(s)}>Save</button><button className="btn btn-secondary btn-sm" onClick={() => setOpenSkill(null)}>Cancel</button></div>
+          </div>
+        )}
+      </div>
+    );
+  };
+
+  const branchHint = (text: string) => <span className="t-sub t-muted" style={{ fontSize: 12 }}>{text}</span>;
 
   return (
     <Section label="Skills" action={!creating ? (
@@ -228,10 +285,8 @@ function Skills({ agentId, agentName, skills, attached, cornerstones, reload, se
       </div>
     ) : undefined}>
       <div className="t-sub t-muted" style={{ fontSize: 12.5, marginBottom: 12 }}>
-        <strong>Cornerstone skills</strong> (1–3, marked with ★) define this agent&rsquo;s core identity and run on every job. Inspect and tune any skill&rsquo;s playbook in place. <strong>Evolve from signals</strong> rewrites attached playbooks as new intelligence lands; you ratify each change. <span className="t-mono-xs">({cornerstones.size}/3 cornerstones)</span>
+        An agent has two kinds of skills. <strong style={{ color: "var(--ac-text)" }}>Cornerstone skills</strong> (1–3, ★) are its core identity — they run on <em>every</em> job. <strong style={{ color: "var(--vl-text)" }}>Play skills</strong> are task/process-specific; you author them here, then attach them to plays over in <a href="/plays" style={{ color: "var(--vl-text)", fontWeight: 600 }}>Plays</a>. Click any skill to edit it. <span className="t-mono-xs">({cornerstones.size}/3 cornerstones)</span>
       </div>
-
-      <SkillHierarchy agentId={agentId} agentName={agentName} cornerstoneSkills={cornerstoneSkills} />
 
       {evolving && <EvolvePanel agentId={agentId} onApplied={reload} onClose={() => setEvolving(false)} setError={setError} />}
       {histSkill && <SkillHistory skill={histSkill} onClose={() => setHistSkill(null)} />}
@@ -247,56 +302,45 @@ function Skills({ agentId, agentName, skills, attached, cornerstones, reload, se
           </div>
           <label className="field"><span className="t-label">Description</span><input className="input" value={form.description} onChange={(e) => setForm({ ...form, description: e.target.value })} placeholder="What it does" /></label>
           <label className="field"><span className="t-label">Instructions / playbook</span><textarea className="textarea" rows={5} value={form.instructions} onChange={(e) => setForm({ ...form, instructions: e.target.value })} placeholder="How the agent should apply this skill, tailored to your company and goals." /></label>
-          <div className="row gap-2"><button className="btn" type="submit" disabled={busy}>{busy ? "Creating…" : "Create & attach"}</button><button className="btn btn-secondary" type="button" onClick={() => setCreating(false)}>Cancel</button></div>
+          <label className="row gap-2" style={{ alignItems: "center", margin: "2px 0 10px", cursor: "pointer" }}><input type="checkbox" checked={form.cornerstone} onChange={(e) => setForm({ ...form, cornerstone: e.target.checked })} /><span className="t-sub">Make this a cornerstone (always on) — otherwise it&rsquo;s a play skill</span></label>
+          <div className="row gap-2"><button className="btn" type="submit" disabled={busy}>{busy ? "Creating…" : "Create skill"}</button><button className="btn btn-secondary" type="button" onClick={() => setCreating(false)}>Cancel</button></div>
         </form>
       )}
 
-      {attachedSkills.length === 0 && !creating ? (
-        <Empty title="No skills attached" hint="Attach a skill from the library below, then mark up to 3 as cornerstone." action={<button className="btn" onClick={() => setCreating(true)}>+ New skill</button>} />
-      ) : (
-        <div className="stack-3">
-          {attachedSkills.map((s) => {
-            const corner = cornerstones.has(s.id);
-            const open = openSkill === s.id;
-            return (
-              <div key={s.id} className="card card-pad" style={{ borderLeft: corner ? "2px solid var(--ac)" : undefined }}>
-                <div className="row-between" style={{ gap: 12 }}>
-                  <div style={{ minWidth: 0 }}>
-                    <div className="row gap-2" style={{ flexWrap: "wrap", alignItems: "center" }}>
-                      <button onClick={() => toggleCornerstone(s.id, !corner)} title={corner ? "Cornerstone — click to unset" : "Mark as cornerstone"} aria-label="Toggle cornerstone" style={{ background: "none", border: "none", cursor: "pointer", fontSize: 16, lineHeight: 1, color: corner ? "var(--ac)" : "var(--tm)" }}>{corner ? "★" : "☆"}</button>
-                      <span style={{ fontSize: 14, fontWeight: 620 }}>{s.name}</span>
-                      <Chip tone={s.category === "product" ? "accent" : s.category === "gtm" ? "violet" : "default"}>{s.category}</Chip>
-                      {corner && <Chip tone="accent">cornerstone</Chip>}
-                    </div>
-                    {s.description && <div className="t-sub t-muted" style={{ fontSize: 12.5, marginTop: 2 }}>{s.description}</div>}
-                  </div>
-                  <div className="row gap-2" style={{ flexShrink: 0 }}>
-                    <button className="btn btn-secondary btn-sm" onClick={() => inspect(s)}>{open ? "Close" : "Inspect"}</button>
-                    <button className="btn btn-secondary btn-sm" onClick={() => setHistSkill(s)}>History</button>
-                    <button className="btn btn-secondary btn-sm" onClick={() => toggle(s.id, false)} style={{ color: "var(--rd-text)" }}>Detach</button>
-                  </div>
-                </div>
-                {open && (
-                  <div style={{ marginTop: 10 }}>
-                    <span className="t-label" style={{ color: "var(--tm)" }}>Instructions (playbook)</span>
-                    <textarea className="textarea" rows={7} value={draft} onChange={(e) => setDraft(e.target.value)} style={{ marginTop: 4 }} placeholder="How the agent applies this skill — tailored to your company and goals." />
-                    <div className="row gap-2" style={{ marginTop: 8 }}><button className="btn btn-sm" onClick={() => saveInstructions(s)}>Save instructions</button><button className="btn btn-secondary btn-sm" onClick={() => setOpenSkill(null)}>Cancel</button></div>
-                  </div>
-                )}
-              </div>
-            );
-          })}
+      {/* Skill stack — the editable hierarchy */}
+      <div className="card card-pad" style={{ background: "var(--panel-2)", marginBottom: "var(--sp-4)" }}>
+        <div className="row gap-2" style={{ alignItems: "center", marginBottom: 4 }}>
+          <span style={{ width: 26, height: 26, borderRadius: 7, background: "var(--ac)", color: "#fff", display: "inline-flex", alignItems: "center", justifyContent: "center", fontWeight: 800, fontSize: 11 }}>{agentName.slice(0, 2).toUpperCase()}</span>
+          <span style={{ fontWeight: 680, fontSize: 14 }}>{agentName}</span>
         </div>
-      )}
+        <div style={{ marginLeft: 13, borderLeft: "2px solid var(--border)", paddingLeft: 16, paddingTop: 8, display: "flex", flexDirection: "column", gap: 16 }}>
+          <div>
+            <div className="row gap-2" style={{ alignItems: "center", marginBottom: 6 }}>
+              <span style={{ color: "var(--ac)", fontSize: 13 }}>★</span>
+              <span style={{ fontWeight: 660, fontSize: 13 }}>Cornerstone skills</span>
+              <span className="t-mono-xs t-muted">always on · every job</span>
+            </div>
+            <div style={{ marginLeft: 6 }}>{cornerstoneSkills.length ? cornerstoneSkills.map((s) => node(s, "cornerstone")) : branchHint("None yet — make a skill a cornerstone with ★.")}</div>
+          </div>
+          <div>
+            <div className="row gap-2" style={{ alignItems: "center", marginBottom: 6 }}>
+              <span style={{ color: "var(--vl)", fontSize: 12 }}>▣</span>
+              <span style={{ fontWeight: 660, fontSize: 13 }}>Play skills</span>
+              <span className="t-mono-xs t-muted">task/process-specific · attach to plays</span>
+            </div>
+            <div style={{ marginLeft: 6 }}>{playSkills.length ? playSkills.map((s) => node(s, "play")) : branchHint("None yet — create one above, or attach from the library below.")}</div>
+          </div>
+        </div>
+      </div>
 
       {library.length > 0 && (
-        <div style={{ marginTop: "var(--sp-5)" }}>
-          <div className="t-label" style={{ color: "var(--tm)", marginBottom: 8 }}>Skill library</div>
+        <div style={{ marginTop: "var(--sp-2)" }}>
+          <div className="t-label" style={{ color: "var(--tm)", marginBottom: 8 }}>Skill library <span className="t-muted" style={{ fontWeight: 400 }}>— attach as a play skill</span></div>
           <div className="stack-3">
             {library.map((s) => (
               <div key={s.id} className="card card-pad row-between" style={{ gap: 12 }}>
                 <div style={{ minWidth: 0 }}>
-                  <div className="row gap-2"><span style={{ fontSize: 14, fontWeight: 620 }}>{s.name}</span><Chip tone={s.category === "product" ? "accent" : s.category === "gtm" ? "violet" : "default"}>{s.category}</Chip></div>
+                  <div className="row gap-2"><span style={{ fontSize: 14, fontWeight: 620 }}>{s.name}</span><Chip tone={catTone(s.category)}>{s.category}</Chip></div>
                   {s.description && <div className="t-sub t-muted" style={{ fontSize: 12.5, marginTop: 2 }}>{s.description}</div>}
                 </div>
                 <button className="btn btn-sm" onClick={() => toggle(s.id, true)}>Attach</button>
@@ -306,87 +350,6 @@ function Skills({ agentId, agentName, skills, attached, cornerstones, reload, se
         </div>
       )}
     </Section>
-  );
-}
-
-// ---------- Skill stack (hierarchy: cornerstones → play skills) ----------
-// A read-only "map" of how this agent's skills layer: its cornerstone skills are
-// the trunk (always on, every job); each play it runs hangs its own bespoke skills
-// off that trunk as children. Makes the cornerstone-vs-play concept legible.
-function SkillHierarchy({ agentId, agentName, cornerstoneSkills }: { agentId: string; agentName: string; cornerstoneSkills: Skill[] }) {
-  const supabase = createClient();
-  const [plays, setPlays] = useState<{ id: string; label: string; skills: { id: string; name: string }[] }[]>([]);
-
-  useEffect(() => {
-    (async () => {
-      const { data } = await supabase.from("play_skills").select("id, name, play_id, skills(name), plays(label)").eq("agent_id", agentId);
-      const byPlay = new Map<string, { id: string; label: string; skills: { id: string; name: string }[] }>();
-      // deno-lint-ignore no-explicit-any
-      for (const r of (data ?? []) as any[]) {
-        if (!byPlay.has(r.play_id)) byPlay.set(r.play_id, { id: r.play_id, label: r.plays?.label ?? "Play", skills: [] });
-        byPlay.get(r.play_id)!.skills.push({ id: r.id, name: r.name ?? r.skills?.name ?? "Play skill" });
-      }
-      setPlays([...byPlay.values()]);
-    })();
-  }, [supabase, agentId]);
-
-  const tone = (c: string | null) => (c === "product" ? "accent" : c === "gtm" ? "violet" : "default");
-
-  return (
-    <div className="card card-pad" style={{ marginBottom: "var(--sp-4)", background: "var(--panel-2)" }}>
-      <div className="t-label" style={{ marginBottom: 12 }}>Skill stack</div>
-
-      {/* root: the agent */}
-      <div className="row gap-2" style={{ alignItems: "center", marginBottom: 4 }}>
-        <span style={{ width: 26, height: 26, borderRadius: 7, background: "var(--ac)", color: "#fff", display: "inline-flex", alignItems: "center", justifyContent: "center", fontWeight: 800, fontSize: 11 }}>{agentName.slice(0, 2).toUpperCase()}</span>
-        <span style={{ fontWeight: 680, fontSize: 14 }}>{agentName}</span>
-      </div>
-
-      {/* trunk */}
-      <div style={{ marginLeft: 13, borderLeft: "2px solid var(--border)", paddingLeft: 16, paddingTop: 8, display: "flex", flexDirection: "column", gap: 14 }}>
-        {/* cornerstone branch — always on */}
-        <div>
-          <div className="row gap-2" style={{ alignItems: "center", marginBottom: 6 }}>
-            <span style={{ color: "var(--ac)", fontSize: 13 }}>★</span>
-            <span style={{ fontWeight: 660, fontSize: 13 }}>Cornerstone skills</span>
-            <span className="t-mono-xs t-muted">always on · every job</span>
-          </div>
-          <div style={{ marginLeft: 6, display: "flex", flexDirection: "column", gap: 5 }}>
-            {cornerstoneSkills.length ? cornerstoneSkills.map((s) => (
-              <div key={s.id} className="row gap-2" style={{ alignItems: "center" }}>
-                <span style={{ color: "var(--ac)", opacity: 0.65 }}>▸</span>
-                <span style={{ fontSize: 13, fontWeight: 600 }}>{s.name}</span>
-                <Chip tone={tone(s.category)}>{s.category}</Chip>
-              </div>
-            )) : <span className="t-sub t-muted" style={{ fontSize: 12 }}>None yet — mark up to 3 skills with ★ below.</span>}
-          </div>
-        </div>
-
-        {/* a branch per play this agent runs — bespoke skills layered on top */}
-        {plays.map((p) => (
-          <div key={p.id}>
-            <div className="row gap-2" style={{ alignItems: "center", marginBottom: 6 }}>
-              <span style={{ color: "var(--vl)", fontSize: 12 }}>▣</span>
-              <span style={{ fontWeight: 660, fontSize: 13 }}>{p.label}</span>
-              <Chip tone="violet">play</Chip>
-              <span className="t-mono-xs t-muted">layered on top · this play only</span>
-            </div>
-            <div style={{ marginLeft: 6, display: "flex", flexDirection: "column", gap: 5 }}>
-              {p.skills.map((s) => (
-                <div key={s.id} className="row gap-2" style={{ alignItems: "center" }}>
-                  <span style={{ color: "var(--vl)", opacity: 0.65 }}>▸</span>
-                  <span style={{ fontSize: 13 }}>{s.name}</span>
-                </div>
-              ))}
-            </div>
-          </div>
-        ))}
-      </div>
-
-      <div className="t-sub t-muted" style={{ fontSize: 11.5, marginTop: 12, lineHeight: 1.5 }}>
-        <strong style={{ color: "var(--ac-text)" }}>Cornerstones</strong> are the agent&rsquo;s core — they run on every job. <strong style={{ color: "var(--vl-text)" }}>Play skills</strong> hang off them, bespoke to a single play and active only when that play runs.
-      </div>
-    </div>
   );
 }
 
