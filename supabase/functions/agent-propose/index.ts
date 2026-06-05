@@ -97,6 +97,7 @@ Deno.serve(async (req: Request) => {
   // ---- parse + validate input ------------------------------------------------
   let input: {
     agent_key?: string;
+    agent_keys?: string[]; // joint proposal: [author, ...advisors]; falls back to [agent_key]
     product_id?: string;
     gtm_record_id?: string;
     instruction?: string;
@@ -110,7 +111,13 @@ Deno.serve(async (req: Request) => {
   const { agent_key, product_id, gtm_record_id, instruction } = input;
   const topK = input.top_k ?? DEFAULT_TOP_K;
 
-  if (!agent_key) return json({ error: "agent_key is required" }, 400);
+  // The propose chain: the first officer AUTHORS the structured proposal; the rest
+  // contribute their lens (a joint task — e.g. CPO + Chief Eng, or CCO + CRO).
+  const chainKeys = (input.agent_keys?.length ? input.agent_keys : [agent_key]).filter(Boolean) as string[];
+  const primaryKey = chainKeys[0];
+  const advisorKeys = chainKeys.slice(1);
+
+  if (!primaryKey) return json({ error: "agent_key (or agent_keys) is required" }, 400);
   if ((product_id ? 1 : 0) + (gtm_record_id ? 1 : 0) !== 1) {
     return json({ error: "provide exactly one of product_id or gtm_record_id" }, 400);
   }
@@ -122,11 +129,11 @@ Deno.serve(async (req: Request) => {
   const { data: agent, error: agentErr } = await supabase
     .from("agents")
     .select("id, org_id, name, model, system_prompt")
-    .eq("key", agent_key)
+    .eq("key", primaryKey)
     .eq("is_active", true)
     .maybeSingle();
   if (agentErr) return json({ error: `agent lookup failed: ${agentErr.message}` }, 500);
-  if (!agent) return json({ error: `no active agent with key '${agent_key}'` }, 404);
+  if (!agent) return json({ error: `no active agent with key '${primaryKey}'` }, 404);
 
   const orgId = agent.org_id as string;
   const model = (agent.model as string) || DEFAULT_CLAUDE_MODEL;
@@ -230,12 +237,50 @@ Deno.serve(async (req: Request) => {
       skillsBlock,
     ].join("\n");
 
-    const userText = [
+    const recordIntelText = [
       "INTELLIGENCE (use as evidence; cite what informs the change in `rationale`):",
       intel.length ? intel.join("\n\n") : "(none in your connected areas yet)",
       "",
       "THE RECORD TO IMPROVE:",
       JSON.stringify({ instruction: instruction ?? null, record: { id: targetId, kind: targetTable, ...record }, fields: fields ?? [] }, null, 2),
+    ].join("\n");
+
+    // Joint task: each advisor officer contributes their lens (prose), which the
+    // author folds into the structured proposal below. One bounded call per advisor;
+    // an advisor failing never sinks the proposal.
+    const lenses: string[] = [];
+    const advisorNames: string[] = [];
+    for (const advKey of advisorKeys) {
+      const { data: adv } = await supabase.from("agents").select("id, name, model, system_prompt").eq("key", advKey).eq("is_active", true).maybeSingle();
+      if (!adv) continue;
+      advisorNames.push(adv.name as string);
+      const { data: advSkillRows } = await supabase.from("agent_skills").select("skills ( name, instructions )").eq("agent_id", adv.id);
+      // deno-lint-ignore no-explicit-any
+      const advSkills = (advSkillRows ?? []).map((r: any) => r.skills).filter(Boolean);
+      // deno-lint-ignore no-explicit-any
+      const advSkillsBlock = advSkills.length ? "\n\nYOUR SKILLS:\n" + advSkills.map((s: any) => `## ${s.name}${s.instructions ? `\n${s.instructions}` : ""}`).join("\n\n") : "";
+      const advSystem = [
+        adv.system_prompt ?? `You are ${adv.name}.`,
+        "Give your lens on improving this record: 3–6 concrete, specific bullets — what to change and why, grounded in the record + intelligence. No preamble, just the bullets.",
+        advSkillsBlock,
+      ].join("\n");
+      try {
+        const advMsg = (await anthropic.messages.create({
+          model: (adv.model as string) || DEFAULT_CLAUDE_MODEL,
+          max_tokens: 1200,
+          thinking: { type: "adaptive" },
+          system: [{ type: "text", text: advSystem, cache_control: { type: "ephemeral" } }],
+          messages: [{ role: "user", content: recordIntelText }],
+          // deno-lint-ignore no-explicit-any
+        } as any)) as Anthropic.Message;
+        const t = advMsg.content.find((b) => b.type === "text");
+        if (t && t.type === "text" && t.text.trim()) lenses.push(`### ${adv.name}'s lens\n${t.text.trim()}`);
+      } catch { /* skip a failed advisor */ }
+    }
+
+    const userText = [
+      recordIntelText,
+      lenses.length ? `\nFELLOW OFFICERS' INPUT — co-authors' lenses; weigh them and fold the right parts into your proposal:\n${lenses.join("\n\n")}` : "",
     ].join("\n");
 
     // Cast the body to `any`: adaptive thinking / output_config / effort may be
@@ -284,7 +329,7 @@ Deno.serve(async (req: Request) => {
         rationale: proposal.rationale,
         conf_level: confLevel,
         conf_label: proposal.conf_label,
-        proposed_by: agent.name,
+        proposed_by: [agent.name, ...advisorNames].join(" + "), // joint authorship
       })
       .select("id")
       .single();

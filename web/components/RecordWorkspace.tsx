@@ -41,14 +41,17 @@ export default function RecordWorkspace({ target, recordName }: { target: Target
 
   useEffect(() => { load(); }, [load]);
 
-  // Run an officer's proposal pass. Throws on failure so the advisor card can
-  // show its own running/error state; the card refreshes via onRan.
-  const proposeFor = useCallback(async (key: string) => {
+  // Run a JOINT proposal pass: the area's officers (CPO+Chief Eng / CCO+CRO) draft
+  // one proposal together. Throws on failure so the card shows its error state.
+  const proposeFor = useCallback(async (keys: string[]) => {
     const { data: s } = await supabase.auth.getSession();
     const token = s.session?.access_token;
+    // agent_key (first officer) kept for back-compat until the joint-aware
+    // function is deployed; agent_keys drives the joint chain once it is.
+    const base = { agent_keys: keys, agent_key: keys[0] };
     const body = target.kind === "product"
-      ? { agent_key: key, product_id: target.id }
-      : { agent_key: key, gtm_record_id: target.id };
+      ? { ...base, product_id: target.id }
+      : { ...base, gtm_record_id: target.id };
     const { data, error } = await supabase.functions.invoke("agent-propose", {
       body, headers: token ? { Authorization: `Bearer ${token}` } : undefined,
     });
