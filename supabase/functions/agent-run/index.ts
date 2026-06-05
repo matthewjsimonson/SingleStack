@@ -152,14 +152,31 @@ Deno.serve(async (req: Request) => {
   // Anthropic executes them server-side (Messages API mcp_servers, beta). Gated:
   // only passed when present, so non-connector agents are unaffected. Auth (Phase 1):
   // optional bearer from config; secure store is Phase 1.5. See docs/mcp-connectors.md.
-  const { data: mcpRows } = await supabase.from("connections").select("label, mcp_url, config").eq("agent_id", agent.id).eq("kind", "mcp").neq("status", "disconnected");
+  const { data: mcpRows } = await supabase.from("connections").select("id, label, mcp_url, config").eq("agent_id", agent.id).eq("kind", "mcp").neq("status", "disconnected");
   // deno-lint-ignore no-explicit-any
-  const mcpServers = (mcpRows ?? []).filter((r: any) => r.mcp_url).map((r: any, i: number) => ({
-    type: "url",
-    name: String(r.label || `mcp_${i}`).toLowerCase().replace(/[^a-z0-9_]+/g, "_").replace(/^_|_$/g, "") || `mcp_${i}`,
-    url: r.mcp_url as string,
-    ...(r.config?.authorization_token ? { authorization_token: r.config.authorization_token } : {}),
-  }));
+  const mcpConns = (mcpRows ?? []).filter((r: any) => r.mcp_url);
+  // Tokens live in the RLS-locked connection_secrets; read them with the SERVICE ROLE
+  // (never the client path). The connection ids came from the RLS-scoped query above,
+  // so we only ever read secrets for this caller's org.
+  const tokenById: Record<string, string> = {};
+  const serviceKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY");
+  if (mcpConns.length && serviceKey) {
+    const admin = createClient(Deno.env.get("SUPABASE_URL")!, serviceKey);
+    // deno-lint-ignore no-explicit-any
+    const { data: secs } = await admin.from("connection_secrets").select("connection_id, token").in("connection_id", mcpConns.map((c: any) => c.id));
+    // deno-lint-ignore no-explicit-any
+    for (const s of (secs ?? []) as any[]) tokenById[s.connection_id] = s.token;
+  }
+  // deno-lint-ignore no-explicit-any
+  const mcpServers = mcpConns.map((r: any, i: number) => {
+    const tok = tokenById[r.id] || r.config?.authorization_token;
+    return {
+      type: "url",
+      name: String(r.label || `mcp_${i}`).toLowerCase().replace(/[^a-z0-9_]+/g, "_").replace(/^_|_$/g, "") || `mcp_${i}`,
+      url: r.mcp_url as string,
+      ...(tok ? { authorization_token: tok } : {}),
+    };
+  });
   const mcpHeaders = mcpServers.length ? { headers: { "anthropic-beta": "mcp-client-2025-11-20" } } : undefined;
 
   const systemText = [

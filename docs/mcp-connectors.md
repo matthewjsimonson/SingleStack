@@ -54,11 +54,13 @@ Most useful connectors need auth (OAuth/bearer). Storing secrets is the hard par
 - **Phase 1 (now):** support **no-auth** connectors, and an **optional bearer token** read
   from `connections.config.authorization_token`. ⚠️ This is plaintext in a row readable by
   org members — acceptable for dogfood/dev, **not** for untrusted multi-tenant production.
-- **Phase 1.5 (hardening):** move tokens into a **secure store** — Supabase Vault
-  (pgsodium) or a restricted secrets table with column-level encryption, decrypted only in
-  the edge function. The connection row references a secret id, never the secret. OAuth
-  connectors get a refresh flow. *This must land before connectors are exposed to
-  untrusted tenants.*
+- **Phase 1.5 (hardening) — DONE (access-control):** tokens live in `connection_secrets`,
+  an **RLS-locked** table (RLS on, no policies). Writes go through **org-checked
+  `SECURITY DEFINER` RPCs** (`set_/clear_connection_secret`); reads happen **only in edge
+  functions via the service role** to pass the token to the connector. There is **no
+  "get" RPC** — a client can never read a token back; the UI field is write-only. Still
+  open: **encryption-at-rest** (pgsodium/Vault) and **OAuth refresh flows** — the next
+  hardening before broad/untrusted multi-tenant exposure.
 
 ## Multi-tenancy
 Connections are per-agent (or org-level, `agent_id` null), RLS-scoped. Each org's
@@ -68,7 +70,8 @@ sanitized/derived from the label.
 ## Phasing
 - **P1 — wire MCP into `agent-run`** *(this build)*: attached connectors work in the loop;
   optional bearer auth from config; beta header; gated.
-- **P1.5 — secure credential store** (Vault) + OAuth refresh. *Prereq for production.*
+- **P1.5 — secure credential store**: ✅ access-control (RLS-locked table + org-checked
+  definer RPCs + service-role-only reads). Remaining: encryption-at-rest + OAuth refresh.
 - **P2 — prebuilt connector catalog**: one-click attach common connectors
   (GitHub, Slack, Linear, Drive, web search) to an agent or a chat.
 - **P3 — "create an MCP with AI"**: an officer scaffolds a connector from a description

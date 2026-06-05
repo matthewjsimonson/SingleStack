@@ -473,7 +473,7 @@ function Alignment({ agentId, alignments, initiatives, workstreams, reload, setE
 // ---------- Connections ----------
 function Connections({ agentId, connections, reload, setError }: { agentId: string; connections: Connection[]; reload: () => void; setError: (s: string | null) => void }) {
   const supabase = createClient();
-  const [mcp, setMcp] = useState({ label: "", url: "", purpose: "", targets: "" });
+  const [mcp, setMcp] = useState({ label: "", url: "", purpose: "", targets: "", token: "" });
   const [busy, setBusy] = useState(false);
 
   const haveArea = (area: string) => connections.some((c) => c.kind === "internal" && c.area === area);
@@ -494,12 +494,19 @@ function Connections({ agentId, connections, reload, setError }: { agentId: stri
       // Pointing context: an MCP connection is only useful if the agent knows
       // WHERE to look (which reports/accounts/repos). Targets capture that.
       const targets = mcp.targets.split("\n").map((l) => l.trim()).filter(Boolean).map((ref) => ({ type: "ref", ref }));
-      await supabase.from("connections").insert({
+      const { data: conn, error: connErr } = await supabase.from("connections").insert({
         org_id: orgId, agent_id: agentId, kind: "mcp", label: mcp.label.trim(), mcp_url: mcp.url.trim(),
         status: "manual", config: { purpose: mcp.purpose.trim() || null },
         guidance: mcp.purpose.trim() || null, targets,
-      });
-      setMcp({ label: "", url: "", purpose: "", targets: "" }); reload();
+      }).select("id").single();
+      if (connErr) throw connErr;
+      // The token goes to the secure store (never the connections row) via the
+      // org-checked RPC. set_connection_secret also flips status to 'connected'.
+      if (mcp.token.trim() && conn) {
+        const { error: secErr } = await supabase.rpc("set_connection_secret", { p_connection: conn.id, p_token: mcp.token.trim() });
+        if (secErr) throw secErr;
+      }
+      setMcp({ label: "", url: "", purpose: "", targets: "", token: "" }); reload();
     } catch (e) { setError(e instanceof Error ? e.message : "Could not add connection."); }
     finally { setBusy(false); }
   }
@@ -519,7 +526,7 @@ function Connections({ agentId, connections, reload, setError }: { agentId: stri
       </Section>
 
       <Section label="External tools (MCP)">
-        <div className="t-sub t-muted" style={{ fontSize: 12.5, marginBottom: 12 }}>Connect an MCP server so this agent can use external tools (web search, GitHub, your own). <strong>Live now</strong> — a connected server&rsquo;s tools run inside the agent&rsquo;s loop. Public/no-auth servers work today; secured (token/OAuth) connectors land with the secure credential store. Whatever it gathers still flows through the review queue.</div>
+        <div className="t-sub t-muted" style={{ fontSize: 12.5, marginBottom: 12 }}>Connect an MCP server so this agent can use external tools (web search, GitHub, your own). <strong>Live now</strong> — a connected server&rsquo;s tools run inside the agent&rsquo;s loop. Add a token for secured servers (kept in a locked store, never shown again, passed only to the model at run time). Whatever it gathers still flows through the review queue.</div>
         <form onSubmit={addMcp} className="card card-pad" style={{ marginBottom: "var(--sp-3)" }}>
           <div style={{ display: "grid", gridTemplateColumns: "1fr 2fr", gap: "var(--sp-3)" }}>
             <label className="field"><span className="t-label">Name</span><input className="input" value={mcp.label} onChange={(e) => setMcp({ ...mcp, label: e.target.value })} placeholder="e.g. Web search" /></label>
@@ -529,6 +536,8 @@ function Connections({ agentId, connections, reload, setError }: { agentId: stri
             <input className="input" value={mcp.purpose} onChange={(e) => setMcp({ ...mcp, purpose: e.target.value })} placeholder="e.g. Pulls competitor releases into external signals; used by the CRO agent for battlecards." /></label>
           <label className="field"><span className="t-label">Point it at specifics — where to look (one per line)</span>
             <textarea className="textarea" rows={3} value={mcp.targets} onChange={(e) => setMcp({ ...mcp, targets: e.target.value })} placeholder={"e.g. report: Win/Loss by Competitor\naccount: Acme Corp\nopportunity stage: Negotiation"} /></label>
+          <label className="field"><span className="t-label">Auth token <span className="t-muted" style={{ fontWeight: 400 }}>— optional; for secured servers. Stored locked; not shown again.</span></span>
+            <input className="input mono" type="password" autoComplete="off" value={mcp.token} onChange={(e) => setMcp({ ...mcp, token: e.target.value })} placeholder="Bearer token (leave blank for public servers)" /></label>
           <div className="t-sub t-muted" style={{ fontSize: 11.5, marginBottom: 8 }}>Connecting Salesforce isn’t enough — tell the agent which reports, accounts, and opportunities to consult. This is the difference between a connection and a useful one.</div>
           <button className="btn btn-sm" type="submit" disabled={busy}>{busy ? "Adding…" : "+ Add MCP connection"}</button>
         </form>
