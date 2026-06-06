@@ -7,6 +7,7 @@ import { useEffect, useState, useCallback } from "react";
 import { createClient } from "@/lib/supabase/client";
 import { getOrgId } from "@/lib/org";
 import { Section, Chip, Banner, BackLink, Empty, Modal } from "@/components/ui";
+import { CONNECTOR_CATALOG } from "@/lib/connectors";
 
 type Agent = { id: string; key: string; name: string; role: string | null; model: string | null; system_prompt: string | null; is_active: boolean };
 type Skill = { id: string; key: string; name: string; description: string | null; category: string | null; instructions: string | null };
@@ -527,6 +528,15 @@ function Connections({ agentId, connections, reload, setError }: { agentId: stri
 
       <Section label="External tools (MCP)">
         <div className="t-sub t-muted" style={{ fontSize: 12.5, marginBottom: 12 }}>Connect an MCP server so this agent can use external tools (web search, GitHub, your own). <strong>Live now</strong> — a connected server&rsquo;s tools run inside the agent&rsquo;s loop. Add a token for secured servers (kept in a locked store, never shown again, passed only to the model at run time). Whatever it gathers still flows through the review queue.</div>
+        {/* Prebuilt connectors — one click prefills the form below; add your token, then Add. */}
+        <div className="t-label" style={{ color: "var(--tm)", marginBottom: 6 }}>Prebuilt connectors</div>
+        <div className="row gap-2" style={{ flexWrap: "wrap", marginBottom: "var(--sp-3)" }}>
+          {CONNECTOR_CATALOG.map((c) => (
+            <button key={c.key} className="btn btn-secondary btn-sm" title={`${c.blurb}${c.needsAuth ? " (needs an auth token)" : ""}`}
+              onClick={() => setMcp({ label: c.name, url: c.url, purpose: c.blurb, targets: "", token: "" })}>+ {c.name}</button>
+          ))}
+        </div>
+
         <form onSubmit={addMcp} className="card card-pad" style={{ marginBottom: "var(--sp-3)" }}>
           <div style={{ display: "grid", gridTemplateColumns: "1fr 2fr", gap: "var(--sp-3)" }}>
             <label className="field"><span className="t-label">Name</span><input className="input" value={mcp.label} onChange={(e) => setMcp({ ...mcp, label: e.target.value })} placeholder="e.g. Web search" /></label>
