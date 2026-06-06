@@ -54,13 +54,38 @@ Most useful connectors need auth (OAuth/bearer). Storing secrets is the hard par
 - **Phase 1 (now):** support **no-auth** connectors, and an **optional bearer token** read
   from `connections.config.authorization_token`. ⚠️ This is plaintext in a row readable by
   org members — acceptable for dogfood/dev, **not** for untrusted multi-tenant production.
-- **Phase 1.5 (hardening) — DONE (access-control):** tokens live in `connection_secrets`,
-  an **RLS-locked** table (RLS on, no policies). Writes go through **org-checked
-  `SECURITY DEFINER` RPCs** (`set_/clear_connection_secret`); reads happen **only in edge
-  functions via the service role** to pass the token to the connector. There is **no
-  "get" RPC** — a client can never read a token back; the UI field is write-only. Still
-  open: **encryption-at-rest** (pgsodium/Vault) and **OAuth refresh flows** — the next
-  hardening before broad/untrusted multi-tenant exposure.
+- **Phase 1.5 — DONE (access-control + encryption-at-rest):** tokens are stored
+  **encrypted in Supabase Vault** (pgsodium); `connection_secrets` holds only a `secret_id`
+  reference, and is RLS-locked. Writes go through **org-checked `SECURITY DEFINER` RPCs**
+  (`set_/clear_connection_secret` → `vault.create/update_secret`). Reads happen **only via
+  `mcp_connection_token()`, a `SECURITY DEFINER` RPC gated to the service role** — clients
+  (anon/authenticated) lack execute *and* get null, so a token can never be read back.
+  The edge function decrypts at run time to pass the token to the connector.
+- **Still open — OAuth** (the next real build; see below).
+
+## OAuth — scoped, not yet built (and why)
+Most useful providers (GitHub, Notion, Linear, Slack) authenticate via **OAuth**, not a
+pasted bearer token. OAuth is genuine infrastructure, and it can't be responsibly
+"blind-shipped" — it needs real provider apps + live testing. What it requires:
+
+1. **A provider OAuth app per connector** — register SingleStack with GitHub/Notion/…,
+   obtaining a `client_id` + `client_secret`, configured as **edge-function secrets**
+   (never in the repo/DB). One per provider.
+2. **An authorize → callback flow:**
+   - `connect-mcp/start` builds the provider authorize URL with **PKCE** + a signed
+     **state** (CSRF + which org/agent/connection), redirects the user.
+   - `connect-mcp/callback` verifies state, exchanges `code` → `{access_token,
+     refresh_token, expires_at}`, and stores them via the secure store (extend the
+     vault secret to hold the token set + refresh metadata).
+3. **Refresh:** before a run, if the access token is near expiry, refresh it
+   server-side using the stored `refresh_token` (Managed Agents' vaults do this
+   automatically; on the Messages API we do it ourselves).
+4. **Live testing:** OAuth bugs (state/PKCE/refresh) are only catchable against a real
+   provider — so this lands when we can register an app and test end-to-end.
+
+Until then: **bearer-token connectors work today** (stored encrypted, per above), which
+covers self-hosted/PAT-style MCP servers. The OAuth providers in the catalog will say
+"needs OAuth — coming" rather than silently failing.
 
 ## Multi-tenancy
 Connections are per-agent (or org-level, `agent_id` null), RLS-scoped. Each org's
@@ -70,8 +95,10 @@ sanitized/derived from the label.
 ## Phasing
 - **P1 — wire MCP into `agent-run`** *(this build)*: attached connectors work in the loop;
   optional bearer auth from config; beta header; gated.
-- **P1.5 — secure credential store**: ✅ access-control (RLS-locked table + org-checked
-  definer RPCs + service-role-only reads). Remaining: encryption-at-rest + OAuth refresh.
+- **P1.5 — secure credential store**: ✅ access-control + **encryption-at-rest** (Vault).
+  Bearer-token connectors work today.
+- **P1.6 — OAuth** (per §OAuth above): provider apps + authorize/callback + refresh.
+  Needs real provider registration + live testing.
 - **P2 — prebuilt connector catalog**: one-click attach common connectors
   (GitHub, Slack, Linear, Drive, web search) to an agent or a chat.
 - **P3 — "create an MCP with AI"**: an officer scaffolds a connector from a description

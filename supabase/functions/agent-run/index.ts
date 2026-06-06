@@ -162,10 +162,12 @@ Deno.serve(async (req: Request) => {
   const serviceKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY");
   if (mcpConns.length && serviceKey) {
     const admin = createClient(Deno.env.get("SUPABASE_URL")!, serviceKey);
-    // deno-lint-ignore no-explicit-any
-    const { data: secs } = await admin.from("connection_secrets").select("connection_id, token").in("connection_id", mcpConns.map((c: any) => c.id));
-    // deno-lint-ignore no-explicit-any
-    for (const s of (secs ?? []) as any[]) tokenById[s.connection_id] = s.token;
+    // tokens are encrypted in the vault; only this service-role RPC can decrypt them.
+    for (const c of mcpConns) {
+      // deno-lint-ignore no-explicit-any
+      const { data: tok } = await admin.rpc("mcp_connection_token", { p_connection: (c as any).id });
+      if (tok) tokenById[(c as { id: string }).id] = tok as string;
+    }
   }
   // deno-lint-ignore no-explicit-any
   const mcpServers = mcpConns.map((r: any, i: number) => {
