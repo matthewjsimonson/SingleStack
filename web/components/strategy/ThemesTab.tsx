@@ -9,7 +9,6 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { createClient } from "@/lib/supabase/client";
 import { getOrgId } from "@/lib/org";
 import { Chip, Banner, Modal, ConfirmDialog } from "@/components/ui";
-import PlayActions from "@/components/PlayActions";
 import { GROUPS, confText, errText, fetchAgentKey, authHeader, isProductSignal } from "@/lib/strategy";
 
 type Theme = { id: string; title: string; summary: string | null; recommendation: string | null; conf_level: number | null; signal_ids: string[] | null; group_label: string | null; merged_by: string; watched: boolean; context: string | null; bundle_id: string | null };
@@ -209,8 +208,6 @@ export default function ThemesTab({ onStartEpic }: { onStartEpic: (themeId: stri
             <L label="Recommendation"><textarea className="textarea" rows={2} value={edit.recommendation} onChange={(e) => setEdit({ ...edit, recommendation: e.target.value })} placeholder="So we should…" /></L>
             <L label="Your context"><textarea className="textarea" rows={2} value={edit.context} onChange={(e) => setEdit({ ...edit, context: e.target.value })} placeholder="Add your own context — nuance the synthesis missed." /></L>
             <div className="row gap-2" style={{ marginBottom: "var(--sp-4)" }}><button className="btn btn-sm" onClick={saveEdit}>Save</button></div>
-
-            <PlayActions surfaceKey="strategy_theme" targetId={open.id} targetName={open.title} />
 
             <div className="row-between" style={{ alignItems: "center", marginBottom: 6, marginTop: "var(--sp-4)" }}>
               <span className="t-label">Sources · {srcSignals.length}</span>

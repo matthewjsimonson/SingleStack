@@ -33,8 +33,7 @@ export default function AgentDetail({ agentId }: { agentId: string }) {
   const [attached, setAttached] = useState<Set<string>>(new Set());
   const [cornerstones, setCornerstones] = useState<Set<string>>(new Set());
   const [connections, setConnections] = useState<Connection[]>([]);
-  const [allPlays, setAllPlays] = useState<{ id: string; label: string; description: string | null }[]>([]);
-  const [attachedPlayIds, setAttachedPlayIds] = useState<Set<string>>(new Set());
+  const [agentWorkflows, setAgentWorkflows] = useState<AgentWorkflow[]>([]);
   const [alignments, setAlignments] = useState<Alignment[]>([]);
   const [initiatives, setInitiatives] = useState<InitiativeOpt[]>([]);
   const [workstreams, setWorkstreams] = useState<WorkstreamOpt[]>([]);
@@ -44,21 +43,23 @@ export default function AgentDetail({ agentId }: { agentId: string }) {
 
   const load = useCallback(async () => {
     const { data: a } = await supabase.from("agents").select("id, key, name, role, model, system_prompt, is_active").eq("id", agentId).maybeSingle();
-    const [{ data: sk }, { data: as }, { data: cs }, { data: pls }, { data: al }, { data: inits }, { data: ws }, { data: pa }] = await Promise.all([
+    const [{ data: sk }, { data: as }, { data: cs }, { data: wf }, { data: al }, { data: inits }, { data: ws }] = await Promise.all([
       supabase.from("skills").select("id, key, name, description, category, instructions").order("name"),
       supabase.from("agent_skills").select("skill_id, is_cornerstone").eq("agent_id", agentId),
       supabase.from("connections").select("id, kind, label, area, mcp_url, status, config, targets, guidance").eq("agent_id", agentId).order("created_at"),
-      supabase.from("plays").select("id, label, description").order("created_at"),
+      supabase.from("workflows").select("id, name, description, agent_id, steps, is_active").order("created_at", { ascending: false }),
       supabase.from("agent_alignments").select("id, role, guidance, initiative_id, workstream_id, initiatives(title, stage), initiative_workstreams(title, area)").eq("agent_id", agentId).order("created_at"),
       supabase.from("initiatives").select("id, title, stage, scope").order("created_at", { ascending: false }).limit(200),
       supabase.from("initiative_workstreams").select("id, title, area, initiative_id").order("created_at", { ascending: false }).limit(400),
-      supabase.from("play_agents").select("play_id").eq("agent_id", agentId),
     ]);
     setAgent(a); setSkills(sk ?? []);
     setAttached(new Set((as ?? []).map((x) => x.skill_id)));
     setCornerstones(new Set((as ?? []).filter((x) => x.is_cornerstone).map((x) => x.skill_id)));
     setConnections(cs ?? []);
-    setAllPlays(pls ?? []); setAttachedPlayIds(new Set((pa ?? []).map((r) => r.play_id)));
+    // Workflows this agent participates in — as owner, or named in any step.
+    // deno-lint-ignore no-explicit-any
+    setAgentWorkflows(((wf ?? []) as any[]).filter((w) => w.agent_id === agentId || (Array.isArray(w.steps) && w.steps.some((s: any) => s?.agent_id === agentId)))
+      .map((w) => ({ id: w.id, name: w.name, description: w.description, is_active: w.is_active, stepCount: Array.isArray(w.steps) ? w.steps.length : 0 })));
     const initById = new Map((inits ?? []).map((i) => [i.id, i.title]));
     // deno-lint-ignore no-explicit-any
     setAlignments(((al ?? []) as any[]).map((r) => r.workstream_id
@@ -79,7 +80,7 @@ export default function AgentDetail({ agentId }: { agentId: string }) {
     ["skills", "Skills", attached.size],
     ["connections", "Connections", connections.length],
     ["alignment", "Alignment", alignments.length],
-    ["workflows", "Plays", attachedPlayIds.size],
+    ["workflows", "Workflows", agentWorkflows.length],
   ];
 
   return (
@@ -110,7 +111,7 @@ export default function AgentDetail({ agentId }: { agentId: string }) {
       {tab === "skills" && <Skills agentId={agentId} agentName={agent.name} skills={skills} attached={attached} cornerstones={cornerstones} reload={load} setError={setError} />}
       {tab === "connections" && <Connections agentId={agentId} connections={connections} reload={load} setError={setError} />}
       {tab === "alignment" && <Alignment agentId={agentId} alignments={alignments} initiatives={initiatives} workstreams={workstreams} reload={load} setError={setError} />}
-      {tab === "workflows" && <Workflows agentId={agentId} plays={allPlays} attachedPlayIds={attachedPlayIds} reload={load} setError={setError} />}
+      {tab === "workflows" && <Workflows workflows={agentWorkflows} />}
     </div>
   );
 }
@@ -167,12 +168,12 @@ function Overview({ agent, onSaved, setError, skillsCount, areas, alignCount, ta
   );
 }
 
-// ---------- Skills — the per-agent editor for cornerstone + play skills ----------
-// Rendered as a clickable, editable hierarchy: the agent is the root; its 1–3
-// CORNERSTONE skills (always on, every job) are one branch; its PLAY SKILLS
-// (task/process-specific, attached to plays over in Plays) are another. Click any
+// ---------- Skills — the per-agent editor for the cornerstone + child skills ----------
+// Rendered as a clickable, editable hierarchy: the agent is the root; its single
+// CORNERSTONE skill (its identity, always on, every job) is one branch; its CHILD
+// skills (task/area-specific, built on the cornerstone) are another. Click any
 // branch to edit that skill in place (name, what it does, the playbook), promote/
-// demote it to a cornerstone, see its history, or detach it.
+// demote the cornerstone, see its history, or detach it.
 const catTone = (c: string | null) => (c === "product" ? "accent" : c === "gtm" ? "violet" : "default");
 
 function Skills({ agentId, agentName, skills, attached, cornerstones, reload, setError }: { agentId: string; agentName: string; skills: Skill[]; attached: Set<string>; cornerstones: Set<string>; reload: () => void; setError: (s: string | null) => void }) {
@@ -184,18 +185,6 @@ function Skills({ agentId, agentName, skills, attached, cornerstones, reload, se
   const [histSkill, setHistSkill] = useState<Skill | null>(null);
   const [openSkill, setOpenSkill] = useState<string | null>(null); // which node's editor is open
   const [edit, setEdit] = useState({ name: "", description: "", instructions: "" });
-  const [usage, setUsage] = useState<Record<string, { id: string; label: string }[]>>({}); // skill_id -> plays using it
-
-  // Which plays each of this agent's skills is attached to (for the "in N plays" links).
-  useEffect(() => {
-    (async () => {
-      const { data } = await supabase.from("play_skills").select("skill_id, plays(id, label)").eq("agent_id", agentId);
-      const m: Record<string, { id: string; label: string }[]> = {};
-      // deno-lint-ignore no-explicit-any
-      for (const r of (data ?? []) as any[]) { if (r.skill_id && r.plays?.id) (m[r.skill_id] ??= []).push({ id: r.plays.id, label: r.plays.label ?? "Play" }); }
-      setUsage(m);
-    })();
-  }, [supabase, agentId, skills]);
 
   async function toggle(skillId: string, on: boolean) {
     setError(null);
@@ -246,39 +235,28 @@ function Skills({ agentId, agentName, skills, attached, cornerstones, reload, se
 
   const attachedSkills = skills.filter((s) => attached.has(s.id));
   const cornerstoneSkills = attachedSkills.filter((s) => cornerstones.has(s.id));
-  const playSkills = attachedSkills.filter((s) => !cornerstones.has(s.id));
+  const childSkills = attachedSkills.filter((s) => !cornerstones.has(s.id));
   const library = skills.filter((s) => !attached.has(s.id));
 
   // One editable node in the tree. Clicking the row opens the inline editor.
-  const node = (s: Skill, kind: "cornerstone" | "play") => {
+  const node = (s: Skill, kind: "cornerstone" | "child") => {
     const open = openSkill === s.id;
     const accent = kind === "cornerstone" ? "var(--ac)" : "var(--vl)";
-    const plays = usage[s.id] ?? [];
     return (
       <div key={s.id}>
         <div className="row gap-2" onClick={() => openEditor(s)} style={{ alignItems: "center", cursor: "pointer", padding: "3px 0", flexWrap: "wrap" }}>
           <span style={{ color: accent, opacity: 0.7 }}>▸</span>
           <span style={{ fontSize: 13, fontWeight: 600 }}>{s.name}</span>
           <Chip tone={catTone(s.category)}>{s.category}</Chip>
-          {kind === "play" && (plays.length
-            ? <span className="t-mono-xs" style={{ color: "var(--vl-text)" }}>in {plays.length} play{plays.length > 1 ? "s" : ""}</span>
-            : <span className="t-mono-xs t-muted">not in a play yet</span>)}
           <span className="t-mono-xs" style={{ color: "var(--ac-text)", marginLeft: "auto" }}>{open ? "Close" : "Edit"}</span>
         </div>
         {open && (
           <div className="card card-pad" style={{ marginTop: 6, marginBottom: 6, background: "var(--panel)" }}>
             <div className="row gap-2" style={{ marginBottom: 10, flexWrap: "wrap" }}>
-              <button className="btn btn-secondary btn-sm" onClick={() => toggleCornerstone(s.id, kind !== "cornerstone")} title={kind === "cornerstone" ? "Demote to a play skill" : "Promote to cornerstone (always on)"}>{kind === "cornerstone" ? "★ Cornerstone — unset" : "☆ Make cornerstone"}</button>
+              <button className="btn btn-secondary btn-sm" onClick={() => toggleCornerstone(s.id, kind !== "cornerstone")} title={kind === "cornerstone" ? "Demote to a child skill" : "Make this the agent's cornerstone (identity, always on)"}>{kind === "cornerstone" ? "★ Cornerstone — unset" : "☆ Make cornerstone"}</button>
               <button className="btn btn-secondary btn-sm" onClick={() => setHistSkill(s)}>History</button>
               <button className="btn btn-secondary btn-sm" onClick={() => toggle(s.id, false)} style={{ color: "var(--rd-text)", marginLeft: "auto" }}>Detach</button>
             </div>
-            {kind === "play" && plays.length > 0 && (
-              <div className="t-sub t-muted" style={{ fontSize: 11.5, marginBottom: 8 }}>
-                Used in: {plays.map((p, i) => (
-                  <span key={p.id}>{i ? ", " : ""}<a href={`/agents?tab=plays&play=${p.id}&step=2`} style={{ color: "var(--vl-text)", fontWeight: 600 }}>{p.label}</a></span>
-                ))}
-              </div>
-            )}
             <label className="field"><span className="t-label">Name</span><input className="input" value={edit.name} onChange={(e) => setEdit({ ...edit, name: e.target.value })} /></label>
             <label className="field"><span className="t-label">What it does</span><input className="input" value={edit.description} onChange={(e) => setEdit({ ...edit, description: e.target.value })} placeholder="A one-liner" /></label>
             <label className="field"><span className="t-label">Instructions (playbook)</span><textarea className="textarea" rows={7} value={edit.instructions} onChange={(e) => setEdit({ ...edit, instructions: e.target.value })} placeholder="How the agent applies this skill — tailored to your company and goals." /></label>
@@ -299,7 +277,7 @@ function Skills({ agentId, agentName, skills, attached, cornerstones, reload, se
       </div>
     ) : undefined}>
       <div className="t-sub t-muted" style={{ fontSize: 12.5, marginBottom: 12 }}>
-        An agent has two kinds of skills. <strong style={{ color: "var(--ac-text)" }}>The cornerstone</strong> (one, ★) is its identity — it runs on <em>every</em> job. <strong style={{ color: "var(--vl-text)" }}>Play skills</strong> are task/process-specific; you author them here, then attach them to plays over in <a href="/plays" style={{ color: "var(--vl-text)", fontWeight: 600 }}>Plays</a>. Click any skill to edit it. <span className="t-mono-xs">({cornerstones.size === 1 ? "cornerstone set" : "no cornerstone yet"})</span>
+        An agent has two kinds of skills. <strong style={{ color: "var(--ac-text)" }}>The cornerstone</strong> (one, ★) is its identity — it runs on <em>every</em> job. <strong style={{ color: "var(--vl-text)" }}>Child skills</strong> are task/area-specific and build on the cornerstone; you author them here and bring them in for specific work. Click any skill to edit it. <span className="t-mono-xs">({cornerstones.size === 1 ? "cornerstone set" : "no cornerstone yet"})</span>
       </div>
 
       {evolving && <EvolvePanel agentId={agentId} onApplied={reload} onClose={() => setEvolving(false)} setError={setError} />}
@@ -316,7 +294,7 @@ function Skills({ agentId, agentName, skills, attached, cornerstones, reload, se
           </div>
           <label className="field"><span className="t-label">Description</span><input className="input" value={form.description} onChange={(e) => setForm({ ...form, description: e.target.value })} placeholder="What it does" /></label>
           <label className="field"><span className="t-label">Instructions / playbook</span><textarea className="textarea" rows={5} value={form.instructions} onChange={(e) => setForm({ ...form, instructions: e.target.value })} placeholder="How the agent should apply this skill, tailored to your company and goals." /></label>
-          <label className="row gap-2" style={{ alignItems: "center", margin: "2px 0 10px", cursor: "pointer" }}><input type="checkbox" checked={form.cornerstone} onChange={(e) => setForm({ ...form, cornerstone: e.target.checked })} /><span className="t-sub">Make this a cornerstone (always on) — otherwise it&rsquo;s a play skill</span></label>
+          <label className="row gap-2" style={{ alignItems: "center", margin: "2px 0 10px", cursor: "pointer" }}><input type="checkbox" checked={form.cornerstone} onChange={(e) => setForm({ ...form, cornerstone: e.target.checked })} /><span className="t-sub">Make this the cornerstone (the agent&rsquo;s identity, always on) — otherwise it&rsquo;s a child skill</span></label>
           <div className="row gap-2"><button className="btn" type="submit" disabled={busy}>{busy ? "Creating…" : "Create skill"}</button><button className="btn btn-secondary" type="button" onClick={() => setCreating(false)}>Cancel</button></div>
         </form>
       )}
@@ -331,25 +309,25 @@ function Skills({ agentId, agentName, skills, attached, cornerstones, reload, se
           <div>
             <div className="row gap-2" style={{ alignItems: "center", marginBottom: 6 }}>
               <span style={{ color: "var(--ac)", fontSize: 13 }}>★</span>
-              <span style={{ fontWeight: 660, fontSize: 13 }}>Cornerstone skills</span>
-              <span className="t-mono-xs t-muted">always on · every job</span>
+              <span style={{ fontWeight: 660, fontSize: 13 }}>Cornerstone</span>
+              <span className="t-mono-xs t-muted">identity · always on · every job</span>
             </div>
-            <div style={{ marginLeft: 6 }}>{cornerstoneSkills.length ? cornerstoneSkills.map((s) => node(s, "cornerstone")) : branchHint("None yet — make a skill a cornerstone with ★.")}</div>
+            <div style={{ marginLeft: 6 }}>{cornerstoneSkills.length ? cornerstoneSkills.map((s) => node(s, "cornerstone")) : branchHint("None yet — make a skill the cornerstone with ★.")}</div>
           </div>
           <div>
             <div className="row gap-2" style={{ alignItems: "center", marginBottom: 6 }}>
               <span style={{ color: "var(--vl)", fontSize: 12 }}>▣</span>
-              <span style={{ fontWeight: 660, fontSize: 13 }}>Play skills</span>
-              <span className="t-mono-xs t-muted">task/process-specific · attach to plays</span>
+              <span style={{ fontWeight: 660, fontSize: 13 }}>Child skills</span>
+              <span className="t-mono-xs t-muted">task/area-specific · build on the cornerstone</span>
             </div>
-            <div style={{ marginLeft: 6 }}>{playSkills.length ? playSkills.map((s) => node(s, "play")) : branchHint("None yet — create one above, or attach from the library below.")}</div>
+            <div style={{ marginLeft: 6 }}>{childSkills.length ? childSkills.map((s) => node(s, "child")) : branchHint("None yet — create one above, or attach from the library below.")}</div>
           </div>
         </div>
       </div>
 
       {library.length > 0 && (
         <div style={{ marginTop: "var(--sp-2)" }}>
-          <div className="t-label" style={{ color: "var(--tm)", marginBottom: 8 }}>Skill library <span className="t-muted" style={{ fontWeight: 400 }}>— attach as a play skill</span></div>
+          <div className="t-label" style={{ color: "var(--tm)", marginBottom: 8 }}>Skill library <span className="t-muted" style={{ fontWeight: 400 }}>— attach as a child skill</span></div>
           <div className="stack-3">
             {library.map((s) => (
               <div key={s.id} className="card card-pad row-between" style={{ gap: 12 }}>
@@ -622,49 +600,29 @@ function ConnRow({ c, onRemove, reload, setError }: { c: Connection; onRemove: (
   );
 }
 
-// ---------- Workflows (the plays this agent is attached to) ----------
-function Workflows({ agentId, plays, attachedPlayIds, reload, setError }: { agentId: string; plays: { id: string; label: string; description: string | null }[]; attachedPlayIds: Set<string>; reload: () => void; setError: (s: string | null) => void }) {
-  const supabase = createClient();
-  async function attach(playId: string) {
-    if (!playId) return;
-    setError(null);
-    const orgId = await getOrgId();
-    const { error } = await supabase.from("play_agents").insert({ org_id: orgId, play_id: playId, agent_id: agentId });
-    if (error && (error as { code?: string }).code !== "23505") setError(error.message);
-    reload();
-  }
-  async function detach(playId: string) {
-    setError(null);
-    await supabase.from("play_skills").delete().eq("play_id", playId).eq("agent_id", agentId);
-    await supabase.from("play_agents").delete().eq("play_id", playId).eq("agent_id", agentId);
-    reload();
-  }
-  const on = plays.filter((p) => attachedPlayIds.has(p.id));
-  const available = plays.filter((p) => !attachedPlayIds.has(p.id));
-
+// ---------- Workflows (the workflows this agent participates in) ----------
+type AgentWorkflow = { id: string; name: string; description: string | null; is_active: boolean; stepCount: number };
+function Workflows({ workflows }: { workflows: AgentWorkflow[] }) {
   return (
-    <Section label="Workflows — plays this agent is on">
-      <div className="t-sub t-muted" style={{ fontSize: 12.5, marginBottom: 12 }}>The plays that deploy this agent. Layer play-specific skills on top of its cornerstones from the <a href="/plays" style={{ color: "var(--ac-text)", fontWeight: 600 }}>Plays</a> surface.</div>
-      {on.length === 0 ? (
-        <div className="t-sub t-muted" style={{ fontSize: 12.5, marginBottom: 10 }}>Not attached to any play yet.</div>
+    <Section label="Workflows" action={<a className="btn btn-secondary btn-sm" href="/agents?tab=workflows">Manage workflows</a>}>
+      <div className="t-sub t-muted" style={{ fontSize: 12.5, marginBottom: 12 }}>The workflows this agent runs in — as owner, or as a step in a chain. Author and edit them over in <a href="/agents?tab=workflows" style={{ color: "var(--ac-text)", fontWeight: 600 }}>Workflows</a>.</div>
+      {workflows.length === 0 ? (
+        <div className="t-sub t-muted" style={{ fontSize: 12.5, marginBottom: 10 }}>Not part of any workflow yet.</div>
       ) : (
         <div className="stack-3">
-          {on.map((p) => (
-            <div key={p.id} className="card card-pad row-between" style={{ gap: 12 }}>
+          {workflows.map((w) => (
+            <div key={w.id} className="card card-pad row-between" style={{ gap: 12 }}>
               <div style={{ minWidth: 0 }}>
-                <a href="/plays" style={{ fontSize: 14, fontWeight: 620, color: "var(--tp)" }}>{p.label}</a>
-                {p.description && <div className="t-sub t-muted" style={{ fontSize: 12.5, marginTop: 2 }}>{p.description}</div>}
+                <div className="row gap-2" style={{ alignItems: "center" }}>
+                  <a href="/agents?tab=workflows" style={{ fontSize: 14, fontWeight: 620, color: "var(--tp)" }}>{w.name}</a>
+                  {!w.is_active && <Chip tone="amber">inactive</Chip>}
+                  <span className="t-mono-xs t-muted">{w.stepCount} step{w.stepCount === 1 ? "" : "s"}</span>
+                </div>
+                {w.description && <div className="t-sub t-muted" style={{ fontSize: 12.5, marginTop: 2 }}>{w.description}</div>}
               </div>
-              <button className="btn btn-secondary btn-sm" onClick={() => detach(p.id)} style={{ color: "var(--rd-text)" }}>Detach</button>
             </div>
           ))}
         </div>
-      )}
-      {available.length > 0 && (
-        <select className="select" defaultValue="" onChange={(e) => { attach(e.target.value); e.target.value = ""; }} style={{ maxWidth: 320, marginTop: 12 }}>
-          <option value="">+ Attach to a play…</option>
-          {available.map((p) => <option key={p.id} value={p.id}>{p.label}</option>)}
-        </select>
       )}
     </Section>
   );

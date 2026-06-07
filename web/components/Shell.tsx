@@ -147,7 +147,7 @@ export default function Shell({
             </div>
           ))}
 
-          {/* Agents (with Plays) — standalone */}
+          {/* Agents — standalone */}
           <div style={{ marginBottom: 6 }}>
             <a href="/agents" style={itemStyle(isActive("/agents"))}>
               <span>Agents</span>

@@ -13,7 +13,6 @@ import TrackingTopics from "@/components/TrackingTopics";
 import SourceManager from "@/components/SourceManager";
 import CapabilityCellDrawer, { type Cell } from "@/components/CapabilityCellDrawer";
 import CompetitiveGrid from "@/components/CompetitiveGrid";
-import PlayActions from "@/components/PlayActions";
 
 type Competitor = { id: string; name: string; relationship: string; website: string | null; notes: string | null };
 type Capability = { id: string; name: string; category: string | null };
@@ -463,8 +462,6 @@ function Competitors({ competitors, cards, overview, capabilities, scores, compS
               </div>
             </div>
 
-            {/* the four officers each analyze this competitor through their own lens */}
-            {selected && <PlayActions surfaceKey="competitor_home" targetId={selected.id} targetName={selected.name} heading="Officer analyses" />}
           </div>
         );
       })() : cdTab === "gtm" ? (

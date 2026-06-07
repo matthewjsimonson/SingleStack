@@ -14,20 +14,12 @@ import { createClient } from "@/lib/supabase/client";
 import { getOrgId } from "@/lib/org";
 import { Chip, Banner, BackLink, Spinner, SubTabs, Modal } from "@/components/ui";
 import { Markdown } from "@/components/Markdown";
-import PlaysPanel, { type PlayDef } from "@/components/PlaysPanel";
-import PlayActions from "@/components/PlayActions";
 import BuildScope from "@/components/BuildScope";
 import TechnicalScope from "@/components/TechnicalScope";
 import GtmWorkflow from "@/components/GtmWorkflow";
 import { BUILD_TEMPLATE } from "@/lib/templates";
 import { BUILD_STAGES, STAGE_LABEL, GTM_STAGE_LABEL, buildReadiness, deriveBuildStage, deriveGtmStage, type BuildStage } from "@/lib/buildStage";
 import { buildAgentBrief, BUILD_KIND_LABEL } from "@/lib/agentBrief";
-
-const INITIATIVE_PLAYS: PlayDef[] = [
-  { key: "initiative_review", label: "Initiative review", officer: "CPO", tone: "accent" },
-  { key: "delivery_risk", label: "Delivery risk", officer: "Chief Eng", tone: "accent" },
-  { key: "gtm_readiness", label: "GTM readiness", officer: "CRO", tone: "violet" },
-];
 
 type Initiative = { id: string; title: string; description: string | null; scope: string; kind: string | null; assignee_id: string | null; build_state: string | null; is_unevidenced: boolean; release_id: string | null; gtm_record_id: string | null };
 type Task = { id: string; area: string; title: string; stage: string; assignee_id: string | null };
@@ -101,7 +93,6 @@ export default function InitiativeDetail({ id }: { id: string }) {
   const segments = [
     ...(hasBuild ? [{ key: "build", label: "Build" }] : []),
     ...(hasGtm ? [{ key: "gtm", label: "Go-to-market" }] : []),
-    { key: "advisors", label: "Advisors" },
   ];
   const stageRank = (k: string) => BUILD_STAGES.findIndex((s) => s.key === k);
   const curRank = stageRank(stage);
@@ -202,12 +193,6 @@ export default function InitiativeDetail({ id }: { id: string }) {
       )}
 
       {side === "gtm" && hasGtm && <GtmWorkflow initiativeId={ini.id} gtmRecordId={ini.gtm_record_id} />}
-
-      {side === "advisors" && (<>
-        <StepIntro title="Advisors — the officers' read" body="Each officer runs their own analysis — same evidence, different lens. Review, edit, ratify." />
-        <PlaysPanel targetType="initiative" targetId={ini.id} targetName={ini.title} plays={INITIATIVE_PLAYS} heading="Officer analyses" columns={1} />
-        <PlayActions surfaceKey="build_item" targetId={ini.id} targetName={ini.title} heading="Mapped plays" />
-      </>)}
 
       <Modal open={brief} onClose={() => setBrief(false)} title={`Agent brief — ${ini.title}`} width={680}>
         <div className="row-between" style={{ marginBottom: 12, alignItems: "center" }}>

@@ -145,7 +145,7 @@ export async function streamAgentChat(opts: {
   }
 }
 
-// Like streamAgentChat, but for STRUCTURED functions (run-play / agent-propose):
+// Like streamAgentChat, but for STRUCTURED functions (run-workflow / agent-propose):
 // the stream is the real reasoning, then ANSWER_MARK, then the final JSON result.
 // onThinking() gets the live reasoning; the parsed result is returned. Falls back
 // to the plain JSON response if the function isn't streaming yet.
