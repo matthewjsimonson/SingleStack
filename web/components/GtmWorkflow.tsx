@@ -12,6 +12,7 @@ import { useCallback, useEffect, useState } from "react";
 import { createClient } from "@/lib/supabase/client";
 import { getOrgId } from "@/lib/org";
 import { Chip, Banner, SubTabs } from "@/components/ui";
+import { Markdown } from "@/components/Markdown";
 import { GTM_STAGES, deriveGtmStage } from "@/lib/buildStage";
 
 type Task = { id: string; title: string; stage: string; content_type: string | null; campaign_id: string | null };
@@ -88,7 +89,7 @@ export default function GtmWorkflow({ initiativeId, gtmRecordId }: { initiativeI
                 <textarea className="textarea" rows={4} autoFocus value={draft} placeholder="Who we're talking to, the core message, and the channels we'll use." onChange={(e) => setDraft(e.target.value)} style={{ marginBottom: 8 }} />
                 <div className="row gap-2"><button className="btn btn-sm" onClick={saveBrief}>Save</button><button className="btn btn-secondary btn-sm" onClick={() => setEditingBrief(false)}>Cancel</button></div>
               </div>
-            ) : brief?.value ? <div className="t-body" style={{ lineHeight: 1.6, whiteSpace: "pre-wrap" }}>{brief.value}</div>
+            ) : brief?.value ? <Markdown className="t-body" style={{ lineHeight: 1.6 }} text={brief.value} />
               : <div className="t-sub t-muted" style={{ fontSize: 12.5 }}>Define who we&apos;re talking to, the core message, and the channels.</div>}
           </div>
           {gtmRecordId

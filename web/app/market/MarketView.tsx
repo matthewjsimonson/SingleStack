@@ -12,6 +12,7 @@ import { fireWorkflows } from "@/lib/triggers";
 import { Chip, Banner, Confidence, Modal } from "@/components/ui";
 import { fetchAgentKey, errText } from "@/lib/strategy";
 import { LiveReply, useAliveReply, streamAgentChat } from "@/components/alive";
+import { Markdown } from "@/components/Markdown";
 
 type Meta = { domain?: string; lens?: string; industry?: string; persona?: string } | null;
 type Signal = { id: string; title: string; why: string | null; conf_label: string | null; conf_level: number | null; observed_at: string | null; origin: string; metadata: Meta };
@@ -193,7 +194,7 @@ export default function MarketView() {
                   <LiveReply officer="Analyst" thinking={reply.thinking} display={reply.display} typing={reply.typing} busy={deepBusy} />
                 </div>
               ) : deep ? (
-                <div className="t-body" style={{ lineHeight: 1.6, whiteSpace: "pre-wrap", background: "var(--fill-2)", border: "1px solid var(--border)", borderRadius: 8, padding: 14 }}>{deep}</div>
+                <Markdown className="t-body" style={{ lineHeight: 1.6, background: "var(--fill-2)", border: "1px solid var(--border)", borderRadius: 8, padding: 14 }} text={deep} />
               ) : null}
             </div>
           </aside>

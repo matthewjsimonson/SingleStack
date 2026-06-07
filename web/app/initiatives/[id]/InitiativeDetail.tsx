@@ -13,6 +13,7 @@ import { useSearchParams } from "next/navigation";
 import { createClient } from "@/lib/supabase/client";
 import { getOrgId } from "@/lib/org";
 import { Chip, Banner, BackLink, Spinner, SubTabs, Modal } from "@/components/ui";
+import { Markdown } from "@/components/Markdown";
 import PlaysPanel, { type PlayDef } from "@/components/PlaysPanel";
 import PlayActions from "@/components/PlayActions";
 import BuildScope from "@/components/BuildScope";
@@ -232,7 +233,7 @@ function DRow({ label, value, empty }: { label: string; value: string | null; em
   return (
     <div style={{ padding: "14px 18px", borderTop: "1px solid var(--border)" }}>
       <div className="t-h2" style={{ fontSize: 13, fontWeight: 620, marginBottom: 4 }}>{label}</div>
-      {value ? <div className="t-body" style={{ lineHeight: 1.6, whiteSpace: "pre-wrap" }}>{value}</div> : <div className="t-sub t-muted" style={{ fontSize: 12.5 }}>{empty}</div>}
+      {value ? <Markdown className="t-body" style={{ lineHeight: 1.6 }} text={value} /> : <div className="t-sub t-muted" style={{ fontSize: 12.5 }}>{empty}</div>}
     </div>
   );
 }

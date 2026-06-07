@@ -8,6 +8,7 @@ import { createClient } from "@/lib/supabase/client";
 import type { Exec } from "@/lib/team";
 import { Chip } from "@/components/ui";
 import { LiveReply, useAliveReply, streamAgentChat } from "@/components/alive";
+import { Markdown } from "@/components/Markdown";
 import WorkflowRunDrawer from "@/components/WorkflowRunDrawer";
 
 type WF = { id: string; name: string; description: string | null; steps: unknown[] | null };
@@ -158,12 +159,13 @@ export default function AgentDrawer({
                 {messages.map((m, i) => (
                   <div key={i} style={{ display: "flex", justifyContent: m.role === "user" ? "flex-end" : "flex-start" }}>
                     <div style={{
-                      maxWidth: "85%", padding: "9px 12px", borderRadius: 12, fontSize: 13.5, lineHeight: 1.55, whiteSpace: "pre-wrap",
+                      maxWidth: "85%", padding: "9px 12px", borderRadius: 12, fontSize: 13.5, lineHeight: 1.55,
+                      ...(m.role === "user" ? { whiteSpace: "pre-wrap" as const } : {}),
                       background: m.role === "user" ? "var(--tp)" : "var(--fill)",
                       color: m.role === "user" ? "#fff" : "var(--tp)",
                       borderBottomRightRadius: m.role === "user" ? 4 : 12,
                       borderBottomLeftRadius: m.role === "user" ? 12 : 4,
-                    }}>{m.content}</div>
+                    }}>{m.role === "user" ? m.content : <Markdown text={m.content} />}</div>
                   </div>
                 ))}
                 {/* live reply — real reasoning trace while it works, then the answer types out */}

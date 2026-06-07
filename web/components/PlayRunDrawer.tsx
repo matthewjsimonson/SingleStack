@@ -12,6 +12,7 @@ import { createClient } from "@/lib/supabase/client";
 import { getOrgId } from "@/lib/org";
 import { AgentBadge, Chip, SourceChip } from "@/components/ui";
 import { LiveReply, useAliveReply, streamAgentChat, streamStructured } from "@/components/alive";
+import { Markdown } from "@/components/Markdown";
 
 type Sec = { title: string; body: string; evidence: string[] };
 type Payload = { headline: string; sections: Sec[]; recommendations: string[]; confidence: string };
@@ -207,7 +208,7 @@ export default function PlayRunDrawer({ open, onClose, play, target }: {
               {(a.payload.sections ?? []).map((s, i) => (
                 <div key={i} className="reveal-up" style={{ marginBottom: 16, animationDelay: `${(i + 1) * 90}ms` }}>
                   <div style={{ fontSize: 11, fontWeight: 700, letterSpacing: 0.4, textTransform: "uppercase", color: "var(--ac)", marginBottom: 5 }}>{s.title}</div>
-                  <div className="t-body" style={{ fontSize: 13, lineHeight: 1.6, whiteSpace: "pre-wrap" }}>{s.body}</div>
+                  <Markdown className="t-body" style={{ fontSize: 13, lineHeight: 1.6 }} text={s.body} />
                   {(s.evidence ?? []).length > 0 && (
                     <div className="row gap-2" style={{ flexWrap: "wrap", marginTop: 7, alignItems: "center" }}>
                       <span className="t-label" style={{ color: "var(--tm)", fontSize: 9.5 }}>Evidence</span>
@@ -272,7 +273,9 @@ export default function PlayRunDrawer({ open, onClose, play, target }: {
               <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
                 {chat.map((m, i) => (
                   <div key={i} style={{ alignSelf: m.role === "user" ? "flex-end" : "flex-start", maxWidth: "90%", background: m.role === "user" ? "var(--ac-fill)" : "var(--fill-2)", border: "1px solid var(--border)", borderRadius: 8, padding: "9px 12px" }}>
-                    <div className="t-sub" style={{ fontSize: 12.5, lineHeight: 1.5, whiteSpace: "pre-wrap" }}>{m.content}</div>
+                    {m.role === "user"
+                      ? <div className="t-sub" style={{ fontSize: 12.5, lineHeight: 1.5, whiteSpace: "pre-wrap" }}>{m.content}</div>
+                      : <Markdown className="t-sub" style={{ fontSize: 12.5, lineHeight: 1.5 }} text={m.content} />}
                   </div>
                 ))}
                 {/* in-flight reply: reasoning trace → answer types out */}

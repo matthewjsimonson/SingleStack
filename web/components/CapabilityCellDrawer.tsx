@@ -8,6 +8,7 @@
 import { useState } from "react";
 import { createClient } from "@/lib/supabase/client";
 import { getOrgId } from "@/lib/org";
+import { Markdown } from "@/components/Markdown";
 
 export type Cell = {
   capabilityId: string; capabilityName: string; competitorId: string | null; who: string; score: number;
@@ -80,7 +81,7 @@ export default function CapabilityCellDrawer({ cell, onClose, onChanged }: { cel
           <div className="card card-pad" style={{ background: "var(--panel-2)" }}>
             <div className="t-label" style={{ color: "var(--tm)", marginBottom: 8 }}>Why this rating</div>
             <button className="btn btn-sm" onClick={ask} disabled={thinking} style={{ background: "var(--ac)", color: "#fff" }}>{thinking ? "CRO is assessing…" : "Ask the CRO: reasons, sources, implications"}</button>
-            {take && <div className="card card-pad" style={{ marginTop: 10, background: "var(--panel)" }}><div className="t-sub" style={{ fontSize: 13, lineHeight: 1.55, whiteSpace: "pre-wrap" }}>{take}</div></div>}
+            {take && <div className="card card-pad" style={{ marginTop: 10, background: "var(--panel)" }}><Markdown className="t-sub" style={{ fontSize: 13, lineHeight: 1.55 }} text={take} /></div>}
           </div>
 
           <div className="card card-pad">

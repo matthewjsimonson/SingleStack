@@ -11,6 +11,7 @@ import { createClient } from "@/lib/supabase/client";
 import { getOrgId } from "@/lib/org";
 import RecordWorkspace from "@/components/RecordWorkspace";
 import { Section, Chip, Confidence, Empty, Banner, BackLink, SubTabs } from "@/components/ui";
+import { Markdown } from "@/components/Markdown";
 
 type Gtm = { id: string; name: string; product_id: string };
 type Product = { id: string; name: string };
@@ -154,9 +155,9 @@ export default function GtmView({ gtmId }: { gtmId: string }) {
                     <span className="t-label">{current.label}</span>
                     <button className="btn btn-secondary btn-sm" onClick={() => { setEditing(true); setDraft(current.body?.text ?? ""); }}>Edit</button>
                   </div>
-                  <div className="t-body" style={{ lineHeight: 1.6, whiteSpace: "pre-wrap" }}>
-                    {current.body?.text || <span className="t-muted">Empty — click Edit to write this section.</span>}
-                  </div>
+                  {current.body?.text
+                    ? <Markdown className="t-body" style={{ lineHeight: 1.6 }} text={current.body.text} />
+                    : <div className="t-body" style={{ lineHeight: 1.6 }}><span className="t-muted">Empty — click Edit to write this section.</span></div>}
                 </div>
               ))}
             </div>

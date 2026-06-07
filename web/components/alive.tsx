@@ -5,6 +5,7 @@
 // side typewriter that reveals the reply at a steady pace no matter how the bytes
 // arrive (streamed, gateway-buffered into one blob, or a JSON { reply }).
 import { useCallback, useEffect, useRef, useState, type CSSProperties } from "react";
+import { Markdown } from "./Markdown";
 
 export const CHAT_PHASES = ["Reading your question", "Pulling the context", "Thinking it through", "Writing the reply"];
 export const RUN_PHASES = ["Reading the context", "Weighing the evidence", "Forming the take", "Structuring the output"];
@@ -229,7 +230,7 @@ export function LiveReply({ officer, thinking, display, typing, busy }: {
               {showReason && <div style={{ ...traceStyle, marginTop: 7 }}>{thinking}</div>}
             </div>
           )}
-          <div style={{ whiteSpace: "pre-wrap", lineHeight: 1.55 }}>{display}{typing && <span className="pulse-dot" style={{ fontWeight: 700 }}>▍</span>}</div>
+          <div style={{ lineHeight: 1.55 }}><Markdown text={display} />{typing && <span className="pulse-dot" style={{ fontWeight: 700 }}>▍</span>}</div>
         </>
       )}
     </div>

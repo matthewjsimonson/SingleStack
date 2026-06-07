@@ -10,6 +10,7 @@ import { createClient } from "@/lib/supabase/client";
 import { getOrgId } from "@/lib/org";
 import { spawnInitiative } from "@/lib/routing";
 import { Chip } from "@/components/ui";
+import { Markdown } from "@/components/Markdown";
 
 export type DrawerCapability = {
   id: string; title: string; why: string | null; observed_at: string | null;
@@ -166,7 +167,7 @@ export default function CapabilityDrawer({ capability, onClose, onChanged }: { c
               </select>
               <button className="btn btn-sm" onClick={ask} disabled={thinking} style={{ background: "var(--ac)", color: "#fff" }}>{thinking ? `${officer.name} is reading…` : `Ask ${officer.name}`}</button>
             </div>
-            {take && <div className="card card-pad" style={{ background: "var(--panel)" }}><div className="t-sub" style={{ fontSize: 13, lineHeight: 1.55, whiteSpace: "pre-wrap" }}>{take}</div></div>}
+            {take && <div className="card card-pad" style={{ background: "var(--panel)" }}><Markdown className="t-sub" style={{ fontSize: 13, lineHeight: 1.55 }} text={take} /></div>}
           </div>
 
           {/* Execute */}

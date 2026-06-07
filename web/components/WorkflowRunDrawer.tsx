@@ -8,6 +8,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { createClient } from "@/lib/supabase/client";
 import { Chip } from "@/components/ui";
 import { PulseDots, streamStructured } from "@/components/alive";
+import { Markdown } from "@/components/Markdown";
 
 type Section = { title: string; body: string; evidence?: string[] };
 type Artifact = { title?: string; payload: { headline?: string; sections?: Section[]; recommendations?: string[]; confidence?: string } };
@@ -84,7 +85,7 @@ export default function WorkflowRunDrawer({ open, onClose, workflow, target, onR
               {(p.sections ?? []).map((s, i) => (
                 <div key={i} className="card card-pad" style={{ marginBottom: 10 }}>
                   <div style={{ fontSize: 13.5, fontWeight: 660, marginBottom: 6 }}>{s.title}</div>
-                  <div className="t-body" style={{ fontSize: 13, lineHeight: 1.6, whiteSpace: "pre-wrap" }}>{s.body}</div>
+                  <Markdown className="t-body" style={{ fontSize: 13, lineHeight: 1.6 }} text={s.body} />
                   {(s.evidence?.length ?? 0) > 0 && (
                     <div className="row gap-2" style={{ flexWrap: "wrap", marginTop: 8 }}>{s.evidence!.map((e, j) => <Chip key={j}>{e}</Chip>)}</div>
                   )}
