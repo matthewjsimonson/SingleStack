@@ -180,6 +180,10 @@ Deno.serve(async (req: Request) => {
     };
   });
   const mcpHeaders = mcpServers.length ? { headers: { "anthropic-beta": "mcp-client-2025-11-20" } } : undefined;
+  // The mcp-client-2025-11-20 beta requires each declared MCP server to be opted into
+  // via an mcp_toolset entry in `tools` — passing mcp_servers alone returns a 400
+  // ("server X is defined but not referenced by any mcp_toolset"). One per server.
+  const mcpToolsets = mcpServers.map((m) => ({ type: "mcp_toolset", mcp_server_name: m.name }));
 
   const systemText = [
     agent.system_prompt || `You are ${agent.name}${agent.role ? `, ${agent.role}` : ""}, an executive agent in SingleStack.`,
@@ -210,7 +214,7 @@ Deno.serve(async (req: Request) => {
         max_tokens: 8000,
         thinking: { type: "adaptive", display: "summarized" }, // summarized → reasoning text is actually present on Opus 4.8
         system: [{ type: "text", text: systemText, cache_control: { type: "ephemeral" } }],
-        tools: TOOLS,
+        tools: [...TOOLS, ...mcpToolsets],
         ...(mcpServers.length ? { mcp_servers: mcpServers } : {}),
         messages,
         // deno-lint-ignore no-explicit-any
