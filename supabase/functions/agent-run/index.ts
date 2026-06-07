@@ -127,7 +127,17 @@ Deno.serve(async (req: Request) => {
     { global: { headers: { Authorization: authHeader } } },
   );
 
-  let input: { agent_key?: string; messages?: { role: "user" | "assistant"; content: string }[]; context?: { record_type?: string; record_id?: string }; stream?: boolean };
+  let input: {
+    agent_key?: string;
+    messages?: { role: "user" | "assistant"; content: string }[];
+    context?: {
+      record_type?: string; record_id?: string;
+      page?: string; entity_id?: string; label?: string;
+      page_aware?: boolean;       // opt-in: deep-load the current page's data into the run
+      steer_connector?: string;   // "/" selection: nudge the agent to use this connector this turn
+    };
+    stream?: boolean;
+  };
   try { input = await req.json(); } catch { return json({ error: "invalid JSON body" }, 400); }
   const { agent_key } = input;
   const convo = (input.messages ?? []).filter((m) => m && m.content);
@@ -202,6 +212,53 @@ Deno.serve(async (req: Request) => {
   // ("server X is defined but not referenced by any mcp_toolset"). One per server.
   const mcpToolsets = mcpServers.map((m) => ({ type: "mcp_toolset", mcp_server_name: m.name }));
 
+  // ---- Page awareness (opt-in) ----------------------------------------------
+  // Default: the agent only knows which record you're on (so propose_change can
+  // target it). When the operator turns "Use this page" on (page_aware), we deep-
+  // load a compact snapshot of what they're looking at and ground the run in it.
+  // Everything here runs as the caller (RLS-scoped) — no privileged reads.
+  const ctx = input.context ?? {};
+  async function recordSnapshot(rt: string, id: string): Promise<string> {
+    const table = rt === "product" ? "product_records" : "gtm_records";
+    const fk = rt === "product" ? "product_id" : "gtm_record_id";
+    const { data: rec } = await supabase.from(table).select("name").eq("id", id).maybeSingle();
+    const { data: fields } = await supabase.from("record_fields").select("label, value").eq(fk, id).order("position", { ascending: true });
+    // deno-lint-ignore no-explicit-any
+    const lines = (fields ?? []).map((f: any) => `- ${f.label}: ${f.value}`).join("\n");
+    // deno-lint-ignore no-explicit-any
+    const head = (rec as any)?.name ? `${(rec as any).name}\n` : "";
+    return `${head}${lines || "(no fields yet)"}`;
+  }
+  async function strategySnapshot(): Promise<string> {
+    const { data: themes } = await supabase.from("signal_themes").select("title, summary, recommendation, category").order("position", { ascending: true }).limit(20);
+    // deno-lint-ignore no-explicit-any
+    const t = (themes ?? []).map((x: any) => `- [${x.category}] ${x.title}${x.summary ? ` — ${x.summary}` : ""}${x.recommendation ? `\n    → ${x.recommendation}` : ""}`).join("\n");
+    return `Product strategy themes:\n${t || "(none yet)"}`;
+  }
+  async function marketSnapshot(): Promise<string> {
+    const { data: comps } = await supabase.from("competitors").select("name, relationship, notes").order("position", { ascending: true }).limit(30);
+    // deno-lint-ignore no-explicit-any
+    const c = (comps ?? []).map((x: any) => `- ${x.name} [${x.relationship}]${x.notes ? ` — ${x.notes}` : ""}`).join("\n");
+    return `Tracked competitors:\n${c || "(none tracked)"}`;
+  }
+  let pageContextText = "";
+  if (ctx.record_id && (ctx.record_type === "product" || ctx.record_type === "gtm")) {
+    pageContextText = `\nThe operator is currently viewing the ${ctx.record_type} record ${ctx.record_id}.`;
+    pageContextText += ctx.page_aware
+      ? ` WHAT YOU'RE LOOKING AT — ground your answer in this:\n${await recordSnapshot(ctx.record_type, ctx.record_id)}`
+      : " Use get_record to read it when relevant.";
+  } else if (ctx.page_aware && (ctx.page === "strategy" || ctx.page === "market")) {
+    const snap = ctx.page === "strategy" ? await strategySnapshot() : await marketSnapshot();
+    pageContextText = `\nWHAT YOU'RE LOOKING AT — the ${ctx.label || ctx.page} page. Ground your answer in this:\n${snap}`;
+  } else if (ctx.page_aware && ctx.label) {
+    pageContextText = `\nThe operator is currently on the ${ctx.label} page — factor that in.`;
+  }
+  // "/" connector steer — the operator explicitly chose a connector for this turn.
+  const steerName = ctx.steer_connector ? connName(ctx.steer_connector, 0) : "";
+  const steerText = steerName && mcpServers.some((m) => m.name === steerName)
+    ? `\nThe operator selected the "${steerName}" connector for this turn — use it to gather what's needed before answering (your other tools remain available).`
+    : "";
+
   const systemText = [
     agent.system_prompt || `You are ${agent.name}${agent.role ? `, ${agent.role}` : ""}, an executive agent in SingleStack.`,
     "",
@@ -211,9 +268,8 @@ Deno.serve(async (req: Request) => {
     "YOUR SKILLS — only the titles are shown. Before doing specialized work, load the relevant skill's full playbook with read_skill(skill_key):",
     skillCatalog,
     mcpServers.length ? `\nYOUR CONNECTORS (external systems via MCP) — use them when the task calls for it, and honor the focus + instructions given for each:\n${mcpGuidance}` : "",
-    input.context?.record_id && input.context?.record_type
-      ? `\nThe operator is currently looking at the ${input.context.record_type} record ${input.context.record_id}. Use get_record to read it when relevant.`
-      : "",
+    pageContextText,
+    steerText,
     "\nGround every claim in what the tools return. Be concrete; cite the records/signals/skills you used.",
     "If the operator's request, a skill, or a connector specifies how to structure the answer (e.g. named sections), follow that structure; otherwise choose a clean, scannable layout that fits the question. Don't impose a fixed template when none was asked for.",
   ].join("\n");

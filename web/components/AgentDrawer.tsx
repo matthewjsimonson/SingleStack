@@ -20,7 +20,11 @@ export type AgentContext = {
   record_type?: "product" | "gtm";
   record_name?: string;
   module?: string;
+  page?: string;   // generic page key for page-awareness, e.g. "strategy" | "market"
+  label?: string;  // human label of the current page/entity
 };
+
+type Connector = { id: string; label: string };
 
 export default function AgentDrawer({
   exec,
@@ -45,6 +49,13 @@ export default function AgentDrawer({
   const [mode, setMode] = useState<"chat" | "workflows">("chat");
   const [workflows, setWorkflows] = useState<WF[]>([]);
   const [runWf, setRunWf] = useState<{ id: string; name: string } | null>(null);
+  const [connectors, setConnectors] = useState<Connector[]>([]);
+  const [pageAware, setPageAware] = useState(false);   // opt-in: ground the agent in the current page
+  const [steer, setSteer] = useState<string | null>(null); // "/" connector selected for this turn
+  // "/" menu state: open when the input begins with "/" and no space yet.
+  const slashQuery = input.startsWith("/") && !input.includes(" ") ? input.slice(1).toLowerCase() : null;
+  const slashMatches = slashQuery !== null ? connectors.filter((c) => c.label.toLowerCase().includes(slashQuery)) : [];
+  const hasPage = !!(context && (context.record_name || context.label || context.page || context.area));
   const scrollRef = useRef<HTMLDivElement>(null);
   const liveRef = useRef<HTMLDivElement>(null);   // the in-progress reply bubble, to bring into view
   const reply = useAliveReply();
@@ -60,7 +71,7 @@ export default function AgentDrawer({
   // reset + load light status whenever a different agent opens
   useEffect(() => {
     if (!open || !exec) return;
-    setMessages([]); setInput(""); setError(null); setMode("chat");
+    setMessages([]); setInput(""); setError(null); setMode("chat"); setSteer(null); setConnectors([]); setPageAware(false);
     (async () => {
       const [{ data: ag }, { data: wf }] = await Promise.all([
         supabase.from("agents").select("id").eq("key", exec.key).maybeSingle(),
@@ -69,6 +80,8 @@ export default function AgentDrawer({
       if (ag) {
         const { count: rc } = await supabase.from("agent_runs").select("id", { count: "exact", head: true }).eq("agent_id", ag.id);
         setRuns(rc ?? 0);
+        const { data: conns } = await supabase.from("connections").select("id, label").eq("agent_id", ag.id).eq("kind", "mcp").neq("status", "disconnected");
+        setConnectors((conns ?? []) as Connector[]);
       } else setRuns(0);
       const { count: pc } = await supabase.from("proposals").select("id", { count: "exact", head: true }).eq("status", "pending");
       setPending(pc ?? 0);
@@ -82,13 +95,14 @@ export default function AgentDrawer({
   async function send(text: string) {
     if (!exec || !text.trim()) return;
     const next = [...messages, { role: "user" as const, content: text.trim() }];
-    setMessages(next); setInput(""); setBusy(true); setError(null);
+    const runCtx = { ...(context ?? {}), page_aware: pageAware, ...(steer ? { steer_connector: steer } : {}) };
+    setMessages(next); setInput(""); setBusy(true); setError(null); setSteer(null);
     reply.begin();
     requestAnimationFrame(() => liveRef.current?.scrollIntoView({ block: "start", behavior: "smooth" }));
     try {
       const { data: s } = await supabase.auth.getSession();
       const token = s.session?.access_token;
-      await streamAgentChat({ agentKey: exec.key, messages: next, context: context ?? undefined, token, onChunk: reply.onChunk, onThinking: reply.onThinking, fnName: runner, fallbackFnName: runner ? "agent-chat" : undefined });
+      await streamAgentChat({ agentKey: exec.key, messages: next, context: runCtx, token, onChunk: reply.onChunk, onThinking: reply.onThinking, fnName: runner, fallbackFnName: runner ? "agent-chat" : undefined });
       reply.finish();
     } catch (e) {
       reply.reset();
@@ -119,13 +133,19 @@ export default function AgentDrawer({
           <button onClick={onClose} className="btn btn-secondary btn-sm">Close</button>
         </div>
 
-        {/* context strip — shows what the agent is grounded in right now */}
-        {context?.record_name && (
-          <div style={{ padding: "8px 18px", borderBottom: "1px solid var(--border)", background: "var(--panel-2)", display: "flex", alignItems: "center", gap: 8 }}>
-            <span className="t-label" style={{ color: "var(--tm)" }}>Grounded in</span>
-            <span className="chip chip-accent" style={{ fontSize: 11.5 }}>
-              {context.record_type === "gtm" ? "GTM" : "Product"}: {context.record_name}{context.module ? ` · ${context.module}` : ""}
-            </span>
+        {/* context strip — what page you're on + opt-in "page-aware" toggle. When on,
+            the agent reads this page's data and grounds its answer in it. */}
+        {hasPage && (
+          <div style={{ padding: "8px 18px", borderBottom: "1px solid var(--border)", background: "var(--panel-2)", display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
+            {context?.record_name
+              ? <span className="chip chip-accent" style={{ fontSize: 11.5 }}>{context.record_type === "gtm" ? "GTM" : "Product"}: {context.record_name}{context.module ? ` · ${context.module}` : ""}</span>
+              : <span className="t-label" style={{ color: "var(--tm)" }}>{context?.label || "This page"}</span>}
+            <button onClick={() => setPageAware((v) => !v)} title="When on, the agent reads this page's data and grounds its answer in it"
+              style={{ marginLeft: "auto", display: "inline-flex", alignItems: "center", gap: 6, padding: "3px 9px", borderRadius: 999, cursor: "pointer", fontSize: 11.5, fontWeight: 620,
+                border: "1px solid " + (pageAware ? "var(--ac)" : "var(--border)"), background: pageAware ? "var(--ac-fill)" : "transparent", color: pageAware ? "var(--ac-text)" : "var(--ts)" }}>
+              <span style={{ width: 7, height: 7, borderRadius: "50%", background: pageAware ? "var(--ac)" : "var(--tm)" }} />
+              Page-aware{pageAware ? " · on" : ""}
+            </button>
           </div>
         )}
 
@@ -185,10 +205,33 @@ export default function AgentDrawer({
               <div className="row gap-2" style={{ marginBottom: 10, flexWrap: "wrap" }}>
                 <button className="btn btn-secondary btn-sm" disabled={busy} onClick={() => send("Give me a daily briefing: what needs my attention and the 2–3 most important next steps.")}>Daily briefing</button>
               </div>
-              <form onSubmit={(e) => { e.preventDefault(); send(input); }} className="row gap-2">
-                <input className="input" value={input} onChange={(e) => setInput(e.target.value)} placeholder={`Ask ${exec.short}…`} disabled={busy} style={{ flex: 1 }} />
-                <button className="btn btn-sm" type="submit" disabled={busy || !input.trim()}>Send</button>
-              </form>
+              <div style={{ position: "relative" }}>
+                {/* "/" connector menu — appears as you type "/" */}
+                {slashQuery !== null && connectors.length > 0 && (
+                  <div style={{ position: "absolute", bottom: "calc(100% + 6px)", left: 0, right: 0, background: "var(--panel)", border: "1px solid var(--border)", borderRadius: 10, boxShadow: "var(--shadow-md)", overflow: "hidden", zIndex: 5 }}>
+                    <div className="t-label" style={{ color: "var(--tm)", padding: "8px 12px 4px" }}>Connectors — steer this turn</div>
+                    {slashMatches.length === 0
+                      ? <div className="t-sub t-muted" style={{ fontSize: 12, padding: "0 12px 10px" }}>No connector matches “{slashQuery}”.</div>
+                      : slashMatches.map((c) => (
+                        <button key={c.id} onClick={() => { setSteer(c.label); setInput(""); }}
+                          style={{ width: "100%", textAlign: "left", padding: "8px 12px", border: "none", background: "none", cursor: "pointer", fontSize: 13 }}
+                          onMouseEnter={(e) => (e.currentTarget.style.background = "var(--fill)")} onMouseLeave={(e) => (e.currentTarget.style.background = "none")}>
+                          <span style={{ color: "var(--ac)", fontWeight: 700 }}>/</span> {c.label}
+                        </button>
+                      ))}
+                  </div>
+                )}
+                {steer && (
+                  <div className="row gap-2" style={{ marginBottom: 8, alignItems: "center" }}>
+                    <span className="chip chip-accent" style={{ fontSize: 11.5 }}>↳ via {steer}</span>
+                    <button className="btn btn-secondary btn-sm" onClick={() => setSteer(null)} style={{ padding: "2px 8px" }} title="Remove connector steer">✕</button>
+                  </div>
+                )}
+                <form onSubmit={(e) => { e.preventDefault(); if (slashQuery !== null && slashMatches.length) { setSteer(slashMatches[0].label); setInput(""); return; } send(input); }} className="row gap-2">
+                  <input className="input" value={input} onChange={(e) => setInput(e.target.value)} placeholder={connectors.length ? `Ask ${exec.short}…  (type / for connectors)` : `Ask ${exec.short}…`} disabled={busy} style={{ flex: 1 }} />
+                  <button className="btn btn-sm" type="submit" disabled={busy || !input.trim()}>Send</button>
+                </form>
+              </div>
             </div>
           </>
         ) : (
