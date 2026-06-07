@@ -209,8 +209,14 @@ function Skills({ agentId, agentName, skills, attached, cornerstones, reload, se
   }
   async function toggleCornerstone(skillId: string, next: boolean) {
     setError(null);
-    if (next && cornerstones.size >= 3) { setError("An agent has at most 3 cornerstone skills — unset one first."); return; }
-    await supabase.from("agent_skills").update({ is_cornerstone: next }).eq("agent_id", agentId).eq("skill_id", skillId);
+    // Exactly one cornerstone per agent (the identity). Promoting one demotes the
+    // current cornerstone — radio behavior, also matching the DB unique index.
+    if (next) {
+      await supabase.from("agent_skills").update({ is_cornerstone: false }).eq("agent_id", agentId).eq("is_cornerstone", true);
+      await supabase.from("agent_skills").update({ is_cornerstone: true }).eq("agent_id", agentId).eq("skill_id", skillId);
+    } else {
+      await supabase.from("agent_skills").update({ is_cornerstone: false }).eq("agent_id", agentId).eq("skill_id", skillId);
+    }
     reload();
   }
   function openEditor(s: Skill) { if (openSkill === s.id) { setOpenSkill(null); return; } setOpenSkill(s.id); setEdit({ name: s.name, description: s.description ?? "", instructions: s.instructions ?? "" }); }
@@ -226,10 +232,11 @@ function Skills({ agentId, agentName, skills, attached, cornerstones, reload, se
     try {
       const orgId = await getOrgId();
       if (!orgId) throw new Error("Could not resolve your organization.");
-      if (form.cornerstone && cornerstones.size >= 3) throw new Error("An agent has at most 3 cornerstone skills — unset one first.");
       const key = form.name.trim().toLowerCase().replace(/[^a-z0-9]+/g, "_").replace(/^_|_$/g, "") || `skill_${Date.now()}`;
       const { data, error } = await supabase.from("skills").insert({ org_id: orgId, key, name: form.name.trim(), description: form.description.trim() || null, instructions: form.instructions.trim() || null, category: form.category }).select("id").single();
       if (error) throw error;
+      // Exactly one cornerstone: if this new skill is the identity, demote the current one first.
+      if (form.cornerstone) await supabase.from("agent_skills").update({ is_cornerstone: false }).eq("agent_id", agentId).eq("is_cornerstone", true);
       await supabase.from("agent_skills").insert({ org_id: orgId, agent_id: agentId, skill_id: data.id, is_cornerstone: form.cornerstone });
       setCreating(false); setForm({ name: "", description: "", instructions: "", category: "general", cornerstone: false });
       reload();
@@ -292,7 +299,7 @@ function Skills({ agentId, agentName, skills, attached, cornerstones, reload, se
       </div>
     ) : undefined}>
       <div className="t-sub t-muted" style={{ fontSize: 12.5, marginBottom: 12 }}>
-        An agent has two kinds of skills. <strong style={{ color: "var(--ac-text)" }}>Cornerstone skills</strong> (1–3, ★) are its core identity — they run on <em>every</em> job. <strong style={{ color: "var(--vl-text)" }}>Play skills</strong> are task/process-specific; you author them here, then attach them to plays over in <a href="/plays" style={{ color: "var(--vl-text)", fontWeight: 600 }}>Plays</a>. Click any skill to edit it. <span className="t-mono-xs">({cornerstones.size}/3 cornerstones)</span>
+        An agent has two kinds of skills. <strong style={{ color: "var(--ac-text)" }}>The cornerstone</strong> (one, ★) is its identity — it runs on <em>every</em> job. <strong style={{ color: "var(--vl-text)" }}>Play skills</strong> are task/process-specific; you author them here, then attach them to plays over in <a href="/plays" style={{ color: "var(--vl-text)", fontWeight: 600 }}>Plays</a>. Click any skill to edit it. <span className="t-mono-xs">({cornerstones.size === 1 ? "cornerstone set" : "no cornerstone yet"})</span>
       </div>
 
       {evolving && <EvolvePanel agentId={agentId} onApplied={reload} onClose={() => setEvolving(false)} setError={setError} />}
