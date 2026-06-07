@@ -152,7 +152,7 @@ Deno.serve(async (req: Request) => {
   // Anthropic executes them server-side (Messages API mcp_servers, beta). Gated:
   // only passed when present, so non-connector agents are unaffected. Auth (Phase 1):
   // optional bearer from config; secure store is Phase 1.5. See docs/mcp-connectors.md.
-  const { data: mcpRows } = await supabase.from("connections").select("id, label, mcp_url, config").eq("agent_id", agent.id).eq("kind", "mcp").neq("status", "disconnected");
+  const { data: mcpRows } = await supabase.from("connections").select("id, label, mcp_url, config, guidance, targets").eq("agent_id", agent.id).eq("kind", "mcp").neq("status", "disconnected");
   // deno-lint-ignore no-explicit-any
   const mcpConns = (mcpRows ?? []).filter((r: any) => r.mcp_url);
   // Tokens live in the RLS-locked connection_secrets; read them with the SERVICE ROLE
@@ -169,16 +169,33 @@ Deno.serve(async (req: Request) => {
       if (tok) tokenById[(c as { id: string }).id] = tok as string;
     }
   }
+  // Stable connector name — used on the API and to label its guidance below.
+  const connName = (label: string | null | undefined, i: number) =>
+    String(label || `mcp_${i}`).toLowerCase().replace(/[^a-z0-9_]+/g, "_").replace(/^_|_$/g, "") || `mcp_${i}`;
   // deno-lint-ignore no-explicit-any
   const mcpServers = mcpConns.map((r: any, i: number) => {
     const tok = tokenById[r.id] || r.config?.authorization_token;
     return {
       type: "url",
-      name: String(r.label || `mcp_${i}`).toLowerCase().replace(/[^a-z0-9_]+/g, "_").replace(/^_|_$/g, "") || `mcp_${i}`,
+      name: connName(r.label, i),
       url: r.mcp_url as string,
       ...(tok ? { authorization_token: tok } : {}),
     };
   });
+  // The operator's per-connector instructions — purpose ("what it does here") + the
+  // "where to look / focus" targets they typed on the connection. These were being
+  // dropped; we now feed them to the model so it actually honors that focus (and any
+  // output structure the operator asked for there) when using the connector.
+  // deno-lint-ignore no-explicit-any
+  const mcpGuidance = mcpConns.map((r: any, i: number) => {
+    const purpose = String(r.config?.purpose || r.guidance || "").trim();
+    // deno-lint-ignore no-explicit-any
+    const targets = (Array.isArray(r.targets) ? r.targets : []).map((t: any) => t?.ref).filter(Boolean);
+    const bits: string[] = [];
+    if (purpose) bits.push(purpose);
+    if (targets.length) bits.push(`Focus / where to look: ${targets.join("; ")}`);
+    return `- ${connName(r.label, i)}${bits.length ? `: ${bits.join(". ")}` : ""}`;
+  }).join("\n");
   const mcpHeaders = mcpServers.length ? { headers: { "anthropic-beta": "mcp-client-2025-11-20" } } : undefined;
   // The mcp-client-2025-11-20 beta requires each declared MCP server to be opted into
   // via an mcp_toolset entry in `tools` — passing mcp_servers alone returns a 400
@@ -193,11 +210,12 @@ Deno.serve(async (req: Request) => {
     "",
     "YOUR SKILLS — only the titles are shown. Before doing specialized work, load the relevant skill's full playbook with read_skill(skill_key):",
     skillCatalog,
-    mcpServers.length ? `\nYOUR CONNECTORS (external systems via MCP): ${mcpServers.map((m) => m.name).join(", ")}. Use them to reach those systems when the task calls for it.` : "",
+    mcpServers.length ? `\nYOUR CONNECTORS (external systems via MCP) — use them when the task calls for it, and honor the focus + instructions given for each:\n${mcpGuidance}` : "",
     input.context?.record_id && input.context?.record_type
       ? `\nThe operator is currently looking at the ${input.context.record_type} record ${input.context.record_id}. Use get_record to read it when relevant.`
       : "",
     "\nGround every claim in what the tools return. Be concrete; cite the records/signals/skills you used.",
+    "If the operator's request, a skill, or a connector specifies how to structure the answer (e.g. named sections), follow that structure; otherwise choose a clean, scannable layout that fits the question. Don't impose a fixed template when none was asked for.",
   ].join("\n");
 
   const anthropic = new Anthropic({ apiKey: key });
