@@ -179,7 +179,9 @@ const catTone = (c: string | null) => (c === "product" ? "accent" : c === "gtm" 
 function Skills({ agentId, agentName, skills, attached, cornerstones, reload, setError }: { agentId: string; agentName: string; skills: Skill[]; attached: Set<string>; cornerstones: Set<string>; reload: () => void; setError: (s: string | null) => void }) {
   const supabase = createClient();
   const [creating, setCreating] = useState(false);
-  const [form, setForm] = useState({ name: "", description: "", instructions: "", category: "general", cornerstone: false });
+  const [form, setForm] = useState({ name: "", description: "", instructions: "", category: "general", cornerstone: false, areas: [] as string[], connectors: [] as string[] });
+  const [intent, setIntent] = useState(""); // "describe what you want" → AI draft
+  const [drafting, setDrafting] = useState(false);
   const [busy, setBusy] = useState(false);
   const [evolving, setEvolving] = useState(false);
   const [histSkill, setHistSkill] = useState<Skill | null>(null);
@@ -215,6 +217,31 @@ function Skills({ agentId, agentName, skills, attached, cornerstones, reload, se
     if (error) setError(error.message); else { setOpenSkill(null); reload(); }
   }
 
+  // Draft from a plain-English description (AI). Fills the form; the human reviews
+  // and edits before Create. Cornerstone vs child changes the grounding the model uses.
+  async function draftWithAI() {
+    if (!intent.trim()) { setError("Describe what you want this skill to do/be first."); return; }
+    setDrafting(true); setError(null);
+    try {
+      const { data, error } = await supabase.functions.invoke("evolve-skills", {
+        body: { agent_id: agentId, mode: "draft", kind: form.cornerstone ? "cornerstone" : "child", intent: intent.trim() },
+      });
+      if (error) throw error;
+      const d = data?.draft;
+      if (!d) throw new Error(data?.error || "No draft returned.");
+      setForm((f) => ({
+        ...f,
+        name: f.name.trim() || d.name || "",
+        description: d.description || f.description,
+        instructions: d.instructions || f.instructions,
+        category: d.category || f.category,
+        areas: Array.isArray(d.areas) ? d.areas : [],
+        connectors: Array.isArray(d.connectors) ? d.connectors : [],
+      }));
+    } catch (e) { setError(e instanceof Error ? e.message : "Could not draft the skill."); }
+    finally { setDrafting(false); }
+  }
+
   async function createSkill(e: React.FormEvent) {
     e.preventDefault(); if (!form.name.trim()) return;
     setBusy(true); setError(null);
@@ -222,12 +249,12 @@ function Skills({ agentId, agentName, skills, attached, cornerstones, reload, se
       const orgId = await getOrgId();
       if (!orgId) throw new Error("Could not resolve your organization.");
       const key = form.name.trim().toLowerCase().replace(/[^a-z0-9]+/g, "_").replace(/^_|_$/g, "") || `skill_${Date.now()}`;
-      const { data, error } = await supabase.from("skills").insert({ org_id: orgId, key, name: form.name.trim(), description: form.description.trim() || null, instructions: form.instructions.trim() || null, category: form.category }).select("id").single();
+      const { data, error } = await supabase.from("skills").insert({ org_id: orgId, key, name: form.name.trim(), description: form.description.trim() || null, instructions: form.instructions.trim() || null, category: form.category, areas: form.cornerstone ? [] : form.areas, connectors: form.connectors }).select("id").single();
       if (error) throw error;
       // Exactly one cornerstone: if this new skill is the identity, demote the current one first.
       if (form.cornerstone) await supabase.from("agent_skills").update({ is_cornerstone: false }).eq("agent_id", agentId).eq("is_cornerstone", true);
       await supabase.from("agent_skills").insert({ org_id: orgId, agent_id: agentId, skill_id: data.id, is_cornerstone: form.cornerstone });
-      setCreating(false); setForm({ name: "", description: "", instructions: "", category: "general", cornerstone: false });
+      setCreating(false); setIntent(""); setForm({ name: "", description: "", instructions: "", category: "general", cornerstone: false, areas: [], connectors: [] });
       reload();
     } catch (e) { setError(e instanceof Error ? e.message : "Could not create skill."); }
     finally { setBusy(false); }
@@ -285,6 +312,13 @@ function Skills({ agentId, agentName, skills, attached, cornerstones, reload, se
 
       {creating && (
         <form onSubmit={createSkill} className="card card-pad" style={{ marginBottom: "var(--sp-3)" }}>
+          {/* Describe-it → AI draft. Kind (cornerstone vs child) steers the grounding. */}
+          <div className="card card-pad" style={{ background: "var(--panel-2)", marginBottom: "var(--sp-3)" }}>
+            <span className="t-label">Describe what you want — let AI draft it</span>
+            <label className="row gap-2" style={{ alignItems: "center", margin: "6px 0 8px", cursor: "pointer" }}><input type="checkbox" checked={form.cornerstone} onChange={(e) => setForm({ ...form, cornerstone: e.target.checked })} /><span className="t-sub">{form.cornerstone ? "Cornerstone — the agent’s identity (drafts from your product truth + ICP + role)" : "Child skill — a task/area playbook (drafts from the cornerstone + what you describe)"}</span></label>
+            <textarea className="textarea" rows={3} value={intent} onChange={(e) => setIntent(e.target.value)} placeholder={form.cornerstone ? "e.g. A CPO who guards the product record's truth, reframes the category, and is ruthless about evidence." : "e.g. Tear down a named competitor and turn it into a battlecard our reps can use."} />
+            <div className="row gap-2" style={{ marginTop: 8 }}><button className="btn btn-sm" type="button" onClick={draftWithAI} disabled={drafting} style={{ background: "var(--ac)", color: "#fff" }}>{drafting ? "Drafting…" : "✨ Draft with AI"}</button><span className="t-sub t-muted" style={{ fontSize: 11.5 }}>Fills the fields below — review and edit before creating.</span></div>
+          </div>
           <div style={{ display: "grid", gridTemplateColumns: "2fr 1fr", gap: "var(--sp-3)" }}>
             <label className="field"><span className="t-label">Name</span><input className="input" autoFocus value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} placeholder="e.g. Competitive teardown" /></label>
             <label className="field"><span className="t-label">Category</span>
@@ -293,9 +327,14 @@ function Skills({ agentId, agentName, skills, attached, cornerstones, reload, se
               </select></label>
           </div>
           <label className="field"><span className="t-label">Description</span><input className="input" value={form.description} onChange={(e) => setForm({ ...form, description: e.target.value })} placeholder="What it does" /></label>
-          <label className="field"><span className="t-label">Instructions / playbook</span><textarea className="textarea" rows={5} value={form.instructions} onChange={(e) => setForm({ ...form, instructions: e.target.value })} placeholder="How the agent should apply this skill, tailored to your company and goals." /></label>
-          <label className="row gap-2" style={{ alignItems: "center", margin: "2px 0 10px", cursor: "pointer" }}><input type="checkbox" checked={form.cornerstone} onChange={(e) => setForm({ ...form, cornerstone: e.target.checked })} /><span className="t-sub">Make this the cornerstone (the agent&rsquo;s identity, always on) — otherwise it&rsquo;s a child skill</span></label>
-          <div className="row gap-2"><button className="btn" type="submit" disabled={busy}>{busy ? "Creating…" : "Create skill"}</button><button className="btn btn-secondary" type="button" onClick={() => setCreating(false)}>Cancel</button></div>
+          <label className="field"><span className="t-label">Instructions / playbook</span><textarea className="textarea" rows={7} value={form.instructions} onChange={(e) => setForm({ ...form, instructions: e.target.value })} placeholder="How the agent should apply this skill, tailored to your company and goals." /></label>
+          {!form.cornerstone && (form.areas.length > 0 || form.connectors.length > 0) && (
+            <div className="row gap-2" style={{ flexWrap: "wrap", margin: "2px 0 10px", alignItems: "center" }}>
+              {form.areas.length > 0 && <><span className="t-mono-xs t-muted">areas:</span>{form.areas.map((a) => <Chip key={a} tone="accent">{a}</Chip>)}</>}
+              {form.connectors.length > 0 && <><span className="t-mono-xs t-muted" style={{ marginLeft: 6 }}>connectors:</span>{form.connectors.map((c) => <Chip key={c} tone="violet">{c}</Chip>)}</>}
+            </div>
+          )}
+          <div className="row gap-2"><button className="btn" type="submit" disabled={busy}>{busy ? "Creating…" : "Create skill"}</button><button className="btn btn-secondary" type="button" onClick={() => { setCreating(false); setIntent(""); }}>Cancel</button></div>
         </form>
       )}
 
@@ -630,7 +669,7 @@ function Workflows({ workflows }: { workflows: AgentWorkflow[] }) {
 
 // ---------- Evolve from signals (recursive skill evolution) ----------
 type Revision = { skill_id: string; name: string; category: string | null; current_instructions: string; proposed_instructions: string; rationale: string; drivers: string[] };
-type NewSkill = { name: string; description: string; category: string; instructions: string; rationale: string; drivers: string[] };
+type NewSkill = { name: string; description: string; category: string; instructions: string; areas?: string[]; connectors?: string[]; rationale: string; drivers: string[] };
 type NewDraft = { name: string; category: string; instructions: string };
 
 function EvolvePanel({ agentId, onApplied, onClose, setError }: { agentId: string; onApplied: () => void; onClose: () => void; setError: (s: string | null) => void }) {
@@ -696,12 +735,13 @@ function EvolvePanel({ agentId, onApplied, onClose, setError }: { agentId: strin
       const base = d.name.trim().toLowerCase().replace(/[^a-z0-9]+/g, "_").replace(/^_|_$/g, "") || `skill_${Date.now()}`;
       // Create with no instructions first, then evolve them in — so the skill's
       // first revision is provenance-tagged 'evolved' (born from these signals).
+      const newCols = { description: n.description?.trim() || null, category: d.category, source: "evolved", areas: n.areas ?? [], connectors: n.connectors ?? [] };
       let { data: created, error: insErr } = await supabase.from("skills")
-        .insert({ org_id: orgId, key: base, name: d.name.trim(), description: n.description?.trim() || null, instructions: null, category: d.category, source: "evolved" })
+        .insert({ org_id: orgId, key: base, name: d.name.trim(), instructions: null, ...newCols })
         .select("id").single();
       if (insErr && (insErr as { code?: string }).code === "23505") {
         ({ data: created, error: insErr } = await supabase.from("skills")
-          .insert({ org_id: orgId, key: `${base}_${Date.now().toString(36)}`, name: d.name.trim(), description: n.description?.trim() || null, instructions: null, category: d.category, source: "evolved" })
+          .insert({ org_id: orgId, key: `${base}_${Date.now().toString(36)}`, name: d.name.trim(), instructions: null, ...newCols })
           .select("id").single());
       }
       if (insErr) throw insErr;

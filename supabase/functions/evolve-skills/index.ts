@@ -1,5 +1,12 @@
 // ============================================================================
-// evolve-skills — recursively evolve an agent's skills from new intelligence.
+// evolve-skills — the agent skill-authoring service. Two modes:
+//   • evolve (default) — review the agent's attached skills against new
+//     intelligence and PROPOSE evolved instructions (drift-driven).
+//   • draft  — author ONE new skill from the operator's description
+//     (intent-first): a cornerstone from the company's product truth + ICP +
+//     role, or a child from the agent's cornerstone + the task/area described.
+//     Returns { draft: { name, description, category, instructions, areas,
+//     connectors, rationale, kind } }. Writes nothing — the human accepts/edits.
 //
 // Plain English: a skill's `instructions` are its playbook. As the market,
 // positioning, product releases, and dev strategy shift (captured as signals +
@@ -60,15 +67,36 @@ const SCHEMA = {
           description: { type: "string" },
           category: { type: "string", enum: ["product", "gtm", "research", "general"] },
           instructions: { type: "string" },
+          areas: { type: "array", items: { type: "string" } },
+          connectors: { type: "array", items: { type: "string" } },
           rationale: { type: "string" },
           drivers: { type: "array", items: { type: "string" } },
         },
-        required: ["name", "description", "category", "instructions", "rationale", "drivers"],
+        required: ["name", "description", "category", "instructions", "areas", "connectors", "rationale", "drivers"],
       },
     },
   },
   required: ["revisions", "new_skills"],
 };
+
+// Draft mode returns ONE authored skill from the operator's description.
+const DRAFT_SCHEMA = {
+  type: "object",
+  additionalProperties: false,
+  properties: {
+    name: { type: "string" },
+    description: { type: "string" },
+    category: { type: "string", enum: ["product", "gtm", "research", "general"] },
+    instructions: { type: "string" },
+    areas: { type: "array", items: { type: "string" } },
+    connectors: { type: "array", items: { type: "string" } },
+    rationale: { type: "string" },
+  },
+  required: ["name", "description", "category", "instructions", "areas", "connectors", "rationale"],
+};
+
+// Area/surface vocabulary a child skill can declare relevance to.
+const AREA_KEYS = ["product", "gtm", "competitive", "strategy", "market", "signals", "frontier", "roadmap", "content", "campaigns", "initiatives"];
 
 Deno.serve(async (req: Request) => {
   if (req.method === "OPTIONS") return new Response("ok", { headers: CORS });
@@ -85,7 +113,7 @@ Deno.serve(async (req: Request) => {
     { global: { headers: { Authorization: authHeader } } },
   );
 
-  let input: { agent_id?: string; agent_key?: string };
+  let input: { agent_id?: string; agent_key?: string; mode?: string; kind?: string; intent?: string; area?: string };
   try { input = await req.json(); } catch { return json({ error: "invalid JSON body" }, 400); }
 
   // Load the agent (by id or key), RLS-scoped.
@@ -97,6 +125,83 @@ Deno.serve(async (req: Request) => {
   if (!agent) return json({ error: "agent not found" }, 404);
 
   try {
+    // ---- DRAFT MODE: author a skill from the operator's description ----------
+    // Intent-first authoring (vs. evolve's drift-driven review). A cornerstone is
+    // drafted from the company's product truth + ICP + role; a child from the
+    // agent's cornerstone (its identity) + the task/area the operator describes.
+    if (input.mode === "draft") {
+      const kind = input.kind === "cornerstone" ? "cornerstone" : "child";
+      const intent = (input.intent ?? "").trim();
+      if (!intent) return json({ error: "Describe what you want this skill to do/be (intent is required)." }, 400);
+      const area = (input.area ?? "").trim().toLowerCase() || null;
+
+      const ground: string[] = [];
+      if (kind === "cornerstone") {
+        // Aggregate product truth + ICP across the org's product records.
+        const { data: pf } = await supabase
+          .from("record_fields").select("field_key, label, value")
+          .not("product_id", "is", null)
+          .in("field_key", ["overview", "value_prop", "icp", "target_customer", "positioning", "differentiation"])
+          .limit(40);
+        const fields = (pf ?? []) as { field_key: string; label: string | null; value: string | null }[];
+        const filled = fields.filter((f) => (f.value ?? "").trim());
+        if (filled.length) ground.push("PRODUCT TRUTH & ICP (tailor the identity to this company):", ...filled.map((f) => `• ${f.label || f.field_key}: ${f.value}`));
+      } else {
+        // The cornerstone the child builds on.
+        const { data: cornerRow } = await supabase
+          .from("agent_skills").select("skills ( name, instructions )")
+          .eq("agent_id", agent.id).eq("is_cornerstone", true).maybeSingle();
+        // deno-lint-ignore no-explicit-any
+        const corner = (cornerRow as any)?.skills;
+        if (corner?.instructions) ground.push(`THE AGENT'S CORNERSTONE (its identity — this child skill builds on it, does not restate it):\n## ${corner.name}\n${corner.instructions}`);
+      }
+
+      // Light area intelligence: themes (scoped to product/gtm when the area maps).
+      const cat = area === "product" ? "product" : area === "gtm" ? "gtm" : null;
+      let tQ = supabase.from("signal_themes").select("title, summary, recommendation, category").order("last_evidence_at", { ascending: false }).limit(12);
+      if (cat) tQ = tQ.eq("category", cat);
+      const { data: themes } = await tQ;
+      if ((themes ?? []).length) ground.push("", "RELEVANT THEMES:", ...(themes ?? []).map((t) => `• (${t.category}) ${t.title}${t.summary ? ` — ${t.summary}` : ""}${t.recommendation ? ` → ${t.recommendation}` : ""}`));
+
+      const system = kind === "cornerstone"
+        ? [
+            `You are drafting the CORNERSTONE skill — the general-purpose IDENTITY — of ${agent.name}${agent.role ? `, ${agent.role}` : ""}, an executive agent in SingleStack.`,
+            "The cornerstone defines who this agent IS and how it operates across EVERY job, tailored to this company's product truth and ICP. It is general — not task-specific.",
+            "Write a tight, usable playbook in markdown, second person ('You are…', 'You…'). Ground it in the product truth & ICP and the operator's description. Be specific to THIS company — no generic filler, no changelog.",
+            "Set areas to [] (a cornerstone is general). Set connectors only if the identity clearly depends on a specific external system; otherwise [].",
+          ].join("\n")
+        : [
+            `You are drafting a CHILD skill for ${agent.name}${agent.role ? `, ${agent.role}` : ""}, an executive agent in SingleStack.`,
+            "A child skill is task/area-specific and BUILDS ON the agent's cornerstone (its identity, shown in grounding). It gives focused direction for one kind of work — it does NOT restate the identity.",
+            "Write a tight, usable playbook in markdown, second person. Ground it in the operator's description and the area intelligence.",
+            `Set areas to the relevant surface keys from this set: ${AREA_KEYS.join(", ")}. Set connectors to any external MCP systems the skill clearly needs, by label (e.g. DeepWiki, G2, GitHub). Use [] if none.`,
+          ].join("\n");
+
+      const userMsg = [
+        `WHAT THE OPERATOR WANTS THIS ${kind === "cornerstone" ? "AGENT (its cornerstone)" : "CHILD SKILL"} TO DO/BE:\n${intent}`,
+        area ? `\nTARGET AREA: ${area}` : "",
+        ground.length ? `\n\nGROUNDING:\n${ground.join("\n")}` : "",
+        "\n\nDraft the skill now.",
+      ].filter(Boolean).join("");
+
+      const anthropic = new Anthropic({ apiKey: key });
+      const resp = (await anthropic.messages.create({
+        model: MODEL, max_tokens: 3000, thinking: { type: "adaptive" },
+        output_config: { effort: "high", format: { type: "json_schema", schema: DRAFT_SCHEMA } },
+        system: [{ type: "text", text: system, cache_control: { type: "ephemeral" } }],
+        messages: [{ role: "user", content: userMsg }],
+        // deno-lint-ignore no-explicit-any
+      } as any)) as Anthropic.Message;
+      const block = resp.content.find((b) => b.type === "text");
+      if (!block || block.type !== "text") throw new Error("no draft returned");
+      const d = JSON.parse(block.text) as { name: string; description: string; category: string; instructions: string; areas: string[]; connectors: string[]; rationale: string };
+      const category = ["product", "gtm", "research", "general"].includes(d.category) ? d.category : "general";
+      const areas = kind === "cornerstone" ? [] : (Array.isArray(d.areas) ? d.areas.map((a) => String(a).toLowerCase()).filter((a) => AREA_KEYS.includes(a)) : []);
+      const connectors = Array.isArray(d.connectors) ? d.connectors.map((c) => String(c).trim()).filter(Boolean) : [];
+      return json({ draft: { name: d.name, description: d.description ?? "", category, instructions: d.instructions, areas, connectors, rationale: d.rationale ?? "", kind } });
+    }
+
+    // ---- EVOLVE MODE (default): review attached skills against new intelligence ----
     // Attached skills (the playbooks we might evolve).
     const { data: skillRows } = await supabase
       .from("agent_skills")
@@ -218,7 +323,7 @@ Deno.serve(async (req: Request) => {
     if (!block || block.type !== "text") throw new Error("no revisions returned");
     const parsed = JSON.parse(block.text) as {
       revisions?: { skill_id: string; change: boolean; proposed_instructions: string; rationale: string; drivers: string[] }[];
-      new_skills?: { name: string; description: string; category: string; instructions: string; rationale: string; drivers: string[] }[];
+      new_skills?: { name: string; description: string; category: string; instructions: string; areas?: string[]; connectors?: string[]; rationale: string; drivers: string[] }[];
     };
 
     // Decorate with current text + names so the client can show a clean diff;
@@ -249,6 +354,8 @@ Deno.serve(async (req: Request) => {
         description: n.description ?? "",
         category: ["product", "gtm", "research", "general"].includes(n.category) ? n.category : "general",
         instructions: n.instructions,
+        areas: Array.isArray(n.areas) ? n.areas.map((a) => String(a).toLowerCase()).filter((a) => AREA_KEYS.includes(a)) : [],
+        connectors: Array.isArray(n.connectors) ? n.connectors.map((c) => String(c).trim()).filter(Boolean) : [],
         rationale: n.rationale ?? "",
         drivers: n.drivers ?? [],
       }));
