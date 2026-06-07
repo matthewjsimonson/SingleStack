@@ -4,6 +4,7 @@ name: Narrative & brand voice
 category: gtm
 description: Keep the story consistent, compelling, and on-voice.
 agents: cco
+areas: gtm, content
 ---
 # Narrative & brand voice
 

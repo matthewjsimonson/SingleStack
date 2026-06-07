@@ -4,6 +4,8 @@ name: Competitive battlecard
 category: gtm
 description: Equip GTM to win against named alternatives.
 agents: cro
+areas: competitive, gtm
+connectors: DeepWiki, G2
 ---
 # Competitive battlecard
 

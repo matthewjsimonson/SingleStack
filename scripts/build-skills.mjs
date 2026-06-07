@@ -8,7 +8,8 @@
 //
 //   Run: node scripts/build-skills.mjs   (re-run after editing any SKILL.md)
 //
-// Frontmatter keys: key, name, description, category, agents (comma-separated).
+// Frontmatter keys: key, name, description, category, agents (comma-separated),
+// cornerstone (true/false), areas (comma-separated), connectors (comma-separated).
 // Everything after the closing --- is the skill's instructions (markdown body).
 // ============================================================================
 import { readdirSync, readFileSync, writeFileSync, statSync } from "node:fs";
@@ -37,20 +38,23 @@ for (const name of readdirSync(skillsDir).sort()) {
   if (!statSync(dir).isDirectory()) continue;
   const { fm, body } = parse(readFileSync(join(dir, "SKILL.md"), "utf8"));
   if (!fm.key) throw new Error(`${name}/SKILL.md: missing 'key'`);
+  const list = (v) => (v ?? "").split(",").map((s) => s.trim()).filter(Boolean);
   defs.push({
     key: fm.key,
     name: fm.name ?? fm.key,
     description: fm.description ?? "",
     category: fm.category ?? "general",
     instructions: body,
-    agents: (fm.agents ?? "").split(",").map((s) => s.trim()).filter(Boolean),
+    agents: list(fm.agents),
     cornerstone: fm.cornerstone === "true",
+    areas: list(fm.areas),
+    connectors: list(fm.connectors),
   });
 }
 
 const banner = "// AUTO-GENERATED from web/skills/**/SKILL.md by scripts/build-skills.mjs — do not edit by hand.\n";
 const ts = banner +
-  "export type SkillDef = { key: string; name: string; description: string; category: string; instructions: string; agents: string[]; cornerstone: boolean };\n" +
+  "export type SkillDef = { key: string; name: string; description: string; category: string; instructions: string; agents: string[]; cornerstone: boolean; areas: string[]; connectors: string[] };\n" +
   "export const SKILL_DEFS: SkillDef[] = " + JSON.stringify(defs, null, 2) + ";\n";
 writeFileSync(outFile, ts);
 console.log(`Wrote ${defs.length} skills → web/lib/skills.generated.ts`);

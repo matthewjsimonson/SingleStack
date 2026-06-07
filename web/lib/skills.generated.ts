@@ -1,5 +1,5 @@
 // AUTO-GENERATED from web/skills/**/SKILL.md by scripts/build-skills.mjs — do not edit by hand.
-export type SkillDef = { key: string; name: string; description: string; category: string; instructions: string; agents: string[]; cornerstone: boolean };
+export type SkillDef = { key: string; name: string; description: string; category: string; instructions: string; agents: string[]; cornerstone: boolean; areas: string[]; connectors: string[] };
 export const SKILL_DEFS: SkillDef[] = [
   {
     "key": "cco_one_narrative",
@@ -10,7 +10,9 @@ export const SKILL_DEFS: SkillDef[] = [
     "agents": [
       "cco"
     ],
-    "cornerstone": true
+    "cornerstone": true,
+    "areas": [],
+    "connectors": []
   },
   {
     "key": "ceng_buildable_truth",
@@ -21,7 +23,9 @@ export const SKILL_DEFS: SkillDef[] = [
     "agents": [
       "ceng"
     ],
-    "cornerstone": true
+    "cornerstone": true,
+    "areas": [],
+    "connectors": []
   },
   {
     "key": "cos_roster_stewardship",
@@ -32,7 +36,9 @@ export const SKILL_DEFS: SkillDef[] = [
     "agents": [
       "cos"
     ],
-    "cornerstone": true
+    "cornerstone": true,
+    "areas": [],
+    "connectors": []
   },
   {
     "key": "cpo_product_truth",
@@ -43,7 +49,9 @@ export const SKILL_DEFS: SkillDef[] = [
     "agents": [
       "cpo"
     ],
-    "cornerstone": true
+    "cornerstone": true,
+    "areas": [],
+    "connectors": []
   },
   {
     "key": "cro_win_the_category",
@@ -54,7 +62,9 @@ export const SKILL_DEFS: SkillDef[] = [
     "agents": [
       "cro"
     ],
-    "cornerstone": true
+    "cornerstone": true,
+    "areas": [],
+    "connectors": []
   },
   {
     "key": "demo_architecture_review",
@@ -65,7 +75,14 @@ export const SKILL_DEFS: SkillDef[] = [
     "agents": [
       "ceng"
     ],
-    "cornerstone": false
+    "cornerstone": false,
+    "areas": [
+      "product",
+      "frontier"
+    ],
+    "connectors": [
+      "GitHub"
+    ]
   },
   {
     "key": "demo_competitive_battlecard",
@@ -76,7 +93,15 @@ export const SKILL_DEFS: SkillDef[] = [
     "agents": [
       "cro"
     ],
-    "cornerstone": false
+    "cornerstone": false,
+    "areas": [
+      "competitive",
+      "gtm"
+    ],
+    "connectors": [
+      "DeepWiki",
+      "G2"
+    ]
   },
   {
     "key": "demo_narrative_voice",
@@ -87,7 +112,12 @@ export const SKILL_DEFS: SkillDef[] = [
     "agents": [
       "cco"
     ],
-    "cornerstone": false
+    "cornerstone": false,
+    "areas": [
+      "gtm",
+      "content"
+    ],
+    "connectors": []
   },
   {
     "key": "demo_persona_messaging",
@@ -98,7 +128,14 @@ export const SKILL_DEFS: SkillDef[] = [
     "agents": [
       "cro"
     ],
-    "cornerstone": false
+    "cornerstone": false,
+    "areas": [
+      "gtm",
+      "market"
+    ],
+    "connectors": [
+      "G2"
+    ]
   },
   {
     "key": "demo_positioning_sharpening",
@@ -109,7 +146,12 @@ export const SKILL_DEFS: SkillDef[] = [
     "agents": [
       "cpo"
     ],
-    "cornerstone": false
+    "cornerstone": false,
+    "areas": [
+      "product",
+      "competitive"
+    ],
+    "connectors": []
   },
   {
     "key": "demo_roadmap_prioritization",
@@ -120,6 +162,11 @@ export const SKILL_DEFS: SkillDef[] = [
     "agents": [
       "cpo"
     ],
-    "cornerstone": false
+    "cornerstone": false,
+    "areas": [
+      "product",
+      "roadmap"
+    ],
+    "connectors": []
   }
 ];

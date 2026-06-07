@@ -4,6 +4,7 @@ name: Positioning sharpening
 category: product
 description: Tighten how the product is positioned against the alternatives.
 agents: cpo
+areas: product, competitive
 ---
 # Positioning sharpening
 

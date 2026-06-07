@@ -4,6 +4,8 @@ name: Persona messaging
 category: gtm
 description: Tune the message to each buyer.
 agents: cro
+areas: gtm, market
+connectors: G2
 ---
 # Persona messaging
 

@@ -233,10 +233,10 @@ export async function loadDemoData(supabase: SupabaseClient, orgId: string): Pro
       if (existing) {
         sk = { id: (existing as { id: string }).id };
         if ((existing as { source?: string }).source === "template") {
-          await supabase.from("skills").update({ name: s.name, description: s.description, category: s.category, instructions: s.instructions }).eq("id", sk.id);
+          await supabase.from("skills").update({ name: s.name, description: s.description, category: s.category, instructions: s.instructions, areas: s.areas, connectors: s.connectors }).eq("id", sk.id);
         }
       } else {
-        const { data: created } = await supabase.from("skills").insert({ org_id: orgId, key: s.key, name: s.name, description: s.description, category: s.category, instructions: s.instructions, source: "template" }).select("id").single();
+        const { data: created } = await supabase.from("skills").insert({ org_id: orgId, key: s.key, name: s.name, description: s.description, category: s.category, instructions: s.instructions, source: "template", areas: s.areas, connectors: s.connectors }).select("id").single();
         if (created) { sk = { id: (created as { id: string }).id }; made++; }
       }
       if (sk) {

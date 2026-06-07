@@ -4,6 +4,8 @@ name: Architecture review
 category: general
 description: Keep technical claims precise, feasible, and buildable.
 agents: ceng
+areas: product, frontier
+connectors: GitHub
 ---
 # Architecture review
 

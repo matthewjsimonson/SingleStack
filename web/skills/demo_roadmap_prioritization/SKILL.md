@@ -4,6 +4,7 @@ name: Roadmap prioritization
 category: product
 description: Decide what to build next, from evidence.
 agents: cpo
+areas: product, roadmap
 ---
 # Roadmap prioritization
 
