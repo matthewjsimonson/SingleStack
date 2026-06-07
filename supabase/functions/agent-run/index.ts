@@ -207,18 +207,37 @@ Deno.serve(async (req: Request) => {
     // deno-lint-ignore no-explicit-any
     const messages: any[] = convo.map((m) => ({ role: m.role, content: m.content }));
     let inTok = 0, outTok = 0;
+    // Connectors can be flaky/down — if one is unreachable, we drop them and carry
+    // on with our own tools rather than failing the whole run (see the model call).
+    let mcpActive = mcpServers.length > 0;
+
+    // One model call. `useMcp` lets us retry without connectors if they error out.
+    const callModel = (useMcp: boolean) => anthropic.messages.create({
+      model,
+      max_tokens: 8000,
+      thinking: { type: "adaptive", display: "summarized" }, // summarized → reasoning text is actually present on Opus 4.8
+      system: [{ type: "text", text: systemText, cache_control: { type: "ephemeral" } }],
+      tools: useMcp ? [...TOOLS, ...mcpToolsets] : TOOLS,
+      ...(useMcp ? { mcp_servers: mcpServers } : {}),
+      messages,
+      // deno-lint-ignore no-explicit-any
+    } as any, useMcp ? mcpHeaders : undefined) as Promise<Anthropic.Message>;
 
     for (let step = 0; step < MAX_STEPS; step++) {
-      const resp = (await anthropic.messages.create({
-        model,
-        max_tokens: 8000,
-        thinking: { type: "adaptive", display: "summarized" }, // summarized → reasoning text is actually present on Opus 4.8
-        system: [{ type: "text", text: systemText, cache_control: { type: "ephemeral" } }],
-        tools: [...TOOLS, ...mcpToolsets],
-        ...(mcpServers.length ? { mcp_servers: mcpServers } : {}),
-        messages,
-        // deno-lint-ignore no-explicit-any
-      } as any, mcpHeaders)) as Anthropic.Message;
+      // Graceful connector degradation: a down/unreachable MCP server returns a 400
+      // ("Connection error while communicating with MCP server"). Don't let that kill
+      // the run — drop the connectors, tell the user, and answer with our own tools.
+      let resp: Anthropic.Message;
+      try {
+        resp = await callModel(mcpActive);
+      } catch (e) {
+        const msg = e instanceof Error ? e.message : String(e);
+        if (mcpActive && /mcp server|mcp_server|communicating with mcp/i.test(msg)) {
+          emit(`\n⚠ A connector was unavailable — continuing without it.\n`);
+          mcpActive = false;
+          resp = await callModel(false);
+        } else throw e;
+      }
       inTok += resp.usage.input_tokens; outTok += resp.usage.output_tokens;
 
       // surface the officer's real reasoning + any connector calls for this step
