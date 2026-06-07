@@ -271,6 +271,14 @@ export async function loadDemoData(supabase: SupabaseClient, orgId: string): Pro
         ],
       },
       {
+        name: "Competitive teardown",
+        description: "Tear down a named competitor, then map the read back to our own product truth — where we win, where we're exposed, and the one move that matters.",
+        steps: [
+          { agent: "cro", signals: "external", instruction: "Tear down the named competitor using the latest competitive + market signals (and any connector you have for their docs/site). Cover their positioning, pricing posture, strongest claims, and where they're vulnerable. Be concrete and cite the signals you leaned on. Hand the teardown forward." },
+          { agent: "cpo", signals: "internal", instruction: "Take the CRO's teardown and map it against our product record and evidence: where we genuinely win, where we're exposed, and what's overclaimed on either side. Recommend the single highest-leverage move in response." },
+        ],
+      },
+      {
         name: "Frontier capability sweep",
         description: "Engineering scans what's newly possible; product turns it into priorities.",
         steps: [
