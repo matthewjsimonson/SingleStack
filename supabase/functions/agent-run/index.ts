@@ -82,35 +82,39 @@ const TOOLS = [
     description: "List the org's initiatives (title, stage, lane, priority). Use to connect your work to the active roadmap/GTM efforts.",
     input_schema: { type: "object", additionalProperties: false, properties: { limit: { type: "integer" } }, required: [] },
   },
-  {
-    name: "propose_change",
-    description: "Draft a concrete change to the record you're grounded in. It goes to the record's REVIEW QUEUE (pending) for the human to accept or reject — you never apply changes directly. For an update, use the field's id from get_record; for a new field, give a snake_case field_key + human label.",
-    input_schema: {
-      type: "object", additionalProperties: false,
-      properties: {
-        title: { type: "string", description: "Short title for the proposed change" },
-        rationale: { type: "string", description: "Why — cite the records/signals/skills behind it" },
-        conf_label: { type: "string", description: "A short confidence read, e.g. High / Medium / Low" },
-        conf_level: { type: "number", description: "Confidence 0..1" },
-        changes: {
-          type: "array",
-          items: {
-            type: "object", additionalProperties: false,
-            properties: {
-              change_kind: { type: "string", enum: ["update_field", "add_field"] },
-              record_field_id: { type: "string", description: "update_field: the field's id from get_record" },
-              field_key: { type: "string", description: "add_field: a snake_case key" },
-              label: { type: "string", description: "add_field: a human label" },
-              proposed_value: { type: "string" },
-            },
-            required: ["change_kind", "proposed_value"],
+];
+
+// propose_change is added to the tool set ONLY when a specific product/GTM record is
+// in scope. In a general advisory chat there's nothing to propose into, so we don't
+// offer it — that's what stops the agent hunting for a record to act on.
+const PROPOSE_TOOL = {
+  name: "propose_change",
+  description: "Draft a concrete change to the record you're grounded in. It goes to the record's REVIEW QUEUE (pending) for the human to accept or reject — you never apply changes directly. For an update, use the field's id from get_record; for a new field, give a snake_case field_key + human label.",
+  input_schema: {
+    type: "object", additionalProperties: false,
+    properties: {
+      title: { type: "string", description: "Short title for the proposed change" },
+      rationale: { type: "string", description: "Why — cite the records/signals/skills behind it" },
+      conf_label: { type: "string", description: "A short confidence read, e.g. High / Medium / Low" },
+      conf_level: { type: "number", description: "Confidence 0..1" },
+      changes: {
+        type: "array",
+        items: {
+          type: "object", additionalProperties: false,
+          properties: {
+            change_kind: { type: "string", enum: ["update_field", "add_field"] },
+            record_field_id: { type: "string", description: "update_field: the field's id from get_record" },
+            field_key: { type: "string", description: "add_field: a snake_case key" },
+            label: { type: "string", description: "add_field: a human label" },
+            proposed_value: { type: "string" },
           },
+          required: ["change_kind", "proposed_value"],
         },
       },
-      required: ["title", "rationale", "changes"],
     },
+    required: ["title", "rationale", "changes"],
   },
-];
+};
 
 Deno.serve(async (req: Request) => {
   if (req.method === "OPTIONS") return new Response("ok", { headers: CORS });
@@ -149,9 +153,11 @@ Deno.serve(async (req: Request) => {
   const orgId = agent.org_id as string;
   const model = (agent.model as string) || DEFAULT_MODEL;
 
-  // The agent's skills — names + descriptions only (progressive disclosure). The
-  // full instructions (the SKILL.md body) load on demand via read_skill.
-  const { data: skillRows } = await supabase.from("agent_skills").select("skills ( key, name, description )").eq("agent_id", agent.id);
+  // The agent's CORNERSTONE skills only — names + descriptions (progressive
+  // disclosure; full body loads on demand via read_skill). Cornerstones are the
+  // agent's general-purpose lens, always on. Child (non-cornerstone) skills are
+  // for specific tasks and belong to workflows or a "/" summon — NOT general chat.
+  const { data: skillRows } = await supabase.from("agent_skills").select("skills ( key, name, description )").eq("agent_id", agent.id).eq("is_cornerstone", true);
   // deno-lint-ignore no-explicit-any
   const skills = (skillRows ?? []).map((r: any) => r.skills).filter(Boolean) as { key: string; name: string; description: string | null }[];
   const skillCatalog = skills.length
@@ -259,13 +265,19 @@ Deno.serve(async (req: Request) => {
     ? `\nThe operator selected the "${steerName}" connector for this turn — use it to gather what's needed before answering (your other tools remain available).`
     : "";
 
+  // propose_change is only in scope when a specific product/GTM record is open.
+  // No record → advisory mode: answer, don't hunt for somewhere to act.
+  const canPropose = !!(ctx.record_id && (ctx.record_type === "product" || ctx.record_type === "gtm"));
+
   const systemText = [
     agent.system_prompt || `You are ${agent.name}${agent.role ? `, ${agent.role}` : ""}, an executive agent in SingleStack.`,
     "",
     "You operate AGENTICALLY: use the tools to gather what you need and to ground your work, then answer. Don't guess when a tool can tell you. Keep tool use purposeful — a few targeted calls, not exhaustive sweeps.",
-    "When you identify a concrete improvement to the record you're grounded in, draft it with propose_change — it goes to the record's review queue for the human to accept; you never apply changes yourself. Propose only when the operator wants a change or you've found a clear, well-grounded one; otherwise just answer.",
+    canPropose
+      ? "When you identify a concrete improvement to the record you're grounded in, draft it with propose_change — it goes to the record's review queue for the human to accept; you never apply changes yourself. Propose only when the operator wants a change or you've found a clear, well-grounded one; otherwise just answer."
+      : "You are in ADVISORY mode — no record is open, so you cannot and should not propose changes. Answer the question directly and usefully from your cornerstone expertise and the grounding tools. Do NOT hunt for a product/GTM record, do NOT try to find an id to act on, and do NOT apologize for what you can't do or offer to open a record. If a change would help, describe it in plain language; the operator can open the relevant record and ask you to draft it there.",
     "",
-    "YOUR SKILLS — only the titles are shown. Before doing specialized work, load the relevant skill's full playbook with read_skill(skill_key):",
+    "YOUR CORNERSTONE SKILLS — your always-on lens (titles only; load a full playbook with read_skill(skill_key) before leaning on it):",
     skillCatalog,
     mcpServers.length ? `\nYOUR CONNECTORS (external systems via MCP) — use them when the task calls for it, and honor the focus + instructions given for each:\n${mcpGuidance}` : "",
     pageContextText,
@@ -285,13 +297,16 @@ Deno.serve(async (req: Request) => {
     // on with our own tools rather than failing the whole run (see the model call).
     let mcpActive = mcpServers.length > 0;
 
+    // Tool set: read tools always; propose_change only when a record is in scope.
+    const baseTools = canPropose ? [...TOOLS, PROPOSE_TOOL] : TOOLS;
+
     // One model call. `useMcp` lets us retry without connectors if they error out.
     const callModel = (useMcp: boolean) => anthropic.messages.create({
       model,
       max_tokens: 8000,
       thinking: { type: "adaptive", display: "summarized" }, // summarized → reasoning text is actually present on Opus 4.8
       system: [{ type: "text", text: systemText, cache_control: { type: "ephemeral" } }],
-      tools: useMcp ? [...TOOLS, ...mcpToolsets] : TOOLS,
+      tools: useMcp ? [...baseTools, ...mcpToolsets] : baseTools,
       ...(useMcp ? { mcp_servers: mcpServers } : {}),
       messages,
       // deno-lint-ignore no-explicit-any
