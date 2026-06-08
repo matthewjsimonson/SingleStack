@@ -152,6 +152,9 @@ export default function Shell({
             <a href="/agents" style={itemStyle(isActive("/agents"))}>
               <span>Agents</span>
             </a>
+            <a href="/skills" style={itemStyle(isActive("/skills"))}>
+              <span>Skills library</span>
+            </a>
             <a href="/settings" style={itemStyle(isActive("/settings"))}>
               <span>Settings</span>
             </a>
