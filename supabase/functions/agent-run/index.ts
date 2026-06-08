@@ -139,6 +139,7 @@ Deno.serve(async (req: Request) => {
       page?: string; entity_id?: string; label?: string;
       page_aware?: boolean;       // opt-in: deep-load the current page's data into the run
       steer_connector?: string;   // "/" selection: nudge the agent to use this connector this turn
+      steer_skill?: string;       // "/" selection: summon a child skill (id) for this turn
     };
     stream?: boolean;
   };
@@ -265,6 +266,29 @@ Deno.serve(async (req: Request) => {
     ? `\nThe operator selected the "${steerName}" connector for this turn — use it to gather what's needed before answering (your other tools remain available).`
     : "";
 
+  // "/" skill summon — the operator brought a CHILD skill into this otherwise
+  // cornerstone-only chat for this turn. Load its full playbook (validated as
+  // attached to this agent) and apply it, and point at any preferred connectors
+  // the agent actually has attached (soft — graceful degradation preserved).
+  let summonedText = "";
+  if (ctx.steer_skill) {
+    const { data: sumRow } = await supabase.from("agent_skills")
+      .select("skills ( name, instructions, connectors )")
+      .eq("agent_id", agent.id).eq("skill_id", ctx.steer_skill).maybeSingle();
+    // deno-lint-ignore no-explicit-any
+    const sum = (sumRow as any)?.skills;
+    if (sum && (sum.instructions || sum.name)) {
+      const prefs: string[] = Array.isArray(sum.connectors) ? sum.connectors : [];
+      const attachedPrefs = prefs.filter((p) => mcpServers.some((m) => m.name === connName(p, 0)));
+      summonedText = [
+        `\nTHE SKILL THE OPERATOR SUMMONED FOR THIS TURN — apply it as your playbook for this answer:`,
+        `## ${sum.name}`,
+        sum.instructions ?? "",
+        attachedPrefs.length ? `\nThis skill prefers these connectors (attached) — lean on them: ${attachedPrefs.join(", ")}.` : "",
+      ].join("\n");
+    }
+  }
+
   // propose_change is only in scope when a specific product/GTM record is open.
   // No record → advisory mode: answer, don't hunt for somewhere to act.
   const canPropose = !!(ctx.record_id && (ctx.record_type === "product" || ctx.record_type === "gtm"));
@@ -282,6 +306,7 @@ Deno.serve(async (req: Request) => {
     mcpServers.length ? `\nYOUR CONNECTORS (external systems via MCP) — use them when the task calls for it, and honor the focus + instructions given for each:\n${mcpGuidance}` : "",
     pageContextText,
     steerText,
+    summonedText,
     "\nGround every claim in what the tools return. Be concrete; cite the records/signals/skills you used.",
     "If the operator's request, a skill, or a connector specifies how to structure the answer (e.g. named sections), follow that structure; otherwise choose a clean, scannable layout that fits the question. Don't impose a fixed template when none was asked for.",
   ].join("\n");
