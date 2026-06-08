@@ -33,10 +33,6 @@ export default function CompetitiveView() {
   const [overview, setOverview] = useState<{ name: string; overview: string | null; valueProp: string | null } | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  // Opening a competitor from the Dashboard hands off to the inline Battlecards
-  // view (the single competitor surface) — no separate detail page.
-  const [focusComp, setFocusComp] = useState<string | null>(null);
-  const clearFocus = useCallback(() => setFocusComp(null), []);
 
   const load = useCallback(async () => {
     const [{ data: comp }, { data: caps }, { data: scs }, { data: cds }, { data: sigs }] = await Promise.all([
@@ -68,54 +64,32 @@ export default function CompetitiveView() {
       <Banner>{error}</Banner>
 
       {loading ? <div className="t-sub t-muted">Loading…</div>
-        : tab === "dashboard" ? <Dashboard competitors={competitors} capabilities={capabilities} scores={scores} compSignals={compSignals} overview={overview} reload={load} setError={setError} onOpenCompetitor={(id) => { setFocusComp(id); setTab("competitors"); }} />
-        : tab === "competitors" ? <Competitors competitors={competitors} cards={cards} overview={overview} capabilities={capabilities} scores={scores} compSignals={compSignals} reload={load} setError={setError} initialScope={focusComp} onConsumeScope={clearFocus} />
+        : tab === "dashboard" ? <Dashboard competitors={competitors} capabilities={capabilities} scores={scores} compSignals={compSignals} overview={overview} reload={load} setError={setError} />
+        : tab === "competitors" ? <Competitors competitors={competitors} cards={cards} overview={overview} capabilities={capabilities} scores={scores} compSignals={compSignals} reload={load} setError={setError} />
         : <Feed signals={signals} />}
     </div>
   );
 }
 
-// ---------- Dashboard: competitors + capability heat-map ----------
-function Dashboard({ competitors, capabilities, scores, compSignals, overview, reload, setError, onOpenCompetitor }: {
-  competitors: Competitor[]; capabilities: Capability[]; scores: Score[]; compSignals: Signal[]; overview: { name: string; overview: string | null; valueProp: string | null } | null; reload: () => void; setError: (s: string | null) => void; onOpenCompetitor: (id: string) => void;
+// ---------- Dashboard: capability heat-map + metrics ----------
+function Dashboard({ competitors, capabilities, scores, compSignals, overview, reload, setError }: {
+  competitors: Competitor[]; capabilities: Capability[]; scores: Score[]; compSignals: Signal[]; overview: { name: string; overview: string | null; valueProp: string | null } | null; reload: () => void; setError: (s: string | null) => void;
 }) {
   const supabase = createClient();
-  const [addingComp, setAddingComp] = useState(false);
-  const [comp, setComp] = useState({ name: "", relationship: "direct" });
   const [addingCap, setAddingCap] = useState(false);
   const [capName, setCapName] = useState("");
   const [openCell, setOpenCell] = useState<Cell | null>(null);
   const [openMetric, setOpenMetric] = useState<"gaps" | "moves" | null>(null);
   const [matrixView, setMatrixView] = useState<"matrix" | "grid">("matrix");
-  const [pendingDelete, setPendingDelete] = useState<Competitor | null>(null); // staged for in-app confirm
 
   const direct = competitors.filter((c) => c.relationship === "direct");
-  const adjacent = competitors.filter((c) => c.relationship === "adjacent");
   const scoreOf = (capId: string, compId: string | null) => scores.find((s) => s.capability_id === capId && s.competitor_id === compId)?.score ?? 0;
 
-  async function addCompetitor(e: React.FormEvent) {
-    e.preventDefault(); if (!comp.name.trim()) return;
-    const orgId = await getOrgId(); if (!orgId) return;
-    const { error } = await supabase.from("competitors").insert({ org_id: orgId, name: comp.name.trim(), relationship: comp.relationship });
-    if (error) setError(error.message); else { setAddingComp(false); setComp({ name: "", relationship: "direct" }); reload(); }
-  }
   async function addCapability(e: React.FormEvent) {
     e.preventDefault(); if (!capName.trim()) return;
     const orgId = await getOrgId(); if (!orgId) return;
     const { error } = await supabase.from("capabilities").insert({ org_id: orgId, name: capName.trim() });
     if (error) setError(error.message); else { setAddingCap(false); setCapName(""); reload(); }
-  }
-  // Remove a competitor that shouldn't be tracked. The × button stages it; an
-  // in-app ConfirmDialog (not the browser popup) confirms the destructive delete.
-  function removeCompetitor(e: React.MouseEvent, c: Competitor) {
-    e.preventDefault(); e.stopPropagation(); // the row is a link; don't navigate
-    setPendingDelete(c);
-  }
-  async function doRemove() {
-    const c = pendingDelete; if (!c) return;
-    setError(null); setPendingDelete(null);
-    const { error } = await supabase.from("competitors").delete().eq("id", c.id);
-    if (error) setError(error.message); else reload();
   }
   const compById = (id: string | null) => competitors.find((c) => c.id === id) ?? null;
   const heat = (s: number) => ["var(--fill)", "#FCE4C7", "#CDEBD6", "#9FD9B4"][s] || "var(--fill)";
@@ -137,15 +111,6 @@ function Dashboard({ competitors, capabilities, scores, compSignals, overview, r
 
   return (
     <div>
-      {pendingDelete && (
-        <ConfirmDialog
-          title="Remove competitor?"
-          message={<>Remove <b>{pendingDelete.name}</b> from competitive intel? This deletes its capability scores and battlecards, and can&rsquo;t be undone.</>}
-          confirmLabel="Remove"
-          onConfirm={doRemove}
-          onCancel={() => setPendingDelete(null)}
-        />
-      )}
       {/* Capability matrix / momentum grid — the differentiator, up top */}
       <Section label="Capability landscape" action={
         <div className="row gap-2">
@@ -216,23 +181,6 @@ function Dashboard({ competitors, capabilities, scores, compSignals, overview, r
         })}
       </div>
 
-      {/* What's happening — high-value competitive moves */}
-      {compSignals.length > 0 && (
-        <Section label="What's happening">
-          <div className="stack-3">
-            {compSignals.slice(0, 4).map((s) => (
-              <div key={s.id} className="card card-pad signal-card" style={{ borderLeft: "3px solid var(--vl)" }}>
-                <div className="row-between" style={{ gap: 12, alignItems: "flex-start", marginBottom: 4 }}>
-                  <span style={{ fontSize: 14, fontWeight: 620 }}>{s.title}</span>
-                  <Confidence label={s.conf_label} level={s.conf_level} />
-                </div>
-                {s.why && <div className="t-sub t-muted" style={{ fontSize: 12.5, lineHeight: 1.45 }}>{s.why}</div>}
-              </div>
-            ))}
-          </div>
-        </Section>
-      )}
-
       {/* Gaps / Moves drill-in drawer */}
       {openMetric && (
         <>
@@ -273,46 +221,8 @@ function Dashboard({ competitors, capabilities, scores, compSignals, overview, r
         </>
       )}
 
-      {/* Competitors */}
-      <Section label="Competitors" action={!addingComp ? <button className="btn btn-secondary btn-sm" onClick={() => setAddingComp(true)}>+ Competitor</button> : undefined}>
-        {addingComp && (
-          <form onSubmit={addCompetitor} className="card card-pad" style={{ marginBottom: "var(--sp-3)" }}>
-            <div className="row gap-2">
-              <input className="input" autoFocus placeholder="Competitor name" value={comp.name} onChange={(e) => setComp({ ...comp, name: e.target.value })} style={{ flex: 1 }} />
-              <select className="select" value={comp.relationship} onChange={(e) => setComp({ ...comp, relationship: e.target.value })} style={{ width: 140 }}>
-                <option value="direct">Direct</option><option value="adjacent">Adjacent</option>
-              </select>
-              <button className="btn btn-sm" type="submit">Add</button>
-              <button className="btn btn-secondary btn-sm" type="button" onClick={() => setAddingComp(false)}>Cancel</button>
-            </div>
-          </form>
-        )}
-        {competitors.length === 0 && !addingComp ? <div className="t-sub t-muted">No competitors yet. Add direct and adjacent competitors to map the landscape.</div> : (
-          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "var(--sp-4)" }}>
-            {[["Direct", direct, "accent"], ["Adjacent", adjacent, "violet"]].map(([label, list, tone]) => (
-              <div key={label as string}>
-                <div className="t-label" style={{ marginBottom: 8 }}>{label as string} · {(list as Competitor[]).length}</div>
-                <div className="stack-3">
-                  {(list as Competitor[]).map((c) => (
-                    <div key={c.id} onClick={() => onOpenCompetitor(c.id)} className="card card-link card-pad row-between" style={{ cursor: "pointer" }}>
-                      <span style={{ fontSize: 14, fontWeight: 600 }}>{c.name}</span>
-                      <span className="row gap-2" style={{ alignItems: "center" }}>
-                        <Chip tone={tone as "accent" | "violet"}>{c.relationship}</Chip>
-                        <span className="t-sub" style={{ color: "var(--ac-text)", fontWeight: 600, fontSize: 12 }}>Open →</span>
-                        <button onClick={(e) => { e.stopPropagation(); removeCompetitor(e, c); }} title={`Remove ${c.name}`} aria-label={`Remove ${c.name}`}
-                          style={{ background: "none", border: "none", cursor: "pointer", fontSize: 16, lineHeight: 1, color: "var(--tm)", padding: "0 2px" }}>×</button>
-                      </span>
-                    </div>
-                  ))}
-                  {(list as Competitor[]).length === 0 && <div className="t-sub t-muted" style={{ fontSize: 12.5 }}>None</div>}
-                </div>
-              </div>
-            ))}
-          </div>
-        )}
-      </Section>
-
-      {/* Org-wide competitive sources (cross-competitor) */}
+      {/* Org-wide competitive sources (cross-competitor). Competitors are added &
+          managed on the Competitors tab. */}
       <SourceManager title="Competitive sources (all competitors)" />
 
       <CapabilityCellDrawer key={openCell ? `${openCell.capabilityId}:${openCell.competitorId}` : "none"} cell={openCell} onClose={() => setOpenCell(null)} onChanged={reload} />
@@ -336,21 +246,35 @@ const KINDS: [string, string, string][] = [
   ["discovery", "Discovery questions", "bd"],
 ];
 const TONE_BORDER: Record<string, string> = { gn: "var(--gn)", am: "var(--am-text)", vl: "var(--vl)", bd: "var(--border-strong)" };
-function Competitors({ competitors, cards, overview, capabilities, scores, compSignals, reload, setError, initialScope, onConsumeScope }: {
+function Competitors({ competitors, cards, overview, capabilities, scores, compSignals, reload, setError }: {
   competitors: Competitor[]; cards: Card[]; overview: { name: string; overview: string | null; valueProp: string | null } | null;
   capabilities: Capability[]; scores: Score[]; compSignals: Signal[]; reload: () => void; setError: (s: string | null) => void;
-  initialScope?: string | null; onConsumeScope?: () => void;
 }) {
   const supabase = createClient();
   const [scope, setScope] = useState<string | null>(null); // selected competitor id; null = tile grid
   const [cdTab, setCdTab] = useState<CdTab>("overview");
-  // Handoff from the Dashboard ("Open" a competitor) selects it here, then clears.
-  useEffect(() => { if (initialScope) { setScope(initialScope); setCdTab("overview"); onConsumeScope?.(); } }, [initialScope, onConsumeScope]);
   const [adding, setAdding] = useState<string | null>(null);
   const [form, setForm] = useState({ title: "", detail: "" });
   const [openCell, setOpenCell] = useState<Cell | null>(null);
   const [editNotes, setEditNotes] = useState(false);
   const [notes, setNotes] = useState("");
+  // Add / remove competitors lives here now (moved off the Dashboard).
+  const [addingComp, setAddingComp] = useState(false);
+  const [comp, setComp] = useState({ name: "", relationship: "direct" });
+  const [pendingDelete, setPendingDelete] = useState<Competitor | null>(null);
+
+  async function addCompetitor(e: React.FormEvent) {
+    e.preventDefault(); if (!comp.name.trim()) return;
+    const orgId = await getOrgId(); if (!orgId) return;
+    const { error } = await supabase.from("competitors").insert({ org_id: orgId, name: comp.name.trim(), relationship: comp.relationship });
+    if (error) setError(error.message); else { setAddingComp(false); setComp({ name: "", relationship: "direct" }); reload(); }
+  }
+  async function doRemoveComp() {
+    const c = pendingDelete; if (!c) return;
+    setError(null); setPendingDelete(null);
+    const { error } = await supabase.from("competitors").delete().eq("id", c.id);
+    if (error) setError(error.message); else { if (scope === c.id) setScope(null); reload(); }
+  }
 
   const cardsFor = (kind: string) => cards.filter((c) => c.kind === kind && c.competitor_id === scope);
   const countFor = (compId: string) => cards.filter((c) => c.competitor_id === compId).length;
@@ -372,28 +296,51 @@ function Competitors({ competitors, cards, overview, capabilities, scores, compS
   async function remove(id: string) { setError(null); await supabase.from("battlecard_items").delete().eq("id", id); reload(); }
 
 
-  // Tile grid — pick a competitor to drill in.
+  // Tile grid — pick a competitor to drill in. Add / remove competitors here.
   if (!scope) {
     return (
-      <Section label="Competitors">
-        {competitors.length === 0 ? (
-          <div className="t-sub t-muted">No competitors yet. Add direct and adjacent competitors on the Dashboard — each gets an overview, battlecard, product board, and signal feed here.</div>
+      <Section label="Competitors" action={!addingComp ? <button className="btn btn-secondary btn-sm" onClick={() => setAddingComp(true)}>+ Competitor</button> : undefined}>
+        {pendingDelete && (
+          <ConfirmDialog
+            title="Remove competitor?"
+            message={<>Remove <b>{pendingDelete.name}</b> from competitive intel? This deletes its capability scores and battlecards, and can&rsquo;t be undone.</>}
+            confirmLabel="Remove" onConfirm={doRemoveComp} onCancel={() => setPendingDelete(null)}
+          />
+        )}
+        {addingComp && (
+          <form onSubmit={addCompetitor} className="card card-pad" style={{ marginBottom: "var(--sp-3)" }}>
+            <div className="row gap-2">
+              <input className="input" autoFocus placeholder="Competitor name" value={comp.name} onChange={(e) => setComp({ ...comp, name: e.target.value })} style={{ flex: 1 }} />
+              <select className="select" value={comp.relationship} onChange={(e) => setComp({ ...comp, relationship: e.target.value })} style={{ width: 140 }}>
+                <option value="direct">Direct</option><option value="adjacent">Adjacent</option>
+              </select>
+              <button className="btn btn-sm" type="submit">Add</button>
+              <button className="btn btn-secondary btn-sm" type="button" onClick={() => setAddingComp(false)}>Cancel</button>
+            </div>
+          </form>
+        )}
+        {competitors.length === 0 && !addingComp ? (
+          <div className="t-sub t-muted">No competitors yet. Add direct and adjacent competitors — each gets an overview, battlecard, product board, and signal feed here.</div>
         ) : (
           <div className="grid-cards">
             {competitors.map((c) => {
               const e = edge(c.id);
               return (
-                <button key={c.id} className="card card-link card-pad" style={{ textAlign: "left" }} onClick={() => { setScope(c.id); setCdTab("overview"); }}>
-                  <div className="row-between" style={{ marginBottom: 8 }}>
+                <div key={c.id} className="card card-link card-pad" style={{ textAlign: "left", cursor: "pointer", position: "relative" }} onClick={() => { setScope(c.id); setCdTab("overview"); }}>
+                  <div className="row-between" style={{ marginBottom: 8, gap: 6 }}>
                     <span style={{ fontSize: 15, fontWeight: 620 }}>{c.name}</span>
-                    <Chip tone={c.relationship === "direct" ? "accent" : "violet"}>{c.relationship}</Chip>
+                    <span className="row gap-2" style={{ alignItems: "center" }}>
+                      <Chip tone={c.relationship === "direct" ? "accent" : "violet"}>{c.relationship}</Chip>
+                      <button onClick={(ev) => { ev.stopPropagation(); setPendingDelete(c); }} title={`Remove ${c.name}`} aria-label={`Remove ${c.name}`}
+                        style={{ background: "none", border: "none", cursor: "pointer", fontSize: 16, lineHeight: 1, color: "var(--tm)", padding: "0 2px" }}>×</button>
+                    </span>
                   </div>
                   <div className="row gap-2" style={{ flexWrap: "wrap" }}>
                     <span className="t-mono-xs" style={{ color: "var(--gn-text)" }}>we lead {e.we}</span>
                     <span className="t-mono-xs" style={{ color: "var(--am-text)" }}>they lead {e.they}</span>
                     <span className="t-mono-xs" style={{ color: "var(--tm)" }}>{countFor(c.id)} card{countFor(c.id) === 1 ? "" : "s"}</span>
                   </div>
-                </button>
+                </div>
               );
             })}
           </div>

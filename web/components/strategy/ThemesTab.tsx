@@ -37,7 +37,7 @@ export default function ThemesTab({ onStartEpic }: { onStartEpic: (themeId: stri
 
   const load = useCallback(async () => {
     const [{ data: th }, { data: s }, { data: b }] = await Promise.all([
-      supabase.from("signal_themes").select("id, title, summary, recommendation, conf_level, signal_ids, group_label, merged_by, watched, context, bundle_id").neq("state", "dormant").order("watched", { ascending: false }).order("conf_level", { ascending: false, nullsFirst: false }),
+      supabase.from("signal_themes").select("id, title, summary, recommendation, conf_level, signal_ids, group_label, merged_by, watched, context, bundle_id").neq("state", "dormant").or("category.is.null,category.neq.gtm").order("watched", { ascending: false }).order("conf_level", { ascending: false, nullsFirst: false }),
       supabase.from("signals").select("id, title, why, origin, category, metadata, conf_level, conf_label").neq("strategy_state", "promoted"),
       supabase.from("strategy_bundles").select("id, title").eq("state", "open").order("created_at", { ascending: false }),
     ]);

@@ -18,6 +18,7 @@ export default function AgentsView() {
   const [agents, setAgents] = useState<Agent[]>([]);
   const [aligns, setAligns] = useState<Align[]>([]);
   const [inits, setInits] = useState<{ id: string; title: string }[]>([]);
+  const [cornerstones, setCornerstones] = useState<Record<string, string>>({}); // agent_id -> cornerstone skill name
   const [loading, setLoading] = useState(true);
   const [editing, setEditing] = useState<string | "new" | null>(null);
   const [form, setForm] = useState<typeof BLANK>(BLANK);
@@ -26,12 +27,19 @@ export default function AgentsView() {
 
   const load = useCallback(async () => {
     await ensureTeam(supabase); // seed the standard executive roster if this org has none
-    const [{ data }, { data: al }, { data: it }] = await Promise.all([
+    const [{ data }, { data: al }, { data: it }, { data: cs }] = await Promise.all([
       supabase.from("agents").select("id, key, name, role, model, system_prompt, is_active").order("name"),
       supabase.from("agent_alignments").select("agent_id, initiative_id, workstream_id"),
       supabase.from("initiatives").select("id, title").order("created_at", { ascending: false }).limit(200),
+      supabase.from("agent_skills").select("agent_id, skills(name)").eq("is_cornerstone", true),
     ]);
-    setAgents(data ?? []); setAligns(al ?? []); setInits(it ?? []); setLoading(false);
+    setAgents(data ?? []); setAligns(al ?? []); setInits(it ?? []);
+    const cmap: Record<string, string> = {};
+    for (const r of (cs ?? []) as { agent_id: string; skills: { name: string } | { name: string }[] | null }[]) {
+      const sk = Array.isArray(r.skills) ? r.skills[0] : r.skills;
+      if (r.agent_id && sk?.name) cmap[r.agent_id] = sk.name;
+    }
+    setCornerstones(cmap); setLoading(false);
   }, [supabase]);
   useEffect(() => { load(); }, [load]);
 
@@ -69,7 +77,7 @@ export default function AgentsView() {
   }
 
   return (
-    <div style={{ maxWidth: 760, margin: "0 auto" }}>
+    <div style={{ maxWidth: 1040, margin: "0 auto" }}>
       <PageBar actions={editing === null ? <button className="btn btn-sm" onClick={startNew}>+ New agent</button> : undefined} />
 
       {editing === null && <div style={{ marginBottom: "var(--sp-6)" }}><RosterReview onChanged={load} /></div>}
@@ -127,26 +135,30 @@ export default function AgentsView() {
           <Empty title="No agents yet" hint="Create an agent to start generating proposals on your records."
             action={<button className="btn" onClick={startNew}>+ Create your first agent</button>} />
         ) : (
-          <div className="stack-3">
-            {agents.map((a) => (
-              <a key={a.id} href={`/agents/${a.id}`} className="card card-link card-pad row-between" style={{ gap: 12 }}>
-                <div style={{ minWidth: 0 }}>
-                  <div className="row gap-2">
-                    <span style={{ fontSize: 15, fontWeight: 620 }}>{a.name}</span>
-                    <Chip>{a.key}</Chip>
+          <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(240px, 1fr))", gap: "var(--sp-4)" }}>
+            {agents.map((a) => {
+              const c = countsByAgent[a.id];
+              const corner = cornerstones[a.id];
+              return (
+                <a key={a.id} href={`/agents/${a.id}`} className="card card-link card-pad" style={{ display: "flex", flexDirection: "column", gap: 8, minHeight: 132 }}>
+                  <div className="row-between" style={{ gap: 8, alignItems: "flex-start" }}>
+                    <span style={{ fontSize: 15, fontWeight: 660, minWidth: 0 }}>{a.name}</span>
                     {!a.is_active && <Chip tone="amber">inactive</Chip>}
                   </div>
-                  <div className="t-sub" style={{ marginTop: 3 }}>
-                    {a.role || <span className="t-muted">No role</span>}
-                    <span className="t-mono-xs" style={{ marginLeft: 8 }}>{a.model}</span>
-                    {(() => { const c = countsByAgent[a.id]; return c && (c.inits || c.tasks)
-                      ? <span className="t-mono-xs" style={{ marginLeft: 8 }}>· aligned to {c.inits} init{c.inits === 1 ? "" : "s"}{c.tasks ? `, ${c.tasks} task${c.tasks === 1 ? "" : "s"}` : ""}</span>
-                      : <span className="t-mono-xs" style={{ marginLeft: 8, color: "var(--tm)" }}>· no alignment</span>; })()}
+                  <div className="row gap-2" style={{ flexWrap: "wrap", alignItems: "center" }}>
+                    <Chip>{a.key}</Chip>
+                    <span className="t-mono-xs t-muted">{a.model}</span>
                   </div>
-                </div>
-                <span className="t-sub" style={{ color: "var(--ac-text)", fontWeight: 600, fontSize: 13 }}>Configure →</span>
-              </a>
-            ))}
+                  <div className="t-sub t-muted" style={{ fontSize: 12, lineHeight: 1.4, flex: 1 }}>{a.role || "No role set"}</div>
+                  <div style={{ fontSize: 11.5, color: corner ? "var(--vl-text, var(--ac-text))" : "var(--tm)" }}>
+                    {corner ? <>★ {corner}</> : "No cornerstone yet"}
+                  </div>
+                  <div className="t-mono-xs t-muted">
+                    {c && (c.inits || c.tasks) ? `aligned · ${c.inits} init${c.inits === 1 ? "" : "s"}${c.tasks ? `, ${c.tasks} task${c.tasks === 1 ? "" : "s"}` : ""}` : "no alignment"}
+                  </div>
+                </a>
+              );
+            })}
           </div>
         )}
     </div>
