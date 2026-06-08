@@ -13,14 +13,15 @@ import TrackingTopics from "@/components/TrackingTopics";
 import SourceManager from "@/components/SourceManager";
 import CapabilityCellDrawer, { type Cell } from "@/components/CapabilityCellDrawer";
 import CompetitiveGrid from "@/components/CompetitiveGrid";
+import SignalProfile from "@/components/SignalProfile";
 
 type Competitor = { id: string; name: string; relationship: string; website: string | null; notes: string | null };
 type Capability = { id: string; name: string; category: string | null };
 type Score = { id: string; capability_id: string; competitor_id: string | null; score: number };
 type Card = { id: string; competitor_id: string | null; kind: string; title: string; detail: string | null };
-type Signal = { id: string; title: string; why: string | null; conf_label: string | null; conf_level: number | null; observed_at: string | null; metadata: { domain?: string; competitor_id?: string } | null; source_id: string | null };
+type Signal = { id: string; title: string; why: string | null; conf_label: string | null; conf_level: number | null; observed_at: string | null; origin: string | null; metadata: { domain?: string; competitor_id?: string; channel?: string } | null; source_id: string | null };
 
-type Tab = "dashboard" | "competitors" | "feed";
+type Tab = "dashboard" | "profile" | "competitors" | "feed";
 
 export default function CompetitiveView() {
   const supabase = createClient();
@@ -40,7 +41,7 @@ export default function CompetitiveView() {
       supabase.from("capabilities").select("id, name, category").order("position").order("created_at"),
       supabase.from("capability_scores").select("id, capability_id, competitor_id, score"),
       supabase.from("battlecard_items").select("id, competitor_id, kind, title, detail").order("position").order("created_at"),
-      supabase.from("signals").select("id, title, why, conf_label, conf_level, observed_at, metadata, source_id").order("observed_at", { ascending: false, nullsFirst: false }),
+      supabase.from("signals").select("id, title, why, conf_label, conf_level, observed_at, origin, metadata, source_id").order("observed_at", { ascending: false, nullsFirst: false }),
     ]);
     setCompetitors(comp ?? []); setCapabilities(caps ?? []); setScores(scs ?? []); setCards(cds ?? []); setSignals(sigs ?? []);
     // Our product overview — anchors the "us vs them" framing on battlecards.
@@ -58,15 +59,16 @@ export default function CompetitiveView() {
   return (
     <div>
       <SubTabs<Tab>
-        tabs={[{ key: "dashboard", label: "Dashboard" }, { key: "competitors", label: "Competitors" }, { key: "feed", label: "Signal feed" }]}
+        tabs={[{ key: "dashboard", label: "Dashboard" }, { key: "profile", label: "Signal profile" }, { key: "competitors", label: "Competitors" }, { key: "feed", label: "Signal feed" }]}
         active={tab} onChange={setTab}
       />
       <Banner>{error}</Banner>
 
       {loading ? <div className="t-sub t-muted">Loading…</div>
         : tab === "dashboard" ? <Dashboard competitors={competitors} capabilities={capabilities} scores={scores} compSignals={compSignals} overview={overview} reload={load} setError={setError} />
+        : tab === "profile" ? <SignalProfile scope="landscape" />
         : tab === "competitors" ? <Competitors competitors={competitors} cards={cards} overview={overview} capabilities={capabilities} scores={scores} compSignals={compSignals} reload={load} setError={setError} />
-        : <Feed signals={signals} />}
+        : <Feed signals={signals} competitors={competitors} reload={load} />}
     </div>
   );
 }
@@ -231,7 +233,7 @@ function Dashboard({ competitors, capabilities, scores, compSignals, overview, r
 }
 
 // ---------- Battlecards ----------
-type CdTab = "overview" | "gtm" | "product" | "signals";
+type CdTab = "overview" | "profile" | "gtm" | "product" | "signals";
 
 // Best-practice battlecard sections — the set is the suggestion; fill the ones
 // that help a rep win against each competitor.
@@ -360,7 +362,7 @@ function Competitors({ competitors, cards, overview, capabilities, scores, compS
 
       <div className="card" style={{ overflow: "hidden" }}>
         <div className="row" style={{ gap: 4, padding: "8px 8px 0", borderBottom: "1px solid var(--border)", flexWrap: "wrap" }}>
-          {([["overview", "Overview"], ["gtm", "GTM battlecard"], ["product", "Product board"], ["signals", `Signals${sigsFor(scope).length ? ` · ${sigsFor(scope).length}` : ""}`]] as [CdTab, string][]).map(([k, label]) => {
+          {([["overview", "Overview"], ["profile", "Signal profile"], ["gtm", "GTM battlecard"], ["product", "Product board"], ["signals", `Signals${sigsFor(scope).length ? ` · ${sigsFor(scope).length}` : ""}`]] as [CdTab, string][]).map(([k, label]) => {
             const on = cdTab === k;
             return <button key={k} onClick={() => setCdTab(k)} style={{ background: "none", border: "none", borderBottom: on ? "2px solid var(--ac)" : "2px solid transparent", color: on ? "var(--tp)" : "var(--ts)", fontWeight: on ? 680 : 600, fontSize: 13, padding: "8px 14px", cursor: "pointer", marginBottom: -1 }}>{label}</button>;
           })}
@@ -471,6 +473,8 @@ function Competitors({ competitors, cards, overview, capabilities, scores, compS
           )}
           <div className="t-sub t-muted" style={{ fontSize: 11.5, marginTop: 8 }}>Click any cell for the officer&rsquo;s reasoning, sources, and the rating control.</div>
         </Section>
+      ) : cdTab === "profile" ? (
+        <SignalProfile scope="competitor" competitorId={scope} competitorName={selected?.name} />
       ) : (
         <Section label={`Signals on ${selected?.name}`}>
           {sigsFor(scope).length === 0 ? <div className="t-sub t-muted" style={{ fontSize: 12.5 }}>No signals tagged to {selected?.name} yet. Log competitive intel in the Signal feed and tag it to them.</div> : (
@@ -495,23 +499,105 @@ function Competitors({ competitors, cards, overview, capabilities, scores, compS
   );
 }
 
-// ---------- Signal feed ----------
-function Feed({ signals }: { signals: Signal[] }) {
-  const feed = signals.filter((s) => s.metadata?.domain === "competitive");
+// ---------- Signal feed — internal vs external, filterable, with capture ----------
+// Competitive intel is BOTH internal (what our own teams hear — deals, calls,
+// win/loss) and external (public — reviews, launches, pricing). The Signal
+// Profile synthesizes across both, so capture them here with origin + competitor.
+function Feed({ signals, competitors, reload }: { signals: Signal[]; competitors: Competitor[]; reload: () => void }) {
+  const supabase = createClient();
+  const [originTab, setOriginTab] = useState<"external" | "internal">("external");
+  const [compFilter, setCompFilter] = useState<string>("all");
+  const [logging, setLogging] = useState(false);
+  const [form, setForm] = useState({ title: "", why: "", origin: "internal", competitor_id: "", channel: "", conf: "0.7" });
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState<string | null>(null);
+
+  const compName = (id?: string) => competitors.find((c) => c.id === id)?.name;
+  const all = signals.filter((s) => s.metadata?.domain === "competitive");
+  const feed = all.filter((s) => (originTab === "internal" ? s.origin === "internal" : s.origin !== "internal"))
+    .filter((s) => compFilter === "all" || s.metadata?.competitor_id === compFilter);
+  const counts = { internal: all.filter((s) => s.origin === "internal").length, external: all.filter((s) => s.origin !== "internal").length };
+  const CHANNELS = form.origin === "internal" ? ["Gong call", "Salesforce opp", "Win/loss", "Support", "Field note"] : ["Website", "Pricing page", "G2 / reviews", "Launch / release", "Job posting", "News"];
+
+  async function log(e: React.FormEvent) {
+    e.preventDefault(); if (!form.title.trim()) return;
+    setBusy(true); setErr(null);
+    try {
+      const orgId = await getOrgId(); if (!orgId) throw new Error("Could not resolve your organization.");
+      const lvl = parseFloat(form.conf);
+      const { error } = await supabase.from("signals").insert({
+        org_id: orgId, scope: "org", title: form.title.trim(), why: form.why.trim() || null,
+        conf_level: isNaN(lvl) ? null : lvl, conf_label: isNaN(lvl) ? null : lvl >= 0.75 ? "High" : lvl >= 0.5 ? "Medium" : "Low",
+        observed_at: new Date().toISOString(), origin: form.origin,
+        metadata: { domain: "competitive", competitor_id: form.competitor_id || undefined, channel: form.channel || undefined },
+      });
+      if (error) throw error;
+      setLogging(false); setForm({ title: "", why: "", origin: form.origin, competitor_id: "", channel: "", conf: "0.7" }); reload();
+    } catch (e) { setErr(e instanceof Error ? e.message : "Could not log the signal."); }
+    finally { setBusy(false); }
+  }
+
   return (
     <div>
       <SourceManager title="Competitive sources" />
       <TrackingTopics category="competitive" suggestions={["Competitor pricing & packaging changes", "New competitor launches", "Win/loss themes vs top rivals", "Competitor messaging shifts"]} />
-      <Section label="Competitive signals">
-        {feed.length === 0 ? <div className="t-sub t-muted">No competitive signals yet. Log intel (it'll appear here) or add sources above.</div> : (
+
+      <Section label="Competitive signals" action={<button className="btn btn-sm" onClick={() => setLogging((v) => !v)} style={{ background: "var(--ac)", color: "#fff" }}>{logging ? "Close" : "+ Log signal"}</button>}>
+        <Banner>{err}</Banner>
+        {logging && (
+          <form onSubmit={log} className="card card-pad" style={{ marginBottom: "var(--sp-3)", background: "var(--panel-2)" }}>
+            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: "var(--sp-3)" }}>
+              <label className="field"><span className="t-label">Origin</span>
+                <select className="select" value={form.origin} onChange={(e) => setForm({ ...form, origin: e.target.value, channel: "" })}>
+                  <option value="internal">Internal — what we hear</option>
+                  <option value="external">External — public</option>
+                </select></label>
+              <label className="field"><span className="t-label">Competitor</span>
+                <select className="select" value={form.competitor_id} onChange={(e) => setForm({ ...form, competitor_id: e.target.value })}>
+                  <option value="">— none / general —</option>
+                  {competitors.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
+                </select></label>
+              <label className="field"><span className="t-label">Channel</span>
+                <select className="select" value={form.channel} onChange={(e) => setForm({ ...form, channel: e.target.value })}>
+                  <option value="">— where from —</option>
+                  {CHANNELS.map((c) => <option key={c} value={c}>{c}</option>)}
+                </select></label>
+            </div>
+            <label className="field"><span className="t-label">What happened</span><input className="input" autoFocus value={form.title} onChange={(e) => setForm({ ...form, title: e.target.value })} placeholder={form.origin === "internal" ? "e.g. Acme undercut us 20% in the Globex deal" : "e.g. Acme shipped SSO/SAML on the Team plan"} /></label>
+            <label className="field"><span className="t-label">Why it matters <span className="t-muted" style={{ fontWeight: 400 }}>— optional</span></span><input className="input" value={form.why} onChange={(e) => setForm({ ...form, why: e.target.value })} placeholder="So what for our positioning / strategy?" /></label>
+            <div className="row gap-2"><button className="btn btn-sm" type="submit" disabled={busy}>{busy ? "Logging…" : "Log signal"}</button><button className="btn btn-secondary btn-sm" type="button" onClick={() => setLogging(false)}>Cancel</button></div>
+          </form>
+        )}
+
+        {/* Internal vs external + competitor filter */}
+        <div className="row-between" style={{ alignItems: "center", marginBottom: "var(--sp-3)", gap: 8, flexWrap: "wrap" }}>
+          <div className="row" style={{ border: "1px solid var(--border)", borderRadius: 8, overflow: "hidden" }}>
+            {(["external", "internal"] as const).map((o) => (
+              <button key={o} onClick={() => setOriginTab(o)} className="btn-sm" style={{ border: "none", background: originTab === o ? "var(--ac)" : "var(--panel)", color: originTab === o ? "#fff" : "var(--ts)", fontWeight: 600, padding: "6px 14px", cursor: "pointer", textTransform: "capitalize" }}>{o} · {counts[o]}</button>
+            ))}
+          </div>
+          <select className="select" value={compFilter} onChange={(e) => setCompFilter(e.target.value)} style={{ maxWidth: 220 }}>
+            <option value="all">All competitors</option>
+            {competitors.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
+          </select>
+        </div>
+
+        {feed.length === 0 ? (
+          <div className="t-sub t-muted">No {originTab} competitive signals{compFilter !== "all" ? ` for ${compName(compFilter)}` : ""} yet. {originTab === "internal" ? "Log what your teams hear in deals and calls." : "Log public moves or add sources above."}</div>
+        ) : (
           <div className="stack-3">
             {feed.map((s) => (
-              <div key={s.id} className="card card-pad">
+              <div key={s.id} className="card card-pad" style={{ borderLeft: `3px solid ${s.origin === "internal" ? "var(--ac)" : "var(--vl)"}` }}>
                 <div className="row-between" style={{ gap: 12, alignItems: "flex-start", marginBottom: 5 }}>
                   <span style={{ fontSize: 14.5, fontWeight: 620 }}>{s.title}</span>
                   <Confidence label={s.conf_label} level={s.conf_level} />
                 </div>
                 {s.why && <p className="t-sub" style={{ lineHeight: 1.5 }}>{s.why}</p>}
+                <div className="row gap-2" style={{ marginTop: 6, flexWrap: "wrap", alignItems: "center" }}>
+                  <Chip tone={s.origin === "internal" ? "accent" : "violet"}>{s.origin === "internal" ? "internal" : "external"}</Chip>
+                  {s.metadata?.competitor_id && <Chip>{compName(s.metadata.competitor_id) ?? "competitor"}</Chip>}
+                  {s.metadata?.channel && <span className="t-mono-xs t-muted">{s.metadata.channel}</span>}
+                </div>
               </div>
             ))}
           </div>

@@ -5,10 +5,11 @@
 // the kind of evidence/sources behind it, and the competitive implication) — and
 // THEN you set the rating yourself, informed by that + your gut. HITL: the agent
 // argues, the human decides. (Parent remounts via `key` per cell.)
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { createClient } from "@/lib/supabase/client";
 import { getOrgId } from "@/lib/org";
 import { Markdown } from "@/components/Markdown";
+import { Chip, Confidence } from "@/components/ui";
 
 export type Cell = {
   capabilityId: string; capabilityName: string; competitorId: string | null; who: string; score: number;
@@ -25,6 +26,23 @@ export default function CapabilityCellDrawer({ cell, onClose, onChanged }: { cel
   const [thinking, setThinking] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  type Ev = { id: string; title: string; why: string | null; origin: string | null; conf_label: string | null; conf_level: number | null; metadata: { channel?: string } | null };
+  const [evidence, setEvidence] = useState<Ev[]>([]);
+
+  // Evidence: the competitive signals (internal + external) tied to this rival —
+  // the raw intel behind the rating. Makes the drill-down a real read, not a guess.
+  useEffect(() => {
+    let active = true;
+    (async () => {
+      if (!cell?.competitorId) { setEvidence([]); return; }
+      const { data } = await supabase.from("signals").select("id, title, why, origin, conf_label, conf_level, metadata")
+        .contains("metadata", { domain: "competitive", competitor_id: cell.competitorId })
+        .order("observed_at", { ascending: false, nullsFirst: false }).limit(20);
+      if (active) setEvidence((data ?? []) as Ev[]);
+    })();
+    return () => { active = false; };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [cell?.competitorId]);
 
   if (!cell) return null;
   const current = selected ?? cell.score;
@@ -95,6 +113,31 @@ export default function CapabilityCellDrawer({ cell, onClose, onChanged }: { cel
               ))}
             </div>
           </div>
+
+          {cell.competitorId && (
+            <div className="card card-pad">
+              <div className="t-label" style={{ color: "var(--tm)", marginBottom: 8 }}>Evidence on {cell.who} <span className="t-sub t-muted" style={{ textTransform: "none", letterSpacing: 0 }}>— internal + external intel</span></div>
+              {evidence.length === 0 ? (
+                <div className="t-sub t-muted" style={{ fontSize: 12.5 }}>No signals tagged to {cell.who} yet. Log competitive intel in the Signal feed and tag it to them — it shows up here as evidence.</div>
+              ) : (
+                <div className="stack-2">
+                  {evidence.map((s) => (
+                    <div key={s.id} className="card card-pad" style={{ background: "var(--panel-2)", borderLeft: `3px solid ${s.origin === "internal" ? "var(--ac)" : "var(--vl)"}` }}>
+                      <div className="row-between" style={{ gap: 8, alignItems: "flex-start" }}>
+                        <span style={{ fontSize: 13, fontWeight: 600 }}>{s.title}</span>
+                        <Confidence label={s.conf_label} level={s.conf_level} />
+                      </div>
+                      {s.why && <div className="t-sub t-muted" style={{ fontSize: 12, marginTop: 2 }}>{s.why}</div>}
+                      <div className="row gap-2" style={{ marginTop: 5, alignItems: "center" }}>
+                        <Chip tone={s.origin === "internal" ? "accent" : "violet"}>{s.origin === "internal" ? "internal" : "external"}</Chip>
+                        {s.metadata?.channel && <span className="t-mono-xs t-muted">{s.metadata.channel}</span>}
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+          )}
 
           {cell.competitorNotes && (
             <div className="card card-pad">

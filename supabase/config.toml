@@ -77,3 +77,5 @@ verify_jwt = false
 verify_jwt = false
 [functions.draft-cornerstone]
 verify_jwt = false
+[functions.synthesize-profile]
+verify_jwt = false
