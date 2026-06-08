@@ -115,7 +115,7 @@ export default function ThemesTab({ onStartEpic, lens = "product" }: { onStartEp
     await load(); await openTheme({ ...open, signal_ids: next });
   }
 
-  async function synthesize() { setBusy("synth"); setError(null); try { const { data, error } = await supabase.functions.invoke("synthesize-signals", { body: {}, headers: await authHeader(supabase) }); if (error) throw error; if (data?.error) throw new Error(data.error); await load(); } catch (e) { setError(errText(e, "Synthesis failed.")); } finally { setBusy(null); } }
+  async function synthesize() { setBusy("synth"); setError(null); try { const { data, error } = await supabase.functions.invoke("synthesize-signals", { body: { lens: isGtm ? "gtm" : "product" }, headers: await authHeader(supabase) }); if (error) throw error; if (data?.error) throw new Error(data.error); await load(); } catch (e) { setError(errText(e, "Synthesis failed.")); } finally { setBusy(null); } }
   async function aiClassify() {
     setBusy("classify"); setError(null);
     try {

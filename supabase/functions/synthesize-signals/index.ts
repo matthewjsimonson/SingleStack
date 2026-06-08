@@ -137,6 +137,13 @@ Deno.serve(async (req: Request) => {
     const { data: orgId } = await supabase.rpc("current_org_id");
     if (!orgId) return json({ error: "could not resolve org" }, 400);
 
+    // Optional LENS scope: run synthesis for one strategy lens so product and GTM
+    // themes are reconciled separately (no cross-lens bleed). Absent → all lenses
+    // (legacy behavior). 'product' = product/both/unsorted; 'gtm' = gtm/both.
+    const body = await req.json().catch(() => ({}));
+    const lens: "product" | "gtm" | null = body?.lens === "gtm" ? "gtm" : body?.lens === "product" ? "product" : null;
+    const inLens = (cat: string | null | undefined) => !lens || (lens === "gtm" ? (cat === "gtm" || cat === "both") : cat !== "gtm");
+
     // Existing living themes + their attached signal ids (what reconciliation updates).
     const { data: themes } = await supabase
       .from("signal_themes").select("id, title, summary, recommendation, category, state, conf_level, product_id, co_product_ids");
@@ -158,7 +165,7 @@ Deno.serve(async (req: Request) => {
       .order("observed_at", { ascending: false, nullsFirst: false })
       .limit(200);
     // Cap candidates so the prompt's signal half stays bounded (newest first).
-    const candidates = capCandidates((allSignals ?? []).filter((s) => !attachedIds.has(s.id)));
+    const candidates = capCandidates((allSignals ?? []).filter((s) => !attachedIds.has(s.id) && inLens((s as { category?: string | null }).category)));
 
     // First run with no themes and no signals: nothing to do.
     if ((themes ?? []).length === 0 && candidates.length === 0) {
@@ -170,7 +177,7 @@ Deno.serve(async (req: Request) => {
     // lines), capped. Keeps cost/latency flat as the org grows and prevents the
     // context-window cliff — without losing cross-product (cross-sell) detection.
     // The model only sees, and may only reference, this subset.
-    const promptThemes = selectRelevantThemes(themes ?? [], linesPresent(candidates));
+    const promptThemes = selectRelevantThemes((themes ?? []).filter((t) => inLens(t.category)), linesPresent(candidates));
 
     const sigList = candidates.map((s, i) => {
       // deno-lint-ignore no-explicit-any
@@ -202,6 +209,7 @@ Deno.serve(async (req: Request) => {
       "• decays: existing theme ids with no fresh evidence that should wind down.",
       "• new_themes: genuinely NEW patterns not covered by any existing theme, each with supporting signal_indices.",
       "Also classify each unsorted signal's lens in signal_categories: product | gtm | both.",
+      lens ? `LENS SCOPE: this run is the ${lens.toUpperCase()} lens only. Every new_theme.category MUST be "${lens}" (use "both" only for a genuinely cross-cutting pattern). Do not create themes for the other lens.` : "",
       "PRODUCT LINES: every signal and theme is tagged with its line (or 'company-wide'). Different lines are different businesses — do NOT attach a signal to a theme of a different line, and do NOT merge themes across lines. Keep each new theme within one line.",
       "CROSS-SELL EXCEPTION: if a pattern GENUINELY spans two lines (the same buyer need pulls two products together), that is valuable — create ONE new theme and include the supporting signals from BOTH lines. The system will record it as a cross-product theme.",
       "Be conservative: only create a new theme when no existing theme fits. Prefer accretion. Set conf_level 0..1 by evidence strength.",
