@@ -35,7 +35,7 @@ const CORS = {
 const json = (b: unknown, s = 200) => new Response(JSON.stringify(b), { status: s, headers: { ...CORS, "content-type": "application/json" } });
 
 const MAX_CHARS_TO_MODEL = SECURITY.MAX_CHARS_TO_MODEL;
-const AUTH_KINDS_LIVE = new Set(["website", "youtube"]); // run for real, no creds
+const AUTH_KINDS_LIVE = new Set(["website", "youtube", "web_search"]); // run for real, no creds
 
 // Source kinds we can fetch without credentials. Others need the secret store.
 const liveKind = (kind: string) => AUTH_KINDS_LIVE.has(kind);
@@ -53,6 +53,44 @@ async function fetchYouTube(rawUrl: string): Promise<{ url: string; text: string
   } catch { /* oembed best-effort */ }
   const page = await fetchTextSafe(u.toString()).catch(() => ({ text: "" }));
   return { url: u.toString(), text: (meta + page.text).slice(0, MAX_CHARS_TO_MODEL) };
+}
+
+// Web-search tier: no URL needed — the source's guidance/terms/targets ARE the
+// search aim. Uses Anthropic's server-side web_search tool (results carry
+// citations); returns one briefing doc, which the caller still injection-screens
+// before distilling. This is how market/competitive signals get "weight" without
+// a per-source secret store. Third-party search MCPs can layer on later.
+// deno-lint-ignore no-explicit-any
+async function fetchViaWebSearch(key: string, source: any): Promise<{ label: string; url: string; text: string }> {
+  const aim = [
+    source.guidance ? `Focus: ${source.guidance}` : "",
+    source.include_terms ? `Only surface things about: ${source.include_terms}` : "",
+    source.exclude_terms ? `Ignore anything about: ${source.exclude_terms}` : "",
+    (Array.isArray(source.targets) && source.targets.length)
+      ? `Specifics to check: ${source.targets.map((t: { ref?: string }) => t?.ref).filter(Boolean).join("; ")}` : "",
+  ].filter(Boolean).join("\n");
+  const sys = "You are a market & competitive research analyst. Use web search to find CONCRETE, RECENT, decision-useful developments for a product & GTM team. Report findings as a tight briefing: the specific facts, dates, and numbers, each with its source URL. Do not editorialize or speculate — only what you found.";
+  const user = `Research the following and report what you find, with source URLs:\n${aim || source.label}`;
+  const anthropic = new Anthropic({ apiKey: key });
+  // deno-lint-ignore no-explicit-any
+  let messages: any[] = [{ role: "user", content: user }];
+  let text = "";
+  for (let i = 0; i < 5; i++) {
+    const resp = (await anthropic.messages.create({
+      model: MODEL,
+      max_tokens: 4000,
+      thinking: { type: "adaptive" },
+      tools: [{ type: "web_search_20260209", name: "web_search", max_uses: 6 }],
+      system: [{ type: "text", text: sys }],
+      messages,
+      // deno-lint-ignore no-explicit-any
+    } as any)) as Anthropic.Message;
+    for (const b of resp.content) if (b.type === "text") text += b.text + "\n";
+    // Server-tool loop: resume on pause_turn by re-sending with the assistant turn.
+    if (resp.stop_reason === "pause_turn") { messages = [...messages, { role: "assistant", content: resp.content }]; continue; }
+    break;
+  }
+  return { label: `Web search · ${source.label}`, url: "web_search", text: text.trim().slice(0, MAX_CHARS_TO_MODEL) };
 }
 
 // Distillation schema — the model returns candidate signals WITH a relevance
@@ -121,49 +159,60 @@ Deno.serve(async (req: Request) => {
       .select("id").single();
     runId = runRow?.id ?? null;
 
-    // Resolve what to fetch: the source's url + each pointing TARGET of type url.
-    const cfgUrl = (source.config as { url?: string } | null)?.url;
-    const targetUrls = (Array.isArray(source.targets) ? source.targets : [])
-      .filter((t: { type?: string; ref?: string }) => t && (t.type === "url" || !t.type) && typeof t.ref === "string")
-      .map((t: { ref: string; label?: string }) => ({ ref: t.ref, label: t.label }));
-    const toFetch: { ref: string; label?: string }[] = [];
-    if (cfgUrl) toFetch.push({ ref: cfgUrl, label: source.label });
-    toFetch.push(...targetUrls);
-    if (toFetch.length === 0) {
-      await supabase.from("connector_runs").update({ status: "skipped", error: "No URL or url-targets to fetch.", finished_at: new Date().toISOString() }).eq("id", runId!);
-      return json({ error: "This source has no URL or pointing targets to fetch. Add a URL or a target.", skipped: true }, 422);
-    }
-
-    // Fetch each (SSRF-guarded). Collect text; record per-item fetch outcome.
-    const fetcher = source.kind === "youtube" ? fetchYouTube : fetchTextSafe;
+    // ---- gather source material -------------------------------------------
     const fetched: { label: string; url: string; text: string }[] = [];
     const fetchErrors: string[] = [];
     let quarantined = 0;
     const secEvents: Record<string, unknown>[] = [];
-    for (const t of toFetch.slice(0, 8)) {            // cap breadth per pull
-      try {
-        const r = await fetcher(t.ref);
-        if (!r.text.trim()) continue;
-        // AI-SECURITY FLOOR: screen every fetched doc for prompt-injection /
-        // tool-abuse BEFORE it reaches the model. 'block' is quarantined — never
-        // fed to a model — and recorded. 'warn' is fed but logged. (SECURITY.md)
-        const screen = screenForInjection(r.text);
-        if (screen.verdict !== "clean") {
-          secEvents.push({ org_id: orgId, surface: "connector", source_id: source.id, run_id: runId,
-            kind: screen.verdict === "block" ? "quarantine" : "injection_screen", verdict: screen.verdict,
-            risk: screen.score, flags: screen.flags, ref: r.url,
-            detail: { preview: r.text.slice(0, 240) } });
-        }
-        if (screen.verdict === "block") { quarantined++; continue; }    // do NOT feed to the model
-        fetched.push({ label: t.label ?? r.url, url: r.url, text: r.text });
+    // AI-SECURITY FLOOR: screen every doc for prompt-injection / tool-abuse
+    // BEFORE it reaches the distiller. 'block' is quarantined (never fed to a
+    // model) and recorded; 'warn' is fed but logged. Shared by both tiers.
+    const screenAndKeep = (label: string, url: string, text: string) => {
+      if (!text.trim()) return;
+      const screen = screenForInjection(text);
+      if (screen.verdict !== "clean") {
+        secEvents.push({ org_id: orgId, surface: "connector", source_id: source.id, run_id: runId,
+          kind: screen.verdict === "block" ? "quarantine" : "injection_screen", verdict: screen.verdict,
+          risk: screen.score, flags: screen.flags, ref: url, detail: { preview: text.slice(0, 240) } });
       }
-      catch (e) {
-        const msg = e instanceof Error ? e.message : String(e);
-        fetchErrors.push(`${t.ref}: ${msg}`);
-        // An SSRF refusal is a security event worth recording, not just an error.
-        if (/Refusing|Only https/i.test(msg)) {
-          secEvents.push({ org_id: orgId, surface: "connector", source_id: source.id, run_id: runId,
-            kind: "ssrf_block", verdict: "block", risk: 1, flags: ["ssrf"], ref: t.ref, detail: { reason: msg } });
+      if (screen.verdict === "block") { quarantined++; return; }
+      fetched.push({ label, url, text });
+    };
+
+    if (source.kind === "web_search") {
+      // Live web search via Anthropic's server-side tool — aimed by the source's
+      // guidance/terms/targets. Still screened before distilling.
+      try {
+        const doc = await fetchViaWebSearch(key, source);
+        screenAndKeep(doc.label, doc.url, doc.text);
+      } catch (e) { fetchErrors.push(`web_search: ${e instanceof Error ? e.message : String(e)}`); }
+    } else {
+      // Resolve what to fetch: the source's url + each pointing TARGET of type url.
+      const cfgUrl = (source.config as { url?: string } | null)?.url;
+      const targetUrls = (Array.isArray(source.targets) ? source.targets : [])
+        .filter((t: { type?: string; ref?: string }) => t && (t.type === "url" || !t.type) && typeof t.ref === "string")
+        .map((t: { ref: string; label?: string }) => ({ ref: t.ref, label: t.label }));
+      const toFetch: { ref: string; label?: string }[] = [];
+      if (cfgUrl) toFetch.push({ ref: cfgUrl, label: source.label });
+      toFetch.push(...targetUrls);
+      if (toFetch.length === 0) {
+        await supabase.from("connector_runs").update({ status: "skipped", error: "No URL or url-targets to fetch.", finished_at: new Date().toISOString() }).eq("id", runId!);
+        return json({ error: "This source has no URL or pointing targets to fetch. Add a URL or a target.", skipped: true }, 422);
+      }
+      // Fetch each (SSRF-guarded). Collect text; record per-item fetch outcome.
+      const fetcher = source.kind === "youtube" ? fetchYouTube : fetchTextSafe;
+      for (const t of toFetch.slice(0, 8)) {            // cap breadth per pull
+        try {
+          const r = await fetcher(t.ref);
+          screenAndKeep(t.label ?? r.url, r.url, r.text);
+        } catch (e) {
+          const msg = e instanceof Error ? e.message : String(e);
+          fetchErrors.push(`${t.ref}: ${msg}`);
+          // An SSRF refusal is a security event worth recording, not just an error.
+          if (/Refusing|Only https/i.test(msg)) {
+            secEvents.push({ org_id: orgId, surface: "connector", source_id: source.id, run_id: runId,
+              kind: "ssrf_block", verdict: "block", risk: 1, flags: ["ssrf"], ref: t.ref, detail: { reason: msg } });
+          }
         }
       }
     }
