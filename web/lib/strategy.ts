@@ -14,6 +14,16 @@ export const GROUPS: { key: string; label: string; blurb: string }[] = [
 ];
 export const GROUP_LABEL: Record<string, string> = Object.fromEntries(GROUPS.map((g) => [g.key, g.label]));
 
+// The strategic groups for the GTM board — campaign/content oriented (vs the
+// product groups above, which are build oriented).
+export const GTM_GROUPS: { key: string; label: string; blurb: string }[] = [
+  { key: "messaging", label: "Messaging & positioning", blurb: "How we talk about value; narrative shifts." },
+  { key: "demand", label: "Demand & campaigns", blurb: "Plays to create and capture demand." },
+  { key: "content", label: "Content & proof", blurb: "Assets, stories, and proof points buyers need." },
+  { key: "enablement", label: "Sales enablement", blurb: "What reps need to win deals." },
+  { key: "audience", label: "Audience & segments", blurb: "Who we target and where they are." },
+];
+
 export const PRIORITY_TONE: Record<string, "default" | "accent" | "amber"> = { low: "default", medium: "accent", high: "amber" };
 
 export type Cap = { id: string; name: string };
@@ -40,6 +50,12 @@ export const confText = (x: { conf_level: number | null; conf_label?: string | n
 // frontier and product/both/unsorted all inform what to build.
 export function isProductSignal(s: { category?: string | null; metadata: { domain?: string } | null }): boolean {
   return !(s.category === "gtm" && !s.metadata?.domain);
+}
+
+// GTM Strategy shows GTM signals — those categorized 'gtm' (or both). The GTM
+// board organizes these into themes that translate to campaigns & content.
+export function isGtmSignal(s: { category?: string | null; metadata: { domain?: string } | null }): boolean {
+  return s.category === "gtm" || s.category === "both" || s.metadata?.domain === "market";
 }
 
 export const errText = (e: unknown, f: string) =>

@@ -9,7 +9,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { createClient } from "@/lib/supabase/client";
 import { getOrgId } from "@/lib/org";
 import { Chip, Banner, Modal, ConfirmDialog } from "@/components/ui";
-import { GROUPS, confText, errText, fetchAgentKey, authHeader, isProductSignal } from "@/lib/strategy";
+import { GROUPS, GTM_GROUPS, confText, errText, fetchAgentKey, authHeader, isProductSignal, isGtmSignal } from "@/lib/strategy";
 
 type Theme = { id: string; title: string; summary: string | null; recommendation: string | null; conf_level: number | null; signal_ids: string[] | null; group_label: string | null; merged_by: string; watched: boolean; context: string | null; bundle_id: string | null };
 type Signal = { id: string; title: string; why: string | null; origin: string; category: string | null; metadata: { domain?: string } | null; conf_level: number | null; conf_label: string | null };
@@ -18,8 +18,12 @@ type Event = { id: string; kind: string; detail: Record<string, unknown> | null;
 
 const EVENT_LABEL: Record<string, string> = { created: "Created", evidence_added: "Evidence added", escalated: "Escalated", state_changed: "State changed", summary_updated: "Summary updated", merged_in: "Merged in", decayed: "Decayed", recommendation_changed: "Recommendation changed" };
 
-export default function ThemesTab({ onStartEpic }: { onStartEpic: (themeId: string) => void }) {
+export default function ThemesTab({ onStartEpic, lens = "product" }: { onStartEpic?: (themeId: string) => void; lens?: "product" | "gtm" }) {
   const supabase = createClient();
+  const isGtm = lens === "gtm";
+  const GROUPS_L = isGtm ? GTM_GROUPS : GROUPS;
+  const signalFilter = isGtm ? isGtmSignal : isProductSignal;
+  const lensWord = isGtm ? "GTM" : "product";
   const [themes, setThemes] = useState<Theme[]>([]);
   const [signals, setSignals] = useState<Signal[]>([]);
   const [epics, setEpics] = useState<Epic[]>([]);
@@ -36,14 +40,16 @@ export default function ThemesTab({ onStartEpic }: { onStartEpic: (themeId: stri
   const [delId, setDelId] = useState<string | null>(null);
 
   const load = useCallback(async () => {
+    const themeQ = supabase.from("signal_themes").select("id, title, summary, recommendation, conf_level, signal_ids, group_label, merged_by, watched, context, bundle_id").neq("state", "dormant");
+    const themeScoped = isGtm ? themeQ.in("category", ["gtm", "both"]) : themeQ.or("category.is.null,category.neq.gtm");
     const [{ data: th }, { data: s }, { data: b }] = await Promise.all([
-      supabase.from("signal_themes").select("id, title, summary, recommendation, conf_level, signal_ids, group_label, merged_by, watched, context, bundle_id").neq("state", "dormant").or("category.is.null,category.neq.gtm").order("watched", { ascending: false }).order("conf_level", { ascending: false, nullsFirst: false }),
+      themeScoped.order("watched", { ascending: false }).order("conf_level", { ascending: false, nullsFirst: false }),
       supabase.from("signals").select("id, title, why, origin, category, metadata, conf_level, conf_label").neq("strategy_state", "promoted"),
       supabase.from("strategy_bundles").select("id, title").eq("state", "open").order("created_at", { ascending: false }),
     ]);
-    setThemes((th ?? []) as Theme[]); setSignals(((s ?? []) as Signal[]).filter(isProductSignal)); setEpics((b ?? []) as Epic[]);
+    setThemes((th ?? []) as Theme[]); setSignals(((s ?? []) as Signal[]).filter(signalFilter)); setEpics((b ?? []) as Epic[]);
     setAgentKey(await fetchAgentKey(supabase)); setLoading(false);
-  }, [supabase]);
+  }, [supabase, isGtm, signalFilter]);
   useEffect(() => { load(); }, [load]);
 
   // Auto-place themes into their bucket: when any theme is ungrouped, classify them
@@ -83,7 +89,7 @@ export default function ThemesTab({ onStartEpic }: { onStartEpic: (themeId: stri
     setError(null);
     try {
       const orgId = await orgIdOr();
-      const { data, error } = await supabase.from("signal_themes").insert({ org_id: orgId, title: "Untitled theme", category: "product", state: "active", merged_by: "human" }).select("id").single();
+      const { data, error } = await supabase.from("signal_themes").insert({ org_id: orgId, title: "Untitled theme", category: isGtm ? "gtm" : "product", state: "active", merged_by: "human" }).select("id").single();
       if (error) throw error;
       await supabase.from("theme_events").insert({ org_id: orgId, theme_id: (data as { id: string }).id, kind: "created", actor: "human" });
       await load(); const t = { id: (data as { id: string }).id, title: "Untitled theme", summary: null, recommendation: null, conf_level: null, signal_ids: [], group_label: null, merged_by: "human", watched: false, context: null, bundle_id: null } as Theme;
@@ -117,11 +123,11 @@ export default function ThemesTab({ onStartEpic }: { onStartEpic: (themeId: stri
       const ung = themes.filter((t) => !t.group_label);
       if (!ung.length) { setBusy(null); setError("Every theme is already grouped."); return; }
       const list = ung.map((t) => `- ${t.id}: ${t.title}${t.summary ? ` — ${t.summary}` : ""}`).join("\n");
-      const prompt = `Classify each product theme into exactly ONE strategic group from: ${GROUPS.map((g) => g.key).join(", ")}.\nReturn ONLY a JSON array, no prose: [{"id":"<theme id>","group":"<group key>"}].\n\nThemes:\n${list}`;
+      const prompt = `Classify each ${lensWord} theme into exactly ONE strategic group from: ${GROUPS_L.map((g) => g.key).join(", ")}.\nReturn ONLY a JSON array, no prose: [{"id":"<theme id>","group":"<group key>"}].\n\nThemes:\n${list}`;
       const { data, error } = await supabase.functions.invoke("agent-chat", { body: { agent_key: agentKey, messages: [{ role: "user", content: prompt }] }, headers: await authHeader(supabase) });
       if (error) throw error; if (data?.error) throw new Error(data.error);
       const m = String(data?.reply ?? "").match(/\[[\s\S]*\]/); if (!m) throw new Error("Couldn't parse the classification.");
-      const valid = new Set(GROUPS.map((g) => g.key));
+      const valid = new Set(GROUPS_L.map((g) => g.key));
       for (const u of (JSON.parse(m[0]) as { id: string; group: string }[]).filter((x) => x.id && valid.has(x.group))) await supabase.from("signal_themes").update({ group_label: u.group }).eq("id", u.id);
       await load();
     } catch (e) { setError(errText(e, "AI classify failed.")); } finally { setBusy(null); }
@@ -143,17 +149,19 @@ export default function ThemesTab({ onStartEpic }: { onStartEpic: (themeId: stri
         {confText(t) && <Chip tone="green">{confText(t)}</Chip>}
         <span className="t-mono-xs t-muted">{(t.signal_ids ?? []).length} sig</span>
       </div>
-      <div className="row gap-2" style={{ marginTop: 6, alignItems: "center" }}>
-        {t.bundle_id ? <span className="t-mono-xs" style={{ color: "var(--ac-text)" }}>→ {epicTitle(t.bundle_id)}</span>
-          : <button className="btn btn-sm" onClick={() => onStartEpic(t.id)}>Start epic →</button>}
-      </div>
+      {onStartEpic && (
+        <div className="row gap-2" style={{ marginTop: 6, alignItems: "center" }}>
+          {t.bundle_id ? <span className="t-mono-xs" style={{ color: "var(--ac-text)" }}>→ {epicTitle(t.bundle_id)}</span>
+            : <button className="btn btn-sm" onClick={() => onStartEpic(t.id)}>Start epic →</button>}
+        </div>
+      )}
     </div>
   );
 
   return (
     <div>
       <div className="row gap-2" style={{ marginBottom: "var(--sp-3)", alignItems: "center", flexWrap: "wrap" }}>
-        <span className="t-label">Themes — product signals, merged &amp; bucketed</span>
+        <span className="t-label">Themes — {lensWord} signals, merged &amp; bucketed</span>
         <div style={{ flex: 1 }} />
         <button className="btn btn-secondary btn-sm" onClick={newTheme}>+ New theme</button>
         <button className="btn btn-secondary btn-sm" disabled={busy === "synth"} onClick={synthesize}>{busy === "synth" ? "Synthesizing…" : "↻ Synthesize"}</button>
@@ -175,7 +183,7 @@ export default function ThemesTab({ onStartEpic }: { onStartEpic: (themeId: stri
 
       {/* The strategy swim lanes — one per bucket, responsive (no forced columns) */}
       <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(210px, 1fr))", gap: "var(--sp-3)", alignItems: "start" }}>
-        {GROUPS.map((g) => {
+        {GROUPS_L.map((g) => {
           const list = themes.filter((t) => t.group_label === g.key);
           return (
             <div key={g.key}>
@@ -199,7 +207,7 @@ export default function ThemesTab({ onStartEpic }: { onStartEpic: (themeId: stri
               {open.merged_by === "synthesis" ? <Chip tone="violet">AI-synthesized</Chip> : <Chip>Human-merged</Chip>}
               {confText(open) && <Chip tone="green">{confText(open)}</Chip>}
               <select className="select" value={open.group_label ?? ""} onChange={(e) => setGroup(open.id, e.target.value)} style={{ flex: "0 0 150px", fontSize: 12 }}>
-                <option value="">Unsorted</option>{GROUPS.map((g) => <option key={g.key} value={g.key}>{g.label}</option>)}
+                <option value="">Unsorted</option>{GROUPS_L.map((g) => <option key={g.key} value={g.key}>{g.label}</option>)}
               </select>
               <button className="btn btn-secondary btn-sm" onClick={() => toggleWatch(open)}>{open.watched ? "★ Watching" : "☆ Watch"}</button>
             </div>
@@ -224,7 +232,7 @@ export default function ThemesTab({ onStartEpic }: { onStartEpic: (themeId: stri
             </div>
             {adding && (
               <div className="card card-pad" style={{ marginBottom: "var(--sp-4)", maxHeight: 200, overflowY: "auto" }}>
-                {addable.length === 0 && <div className="t-sub t-muted" style={{ fontSize: 12 }}>No more product signals to add.</div>}
+                {addable.length === 0 && <div className="t-sub t-muted" style={{ fontSize: 12 }}>No more {lensWord} signals to add.</div>}
                 {addable.map((s) => (<div key={s.id} className="row-between" style={{ padding: "4px 0", alignItems: "center", gap: 8 }}><span style={{ fontSize: 12.5, minWidth: 0 }}>{s.title}</span><button className="btn btn-sm" onClick={() => addSignalToTheme(s.id)} style={{ flexShrink: 0 }}>+ Add</button></div>))}
               </div>
             )}

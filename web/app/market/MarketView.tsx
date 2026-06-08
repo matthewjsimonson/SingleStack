@@ -13,6 +13,8 @@ import { Chip, Banner, Confidence, Modal } from "@/components/ui";
 import { fetchAgentKey, errText } from "@/lib/strategy";
 import { LiveReply, useAliveReply, streamAgentChat } from "@/components/alive";
 import { Markdown } from "@/components/Markdown";
+import SourceManager from "@/components/SourceManager";
+import TrackingTopics from "@/components/TrackingTopics";
 
 type Meta = { domain?: string; lens?: string; industry?: string; persona?: string } | null;
 type Signal = { id: string; title: string; why: string | null; conf_label: string | null; conf_level: number | null; observed_at: string | null; origin: string; metadata: Meta };
@@ -111,6 +113,12 @@ export default function MarketView() {
         <button className="btn" onClick={() => setComposing(true)}>+ Set signal</button>
       </div>
       <Banner>{error}</Banner>
+
+      {/* Configurable ingestion: connect web-search / market sources (incl. MCP)
+          and declare what to watch. Market signals feed BOTH strategy boards. */}
+      <SourceManager title="Market sources" />
+      <TrackingTopics category="market" suggestions={["Category & market-size shifts", "Buyer/persona behavior changes", "Regulatory or platform changes", "Emerging entrants & substitutes"]} />
+      <div className="t-sub t-muted" style={{ fontSize: 11.5, margin: "0 0 var(--sp-4)" }}>Market signals flow into <strong>Product strategy</strong> and <strong>GTM strategy</strong> themes — synthesize there to fold them into your strategy.</div>
 
       <div className="card card-pad" style={{ marginBottom: "var(--sp-4)" }}>
         <div className="stack-2">
