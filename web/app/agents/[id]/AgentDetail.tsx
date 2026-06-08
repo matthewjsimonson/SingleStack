@@ -7,10 +7,11 @@ import { useEffect, useState, useCallback } from "react";
 import { createClient } from "@/lib/supabase/client";
 import { getOrgId } from "@/lib/org";
 import { Section, Chip, Banner, BackLink, Empty, Modal } from "@/components/ui";
+import { Markdown } from "@/components/Markdown";
 import { CONNECTOR_CATALOG } from "@/lib/connectors";
 
 type Agent = { id: string; key: string; name: string; role: string | null; model: string | null; system_prompt: string | null; is_active: boolean };
-type Skill = { id: string; key: string; name: string; description: string | null; category: string | null; instructions: string | null };
+type Skill = { id: string; key: string; name: string; description: string | null; category: string | null; instructions: string | null; areas: string[]; connectors: string[]; source: string | null };
 type Connection = { id: string; kind: string; label: string; area: string | null; mcp_url: string | null; status: string; config: { purpose?: string | null } | null; targets: { type?: string; ref: string; label?: string }[] | null; guidance: string | null };
 type InitiativeOpt = { id: string; title: string; stage: string | null; scope: string | null };
 type WorkstreamOpt = { id: string; title: string; area: string | null; initiative_id: string; initiative_title?: string };
@@ -44,7 +45,7 @@ export default function AgentDetail({ agentId }: { agentId: string }) {
   const load = useCallback(async () => {
     const { data: a } = await supabase.from("agents").select("id, key, name, role, model, system_prompt, is_active").eq("id", agentId).maybeSingle();
     const [{ data: sk }, { data: as }, { data: cs }, { data: wf }, { data: al }, { data: inits }, { data: ws }] = await Promise.all([
-      supabase.from("skills").select("id, key, name, description, category, instructions").order("name"),
+      supabase.from("skills").select("id, key, name, description, category, instructions, areas, connectors, source").order("name"),
       supabase.from("agent_skills").select("skill_id, is_cornerstone").eq("agent_id", agentId),
       supabase.from("connections").select("id, kind, label, area, mcp_url, status, config, targets, guidance").eq("agent_id", agentId).order("created_at"),
       supabase.from("workflows").select("id, name, description, agent_id, steps, is_active").order("created_at", { ascending: false }),
@@ -168,13 +169,61 @@ function Overview({ agent, onSaved, setError, skillsCount, areas, alignCount, ta
   );
 }
 
-// ---------- Skills — the per-agent editor for the cornerstone + child skills ----------
-// Rendered as a clickable, editable hierarchy: the agent is the root; its single
-// CORNERSTONE skill (its identity, always on, every job) is one branch; its CHILD
-// skills (task/area-specific, built on the cornerstone) are another. Click any
-// branch to edit that skill in place (name, what it does, the playbook), promote/
-// demote the cornerstone, see its history, or detach it.
+// ---------- Skills — cornerstone (identity) + child skills, as a hub-and-spoke ----------
+// The CORNERSTONE sits at the center (the agent's identity, always on); CHILD
+// skills radiate as clickable spokes. Selecting any node opens an editor with the
+// markdown playbook (+ live preview), its areas, and its preferred connectors.
 const catTone = (c: string | null) => (c === "product" ? "accent" : c === "gtm" ? "violet" : "default");
+const catDot = (c: string | null) => (c === "product" ? "var(--ac)" : c === "gtm" ? "var(--vl)" : c === "research" ? "var(--gn)" : "var(--tm)");
+const AREA_KEYS = ["product", "gtm", "competitive", "strategy", "market", "signals", "frontier", "roadmap", "content", "campaigns", "initiatives"];
+const CONNECTOR_SUGGESTIONS = CONNECTOR_CATALOG.map((c) => c.name);
+
+// The radial map: cornerstone in the middle, child skills as spokes around it.
+// Responsive — positions are percentages inside a square box, so it scales down.
+function SkillsGraph({ agentName, cornerstone, childList, selectedId, onSelect, onAddCornerstone }: {
+  agentName: string; cornerstone: Skill | null; childList: Skill[]; selectedId: string | null; onSelect: (s: Skill) => void; onAddCornerstone: () => void;
+}) {
+  const n = childList.length;
+  const R = 39; // % radius of the ring
+  const pos = (i: number) => { const a = (-90 + (360 * i) / Math.max(n, 1)) * (Math.PI / 180); return { left: 50 + R * Math.cos(a), top: 50 + R * Math.sin(a) }; };
+  const shadow = "0 1px 2px rgba(17,20,24,0.08)";
+  return (
+    <div style={{ position: "relative", width: "100%", maxWidth: 520, aspectRatio: "1 / 1", margin: "0 auto" }}>
+      <svg viewBox="0 0 100 100" preserveAspectRatio="none" style={{ position: "absolute", inset: 0, width: "100%", height: "100%", pointerEvents: "none" }}>
+        {childList.map((_, i) => { const p = pos(i); return <line key={i} x1={50} y1={50} x2={p.left} y2={p.top} stroke="var(--border-strong)" strokeWidth={0.3} />; })}
+      </svg>
+      {cornerstone ? (
+        <button type="button" onClick={() => onSelect(cornerstone)} title={cornerstone.name}
+          style={{ position: "absolute", left: "50%", top: "50%", transform: "translate(-50%,-50%)", width: 138, height: 138, borderRadius: "50%", cursor: "pointer",
+            background: "var(--ac-fill)", border: "2px solid var(--ac)", boxShadow: selectedId === cornerstone.id ? "0 0 0 4px var(--ac-fill)" : shadow,
+            display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", padding: 12, textAlign: "center", gap: 3 }}>
+          <span style={{ fontSize: 11.5, color: "var(--ac-text)" }}>★ {agentName}</span>
+          <span style={{ fontSize: 13.5, fontWeight: 700, color: "var(--tp)", lineHeight: 1.2, overflow: "hidden", display: "-webkit-box", WebkitLineClamp: 2, WebkitBoxOrient: "vertical" }}>{cornerstone.name}</span>
+          <span className="t-mono-xs" style={{ color: "var(--ac-text)" }}>cornerstone</span>
+        </button>
+      ) : (
+        <button type="button" onClick={onAddCornerstone}
+          style={{ position: "absolute", left: "50%", top: "50%", transform: "translate(-50%,-50%)", width: 138, height: 138, borderRadius: "50%", cursor: "pointer",
+            background: "var(--panel)", border: "2px dashed var(--border-strong)", color: "var(--ts)", display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", padding: 14, textAlign: "center", gap: 4 }}>
+          <span style={{ fontSize: 20, color: "var(--tm)" }}>★</span>
+          <span style={{ fontSize: 12.5, fontWeight: 600 }}>Set the cornerstone</span>
+          <span className="t-mono-xs t-muted">the agent&rsquo;s identity</span>
+        </button>
+      )}
+      {childList.map((s, i) => {
+        const p = pos(i); const on = selectedId === s.id;
+        return (
+          <button key={s.id} type="button" onClick={() => onSelect(s)} title={s.name}
+            style={{ position: "absolute", left: `${p.left}%`, top: `${p.top}%`, transform: "translate(-50%,-50%)", width: 108, cursor: "pointer",
+              background: "var(--panel)", border: `1.5px solid ${on ? "var(--vl)" : "var(--border)"}`, boxShadow: on ? "0 0 0 3px var(--vl-fill)" : shadow, borderRadius: 10, padding: "8px 9px", textAlign: "left", display: "flex", flexDirection: "column", gap: 3 }}>
+            <span style={{ display: "flex", alignItems: "center", gap: 6 }}><span style={{ width: 7, height: 7, borderRadius: "50%", background: catDot(s.category), flexShrink: 0 }} /><span style={{ fontSize: 12, fontWeight: 640, color: "var(--tp)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{s.name}</span></span>
+            {s.areas?.length ? <span className="t-mono-xs t-muted" style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{s.areas.join(" · ")}</span> : null}
+          </button>
+        );
+      })}
+    </div>
+  );
+}
 
 function Skills({ agentId, agentName, skills, attached, cornerstones, reload, setError }: { agentId: string; agentName: string; skills: Skill[]; attached: Set<string>; cornerstones: Set<string>; reload: () => void; setError: (s: string | null) => void }) {
   const supabase = createClient();
@@ -185,8 +234,10 @@ function Skills({ agentId, agentName, skills, attached, cornerstones, reload, se
   const [busy, setBusy] = useState(false);
   const [evolving, setEvolving] = useState(false);
   const [histSkill, setHistSkill] = useState<Skill | null>(null);
-  const [openSkill, setOpenSkill] = useState<string | null>(null); // which node's editor is open
-  const [edit, setEdit] = useState({ name: "", description: "", instructions: "" });
+  const [selected, setSelected] = useState<string | null>(null); // which node's editor is open
+  const [edit, setEdit] = useState({ name: "", description: "", instructions: "", category: "general", areas: [] as string[], connectors: [] as string[] });
+  const [preview, setPreview] = useState(false);
+  const [connInput, setConnInput] = useState("");
 
   async function toggle(skillId: string, on: boolean) {
     setError(null);
@@ -195,6 +246,7 @@ function Skills({ agentId, agentName, skills, attached, cornerstones, reload, se
       await supabase.from("agent_skills").insert({ org_id: orgId, agent_id: agentId, skill_id: skillId });
     } else {
       await supabase.from("agent_skills").delete().eq("agent_id", agentId).eq("skill_id", skillId);
+      if (selected === skillId) setSelected(null);
     }
     reload();
   }
@@ -210,11 +262,23 @@ function Skills({ agentId, agentName, skills, attached, cornerstones, reload, se
     }
     reload();
   }
-  function openEditor(s: Skill) { if (openSkill === s.id) { setOpenSkill(null); return; } setOpenSkill(s.id); setEdit({ name: s.name, description: s.description ?? "", instructions: s.instructions ?? "" }); }
+  function openEditor(s: Skill) {
+    if (selected === s.id) { setSelected(null); return; }
+    setSelected(s.id); setPreview(false); setConnInput("");
+    setEdit({ name: s.name, description: s.description ?? "", instructions: s.instructions ?? "", category: s.category ?? "general", areas: s.areas ?? [], connectors: s.connectors ?? [] });
+  }
   async function saveSkill(s: Skill) {
     setError(null);
-    const { error } = await supabase.from("skills").update({ name: edit.name.trim() || s.name, description: edit.description.trim() || null, instructions: edit.instructions }).eq("id", s.id);
-    if (error) setError(error.message); else { setOpenSkill(null); reload(); }
+    const isCorner = cornerstones.has(s.id);
+    const { error } = await supabase.from("skills").update({
+      name: edit.name.trim() || s.name,
+      description: edit.description.trim() || null,
+      instructions: edit.instructions,
+      category: edit.category,
+      areas: isCorner ? [] : edit.areas,
+      connectors: edit.connectors,
+    }).eq("id", s.id);
+    if (error) setError(error.message); else { setSelected(null); reload(); }
   }
 
   // Draft from a plain-English description (AI). Fills the form; the human reviews
@@ -261,50 +325,25 @@ function Skills({ agentId, agentName, skills, attached, cornerstones, reload, se
   }
 
   const attachedSkills = skills.filter((s) => attached.has(s.id));
-  const cornerstoneSkills = attachedSkills.filter((s) => cornerstones.has(s.id));
-  const childSkills = attachedSkills.filter((s) => !cornerstones.has(s.id));
+  const cornerstone = attachedSkills.find((s) => cornerstones.has(s.id)) ?? null;
+  const childList = attachedSkills.filter((s) => !cornerstones.has(s.id));
   const library = skills.filter((s) => !attached.has(s.id));
+  const selSkill = attachedSkills.find((s) => s.id === selected) ?? null;
+  const selIsCorner = selSkill ? cornerstones.has(selSkill.id) : false;
+  const openCreate = (asCornerstone: boolean) => { setSelected(null); setForm({ name: "", description: "", instructions: "", category: "general", cornerstone: asCornerstone, areas: [], connectors: [] }); setIntent(""); setCreating(true); };
 
-  // One editable node in the tree. Clicking the row opens the inline editor.
-  const node = (s: Skill, kind: "cornerstone" | "child") => {
-    const open = openSkill === s.id;
-    const accent = kind === "cornerstone" ? "var(--ac)" : "var(--vl)";
-    return (
-      <div key={s.id}>
-        <div className="row gap-2" onClick={() => openEditor(s)} style={{ alignItems: "center", cursor: "pointer", padding: "3px 0", flexWrap: "wrap" }}>
-          <span style={{ color: accent, opacity: 0.7 }}>▸</span>
-          <span style={{ fontSize: 13, fontWeight: 600 }}>{s.name}</span>
-          <Chip tone={catTone(s.category)}>{s.category}</Chip>
-          <span className="t-mono-xs" style={{ color: "var(--ac-text)", marginLeft: "auto" }}>{open ? "Close" : "Edit"}</span>
-        </div>
-        {open && (
-          <div className="card card-pad" style={{ marginTop: 6, marginBottom: 6, background: "var(--panel)" }}>
-            <div className="row gap-2" style={{ marginBottom: 10, flexWrap: "wrap" }}>
-              <button className="btn btn-secondary btn-sm" onClick={() => toggleCornerstone(s.id, kind !== "cornerstone")} title={kind === "cornerstone" ? "Demote to a child skill" : "Make this the agent's cornerstone (identity, always on)"}>{kind === "cornerstone" ? "★ Cornerstone — unset" : "☆ Make cornerstone"}</button>
-              <button className="btn btn-secondary btn-sm" onClick={() => setHistSkill(s)}>History</button>
-              <button className="btn btn-secondary btn-sm" onClick={() => toggle(s.id, false)} style={{ color: "var(--rd-text)", marginLeft: "auto" }}>Detach</button>
-            </div>
-            <label className="field"><span className="t-label">Name</span><input className="input" value={edit.name} onChange={(e) => setEdit({ ...edit, name: e.target.value })} /></label>
-            <label className="field"><span className="t-label">What it does</span><input className="input" value={edit.description} onChange={(e) => setEdit({ ...edit, description: e.target.value })} placeholder="A one-liner" /></label>
-            <label className="field"><span className="t-label">Instructions (playbook)</span><textarea className="textarea" rows={7} value={edit.instructions} onChange={(e) => setEdit({ ...edit, instructions: e.target.value })} placeholder="How the agent applies this skill — tailored to your company and goals." /></label>
-            <div className="row gap-2" style={{ marginTop: 4 }}><button className="btn btn-sm" onClick={() => saveSkill(s)}>Save</button><button className="btn btn-secondary btn-sm" onClick={() => setOpenSkill(null)}>Cancel</button></div>
-          </div>
-        )}
-      </div>
-    );
-  };
-
-  const branchHint = (text: string) => <span className="t-sub t-muted" style={{ fontSize: 12 }}>{text}</span>;
+  const addArea = (a: string) => { if (a && !edit.areas.includes(a)) setEdit((e) => ({ ...e, areas: [...e.areas, a] })); };
+  const addConn = (c: string) => { const v = c.trim(); if (v && !edit.connectors.includes(v)) setEdit((e) => ({ ...e, connectors: [...e.connectors, v] })); setConnInput(""); };
 
   return (
     <Section label="Skills" action={!creating ? (
       <div className="row gap-2">
         {attachedSkills.length > 0 && <button className="btn btn-sm" onClick={() => setEvolving((v) => !v)} style={{ background: "var(--ac)", color: "#fff" }}>Evolve from signals</button>}
-        <button className="btn btn-secondary btn-sm" onClick={() => setCreating(true)}>+ New skill</button>
+        <button className="btn btn-secondary btn-sm" onClick={() => openCreate(false)}>+ New skill</button>
       </div>
     ) : undefined}>
       <div className="t-sub t-muted" style={{ fontSize: 12.5, marginBottom: 12 }}>
-        An agent has two kinds of skills. <strong style={{ color: "var(--ac-text)" }}>The cornerstone</strong> (one, ★) is its identity — it runs on <em>every</em> job. <strong style={{ color: "var(--vl-text)" }}>Child skills</strong> are task/area-specific and build on the cornerstone; you author them here and bring them in for specific work. Click any skill to edit it. <span className="t-mono-xs">({cornerstones.size === 1 ? "cornerstone set" : "no cornerstone yet"})</span>
+        An agent has two kinds of skills. <strong style={{ color: "var(--ac-text)" }}>The cornerstone</strong> (one, ★) is its identity — it runs on <em>every</em> job, at the center below. <strong style={{ color: "var(--vl-text)" }}>Child skills</strong> are task/area-specific and build on the cornerstone, radiating as spokes. Click any node to edit it. <span className="t-mono-xs">({cornerstones.size === 1 ? "cornerstone set" : "no cornerstone yet"})</span>
       </div>
 
       {evolving && <EvolvePanel agentId={agentId} onApplied={reload} onClose={() => setEvolving(false)} setError={setError} />}
@@ -338,31 +377,82 @@ function Skills({ agentId, agentName, skills, attached, cornerstones, reload, se
         </form>
       )}
 
-      {/* Skill stack — the editable hierarchy */}
-      <div className="card card-pad" style={{ background: "var(--panel-2)", marginBottom: "var(--sp-4)" }}>
-        <div className="row gap-2" style={{ alignItems: "center", marginBottom: 4 }}>
-          <span style={{ width: 26, height: 26, borderRadius: 7, background: "var(--ac)", color: "#fff", display: "inline-flex", alignItems: "center", justifyContent: "center", fontWeight: 800, fontSize: 11 }}>{agentName.slice(0, 2).toUpperCase()}</span>
-          <span style={{ fontWeight: 680, fontSize: 14 }}>{agentName}</span>
-        </div>
-        <div style={{ marginLeft: 13, borderLeft: "2px solid var(--border)", paddingLeft: 16, paddingTop: 8, display: "flex", flexDirection: "column", gap: 16 }}>
-          <div>
-            <div className="row gap-2" style={{ alignItems: "center", marginBottom: 6 }}>
-              <span style={{ color: "var(--ac)", fontSize: 13 }}>★</span>
-              <span style={{ fontWeight: 660, fontSize: 13 }}>Cornerstone</span>
-              <span className="t-mono-xs t-muted">identity · always on · every job</span>
-            </div>
-            <div style={{ marginLeft: 6 }}>{cornerstoneSkills.length ? cornerstoneSkills.map((s) => node(s, "cornerstone")) : branchHint("None yet — make a skill the cornerstone with ★.")}</div>
-          </div>
-          <div>
-            <div className="row gap-2" style={{ alignItems: "center", marginBottom: 6 }}>
-              <span style={{ color: "var(--vl)", fontSize: 12 }}>▣</span>
-              <span style={{ fontWeight: 660, fontSize: 13 }}>Child skills</span>
-              <span className="t-mono-xs t-muted">task/area-specific · build on the cornerstone</span>
-            </div>
-            <div style={{ marginLeft: 6 }}>{childSkills.length ? childSkills.map((s) => node(s, "child")) : branchHint("None yet — create one above, or attach from the library below.")}</div>
-          </div>
+      {/* The hub-and-spoke map */}
+      <div className="card card-pad" style={{ background: "var(--panel-2)", marginBottom: "var(--sp-4)", paddingTop: 18, paddingBottom: 18 }}>
+        <SkillsGraph agentName={agentName} cornerstone={cornerstone} childList={childList} selectedId={selected} onSelect={openEditor} onAddCornerstone={() => openCreate(true)} />
+        <div className="row gap-2" style={{ justifyContent: "center", marginTop: 8 }}>
+          <button className="btn btn-secondary btn-sm" onClick={() => openCreate(false)}>+ Add child skill</button>
+          {!cornerstone && <button className="btn btn-secondary btn-sm" onClick={() => openCreate(true)}>★ Set cornerstone</button>}
         </div>
       </div>
+
+      {/* Editor for the selected node */}
+      {selSkill && (
+        <div className="card card-pad" style={{ marginBottom: "var(--sp-4)", borderLeft: `3px solid ${selIsCorner ? "var(--ac)" : "var(--vl)"}` }}>
+          <div className="row-between" style={{ alignItems: "center", marginBottom: 10, gap: 8, flexWrap: "wrap" }}>
+            <span className="t-h2" style={{ fontSize: 14 }}>{selIsCorner ? "★ Cornerstone" : "Child skill"}</span>
+            <div className="row gap-2" style={{ flexWrap: "wrap" }}>
+              <button className="btn btn-secondary btn-sm" onClick={() => toggleCornerstone(selSkill.id, !selIsCorner)} title={selIsCorner ? "Demote to a child skill" : "Make this the agent's cornerstone (identity, always on)"}>{selIsCorner ? "Demote to child" : "☆ Make cornerstone"}</button>
+              <button className="btn btn-secondary btn-sm" onClick={() => setHistSkill(selSkill)}>History</button>
+              <button className="btn btn-secondary btn-sm" onClick={() => toggle(selSkill.id, false)} style={{ color: "var(--rd-text)" }}>Detach</button>
+            </div>
+          </div>
+          <div style={{ display: "grid", gridTemplateColumns: "2fr 1fr", gap: "var(--sp-3)" }}>
+            <label className="field"><span className="t-label">Name</span><input className="input" value={edit.name} onChange={(e) => setEdit({ ...edit, name: e.target.value })} /></label>
+            <label className="field"><span className="t-label">Category</span>
+              <select className="select" value={edit.category} onChange={(e) => setEdit({ ...edit, category: e.target.value })}>
+                <option value="general">General</option><option value="product">Product</option><option value="gtm">GTM</option><option value="research">Research</option>
+              </select></label>
+          </div>
+          <label className="field"><span className="t-label">What it does</span><input className="input" value={edit.description} onChange={(e) => setEdit({ ...edit, description: e.target.value })} placeholder="A one-liner" /></label>
+
+          {/* Areas — child skills only (a cornerstone is general). */}
+          {!selIsCorner && (
+            <div className="field">
+              <span className="t-label">Areas <span className="t-muted" style={{ fontWeight: 400 }}>— where this skill is relevant</span></span>
+              <div className="row gap-2" style={{ flexWrap: "wrap", alignItems: "center", marginBottom: 6 }}>
+                {edit.areas.map((a) => <button key={a} type="button" className="chip chip-accent" onClick={() => setEdit((e) => ({ ...e, areas: e.areas.filter((x) => x !== a) }))} title="Remove">{a} ✕</button>)}
+                {edit.areas.length === 0 && <span className="t-mono-xs t-muted">none yet</span>}
+              </div>
+              <select className="select" value="" onChange={(e) => { addArea(e.target.value); }} style={{ maxWidth: 260 }}>
+                <option value="">+ Add area…</option>
+                {AREA_KEYS.filter((a) => !edit.areas.includes(a)).map((a) => <option key={a} value={a}>{a}</option>)}
+              </select>
+            </div>
+          )}
+
+          {/* Preferred connectors (soft preference, by label). */}
+          <div className="field">
+            <span className="t-label">Preferred connectors <span className="t-muted" style={{ fontWeight: 400 }}>— MCP systems this skill expects</span></span>
+            <div className="row gap-2" style={{ flexWrap: "wrap", alignItems: "center", marginBottom: 6 }}>
+              {edit.connectors.map((c) => <button key={c} type="button" className="chip chip-violet" onClick={() => setEdit((e) => ({ ...e, connectors: e.connectors.filter((x) => x !== c) }))} title="Remove">{c} ✕</button>)}
+              {edit.connectors.length === 0 && <span className="t-mono-xs t-muted">none yet</span>}
+            </div>
+            <div className="row gap-2" style={{ alignItems: "center" }}>
+              <input className="input" list="conn-suggest" value={connInput} placeholder="e.g. DeepWiki" style={{ maxWidth: 220 }}
+                onChange={(e) => setConnInput(e.target.value)} onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); addConn(connInput); } }} />
+              <datalist id="conn-suggest">{CONNECTOR_SUGGESTIONS.map((c) => <option key={c} value={c} />)}</datalist>
+              <button type="button" className="btn btn-secondary btn-sm" onClick={() => addConn(connInput)}>Add</button>
+            </div>
+          </div>
+
+          {/* Playbook — edit / preview toggle. */}
+          <div className="field">
+            <div className="row-between" style={{ alignItems: "center", marginBottom: 4 }}>
+              <span className="t-label">Instructions (playbook)</span>
+              <div className="row gap-2">
+                <button type="button" className="btn btn-secondary btn-sm" style={!preview ? { background: "var(--fill-2)" } : undefined} onClick={() => setPreview(false)}>Edit</button>
+                <button type="button" className="btn btn-secondary btn-sm" style={preview ? { background: "var(--fill-2)" } : undefined} onClick={() => setPreview(true)}>Preview</button>
+              </div>
+            </div>
+            {preview
+              ? <div className="card card-pad" style={{ background: "var(--panel-2)", minHeight: 120 }}>{edit.instructions.trim() ? <Markdown text={edit.instructions} /> : <span className="t-sub t-muted">Nothing to preview yet.</span>}</div>
+              : <textarea className="textarea" rows={12} value={edit.instructions} onChange={(e) => setEdit({ ...edit, instructions: e.target.value })} placeholder="How the agent applies this skill — markdown supported." />}
+          </div>
+
+          <div className="row gap-2" style={{ marginTop: 4 }}><button className="btn btn-sm" onClick={() => saveSkill(selSkill)}>Save</button><button className="btn btn-secondary btn-sm" onClick={() => setSelected(null)}>Cancel</button></div>
+        </div>
+      )}
 
       {library.length > 0 && (
         <div style={{ marginTop: "var(--sp-2)" }}>
