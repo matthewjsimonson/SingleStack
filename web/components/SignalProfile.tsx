@@ -19,7 +19,7 @@ export default function SignalProfile({ scope, competitorId, competitorName }: {
   const [headline, setHeadline] = useState("");
   const [fields, setFields] = useState<Field[]>([]);
   const [loading, setLoading] = useState(true);
-  const [busy, setBusy] = useState<null | "save" | "ai" | "create">(null);
+  const [busy, setBusy] = useState<null | "save" | "ai" | "create" | "push">(null);
   const [error, setError] = useState<string | null>(null);
   const [dirty, setDirty] = useState(false);
   const [note, setNote] = useState<string | null>(null);
@@ -82,6 +82,20 @@ export default function SignalProfile({ scope, competitorId, competitorName }: {
     finally { setBusy(null); }
   }
 
+  async function pushToStrategy() {
+    if (!profile) return;
+    if (dirty) { setError("Save your changes first, then push to strategy."); return; }
+    setBusy("push"); setError(null); setNote(null);
+    try {
+      const { data, error } = await supabase.functions.invoke("profile-to-strategy", { body: { profile_id: profile.id } });
+      if (error) throw error;
+      if (data?.error) throw new Error(data.error);
+      if (!data?.created) setNote(data?.message || "Nothing groundable to push yet.");
+      else setNote(`Created ${data.product} product + ${data.gtm} GTM theme(s) — find them on the Strategy and GTM strategy boards.`);
+    } catch (e) { setError(e instanceof Error ? e.message : "Could not push to strategy."); }
+    finally { setBusy(null); }
+  }
+
   function setField(i: number, patch: Partial<Field>) { setFields((fs) => fs.map((f, j) => (j === i ? { ...f, ...patch } : f))); setDirty(true); }
   function removeField(i: number) { setFields((fs) => fs.filter((_, j) => j !== i)); setDirty(true); }
   function addField() { setFields((fs) => [...fs, { field_key: `section_${fs.length + 1}`, label: "New section", value: "", origin: "human" }]); setDirty(true); }
@@ -113,6 +127,7 @@ export default function SignalProfile({ scope, competitorId, competitorName }: {
         </div>
         <div className="row gap-2" style={{ flexShrink: 0 }}>
           <button className="btn btn-secondary btn-sm" onClick={draftAI} disabled={busy === "ai"} style={{ color: "var(--ac-text)" }}>{busy === "ai" ? "Synthesizing…" : "✨ Draft / refresh with AI"}</button>
+          <button className="btn btn-secondary btn-sm" onClick={pushToStrategy} disabled={busy === "push" || dirty} title={dirty ? "Save first" : "Derive product + GTM strategy themes from this profile"}>{busy === "push" ? "Pushing…" : "→ Push to strategy"}</button>
           <button className="btn btn-sm" onClick={save} disabled={busy === "save" || !dirty}>{busy === "save" ? "Saving…" : dirty ? "Save" : "Saved"}</button>
         </div>
       </div>

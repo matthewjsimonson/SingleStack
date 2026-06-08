@@ -79,3 +79,5 @@ verify_jwt = false
 verify_jwt = false
 [functions.synthesize-profile]
 verify_jwt = false
+[functions.profile-to-strategy]
+verify_jwt = false
