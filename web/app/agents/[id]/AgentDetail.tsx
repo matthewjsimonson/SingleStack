@@ -171,7 +171,7 @@ function Overview({ agent, onSaved, setError, skillsCount, areas, alignCount, ta
       if (!d) throw new Error(data?.error || "No draft returned.");
       setW({ identity: d.identity ?? "", mandate: d.mandate ?? "", principles: d.principles ?? "", voice: d.voice ?? "" });
       setAiOpen(false); setIntent("");
-    } catch (e) { setError(e instanceof Error ? e.message : "Could not draft the cornerstone."); }
+    } catch (e) { setError(e instanceof Error ? e.message : "Could not draft the identity."); }
     finally { setDrafting(false); }
   }
 
@@ -187,7 +187,7 @@ function Overview({ agent, onSaved, setError, skillsCount, areas, alignCount, ta
     <>
       <Section label="Setup at a glance">
         <div style={{ display: "grid", gridTemplateColumns: "repeat(4, 1fr)", gap: "var(--sp-3)" }}>
-          <Dial label="Cornerstone" value={`${filled}/4`} hint={filled === 4 ? "fully set" : "windows filled below"} />
+          <Dial label="Identity" value={`${filled}/4`} hint={filled === 4 ? "fully set" : "windows filled below"} />
           <Dial label="Skills" value={String(skillsCount)} hint={skillsCount ? "playbooks it applies" : "none attached"} to="skills" />
           <Dial label="Access" value={areas.length ? String(areas.length) : "all"} hint={areas.length ? areas.join(", ") : "full foundation"} to="scope" />
           <Dial label="Focus" value={String(alignCount)} hint={alignCount ? "initiatives / tasks" : "no alignment"} to="scope" />
@@ -209,8 +209,8 @@ function Overview({ agent, onSaved, setError, skillsCount, areas, alignCount, ta
         </div>
       </Section>
 
-      <Section label="Cornerstone — the agent's identity" action={<button className="btn btn-sm" onClick={() => setAiOpen(true)} style={{ background: "var(--ac)", color: "#fff" }}>✨ Set up with AI</button>}>
-        <div className="t-sub t-muted" style={{ fontSize: 12.5, marginBottom: 12 }}>The four windows below compose this officer&rsquo;s core prompt — staged so it&rsquo;s legible, not one blank box. Fill what matters; empty windows are skipped. Use <strong>Set up with AI</strong> to draft all four from a sentence, grounded in your product truth.</div>
+      <Section label="Core identity" action={<button className="btn btn-sm" onClick={() => setAiOpen(true)} style={{ background: "var(--ac)", color: "#fff" }}>✨ Set up with AI</button>}>
+        <div className="t-sub t-muted" style={{ fontSize: 12.5, marginBottom: 12 }}>The four windows below compose this officer&rsquo;s core prompt — staged so it&rsquo;s legible, not one blank box. Fill what matters; empty windows are skipped. Use <strong>Set up with AI</strong> to draft all four from a sentence, grounded in your product truth. Its <strong>skills</strong> (including a ★ cornerstone skill) are the playbooks layered on top of this identity.</div>
         <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "var(--sp-3)" }}>
           {CORNER_WINDOWS.map((win) => (
             <label key={win.key} className="field">
@@ -221,15 +221,15 @@ function Overview({ agent, onSaved, setError, skillsCount, areas, alignCount, ta
           ))}
         </div>
         <div className="row gap-2" style={{ marginTop: "var(--sp-3)" }}>
-          <button className="btn" onClick={save} disabled={busy}>{busy ? "Saving…" : "Save cornerstone"}</button>
+          <button className="btn" onClick={save} disabled={busy}>{busy ? "Saving…" : "Save identity"}</button>
         </div>
       </Section>
 
-      <Modal open={aiOpen} onClose={() => setAiOpen(false)} title="Set up the cornerstone with AI" width={620}>
+      <Modal open={aiOpen} onClose={() => setAiOpen(false)} title="Set up the identity with AI" width={620}>
         <div className="t-sub t-muted" style={{ fontSize: 12.5, marginBottom: 12 }}>Describe who this officer should be in a sentence or two. AI drafts all four windows, grounded in your product truth — you review and edit before saving.</div>
         <label className="field"><span className="t-label">Who should this officer be?</span>
           <textarea className="textarea" rows={4} autoFocus value={intent} onChange={(e) => setIntent(e.target.value)} placeholder={`e.g. A ${agent.name} who guards our positioning, is ruthless about evidence, and translates signals into a sharp product strategy.`} /></label>
-        <div className="row gap-2"><button className="btn" disabled={drafting} onClick={draftWithAI} style={{ background: "var(--ac)", color: "#fff" }}>{drafting ? "Drafting all four…" : "✨ Draft the cornerstone"}</button><button className="btn btn-secondary" onClick={() => setAiOpen(false)}>Cancel</button></div>
+        <div className="row gap-2"><button className="btn" disabled={drafting} onClick={draftWithAI} style={{ background: "var(--ac)", color: "#fff" }}>{drafting ? "Drafting all four…" : "✨ Draft the identity"}</button><button className="btn btn-secondary" onClick={() => setAiOpen(false)}>Cancel</button></div>
       </Modal>
     </>
   );

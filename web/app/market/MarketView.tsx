@@ -129,7 +129,9 @@ export default function MarketView() {
       </div>
 
       {loading ? <div className="t-sub t-muted">Loading…</div> : feed.length === 0 ? (
-        <div className="empty"><div className="t-body" style={{ fontWeight: 600, marginBottom: 6 }}>No stories yet</div><div className="t-sub" style={{ maxWidth: 460, marginInline: "auto" }}>Set a signal — an internal or external observation about an industry or persona — and it shows up here as a story.</div></div>
+        signals.length > 0
+          ? <div className="empty"><div className="t-body" style={{ fontWeight: 600, marginBottom: 6 }}>No stories match your filters</div><div className="t-sub" style={{ maxWidth: 460, marginInline: "auto" }}>Clear or change the source / industry / persona filters above to see your market signals.</div></div>
+          : <div className="empty"><div className="t-body" style={{ fontWeight: 600, marginBottom: 6 }}>No stories yet</div><div className="t-sub" style={{ maxWidth: 460, marginInline: "auto" }}>Set a signal — an internal or external observation about an industry or persona — or connect a web-search source above, and it shows up here as a story.</div></div>
       ) : (
         <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(300px, 1fr))", gap: "var(--sp-4)" }}>
           {feed.map((s) => (

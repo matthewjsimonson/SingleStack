@@ -11,7 +11,7 @@ import { Section, Chip, Banner, Empty, Modal, ConfirmDialog } from "@/components
 import { Markdown } from "@/components/Markdown";
 
 type Skill = { id: string; key: string; name: string; description: string | null; category: string | null; instructions: string | null; source: string | null; created_at: string };
-type Usage = Record<string, { count: number; agents: string[] }>; // skill_id -> who uses it
+type Usage = Record<string, { count: number; agents: string[]; ids: string[] }>; // skill_id -> who uses it (names for display, ids for matching)
 
 const CATS = ["all", "product", "gtm", "research", "general"] as const;
 type Cat = typeof CATS[number];
@@ -49,8 +49,8 @@ export default function SkillLibrary() {
     const nameById = new Map((ag ?? []).map((a) => [a.id, a.name]));
     const u: Usage = {};
     for (const r of (as ?? []) as { skill_id: string; agent_id: string }[]) {
-      const e = (u[r.skill_id] ??= { count: 0, agents: [] });
-      e.count++; const n = nameById.get(r.agent_id); if (n) e.agents.push(n);
+      const e = (u[r.skill_id] ??= { count: 0, agents: [], ids: [] });
+      e.count++; e.ids.push(r.agent_id); const n = nameById.get(r.agent_id); if (n) e.agents.push(n);
     }
     setUsage(u); setLoading(false);
   }, [supabase]);
@@ -185,7 +185,7 @@ export default function SkillLibrary() {
         {agents.length === 0 ? <div className="t-sub t-muted">No agents yet.</div> : (
           <div className="stack-2">
             {agents.map((a) => {
-              const has = attachFor ? (usage[attachFor.id]?.agents.includes(a.name) ?? false) : false;
+              const has = attachFor ? (usage[attachFor.id]?.ids.includes(a.id) ?? false) : false;
               return (
                 <div key={a.id} className="card card-pad row-between" style={{ alignItems: "center", gap: 8 }}>
                   <span style={{ fontSize: 13.5, fontWeight: 600 }}>{a.name}</span>

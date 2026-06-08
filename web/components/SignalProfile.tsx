@@ -127,7 +127,7 @@ export default function SignalProfile({ scope, competitorId, competitorName }: {
         </div>
         <div className="row gap-2" style={{ flexShrink: 0 }}>
           <button className="btn btn-secondary btn-sm" onClick={draftAI} disabled={busy === "ai"} style={{ color: "var(--ac-text)" }}>{busy === "ai" ? "Synthesizing…" : "✨ Draft / refresh with AI"}</button>
-          <button className="btn btn-secondary btn-sm" onClick={pushToStrategy} disabled={busy === "push" || dirty} title={dirty ? "Save first" : "Derive product + GTM strategy themes from this profile"}>{busy === "push" ? "Pushing…" : "→ Push to strategy"}</button>
+          <button className="btn btn-secondary btn-sm" onClick={pushToStrategy} disabled={busy === "push" || dirty} title={dirty ? "Save first" : "Derive product + GTM strategy themes from this profile"}>{busy === "push" ? "Pushing…" : dirty ? "Save to push to strategy" : "→ Push to strategy"}</button>
           <button className="btn btn-sm" onClick={save} disabled={busy === "save" || !dirty}>{busy === "save" ? "Saving…" : dirty ? "Save" : "Saved"}</button>
         </div>
       </div>
