@@ -234,10 +234,14 @@ function Skills({ agentId, agentName, skills, attached, cornerstones, reload, se
   const [busy, setBusy] = useState(false);
   const [evolving, setEvolving] = useState(false);
   const [histSkill, setHistSkill] = useState<Skill | null>(null);
+  const [createTab, setCreateTab] = useState<"scratch" | "template">("scratch");
   const [selected, setSelected] = useState<string | null>(null); // which node's editor is open
   const [edit, setEdit] = useState({ name: "", description: "", instructions: "", category: "general", areas: [] as string[], connectors: [] as string[] });
   const [preview, setPreview] = useState(false);
   const [connInput, setConnInput] = useState("");
+  const [showImprove, setShowImprove] = useState(false);
+  const [improveAsk, setImproveAsk] = useState("");
+  const [improving, setImproving] = useState(false);
 
   async function toggle(skillId: string, on: boolean) {
     setError(null);
@@ -264,7 +268,7 @@ function Skills({ agentId, agentName, skills, attached, cornerstones, reload, se
   }
   function openEditor(s: Skill) {
     if (selected === s.id) { setSelected(null); return; }
-    setSelected(s.id); setPreview(false); setConnInput("");
+    setSelected(s.id); setPreview(false); setConnInput(""); setShowImprove(false); setImproveAsk("");
     setEdit({ name: s.name, description: s.description ?? "", instructions: s.instructions ?? "", category: s.category ?? "general", areas: s.areas ?? [], connectors: s.connectors ?? [] });
   }
   async function saveSkill(s: Skill) {
@@ -306,6 +310,24 @@ function Skills({ agentId, agentName, skills, attached, cornerstones, reload, se
     finally { setDrafting(false); }
   }
 
+  // Refine the playbook currently in the editor (AI), per a short instruction.
+  async function improveWithAI(s: Skill) {
+    if (!edit.instructions.trim()) { setError("Write or draft some instructions first."); return; }
+    if (!improveAsk.trim()) { setError("Say what to improve."); return; }
+    setImproving(true); setError(null);
+    try {
+      const { data, error } = await supabase.functions.invoke("evolve-skills", {
+        body: { agent_id: agentId, mode: "draft", kind: cornerstones.has(s.id) ? "cornerstone" : "child", intent: improveAsk.trim(), current: edit.instructions, area: edit.areas[0] },
+      });
+      if (error) throw error;
+      const d = data?.draft;
+      if (!d) throw new Error(data?.error || "No result returned.");
+      setEdit((e) => ({ ...e, instructions: d.instructions || e.instructions }));
+      setShowImprove(false); setImproveAsk(""); setPreview(true);
+    } catch (e) { setError(e instanceof Error ? e.message : "Could not improve the skill."); }
+    finally { setImproving(false); }
+  }
+
   async function createSkill(e: React.FormEvent) {
     e.preventDefault(); if (!form.name.trim()) return;
     setBusy(true); setError(null);
@@ -330,7 +352,7 @@ function Skills({ agentId, agentName, skills, attached, cornerstones, reload, se
   const library = skills.filter((s) => !attached.has(s.id));
   const selSkill = attachedSkills.find((s) => s.id === selected) ?? null;
   const selIsCorner = selSkill ? cornerstones.has(selSkill.id) : false;
-  const openCreate = (asCornerstone: boolean) => { setSelected(null); setForm({ name: "", description: "", instructions: "", category: "general", cornerstone: asCornerstone, areas: [], connectors: [] }); setIntent(""); setCreating(true); };
+  const openCreate = (asCornerstone: boolean) => { setSelected(null); setForm({ name: "", description: "", instructions: "", category: "general", cornerstone: asCornerstone, areas: [], connectors: [] }); setIntent(""); setCreateTab("scratch"); setCreating(true); };
 
   const addArea = (a: string) => { if (a && !edit.areas.includes(a)) setEdit((e) => ({ ...e, areas: [...e.areas, a] })); };
   const addConn = (c: string) => { const v = c.trim(); if (v && !edit.connectors.includes(v)) setEdit((e) => ({ ...e, connectors: [...e.connectors, v] })); setConnInput(""); };
@@ -349,33 +371,56 @@ function Skills({ agentId, agentName, skills, attached, cornerstones, reload, se
       {evolving && <EvolvePanel agentId={agentId} onApplied={reload} onClose={() => setEvolving(false)} setError={setError} />}
       {histSkill && <SkillHistory skill={histSkill} onClose={() => setHistSkill(null)} />}
 
-      {creating && (
-        <form onSubmit={createSkill} className="card card-pad" style={{ marginBottom: "var(--sp-3)" }}>
-          {/* Describe-it → AI draft. Kind (cornerstone vs child) steers the grounding. */}
-          <div className="card card-pad" style={{ background: "var(--panel-2)", marginBottom: "var(--sp-3)" }}>
-            <span className="t-label">Describe what you want — let AI draft it</span>
-            <label className="row gap-2" style={{ alignItems: "center", margin: "6px 0 8px", cursor: "pointer" }}><input type="checkbox" checked={form.cornerstone} onChange={(e) => setForm({ ...form, cornerstone: e.target.checked })} /><span className="t-sub">{form.cornerstone ? "Cornerstone — the agent’s identity (drafts from your product truth + ICP + role)" : "Child skill — a task/area playbook (drafts from the cornerstone + what you describe)"}</span></label>
-            <textarea className="textarea" rows={3} value={intent} onChange={(e) => setIntent(e.target.value)} placeholder={form.cornerstone ? "e.g. A CPO who guards the product record's truth, reframes the category, and is ruthless about evidence." : "e.g. Tear down a named competitor and turn it into a battlecard our reps can use."} />
-            <div className="row gap-2" style={{ marginTop: 8 }}><button className="btn btn-sm" type="button" onClick={draftWithAI} disabled={drafting} style={{ background: "var(--ac)", color: "#fff" }}>{drafting ? "Drafting…" : "✨ Draft with AI"}</button><span className="t-sub t-muted" style={{ fontSize: 11.5 }}>Fills the fields below — review and edit before creating.</span></div>
-          </div>
-          <div style={{ display: "grid", gridTemplateColumns: "2fr 1fr", gap: "var(--sp-3)" }}>
-            <label className="field"><span className="t-label">Name</span><input className="input" autoFocus value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} placeholder="e.g. Competitive teardown" /></label>
-            <label className="field"><span className="t-label">Category</span>
-              <select className="select" value={form.category} onChange={(e) => setForm({ ...form, category: e.target.value })}>
-                <option value="general">General</option><option value="product">Product</option><option value="gtm">GTM</option><option value="research">Research</option>
-              </select></label>
-          </div>
-          <label className="field"><span className="t-label">Description</span><input className="input" value={form.description} onChange={(e) => setForm({ ...form, description: e.target.value })} placeholder="What it does" /></label>
-          <label className="field"><span className="t-label">Instructions / playbook</span><textarea className="textarea" rows={7} value={form.instructions} onChange={(e) => setForm({ ...form, instructions: e.target.value })} placeholder="How the agent should apply this skill, tailored to your company and goals." /></label>
-          {!form.cornerstone && (form.areas.length > 0 || form.connectors.length > 0) && (
-            <div className="row gap-2" style={{ flexWrap: "wrap", margin: "2px 0 10px", alignItems: "center" }}>
-              {form.areas.length > 0 && <><span className="t-mono-xs t-muted">areas:</span>{form.areas.map((a) => <Chip key={a} tone="accent">{a}</Chip>)}</>}
-              {form.connectors.length > 0 && <><span className="t-mono-xs t-muted" style={{ marginLeft: 6 }}>connectors:</span>{form.connectors.map((c) => <Chip key={c} tone="violet">{c}</Chip>)}</>}
+      <Modal open={creating} onClose={() => { setCreating(false); setIntent(""); }} title={form.cornerstone ? "Set the cornerstone" : "New child skill"} width={680}>
+        {/* Anthropic-style: build from scratch (AI-assisted) or start from a template. */}
+        <div className="row gap-2" style={{ marginBottom: "var(--sp-3)" }}>
+          <button type="button" className={`btn btn-sm ${createTab === "scratch" ? "" : "btn-secondary"}`} onClick={() => setCreateTab("scratch")}>From scratch</button>
+          <button type="button" className={`btn btn-sm ${createTab === "template" ? "" : "btn-secondary"}`} onClick={() => setCreateTab("template")}>From a template{library.length ? ` · ${library.length}` : ""}</button>
+        </div>
+
+        {createTab === "scratch" ? (
+          <form onSubmit={createSkill}>
+            {/* Kind toggle changes both the grounding AND the setup framing. */}
+            <div className="card card-pad" style={{ background: "var(--panel-2)", marginBottom: "var(--sp-3)" }}>
+              <label className="row gap-2" style={{ alignItems: "center", marginBottom: 8, cursor: "pointer" }}><input type="checkbox" checked={form.cornerstone} onChange={(e) => setForm({ ...form, cornerstone: e.target.checked })} /><span className="t-sub">{form.cornerstone ? "Cornerstone — the agent’s identity (drafts from your product truth + ICP + role)" : "Child skill — a task/area playbook (drafts from the cornerstone + what you describe)"}</span></label>
+              <span className="t-label">Describe what you want — let AI draft it</span>
+              <textarea className="textarea" rows={3} value={intent} onChange={(e) => setIntent(e.target.value)} placeholder={form.cornerstone ? "e.g. A CPO who guards the product record's truth, reframes the category, and is ruthless about evidence." : "e.g. Tear down a named competitor and turn it into a battlecard our reps can use."} />
+              <div className="row gap-2" style={{ marginTop: 8 }}><button className="btn btn-sm" type="button" onClick={draftWithAI} disabled={drafting} style={{ background: "var(--ac)", color: "#fff" }}>{drafting ? "Drafting…" : "✨ Draft with AI"}</button><span className="t-sub t-muted" style={{ fontSize: 11.5 }}>Fills the fields below — review and edit before creating.</span></div>
             </div>
-          )}
-          <div className="row gap-2"><button className="btn" type="submit" disabled={busy}>{busy ? "Creating…" : "Create skill"}</button><button className="btn btn-secondary" type="button" onClick={() => { setCreating(false); setIntent(""); }}>Cancel</button></div>
-        </form>
-      )}
+            <div style={{ display: "grid", gridTemplateColumns: "2fr 1fr", gap: "var(--sp-3)" }}>
+              <label className="field"><span className="t-label">Name</span><input className="input" value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} placeholder="e.g. Competitive teardown" /></label>
+              <label className="field"><span className="t-label">Category</span>
+                <select className="select" value={form.category} onChange={(e) => setForm({ ...form, category: e.target.value })}>
+                  <option value="general">General</option><option value="product">Product</option><option value="gtm">GTM</option><option value="research">Research</option>
+                </select></label>
+            </div>
+            <label className="field"><span className="t-label">Description</span><input className="input" value={form.description} onChange={(e) => setForm({ ...form, description: e.target.value })} placeholder="What it does" /></label>
+            <label className="field"><span className="t-label">Instructions / playbook</span><textarea className="textarea" rows={8} value={form.instructions} onChange={(e) => setForm({ ...form, instructions: e.target.value })} placeholder="How the agent should apply this skill, tailored to your company and goals." /></label>
+            {!form.cornerstone && (form.areas.length > 0 || form.connectors.length > 0) && (
+              <div className="row gap-2" style={{ flexWrap: "wrap", margin: "2px 0 10px", alignItems: "center" }}>
+                {form.areas.length > 0 && <><span className="t-mono-xs t-muted">areas:</span>{form.areas.map((a) => <Chip key={a} tone="accent">{a}</Chip>)}</>}
+                {form.connectors.length > 0 && <><span className="t-mono-xs t-muted" style={{ marginLeft: 6 }}>connectors:</span>{form.connectors.map((c) => <Chip key={c} tone="violet">{c}</Chip>)}</>}
+              </div>
+            )}
+            <div className="row gap-2"><button className="btn" type="submit" disabled={busy}>{busy ? "Creating…" : "Create skill"}</button><button className="btn btn-secondary" type="button" onClick={() => { setCreating(false); setIntent(""); }}>Cancel</button></div>
+          </form>
+        ) : (
+          <div>
+            <div className="t-sub t-muted" style={{ fontSize: 12.5, marginBottom: 10 }}>Reusable skills in your library. Attach one as a child skill — then tailor it on the map.</div>
+            {library.length === 0
+              ? <div className="t-sub t-muted">No templates in your library yet. Build one from scratch.</div>
+              : <div className="stack-3">{library.map((s) => (
+                  <div key={s.id} className="card card-pad row-between" style={{ gap: 12 }}>
+                    <div style={{ minWidth: 0 }}>
+                      <div className="row gap-2" style={{ flexWrap: "wrap" }}><span style={{ fontSize: 14, fontWeight: 620 }}>{s.name}</span><Chip tone={catTone(s.category)}>{s.category}</Chip>{s.source === "template" && <Chip tone="green">template</Chip>}{(s.areas ?? []).map((a) => <Chip key={a} tone="accent">{a}</Chip>)}</div>
+                      {s.description && <div className="t-sub t-muted" style={{ fontSize: 12.5, marginTop: 2 }}>{s.description}</div>}
+                    </div>
+                    <button className="btn btn-sm" onClick={async () => { await toggle(s.id, true); setCreating(false); }}>Use</button>
+                  </div>
+                ))}</div>}
+          </div>
+        )}
+      </Modal>
 
       {/* The hub-and-spoke map */}
       <div className="card card-pad" style={{ background: "var(--panel-2)", marginBottom: "var(--sp-4)", paddingTop: 18, paddingBottom: 18 }}>
@@ -436,15 +481,23 @@ function Skills({ agentId, agentName, skills, attached, cornerstones, reload, se
             </div>
           </div>
 
-          {/* Playbook — edit / preview toggle. */}
+          {/* Playbook — edit / preview toggle + improve-with-AI. */}
           <div className="field">
-            <div className="row-between" style={{ alignItems: "center", marginBottom: 4 }}>
+            <div className="row-between" style={{ alignItems: "center", marginBottom: 4, flexWrap: "wrap", gap: 6 }}>
               <span className="t-label">Instructions (playbook)</span>
               <div className="row gap-2">
+                <button type="button" className="btn btn-secondary btn-sm" onClick={() => setShowImprove((v) => !v)} style={{ color: "var(--ac-text)" }}>✨ Improve with AI</button>
                 <button type="button" className="btn btn-secondary btn-sm" style={!preview ? { background: "var(--fill-2)" } : undefined} onClick={() => setPreview(false)}>Edit</button>
                 <button type="button" className="btn btn-secondary btn-sm" style={preview ? { background: "var(--fill-2)" } : undefined} onClick={() => setPreview(true)}>Preview</button>
               </div>
             </div>
+            {showImprove && (
+              <div className="card card-pad" style={{ background: "var(--panel-2)", marginBottom: 8 }}>
+                <span className="t-label">What should change?</span>
+                <textarea className="textarea" rows={2} value={improveAsk} onChange={(e) => setImproveAsk(e.target.value)} placeholder="e.g. Tighten it, add a step for pricing objections, make the tone more direct." />
+                <div className="row gap-2" style={{ marginTop: 8 }}><button type="button" className="btn btn-sm" disabled={improving} onClick={() => improveWithAI(selSkill)} style={{ background: "var(--ac)", color: "#fff" }}>{improving ? "Improving…" : "Apply"}</button><button type="button" className="btn btn-secondary btn-sm" onClick={() => setShowImprove(false)}>Cancel</button><span className="t-sub t-muted" style={{ fontSize: 11.5 }}>Rewrites the playbook below — review before saving.</span></div>
+              </div>
+            )}
             {preview
               ? <div className="card card-pad" style={{ background: "var(--panel-2)", minHeight: 120 }}>{edit.instructions.trim() ? <Markdown text={edit.instructions} /> : <span className="t-sub t-muted">Nothing to preview yet.</span>}</div>
               : <textarea className="textarea" rows={12} value={edit.instructions} onChange={(e) => setEdit({ ...edit, instructions: e.target.value })} placeholder="How the agent applies this skill — markdown supported." />}
@@ -454,22 +507,6 @@ function Skills({ agentId, agentName, skills, attached, cornerstones, reload, se
         </div>
       )}
 
-      {library.length > 0 && (
-        <div style={{ marginTop: "var(--sp-2)" }}>
-          <div className="t-label" style={{ color: "var(--tm)", marginBottom: 8 }}>Skill library <span className="t-muted" style={{ fontWeight: 400 }}>— attach as a child skill</span></div>
-          <div className="stack-3">
-            {library.map((s) => (
-              <div key={s.id} className="card card-pad row-between" style={{ gap: 12 }}>
-                <div style={{ minWidth: 0 }}>
-                  <div className="row gap-2"><span style={{ fontSize: 14, fontWeight: 620 }}>{s.name}</span><Chip tone={catTone(s.category)}>{s.category}</Chip></div>
-                  {s.description && <div className="t-sub t-muted" style={{ fontSize: 12.5, marginTop: 2 }}>{s.description}</div>}
-                </div>
-                <button className="btn btn-sm" onClick={() => toggle(s.id, true)}>Attach</button>
-              </div>
-            ))}
-          </div>
-        </div>
-      )}
     </Section>
   );
 }

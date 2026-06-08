@@ -113,7 +113,7 @@ Deno.serve(async (req: Request) => {
     { global: { headers: { Authorization: authHeader } } },
   );
 
-  let input: { agent_id?: string; agent_key?: string; mode?: string; kind?: string; intent?: string; area?: string };
+  let input: { agent_id?: string; agent_key?: string; mode?: string; kind?: string; intent?: string; area?: string; current?: string };
   try { input = await req.json(); } catch { return json({ error: "invalid JSON body" }, 400); }
 
   // Load the agent (by id or key), RLS-scoped.
@@ -177,11 +177,16 @@ Deno.serve(async (req: Request) => {
             `Set areas to the relevant surface keys from this set: ${AREA_KEYS.join(", ")}. Set connectors to any external MCP systems the skill clearly needs, by label (e.g. DeepWiki, G2, GitHub). Use [] if none.`,
           ].join("\n");
 
+      // Improve mode: an existing playbook is supplied → refine it in place rather
+      // than author from scratch. Same schema/output; the instruction is the ask.
+      const current = (input.current ?? "").trim();
       const userMsg = [
-        `WHAT THE OPERATOR WANTS THIS ${kind === "cornerstone" ? "AGENT (its cornerstone)" : "CHILD SKILL"} TO DO/BE:\n${intent}`,
+        current
+          ? `IMPROVE THIS EXISTING ${kind === "cornerstone" ? "CORNERSTONE" : "CHILD SKILL"} PLAYBOOK — keep its intent and structure, apply the change, return the FULL improved playbook:\n${current}\n\nTHE IMPROVEMENT THE OPERATOR WANTS:\n${intent}`
+          : `WHAT THE OPERATOR WANTS THIS ${kind === "cornerstone" ? "AGENT (its cornerstone)" : "CHILD SKILL"} TO DO/BE:\n${intent}`,
         area ? `\nTARGET AREA: ${area}` : "",
         ground.length ? `\n\nGROUNDING:\n${ground.join("\n")}` : "",
-        "\n\nDraft the skill now.",
+        current ? "\n\nReturn the improved skill now." : "\n\nDraft the skill now.",
       ].filter(Boolean).join("");
 
       const anthropic = new Anthropic({ apiKey: key });
