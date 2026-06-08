@@ -75,3 +75,5 @@ verify_jwt = false
 verify_jwt = false
 [functions.import-record]
 verify_jwt = false
+[functions.draft-cornerstone]
+verify_jwt = false

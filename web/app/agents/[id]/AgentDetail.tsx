@@ -10,14 +10,14 @@ import { Section, Chip, Banner, BackLink, Empty, Modal } from "@/components/ui";
 import { Markdown } from "@/components/Markdown";
 import { CONNECTOR_CATALOG } from "@/lib/connectors";
 
-type Agent = { id: string; key: string; name: string; role: string | null; model: string | null; system_prompt: string | null; is_active: boolean };
+type Agent = { id: string; key: string; name: string; role: string | null; model: string | null; system_prompt: string | null; is_active: boolean; identity: string | null; mandate: string | null; principles: string | null; voice: string | null };
 type Skill = { id: string; key: string; name: string; description: string | null; category: string | null; instructions: string | null; areas: string[]; connectors: string[]; source: string | null };
 type Connection = { id: string; kind: string; label: string; area: string | null; mcp_url: string | null; status: string; config: { purpose?: string | null } | null; targets: { type?: string; ref: string; label?: string }[] | null; guidance: string | null };
 type InitiativeOpt = { id: string; title: string; stage: string | null; scope: string | null };
 type WorkstreamOpt = { id: string; title: string; area: string | null; initiative_id: string; initiative_title?: string };
 type Alignment = { id: string; role: string; guidance: string | null; initiative_id: string | null; workstream_id: string | null; title: string; kind: "initiative" | "task"; sub: string | null };
 
-type Tab = "overview" | "skills" | "connections" | "alignment" | "workflows";
+type Tab = "overview" | "skills" | "scope" | "workflows";
 
 const INTERNAL_AREAS = [
   { area: "products", label: "Product records" },
@@ -43,7 +43,7 @@ export default function AgentDetail({ agentId }: { agentId: string }) {
   const [error, setError] = useState<string | null>(null);
 
   const load = useCallback(async () => {
-    const { data: a } = await supabase.from("agents").select("id, key, name, role, model, system_prompt, is_active").eq("id", agentId).maybeSingle();
+    const { data: a } = await supabase.from("agents").select("id, key, name, role, model, system_prompt, is_active, identity, mandate, principles, voice").eq("id", agentId).maybeSingle();
     const [{ data: sk }, { data: as }, { data: cs }, { data: wf }, { data: al }, { data: inits }, { data: ws }] = await Promise.all([
       supabase.from("skills").select("id, key, name, description, category, instructions, areas, connectors, source").order("name"),
       supabase.from("agent_skills").select("skill_id, is_cornerstone").eq("agent_id", agentId),
@@ -79,8 +79,7 @@ export default function AgentDetail({ agentId }: { agentId: string }) {
   const TABS: [Tab, string, number][] = [
     ["overview", "Overview", 0],
     ["skills", "Skills", attached.size],
-    ["connections", "Connections", connections.length],
-    ["alignment", "Alignment", alignments.length],
+    ["scope", "Scope", connections.length + alignments.length],
     ["workflows", "Workflows", agentWorkflows.length],
   ];
 
@@ -110,27 +109,72 @@ export default function AgentDetail({ agentId }: { agentId: string }) {
       {tab === "overview" && <Overview agent={agent} onSaved={load} setError={setError}
         skillsCount={attached.size} areas={connections.filter((c) => c.kind === "internal").map((c) => c.label)} alignCount={alignments.length} tabTo={setTab} />}
       {tab === "skills" && <Skills agentId={agentId} agentName={agent.name} skills={skills} attached={attached} cornerstones={cornerstones} reload={load} setError={setError} />}
-      {tab === "connections" && <Connections agentId={agentId} connections={connections} reload={load} setError={setError} />}
-      {tab === "alignment" && <Alignment agentId={agentId} alignments={alignments} initiatives={initiatives} workstreams={workstreams} reload={load} setError={setError} />}
+      {tab === "scope" && <Scope agentId={agentId} connections={connections} alignments={alignments} initiatives={initiatives} workstreams={workstreams} reload={load} setError={setError} />}
       {tab === "workflows" && <Workflows workflows={agentWorkflows} />}
     </div>
   );
 }
 
 // ---------- Overview ----------
+// The cornerstone — staged into four guided windows that COMPOSE the system
+// prompt, instead of one blank "base prompt" box. AI can draft all four.
+const CORNER_WINDOWS: { key: "identity" | "mandate" | "principles" | "voice"; label: string; hint: string; ph: string }[] = [
+  { key: "identity", label: "Identity", hint: "Who this officer is — role, seniority, domain, point of view.", ph: "You are the CPO — a senior product leader who guards the product's truth and reframes the category." },
+  { key: "mandate", label: "Mandate", hint: "What they own and are accountable for; what “good” looks like.", ph: "You own the accuracy of the product record and the strength of the product strategy board…" },
+  { key: "principles", label: "Operating principles", hint: "How they think and decide — priorities, tradeoffs, the evidence bar.", ph: "Evidence over opinion. Prefer reversible bets. Name the strongest counter-argument before recommending…" },
+  { key: "voice", label: "Voice & guardrails", hint: "Tone, and what they must NOT do.", ph: "Direct and concise. Never fabricate; always cite. Defer to a human on anything irreversible." },
+];
+
+function composeCornerstone(w: { identity: string; mandate: string; principles: string; voice: string }): string {
+  return CORNER_WINDOWS.map(({ key, label }) => {
+    const v = w[key].trim();
+    return v ? `# ${label}\n${v}` : "";
+  }).filter(Boolean).join("\n\n");
+}
+
 function Overview({ agent, onSaved, setError, skillsCount, areas, alignCount, tabTo }: { agent: Agent; onSaved: () => void; setError: (s: string | null) => void; skillsCount: number; areas: string[]; alignCount: number; tabTo: (t: Tab) => void }) {
   const supabase = createClient();
-  const [prompt, setPrompt] = useState(agent.system_prompt ?? "");
   const [role, setRole] = useState(agent.role ?? "");
   const [model, setModel] = useState(agent.model ?? "claude-opus-4-8");
+  // Seed the windows; if a legacy agent has only a freeform prompt, surface it in
+  // Identity so nothing is lost and the human can restructure it.
+  const noWindows = !agent.identity && !agent.mandate && !agent.principles && !agent.voice;
+  const [w, setW] = useState({
+    identity: agent.identity ?? (noWindows ? agent.system_prompt ?? "" : ""),
+    mandate: agent.mandate ?? "",
+    principles: agent.principles ?? "",
+    voice: agent.voice ?? "",
+  });
   const [busy, setBusy] = useState(false);
+  // Guided AI
+  const [aiOpen, setAiOpen] = useState(false);
+  const [intent, setIntent] = useState("");
+  const [drafting, setDrafting] = useState(false);
+
   async function save() {
     setBusy(true); setError(null);
-    const { error } = await supabase.from("agents").update({ system_prompt: prompt, role, model }).eq("id", agent.id);
+    const system_prompt = composeCornerstone(w) || agent.system_prompt || null;
+    const { error } = await supabase.from("agents").update({
+      role, model, identity: w.identity.trim() || null, mandate: w.mandate.trim() || null,
+      principles: w.principles.trim() || null, voice: w.voice.trim() || null, system_prompt,
+    }).eq("id", agent.id);
     if (error) setError(error.message); else onSaved();
     setBusy(false);
   }
-  // The four dials of how this agent is set up — objective, skills, access, focus.
+  async function draftWithAI() {
+    if (!intent.trim()) { setError("Describe who this officer should be first."); return; }
+    setDrafting(true); setError(null);
+    try {
+      const { data, error } = await supabase.functions.invoke("draft-cornerstone", { body: { name: agent.name, role: role.trim() || null, intent: intent.trim() } });
+      if (error) throw error;
+      const d = data?.draft;
+      if (!d) throw new Error(data?.error || "No draft returned.");
+      setW({ identity: d.identity ?? "", mandate: d.mandate ?? "", principles: d.principles ?? "", voice: d.voice ?? "" });
+      setAiOpen(false); setIntent("");
+    } catch (e) { setError(e instanceof Error ? e.message : "Could not draft the cornerstone."); }
+    finally { setDrafting(false); }
+  }
+
   const Dial = ({ label, value, hint, to }: { label: string; value: string; hint: string; to?: Tab }) => (
     <button onClick={() => to && tabTo(to)} disabled={!to} className={to ? "card card-link card-pad" : "card card-pad"} style={{ textAlign: "left", cursor: to ? "pointer" : "default" }}>
       <div className="t-label" style={{ color: "var(--tm)", marginBottom: 4 }}>{label}</div>
@@ -138,33 +182,55 @@ function Overview({ agent, onSaved, setError, skillsCount, areas, alignCount, ta
       <div className="t-sub t-muted" style={{ fontSize: 11.5 }}>{hint}</div>
     </button>
   );
+  const filled = CORNER_WINDOWS.filter((win) => w[win.key].trim()).length;
   return (
     <>
       <Section label="Setup at a glance">
         <div style={{ display: "grid", gridTemplateColumns: "repeat(4, 1fr)", gap: "var(--sp-3)" }}>
-          <Dial label="Objective" value={agent.model ?? "—"} hint="model · identity & prompt below" />
+          <Dial label="Cornerstone" value={`${filled}/4`} hint={filled === 4 ? "fully set" : "windows filled below"} />
           <Dial label="Skills" value={String(skillsCount)} hint={skillsCount ? "playbooks it applies" : "none attached"} to="skills" />
-          <Dial label="Access" value={areas.length ? String(areas.length) : "all"} hint={areas.length ? areas.join(", ") : "full foundation"} to="connections" />
-          <Dial label="Focus" value={String(alignCount)} hint={alignCount ? "initiatives / tasks" : "no alignment"} to="alignment" />
+          <Dial label="Access" value={areas.length ? String(areas.length) : "all"} hint={areas.length ? areas.join(", ") : "full foundation"} to="scope" />
+          <Dial label="Focus" value={String(alignCount)} hint={alignCount ? "initiatives / tasks" : "no alignment"} to="scope" />
         </div>
       </Section>
-    <Section label="Base configuration">
-      <div className="card card-pad">
-        <div style={{ display: "grid", gridTemplateColumns: "2fr 1fr", gap: "var(--sp-3)" }}>
-          <label className="field"><span className="t-label">Persona</span>
-            <input className="input" value={role} onChange={(e) => setRole(e.target.value)} placeholder="Who this agent is — e.g. Competitor Analyst" /></label>
-          <label className="field"><span className="t-label">Model</span>
-            <select className="select" value={model} onChange={(e) => setModel(e.target.value)}>
-              <option value="claude-opus-4-8">claude-opus-4-8 · most capable</option>
-              <option value="claude-sonnet-4-6">claude-sonnet-4-6 · faster, cheaper</option>
-              <option value="claude-haiku-4-5">claude-haiku-4-5 · cheapest</option>
-            </select></label>
+
+      <Section label="Base configuration">
+        <div className="card card-pad">
+          <div style={{ display: "grid", gridTemplateColumns: "2fr 1fr", gap: "var(--sp-3)" }}>
+            <label className="field"><span className="t-label">Persona</span>
+              <input className="input" value={role} onChange={(e) => setRole(e.target.value)} placeholder="Who this agent is — e.g. Competitor Analyst" /></label>
+            <label className="field"><span className="t-label">Model</span>
+              <select className="select" value={model} onChange={(e) => setModel(e.target.value)}>
+                <option value="claude-opus-4-8">claude-opus-4-8 · most capable</option>
+                <option value="claude-sonnet-4-6">claude-sonnet-4-6 · faster, cheaper</option>
+                <option value="claude-haiku-4-5">claude-haiku-4-5 · cheapest</option>
+              </select></label>
+          </div>
         </div>
-        <label className="field"><span className="t-label">Base prompt</span>
-          <textarea className="textarea" rows={8} value={prompt} onChange={(e) => setPrompt(e.target.value)} placeholder="The agent's core instructions — how it reasons and what it optimizes for." /></label>
-        <button className="btn" onClick={save} disabled={busy}>{busy ? "Saving…" : "Save"}</button>
-      </div>
-    </Section>
+      </Section>
+
+      <Section label="Cornerstone — the agent's identity" action={<button className="btn btn-sm" onClick={() => setAiOpen(true)} style={{ background: "var(--ac)", color: "#fff" }}>✨ Set up with AI</button>}>
+        <div className="t-sub t-muted" style={{ fontSize: 12.5, marginBottom: 12 }}>The four windows below compose this officer&rsquo;s core prompt — staged so it&rsquo;s legible, not one blank box. Fill what matters; empty windows are skipped. Use <strong>Set up with AI</strong> to draft all four from a sentence, grounded in your product truth.</div>
+        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "var(--sp-3)" }}>
+          {CORNER_WINDOWS.map((win) => (
+            <label key={win.key} className="field">
+              <span className="t-label">{win.label}</span>
+              <span className="t-sub t-muted" style={{ fontSize: 11.5, marginBottom: 4 }}>{win.hint}</span>
+              <textarea className="textarea" rows={5} value={w[win.key]} onChange={(e) => setW({ ...w, [win.key]: e.target.value })} placeholder={win.ph} />
+            </label>
+          ))}
+        </div>
+        <div className="row gap-2" style={{ marginTop: "var(--sp-3)" }}>
+          <button className="btn" onClick={save} disabled={busy}>{busy ? "Saving…" : "Save cornerstone"}</button>
+        </div>
+      </Section>
+
+      <Modal open={aiOpen} onClose={() => setAiOpen(false)} title="Set up the cornerstone with AI" width={620}>
+        <div className="t-sub t-muted" style={{ fontSize: 12.5, marginBottom: 12 }}>Describe who this officer should be in a sentence or two. AI drafts all four windows, grounded in your product truth — you review and edit before saving.</div>
+        <label className="field"><span className="t-label">Who should this officer be?</span>
+          <textarea className="textarea" rows={4} autoFocus value={intent} onChange={(e) => setIntent(e.target.value)} placeholder={`e.g. A ${agent.name} who guards our positioning, is ruthless about evidence, and translates signals into a sharp product strategy.`} /></label>
+        <div className="row gap-2"><button className="btn" disabled={drafting} onClick={draftWithAI} style={{ background: "var(--ac)", color: "#fff" }}>{drafting ? "Drafting all four…" : "✨ Draft the cornerstone"}</button><button className="btn btn-secondary" onClick={() => setAiOpen(false)}>Cancel</button></div>
+      </Modal>
     </>
   );
 }
@@ -431,16 +497,13 @@ function Skills({ agentId, agentName, skills, attached, cornerstones, reload, se
         </div>
       </div>
 
-      {/* Editor for the selected node */}
-      {selSkill && (
-        <div className="card card-pad" style={{ marginBottom: "var(--sp-4)", borderLeft: `3px solid ${selIsCorner ? "var(--ac)" : "var(--vl)"}` }}>
-          <div className="row-between" style={{ alignItems: "center", marginBottom: 10, gap: 8, flexWrap: "wrap" }}>
-            <span className="t-h2" style={{ fontSize: 14 }}>{selIsCorner ? "★ Cornerstone" : "Child skill"}</span>
-            <div className="row gap-2" style={{ flexWrap: "wrap" }}>
-              <button className="btn btn-secondary btn-sm" onClick={() => toggleCornerstone(selSkill.id, !selIsCorner)} title={selIsCorner ? "Demote to a child skill" : "Make this the agent's cornerstone (identity, always on)"}>{selIsCorner ? "Demote to child" : "☆ Make cornerstone"}</button>
-              <button className="btn btn-secondary btn-sm" onClick={() => setHistSkill(selSkill)}>History</button>
-              <button className="btn btn-secondary btn-sm" onClick={() => toggle(selSkill.id, false)} style={{ color: "var(--rd-text)" }}>Detach</button>
-            </div>
+      {/* Editor for the selected node — opens as an overlay (no scrolling the page) */}
+      <Modal open={!!selSkill} onClose={() => setSelected(null)} title={selIsCorner ? "★ Cornerstone skill" : "Child skill"} width={720}>
+        {selSkill && (<>
+          <div className="row gap-2" style={{ flexWrap: "wrap", marginBottom: 12 }}>
+            <button className="btn btn-secondary btn-sm" onClick={() => toggleCornerstone(selSkill.id, !selIsCorner)} title={selIsCorner ? "Demote to a child skill" : "Make this the agent's cornerstone (identity, always on)"}>{selIsCorner ? "Demote to child" : "☆ Make cornerstone"}</button>
+            <button className="btn btn-secondary btn-sm" onClick={() => setHistSkill(selSkill)}>History</button>
+            <button className="btn btn-secondary btn-sm" onClick={() => toggle(selSkill.id, false)} style={{ color: "var(--rd-text)" }}>Detach</button>
           </div>
           <div style={{ display: "grid", gridTemplateColumns: "2fr 1fr", gap: "var(--sp-3)" }}>
             <label className="field"><span className="t-label">Name</span><input className="input" value={edit.name} onChange={(e) => setEdit({ ...edit, name: e.target.value })} /></label>
@@ -504,8 +567,8 @@ function Skills({ agentId, agentName, skills, attached, cornerstones, reload, se
           </div>
 
           <div className="row gap-2" style={{ marginTop: 4 }}><button className="btn btn-sm" onClick={() => saveSkill(selSkill)}>Save</button><button className="btn btn-secondary btn-sm" onClick={() => setSelected(null)}>Cancel</button></div>
-        </div>
-      )}
+        </>)}
+      </Modal>
 
     </Section>
   );
@@ -622,13 +685,27 @@ function Alignment({ agentId, alignments, initiatives, workstreams, reload, setE
   );
 }
 
-// ---------- Connections ----------
-function Connections({ agentId, connections, reload, setError }: { agentId: string; connections: Connection[]; reload: () => void; setError: (s: string | null) => void }) {
+// ---------- Scope — what the agent connects to & answers for ----------
+// Consolidates the old Connections + Alignment under one internal-vs-external
+// model: INTERNAL = SingleStack data areas + the work it's aligned to; EXTERNAL
+// = MCP tools. One mental model: everything this agent can see and act on.
+const ScopeHead = ({ title, blurb }: { title: string; blurb: string }) => (
+  <div style={{ margin: "var(--sp-2) 0 var(--sp-3)" }}>
+    <div className="t-h2" style={{ fontSize: 15 }}>{title}</div>
+    <div className="t-sub t-muted" style={{ fontSize: 12.5, marginTop: 2 }}>{blurb}</div>
+  </div>
+);
+
+function Scope({ agentId, connections, alignments, initiatives, workstreams, reload, setError }: {
+  agentId: string; connections: Connection[]; alignments: Alignment[]; initiatives: InitiativeOpt[]; workstreams: WorkstreamOpt[]; reload: () => void; setError: (s: string | null) => void;
+}) {
   const supabase = createClient();
   const [mcp, setMcp] = useState({ label: "", url: "", purpose: "", targets: "", token: "" });
   const [busy, setBusy] = useState(false);
 
   const haveArea = (area: string) => connections.some((c) => c.kind === "internal" && c.area === area);
+  const internalConns = connections.filter((c) => c.kind === "internal");
+  const mcpConns = connections.filter((c) => c.kind === "mcp");
 
   async function addInternal(area: string, label: string) {
     setError(null);
@@ -666,7 +743,8 @@ function Connections({ agentId, connections, reload, setError }: { agentId: stri
 
   return (
     <>
-      <Section label="Internal data">
+      <ScopeHead title="Internal" blurb="What this agent sees inside SingleStack, and the work it answers for." />
+      <Section label="Data areas">
         <div className="t-sub t-muted" style={{ fontSize: 12.5, marginBottom: 12 }}>Give this agent access to areas of SingleStack to reason over.</div>
         <div className="row gap-2" style={{ flexWrap: "wrap" }}>
           {INTERNAL_AREAS.map((a) => (
@@ -675,8 +753,17 @@ function Connections({ agentId, connections, reload, setError }: { agentId: stri
             </button>
           ))}
         </div>
+        {internalConns.length > 0 && (
+          <div className="stack-3" style={{ marginTop: "var(--sp-3)" }}>
+            {internalConns.map((c) => <ConnRow key={c.id} c={c} onRemove={remove} reload={reload} setError={setError} />)}
+          </div>
+        )}
       </Section>
 
+      {/* Aligned work — the concrete initiatives/tasks this agent owns or watches. */}
+      <Alignment agentId={agentId} alignments={alignments} initiatives={initiatives} workstreams={workstreams} reload={reload} setError={setError} />
+
+      <ScopeHead title="External" blurb="Tools this agent reaches outside SingleStack, via MCP." />
       <Section label="External tools (MCP)">
         <div className="t-sub t-muted" style={{ fontSize: 12.5, marginBottom: 12 }}>Connect an MCP server so this agent can use external tools (web search, GitHub, your own). <strong>Live now</strong> — a connected server&rsquo;s tools run inside the agent&rsquo;s loop. Add a token for secured servers (kept in a locked store, never shown again, passed only to the model at run time). Whatever it gathers still flows through the review queue.</div>
         {/* Prebuilt connectors — one click prefills the form below; add your token, then Add. */}
@@ -702,13 +789,9 @@ function Connections({ agentId, connections, reload, setError }: { agentId: stri
           <div className="t-sub t-muted" style={{ fontSize: 11.5, marginBottom: 8 }}>Connecting Salesforce isn’t enough — tell the agent which reports, accounts, and opportunities to consult. This is the difference between a connection and a useful one.</div>
           <button className="btn btn-sm" type="submit" disabled={busy}>{busy ? "Adding…" : "+ Add MCP connection"}</button>
         </form>
-      </Section>
-
-      <Section label="Connected">
-        <div className="t-sub t-muted" style={{ fontSize: 12.5, marginBottom: 12 }}>Connecting an area isn&apos;t enough — <strong>curate</strong> it: tell the agent what to watch, prioritize, or ignore, and point it at specifics. The agent reads this at runtime.</div>
-        {connections.length === 0 ? <div className="t-sub t-muted">No connections yet.</div> : (
+        {mcpConns.length > 0 && (
           <div className="stack-3">
-            {connections.map((c) => <ConnRow key={c.id} c={c} onRemove={remove} reload={reload} setError={setError} />)}
+            {mcpConns.map((c) => <ConnRow key={c.id} c={c} onRemove={remove} reload={reload} setError={setError} />)}
           </div>
         )}
       </Section>
