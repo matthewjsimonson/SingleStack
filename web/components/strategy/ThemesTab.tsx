@@ -251,13 +251,14 @@ export default function ThemesTab({ onStartEpic, lens = "product" }: { onStartEp
 
             <div className="row-between" style={{ alignItems: "center", borderTop: "1px solid var(--border)", paddingTop: 12 }}>
               <button className="btn btn-secondary btn-sm" onClick={() => setDelId(open.id)} style={{ color: "var(--rd-text)" }}>Delete theme</button>
-              {open.bundle_id ? (
+              {/* Epics are the product pipeline — only offered on the product board (onStartEpic present). */}
+              {onStartEpic && (open.bundle_id ? (
                 <span className="row gap-2"><span className="t-mono-xs" style={{ color: "var(--ac-text)" }}>In {epicTitle(open.bundle_id)}</span><button className="btn btn-secondary btn-sm" onClick={() => unpush(open.id)}>Remove from epic</button></span>
               ) : (
                 <select className="select" value="" onChange={(e) => pushToEpic(open.id, e.target.value)} style={{ flex: "0 0 200px" }}>
                   <option value="">Push into epic…</option>{epics.map((ep) => <option key={ep.id} value={ep.id}>{ep.title || "Untitled epic"}</option>)}
                 </select>
-              )}
+              ))}
             </div>
           </div>
         )}
