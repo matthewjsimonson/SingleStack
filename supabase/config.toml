@@ -81,3 +81,7 @@ verify_jwt = false
 verify_jwt = false
 [functions.profile-to-strategy]
 verify_jwt = false
+[functions.scheduled-pulls]
+verify_jwt = false
+[functions.outcome-watch]
+verify_jwt = false

@@ -136,18 +136,19 @@ Deno.serve(async (req: Request) => {
 
   let runId: string | null = null;
   try {
-    const { source_id } = await req.json().catch(() => ({}));
+    const { source_id, trigger } = await req.json().catch(() => ({}));
     if (!source_id) return json({ error: "source_id required" }, 400);
 
-    const { data: orgId } = await supabase.rpc("current_org_id");
-    if (!orgId) return json({ error: "could not resolve org" }, 400);
-
-    // RLS already scopes this to the caller's org; the eq is belt-and-suspenders.
+    // RLS scopes this to the caller's org for user JWTs. The org is taken from
+    // the source row itself — correct under a user JWT (RLS guarantees it's
+    // their org) AND under the service-role scheduler (RLS bypassed, row is
+    // authoritative). This is what lets scheduled pulls run without a user.
     const { data: source, error: sErr } = await supabase
       .from("sources")
-      .select("id, label, kind, origin, status, focus, include_terms, exclude_terms, max_per_pull, min_relevance, config, targets, guidance, competitor_id, market_lens")
+      .select("id, org_id, label, kind, origin, status, focus, include_terms, exclude_terms, max_per_pull, min_relevance, config, targets, guidance, competitor_id, market_lens")
       .eq("id", source_id).single();
     if (sErr || !source) return json({ error: "source not found" }, 404);
+    const orgId = source.org_id as string;
 
     if (!liveKind(source.kind)) {
       return json({ error: `'${source.kind}' needs a connected credential to pull. It's ready to connect — live pulling lights up with the secret store. (website & youtube run today.)`, needsAuth: true }, 422);
@@ -155,7 +156,7 @@ Deno.serve(async (req: Request) => {
 
     // Open the audit record immediately (running) — every pull is accountable.
     const { data: runRow } = await supabase.from("connector_runs")
-      .insert({ org_id: orgId, source_id: source.id, trigger: "manual", status: "running" })
+      .insert({ org_id: orgId, source_id: source.id, trigger: trigger === "scheduled" ? "scheduled" : "manual", status: "running" })
       .select("id").single();
     runId = runRow?.id ?? null;
 
@@ -277,9 +278,37 @@ Deno.serve(async (req: Request) => {
       category: s.category === "gtm" || s.category === "both" ? s.category : "product",
       origin: "external" as const,
     }));
+    let firstSignalId: string | null = null;
     if (rows.length) {
-      const { error: insErr } = await supabase.from("signals").insert(rows);
+      const { data: created, error: insErr } = await supabase.from("signals").insert(rows).select("id");
       if (insErr) throw insErr;
+      firstSignalId = created?.[0]?.id ?? null;
+    }
+
+    // Fire on_signal workflows for the pull (ONE run per pull, not per signal —
+    // the automation spine now reacts to automated ingestion, not just manual
+    // logging). Propose-only: enqueues pending workflow_runs a human ratifies.
+    let workflowsFired = 0;
+    if (rows.length) {
+      try {
+        const { data: wfs } = await supabase.from("workflows").select("id, name").eq("org_id", orgId).eq("trigger", "on_signal").eq("is_active", true);
+        if (wfs?.length) {
+          const label = `${source.label}: ${rows.length} new signal${rows.length === 1 ? "" : "s"}`;
+          // Idempotent per (workflow, run): skip workflows already holding a pending run for this pull.
+          const { data: open } = await supabase.from("workflow_runs").select("workflow_id, context").in("workflow_id", wfs.map((w) => w.id)).eq("status", "pending");
+          const already = new Set((open ?? []).filter((r) => (r.context as { run_id?: string } | null)?.run_id === runId).map((r) => r.workflow_id));
+          const wfRows = wfs.filter((w) => !already.has(w.id)).map((w) => ({
+            org_id: orgId, workflow_id: w.id, trigger: "on_signal", status: "pending",
+            context: { label, signalId: firstSignalId, run_id: runId, source_id: source.id },
+            summary: `${w.name} — ${label}`,
+            proposed_action: `Draft an initiative responding to the new signals from “${source.label}”.`,
+          }));
+          if (wfRows.length) {
+            const { error: wfErr } = await supabase.from("workflow_runs").insert(wfRows);
+            if (!wfErr) { workflowsFired = wfRows.length; await supabase.from("workflows").update({ last_run_at: now }).in("id", wfRows.map((r) => r.workflow_id)); }
+          }
+        }
+      } catch { /* firing is best-effort — never fail the pull */ }
     }
 
     // Update source health + close the audit record.
@@ -298,6 +327,7 @@ Deno.serve(async (req: Request) => {
       ok: true,
       fetched: fetched.length,
       created: rows.length,
+      workflowsFired,
       dropped,
       quarantined,
       floor, budget,

@@ -147,3 +147,20 @@ Region:           West US (Oregon)
   run is green → dev DB migrated.
 - Merge `develop` → `main` → **demo** run green → demo deploy reflects it.
 - ✅ dev and demo are separate databases.
+
+## Heartbeat (scheduled pulls + outcome watch)
+
+The hourly background loops (migration `20260609000001_heartbeat_cron.sql`)
+need two Vault secrets before they fire — until then every tick is a logged
+no-op. Set once per environment (SQL editor or Studio → Vault):
+
+```sql
+select vault.create_secret('https://<project-ref>.supabase.co', 'project_url');
+select vault.create_secret('<service-role-key>', 'service_role_key');
+```
+
+Verify: `select jobname, schedule from cron.job;` should list
+`singlestack-scheduled-pulls` (:12) and `singlestack-outcome-watch` (:27).
+Sources only auto-pull when their **cadence** is daily/weekly (set in the
+connect flow); each tick pulls at most 12 due sources, oldest first, through
+the normal connector pipeline (`connector_runs.trigger = 'scheduled'`).
