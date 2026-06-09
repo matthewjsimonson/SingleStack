@@ -15,8 +15,9 @@ import { errText } from "@/lib/strategy";
 import SignalsTab from "@/components/strategy/SignalsTab";
 import ThemesTab from "@/components/strategy/ThemesTab";
 import EpicsTab from "@/components/strategy/EpicsTab";
+import OutcomesBoard from "@/components/OutcomesBoard";
 
-type View = "strategy" | "epics";
+type View = "strategy" | "epics" | "outcomes";
 
 export default function StrategyView() {
   const supabase = createClient();
@@ -62,7 +63,7 @@ export default function StrategyView() {
         <h1 className="t-page">Strategy</h1>
         <div className="t-sub t-muted" style={{ fontSize: 12.5 }}>Product signals merge into themes, auto-bucketed by strategic group; craft the strongest into epics and push to Ship.</div>
       </div>
-      <SubTabs<View> tabs={[{ key: "strategy", label: "Strategy" }, { key: "epics", label: "Epics" }]} active={view} onChange={setView} />
+      <SubTabs<View> tabs={[{ key: "strategy", label: "Strategy" }, { key: "epics", label: "Epics" }, { key: "outcomes", label: "Outcomes" }]} active={view} onChange={setView} />
       <Banner>{error}</Banner>
 
       {view === "strategy" && (
@@ -76,6 +77,7 @@ export default function StrategyView() {
         </div>
       )}
       {view === "epics" && <EpicsTab initialEpicId={startedEpicId} />}
+      {view === "outcomes" && <OutcomesBoard />}
     </div>
   );
 }
