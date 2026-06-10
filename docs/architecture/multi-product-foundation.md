@@ -1,6 +1,26 @@
 # Multi-Product Foundation — architecture design
 
-Status: **proposed (for review)** · No implementation yet · Owner: SingleStack
+Status: **partially implemented** (see status below) · Owner: SingleStack
+
+## Implementation status (2026-06-10, reconciled against develop)
+
+- **Phase 2 (bind org-only entities) — largely DONE** on develop:
+  `signal_themes`, `competitors`, `sources`, `objectives`, and `bridges` all
+  carry a nullable `product_id` (migrations `20260530210000_multi_product` +
+  `20260530280000_cross_product_scope`), with delete-demotion to company-wide
+  instead of cascading destruction.
+- **Competitor intel — partially done:** sources can be competitor-scoped
+  (`sources.competitor_id`) and per-competitor signal profiles exist
+  (`20260608000001_signal_profiles`). Still open: per-competitor **themes**
+  (`signal_themes.competitor_id`) and the grouping proposed below.
+- **Technical layer — partially done at the build level:** Build Items carry a
+  Technical Scope context bundle gating agent readiness
+  (`20260603170000_build_module_foundation`). Still open: the product- and
+  module-level technical *record fields* proposed below
+  (`record_fields.module_id`).
+- **Agents:** plays were built then retired (`20260607000300_drop_plays`) in
+  favor of the cornerstone + child skills model. The battlecard agent pair
+  below should be expressed as skills in that model, not as plays.
 
 ## The problem
 
@@ -38,14 +58,20 @@ its own living Foundation, cleanly separated but rolling up to the org.
 Org (tenant root, RLS boundary)
 └── Product record  (a line of business)        ← the cornerstone
     ├── GTM record(s)        product_id → product
-    ├── Modules → Features
+    ├── Modules → Features   (+ technical foundation — see below)
     ├── Releases (roadmap)   product_id → product
     ├── Initiatives (ship/roadmap/content/enablement)  product_id / gtm_record_id
     ├── Signals              scope: org | product | gtm
     ├── Signal themes        (today: org-only — needs product binding)
     ├── Competitors / market (today: org-only — usually per product line)
+    │   └── Competitor signals & themes  (planned — see below)
     └── Agents               (today: org-only — see "Agent scoping" below)
 ```
+
+Two records, two jobs: the **product record** is product-focused — what the
+solution is, how it works, how it's built (including its technical foundation).
+The **GTM record** is market-focused — how it's positioned, messaged, and sold.
+The designs below keep that separation sharp.
 
 ## Scoping audit (current state → target)
 
@@ -56,8 +82,9 @@ Org (tenant root, RLS boundary)
 | `modules` / `features` | under product ✓ | unchanged |
 | `releases` | `product_id` ✓ | unchanged |
 | `initiatives` | `product_id` + `gtm_record_id` ✓ | unchanged |
-| `signals` | `scope` org/product/gtm ✓ | unchanged; default to product when logged in a product context |
-| `signal_themes` | **org-only** | add nullable `product_id` (null = org-wide synthesis) |
+| `signals` | `scope` org/product/gtm ✓ | default to product when logged in a product context; add nullable `module_id` (tech-evolution intel) and `competitor_id` (competitor intel) |
+| `signal_themes` | **org-only** | add nullable `product_id` (null = org-wide synthesis) and nullable `competitor_id` (per-competitor themes) |
+| `record_fields` | product/gtm parents | add `module_id` as a third exactly-one parent (module technical fields) |
 | `competitors` / market intel | **org-only** | add nullable `product_id` (null = org-wide) |
 | `tracking_topics` | **org-only** | add nullable `product_id` |
 | `content_pieces` / `campaigns` | tied to GTM record | inherits product via its GTM record (verify FK) |
@@ -114,6 +141,96 @@ Two valid models; recommend **hybrid**:
   (pointing agents at product-lens vs GTM-lens signals) — the lens filter is
   applied *within* the active product.
 
+## Technical foundation (product & module level)
+
+The product record is product-focused, but today nothing captures **how** the
+solution actually does what it does. That technical layer is what lets an org
+see, as new technologies and capabilities come online, where its implementation
+is aging — and evolve deliberately instead of accruing tech debt.
+
+**Where it lives — reuse `record_fields`, don't invent a new table:**
+
+- **Product level:** a "Technical" `section` of `record_fields` already fits the
+  agnostic model (the section column was designed with exactly this in mind).
+  Template fields: *Architecture & stack*, *Key dependencies*, *Build vs buy
+  choices*, *Known constraints / debt*, *Evolution watchlist* (technologies that
+  could obsolete or upgrade parts of the stack).
+- **Module level:** `record_fields` currently allows only a product or GTM
+  parent. Add a nullable `module_id` to the same exactly-one-parent CHECK
+  pattern, so each module gets its own technical fields (*How it works*, *What
+  it's built on*, *Debt / refactor notes*). Additive and consistent with the
+  existing FK-integrity approach.
+
+**How it stays alive (the feedback loops the user experience must surface):**
+
+- **From signals:** product-lens signals that flag a technical shift (a new
+  model, API, platform capability) should be attachable to a module — add a
+  nullable `signals.module_id`. The module's technical panel shows its open
+  signals; synthesis can emit "tech evolution" themes whose recommendation
+  targets a specific technical field ("re-evaluate X, signal suggests Y is now
+  viable").
+- **From build:** the module's technical panel also shows recent ship/roadmap
+  activity (features and releases touching that module), so the stated
+  technical detail and the actual build work sit side by side — drift between
+  them is the tech-debt early warning.
+
+## Competitor signals & themes
+
+Competitive intel today has a dashboard (capability matrix), battlecards, and a
+read-only signal feed. Two gaps:
+
+1. **Logging:** you can't capture a competitor observation from the UI as a
+   first-class signal. Add a nullable `signals.competitor_id` and a "log signal"
+   action inside the Competitive module (and on each competitor's detail page)
+   that pre-fills it. Tracking topics watching a competitor tag their harvested
+   signals the same way.
+2. **Synthesis:** competitor signals deserve the same signal → theme treatment
+   GTM and product strategy get. Add a nullable `signal_themes.competitor_id`
+   and run synthesis per competitor.
+
+**Grouping recommendation:** reuse the existing `category` axis rather than
+inventing a competitor-specific taxonomy. Per competitor, themes group into:
+
+- **Product themes** — capability and roadmap moves (launches, deprecations,
+  platform bets). These inform the **capability matrix** (suggest score
+  changes) and our own **technical foundation** ("they rebuilt on X").
+- **GTM themes** — pricing, packaging, messaging, and positioning moves. These
+  inform **battlecards** and our GTM record's messaging sections.
+
+This keeps one taxonomy across the whole app (a signal is product-lens or
+GTM-lens everywhere), and each competitor theme lands next to the artifact it
+should change. Org-wide market themes (not tied to one competitor) remain
+`competitor_id = null` — the existing Market view.
+
+## Battlecard agents (analyst + creative)
+
+Battlecards now live in two places with different jobs:
+
+| Area | Nature | Source of truth for |
+|---|---|---|
+| Competitive module → `battlecard_items` | Structured, factual (win / lose / objection / trap) | What is *true* about us vs them |
+| GTM record → "Battlecard" messaging section | Narrative, seller-facing | What we *say* about it |
+
+Curate them with **two complementary agent archetypes**, not one:
+
+- **Competitive analyst agent (realistic).** Reads a competitor's product + GTM
+  themes, the capability matrix, and our technical foundation. Proposes
+  `battlecard_items` — new wins/loses when the matrix shifts, new objections
+  when a competitor theme shows a repeated attack — every item citing its
+  supporting signals. Grounded and conservative: its job is accuracy.
+- **Messaging agent (creative).** Reads the ratified battlecard items plus the
+  GTM record (personas, positioning) and drafts the GTM Battlecard section,
+  talk tracks, and objection responses — turning the analyst's strengths and
+  weaknesses into a message in the org's voice. Generative by design: its job
+  is persuasion built on the analyst's facts.
+
+**Curation flow:** signals → competitor themes → analyst agent proposes
+battlecard items → human ratifies → messaging agent drafts seller-facing copy →
+human ratifies. Both agents write through the existing **proposals /
+ratification** system rather than editing directly, so the factual layer stays
+trustworthy and the creative layer stays on-brand. Under the agent-scoping
+model above, both are natural per-product (dedicated) agents.
+
 ## Rollout phases
 
 1. **Context + switcher (no schema change).** Add `ProductContext`, the Shell
@@ -123,9 +240,26 @@ Two valid models; recommend **hybrid**:
 2. **Bind the org-only entities.** Add nullable `product_id` to `signal_themes`,
    `competitors`/market, `tracking_topics`, `agents`; update their views + the
    synthesis function to scope per product with an org-wide roll-up.
-3. **Homepage roll-up.** Make the Foundation homepage product-aware: per-product
-   completeness and activity, plus an org roll-up across lines.
-4. **(Optional, later) Route segments** for canonical, shareable per-product
+3. **Technical foundation.** Add `record_fields.module_id` and
+   `signals.module_id`; ship the "Technical" section templates at product and
+   module level; add the module technical panel showing its fields alongside
+   open signals and recent ship activity. (Independent of multi-product, but
+   builds on the per-product views from Phases 1–2.)
+4. **Competitor signals & themes.** Add `signals.competitor_id` and
+   `signal_themes.competitor_id`; "log signal" from the Competitive module and
+   competitor detail pages; per-competitor synthesis grouped into Product
+   themes and GTM themes, feeding the capability matrix and battlecards.
+   (Depends on Phase 2: competitors are product-scoped first, so themes inherit
+   the right product line.)
+5. **Battlecard agent pair.** The competitive analyst agent (proposes
+   `battlecard_items` from competitor themes + the matrix, evidence-linked) and
+   the messaging agent (drafts the GTM Battlecard section from ratified items),
+   both writing through proposals/ratification. (Depends on Phases 3–4 for
+   their inputs.)
+6. **Homepage roll-up.** Make the Foundation homepage product-aware: per-product
+   completeness and activity, plus an org roll-up across lines. (Independent —
+   can run in parallel with 3–5.)
+7. **(Optional, later) Route segments** for canonical, shareable per-product
    URLs, once the model has settled.
 
 ## Open questions for review
@@ -137,3 +271,13 @@ Two valid models; recommend **hybrid**:
 3. **Agents** — adopt the hybrid (shared `null` + dedicated per-product) model?
 4. **Homepage** — when "All products / Org-wide" is selected, show a roll-up of
    all lines, or a portfolio picker? (Recommended: roll-up with per-line cards.)
+5. **Competitor theme grouping** — reuse the existing product/GTM `category`
+   axis per competitor (recommended above), or a competitor-specific taxonomy
+   (e.g. pricing / capability / positioning)? The former keeps one taxonomy
+   app-wide; the latter is finer-grained but fragments synthesis.
+6. **Module technical fields** — seed them from a template on module creation,
+   or leave empty until filled? (Recommended: seed the template — an empty
+   technical section invites drift from day one.)
+7. **Agent write access** — both battlecard agents go through
+   proposals/ratification (recommended), or may the messaging agent draft
+   directly into the GTM section since it's downstream of ratified facts?
