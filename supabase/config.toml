@@ -85,3 +85,5 @@ verify_jwt = false
 verify_jwt = false
 [functions.outcome-watch]
 verify_jwt = false
+[functions.usage-ingest]
+verify_jwt = false
