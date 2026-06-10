@@ -87,3 +87,5 @@ verify_jwt = false
 verify_jwt = false
 [functions.usage-ingest]
 verify_jwt = false
+[functions.score-accounts]
+verify_jwt = false
