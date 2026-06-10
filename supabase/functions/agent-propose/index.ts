@@ -297,6 +297,19 @@ Deno.serve(async (req: Request) => {
     };
     const jointBy = [agent.name, ...advisorNames].join(" + ");
 
+    // Autonomy dial — 'records' surface. autonomous ⇒ ratify the agent's
+    // proposal immediately via the SAME accept path a human uses (audited),
+    // instead of leaving it in the review queue. Default propose_only ⇒ pending.
+    // (review_policies; absent row = propose_only.)
+    let autoAccepted = false;
+    async function maybeAutoAccept(pid: string) {
+      const { data: pol } = await supabase.from("review_policies").select("mode").eq("org_id", orgId).eq("surface", "records").maybeSingle();
+      if (pol?.mode === "autonomous") {
+        const { error } = await supabase.rpc("accept_proposal", { p_proposal: pid, p_ratifier: `${agent.name} (autonomous policy)` });
+        if (!error) autoAccepted = true;
+      }
+    }
+
     // Persist a parsed proposal + its field changes; returns a compact summary
     // (including a readable change list) used by both the streaming and JSON paths.
     // deno-lint-ignore no-explicit-any
@@ -327,10 +340,11 @@ Deno.serve(async (req: Request) => {
         const { error: chErr } = await supabase.from("proposal_changes").insert(rows);
         if (chErr) { await supabase.from("proposals").delete().eq("id", pid); throw new Error(`could not save changes: ${chErr.message}`); }
       }
+      await maybeAutoAccept(pid);
       const price = PRICING[model];
       const cost = price ? (usage.input_tokens * price.input + usage.output_tokens * price.output) / 1_000_000 : null;
       await supabase.from("agent_runs").update({ status: "succeeded", output: JSON.stringify(proposal), input_tokens: usage.input_tokens, output_tokens: usage.output_tokens, cost_usd: cost, finished_at: new Date().toISOString() }).eq("id", runId);
-      return { run_id: runId, proposal_id: pid, proposal: { title: proposal.title, rationale: proposal.rationale, conf_level: confLevel, conf_label: proposal.conf_label, proposed_by: jointBy, changes: display } };
+      return { run_id: runId, proposal_id: pid, auto_accepted: autoAccepted, proposal: { title: proposal.title, rationale: proposal.rationale, conf_level: confLevel, conf_label: proposal.conf_label, proposed_by: jointBy, changes: display } };
     }
 
     // Streaming path: emit the author's REAL reasoning, then a marker, then the
@@ -471,6 +485,7 @@ Deno.serve(async (req: Request) => {
         throw new Error(`could not save changes: ${changesErr.message}`);
       }
     }
+    await maybeAutoAccept(proposalId);
 
     // ---- close out the run --------------------------------------------------
     const usage = message.usage;
@@ -494,6 +509,7 @@ Deno.serve(async (req: Request) => {
     return json({
       run_id: runId,
       proposal_id: proposalId,
+      auto_accepted: autoAccepted,
       retrieved: (chunks ?? []).length,
       proposal: { ...proposal, conf_level: confLevel, changes_saved: changeRows.length },
     });

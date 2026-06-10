@@ -20,12 +20,45 @@ const SETTINGS_SECTIONS = [
   { key: "security", label: "Security & audit" },
 ] as const;
 
+// The autonomy dial — one governable policy per HITL surface.
+const AUTONOMY_SURFACES = [
+  { key: "records", label: "Records", blurb: "Agent proposals on product / GTM records.", enforced: true },
+  { key: "intelligence", label: "Intelligence", blurb: "Synthesized theme changes from signals.", enforced: true },
+  { key: "automations", label: "Automations", blurb: "Workflow runs fired by events.", enforced: false },
+] as const;
+const AUTONOMY_MODES = [
+  { key: "propose_only", label: "Propose only", hint: "Everything waits for you to ratify — the safe default." },
+  { key: "auto_low", label: "Auto low-risk", hint: "Low-risk maintenance applies; judgment calls still queue." },
+  { key: "autonomous", label: "Autonomous", hint: "The AI acts (auto-ratify proposals, auto-create themes), with a full audit trail; you review after." },
+] as const;
+
 export default function SettingsView() {
   const supabase = createClient();
   const [sources, setSources] = useState<Source[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [section, setSection] = useState<string>("org");
+  const [policies, setPolicies] = useState<Record<string, string>>({});
+  const [savingPolicy, setSavingPolicy] = useState<string | null>(null);
+
+  useEffect(() => {
+    supabase.from("review_policies").select("surface, mode").then(({ data }) => {
+      const m: Record<string, string> = {};
+      for (const r of data ?? []) m[r.surface] = r.mode;
+      setPolicies(m);
+    });
+  }, [supabase]);
+
+  async function setMode(surface: string, mode: string) {
+    setSavingPolicy(surface); setError(null);
+    try {
+      const orgId = await getOrgId(); if (!orgId) throw new Error("Could not resolve your organization.");
+      const { error } = await supabase.from("review_policies").upsert({ org_id: orgId, surface, mode, updated_at: new Date().toISOString(), updated_by: "web" }, { onConflict: "org_id,surface" });
+      if (error) throw error;
+      setPolicies((p) => ({ ...p, [surface]: mode }));
+    } catch (e) { setError(e instanceof Error ? e.message : "Could not update the policy."); }
+    finally { setSavingPolicy(null); }
+  }
 
   const load = useCallback(async () => {
     const { data } = await supabase.from("sources").select("id, label, icon, origin, kind, status").order("created_at");
@@ -153,12 +186,30 @@ export default function SettingsView() {
 
           {section === "hitl" && (
             <Section label="Review & autonomy">
-              <div className="t-sub t-muted" style={{ fontSize: 12.5, marginBottom: 12 }}>How humans and agents share the work. SingleStack runs on <strong>graduated autonomy</strong>: agents draft, humans ratify.</div>
+              <div className="t-sub t-muted" style={{ fontSize: 12.5, marginBottom: 12 }}>How much each part of the platform may do before you ratify. SingleStack runs on <strong>graduated autonomy</strong> — these dials set where the line sits, per surface. Everything is audited regardless of mode.</div>
               <div className="stack-3">
-                <div className="card card-pad"><div style={{ fontWeight: 640, marginBottom: 4 }}>Proposals → records</div><div className="t-sub t-muted" style={{ fontSize: 12.5 }}>Agents and imports never edit a record directly — they queue proposals you accept or reject. <a href="/agents" className="t-sub" style={{ color: "var(--ac-text)", fontWeight: 600 }}>Agents →</a></div></div>
-                <div className="card card-pad"><div style={{ fontWeight: 640, marginBottom: 4 }}>Intel review</div><div className="t-sub t-muted" style={{ fontSize: 12.5 }}>Low-judgment moves (attach evidence, momentum) auto-apply; high-judgment ones (new themes, escalations) queue for review, and your verdicts train the system. <a href="/signals" className="t-sub" style={{ color: "var(--ac-text)", fontWeight: 600 }}>Signals →</a></div></div>
-                <div className="card card-pad"><div style={{ fontWeight: 640, marginBottom: 4 }}>Untrusted input</div><div className="t-sub t-muted" style={{ fontSize: 12.5 }}>Imported / fetched content is treated as untrusted, injection-screened, and always lands in a review queue — never applied automatically.</div></div>
+                {AUTONOMY_SURFACES.map((s) => {
+                  const cur = policies[s.key] ?? "propose_only";
+                  return (
+                    <div key={s.key} className="card card-pad">
+                      <div className="row-between" style={{ alignItems: "flex-start", gap: 12, flexWrap: "wrap" }}>
+                        <div style={{ minWidth: 0 }}>
+                          <div className="row gap-2" style={{ alignItems: "center" }}><span style={{ fontWeight: 640 }}>{s.label}</span>{!s.enforced && <Chip>policy</Chip>}</div>
+                          <div className="t-sub t-muted" style={{ fontSize: 12 }}>{s.blurb}</div>
+                        </div>
+                        <div className="row" style={{ border: "1px solid var(--border)", borderRadius: 8, overflow: "hidden", flexShrink: 0 }}>
+                          {AUTONOMY_MODES.map((m) => (
+                            <button key={m.key} disabled={savingPolicy === s.key} onClick={() => setMode(s.key, m.key)} title={m.hint}
+                              className="btn-sm" style={{ border: "none", background: cur === m.key ? "var(--ac)" : "var(--panel)", color: cur === m.key ? "#fff" : "var(--ts)", fontWeight: 600, padding: "6px 11px", cursor: "pointer" }}>{m.label}</button>
+                          ))}
+                        </div>
+                      </div>
+                      <div className="t-sub t-muted" style={{ fontSize: 11.5, marginTop: 6 }}>{AUTONOMY_MODES.find((m) => m.key === cur)?.hint}</div>
+                    </div>
+                  );
+                })}
               </div>
+              <div className="t-sub t-muted" style={{ fontSize: 11.5, marginTop: 12 }}><strong>Records</strong> &amp; <strong>Intelligence</strong> are enforced now — on Autonomous, agent proposals auto-ratify and synthesis auto-creates themes (audited). <strong>Automations</strong> is recorded and honored as it rolls out. Untrusted / imported content is always screened and queued, regardless of mode.</div>
             </Section>
           )}
 

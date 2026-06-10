@@ -137,6 +137,13 @@ Deno.serve(async (req: Request) => {
     const { data: orgId } = await supabase.rpc("current_org_id");
     if (!orgId) return json({ error: "could not resolve org" }, 400);
 
+    // Autonomy dial for the 'intelligence' surface. Default propose_only:
+    // judgment-call deltas queue for review. autonomous: the AI creates NEW
+    // themes directly (highest-value auto-action; structural edits still queue),
+    // with a full audit trail. (review_policies; absent row ⇒ propose_only.)
+    const { data: polRow } = await supabase.from("review_policies").select("mode").eq("org_id", orgId).eq("surface", "intelligence").maybeSingle();
+    const intelAutonomous = polRow?.mode === "autonomous";
+
     // Optional LENS scope: run synthesis for one strategy lens so product and GTM
     // themes are reconciled separately (no cross-lens bleed). Absent → all lenses
     // (legacy behavior). 'product' = product/both/unsorted; 'gtm' = gtm/both.
@@ -297,13 +304,26 @@ Deno.serve(async (req: Request) => {
     //   two lines becomes a first-class cross-product theme rather than a muddled
     //   company-wide NULL (docs/architecture/cross-sell-and-scope.md).
     const productOfSignal = new Map<string, string | null>(candidates.map((s) => [s.id, (s as { product_id?: string | null }).product_id ?? null]));
+    let autoCreated = 0;
     for (const t of diff.new_themes ?? []) {
       const sigIds = (t.signal_indices ?? []).map(sigIdAt).filter(Boolean);
       const sc = inferScope(sigIds, productOfSignal);
       const xLines = sc.co_product_ids.length;
-      queued.push({ org_id: orgId, kind: "new_theme", theme_id: null,
-        payload: { category: t.category === "gtm" ? "gtm" : "product", title: t.title, summary: t.summary, recommendation: t.recommendation, conf_level: Math.min(1, Math.max(0, Number(t.conf_level) || 0)), signal_ids: sigIds, product_id: sc.product_id, co_product_ids: sc.co_product_ids },
-        summary: `New ${t.category}${xLines ? " cross-product" : ""} theme: "${t.title}" (${sigIds.length} signal${sigIds.length === 1 ? "" : "s"}${xLines ? `, spans ${xLines + 1} lines` : ""})` });
+      const category = t.category === "gtm" ? "gtm" : "product";
+      const conf = Math.min(1, Math.max(0, Number(t.conf_level) || 0));
+      if (intelAutonomous) {
+        // Autonomous: create the theme live (audited via theme_events), no queue.
+        const { data: created } = await supabase.from("signal_themes").insert({
+          org_id: orgId, category, title: t.title, summary: t.summary, recommendation: t.recommendation,
+          conf_level: conf, state: "active", merged_by: "synthesis",
+          product_id: sc.product_id, co_product_ids: sc.co_product_ids, signal_ids: sigIds, last_evidence_at: now,
+        }).select("id").single();
+        if (created) { await attachSignals(created.id, sigIds); await ev(created.id, "created", { auto: true, policy: "autonomous" }, orgId); autoCreated++; }
+      } else {
+        queued.push({ org_id: orgId, kind: "new_theme", theme_id: null,
+          payload: { category, title: t.title, summary: t.summary, recommendation: t.recommendation, conf_level: conf, signal_ids: sigIds, product_id: sc.product_id, co_product_ids: sc.co_product_ids },
+          summary: `New ${t.category}${xLines ? " cross-product" : ""} theme: "${t.title}" (${sigIds.length} signal${sigIds.length === 1 ? "" : "s"}${xLines ? `, spans ${xLines + 1} lines` : ""})` });
+      }
     }
     if (queued.length) {
       await supabase.from("intel_updates").insert(queued.map((q) => ({ ...q, scope: "synthesis", status: "pending" })));
@@ -348,6 +368,7 @@ Deno.serve(async (req: Request) => {
       themes: (liveThemes ?? []).length,
       attached, categorized,
       proposed,          // high-judgment changes queued for review
+      autoCreated,       // new themes auto-created (autonomous policy)
       appliedLessons,    // lessons from past feedback applied this run
       // Bounded-prompt observability: how much the scoping pruned this run.
       themesConsidered: promptThemes.length,
