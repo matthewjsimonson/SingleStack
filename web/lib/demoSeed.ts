@@ -154,6 +154,30 @@ export async function loadDemoData(supabase: SupabaseClient, orgId: string): Pro
     if (error) throw error; return "+3";
   });
 
+  // ---- Battle cards (the SELLER's asset — what to SAY, per competitor) ----
+  await step("battle cards", async () => {
+    const { count: c } = await supabase.from("battlecard_items").select("id", { count: "exact", head: true });
+    if (c) return "exist";
+    const { data: comps } = await supabase.from("competitors").select("id, name");
+    const cid = (n: string) => comps?.find((x) => x.name === n)?.id ?? null;
+    const cards: [string, string, string, string][] = [
+      // [competitor, kind, title, detail]
+      ["Productboard", "win", "We unify product AND GTM in one ratified record", "Spark builds battlecards, but the truth still lives in scattered docs. We keep product + messaging in one place that only moves when a human ratifies — so it never drifts."],
+      ["Productboard", "lose", "They own roadmapping depth", "If the buyer's core need is roadmap prioritization and delivery, they're deeper there. Reframe to the unified record + GTM, where they're thin."],
+      ["Productboard", "objection", "“Doesn't Spark already do competitive AI?”", "Spark automates CI research; it doesn't keep your product+GTM record current with human-in-the-loop ratification. Different job — surfacing intel vs. owning ratified change."],
+      ["Productboard", "proof", "HITL governance is auditable", "Every change is a ratified proposal with a full trail — exactly what procurement now asks about."],
+      ["Crayon", "win", "A living record, not a CI feed", "Crayon monitors the market; we turn that monitoring into ratified change in your product + GTM record. Intel → governed action, not just a dashboard."],
+      ["Crayon", "lose", "Breadth of CI sources", "Crayon tracks 100+ data types. If the buyer just wants the widest net, acknowledge it — then pivot to who actually owns acting on the intel."],
+      ["Crayon", "trap", "Ask: who owns acting on the intel?", "CI tools surface signals; nobody owns turning them into ratified product/GTM updates. That ownership gap is our wedge — set it early."],
+      ["Klue", "win", "Beyond sales enablement", "Klue pushes battlecards to sales; we keep the whole product+GTM record current. Battlecards are one output of our system, not the system."],
+      ["Klue", "objection", "“We already have battlecards in Klue.”", "Great — and they're static until someone updates them. Ours stay current from live signals, human-ratified, so reps never quote a stale card."],
+      ["Gong", "win", "Gong is a signal source; we're the system of record", "We can ingest Gong-style signals; Gong can't keep your product + GTM record current. Position as complementary — feed us, we govern the change."],
+    ];
+    const rows = cards.flatMap(([name, kind, title, detail], i) => { const id = cid(name); return id ? [{ org_id: orgId, competitor_id: id, kind, title, detail, position: i }] : []; });
+    if (rows.length) { const { error } = await supabase.from("battlecard_items").insert(rows); if (error) throw error; }
+    return `+${rows.length}`;
+  });
+
   // ---- GTM record (find or create) ----
   let gtmId: string | undefined;
   await step("gtm record", async () => {
@@ -171,6 +195,9 @@ export async function loadDemoData(supabase: SupabaseClient, orgId: string): Pro
       ["personas", "Personas", "Heads of Product, founders, and RevOps leads at scaling B2B software companies.", 1],
       ["positioning", "Positioning", "A living system of record — not a doc, not a dashboard. It proposes change; you ratify.", 2],
       ["objections", "Objections", "“Is this just another AI wrapper?” — No: humans ratify every change; nothing moves on its own.", 3],
+      ["value_prop", "Value proposition", "Your product & GTM strategy stays current automatically — agents propose sharp updates from live signals, and you ratify. The record and the messaging never go stale.", 4],
+      ["pillars", "Message pillars", "1) Living system of record (not a doc/dashboard). 2) Human-in-the-loop governance — nothing moves unratified. 3) Unifies product + GTM in one record. 4) Leverages new frontier-model capability as it ships.", 5],
+      ["proof_points", "Proof points", "6 design partners · 41 weekly active operators · 28 proposals ratified/week · every change carries an auditable trail.", 6],
     ].map(([field_key, label, value, position]) => ({ org_id: orgId, gtm_record_id: gtmId, field_key, label, value, position })));
     if (error) throw error; return "created";
   });
@@ -400,11 +427,61 @@ export async function loadDemoData(supabase: SupabaseClient, orgId: string): Pro
     if (error) throw error; return `+${toAdd.length}`;
   });
 
+  // ---- Accounts → usage → PQL (the Sell loop has real content) ----
+  await step("accounts (usage / PQL)", async () => {
+    const { count: c } = await supabase.from("accounts").select("id", { count: "exact", head: true });
+    if (c) return "exist";
+    // [ref, name, domain, plan, activation, expansion, churn, pql_state, reason, lastSeenH]
+    const accts: [string, string, string, string, number, number, number, string, string, number][] = [
+      ["acme", "Acme Robotics", "acme.io", "Team", 0.82, 0.7, 0.1, "expansion", "Activation 82% — 12 activation actions in 35d; 6 seats added and hitting plan limits.", 6],
+      ["globex", "Globex", "globex.com", "Pro", 0.74, 0.2, 0.15, "qualified", "Activation 74% — onboarding complete, 9 key actions. Product-qualified.", 10],
+      ["soylent", "Soylent", "soylent.io", "Pro", 0.6, 0.1, 0.1, "qualified", "Activation 60% — crossed the activation bar this week.", 14],
+      ["initech", "Initech", "initech.co", "Starter", 0.35, 0.05, 0.2, "activating", "Activation 35% — onboarding underway (3 actions).", 18],
+      ["umbrella", "Umbrella Corp", "umbrella.com", "Team", 0.4, 0.0, 0.7, "at_risk", "Churn risk 70% — logins down ~60%, last seen 24d ago.", 24 * 24],
+    ];
+    const rows = accts.map(([external_ref, name, domain, plan, a, e, ch, pql, reason, h]) => ({ org_id: orgId, external_ref, name, domain, plan, status: "active", metrics: {}, last_seen_at: iso(h), activation_score: a, expansion_score: e, churn_risk: ch, pql_state: pql, score_reason: reason, scored_at: iso(2) }));
+    const { data: created, error } = await supabase.from("accounts").insert(rows).select("id, external_ref, name, pql_state, score_reason");
+    if (error) throw error;
+    const refId = new Map((created ?? []).map((x) => [x.external_ref, x.id]));
+    // Usage events — the evidence behind each score.
+    const evs: Record<string, unknown>[] = [];
+    const ev = (ref: string, kind: string, value: number, h: number) => { const id = refId.get(ref); if (id) evs.push({ org_id: orgId, account_id: id, kind, value, occurred_at: iso(h) }); };
+    ev("acme", "activation", 5, 30); ev("acme", "feature_adopt", 4, 20); ev("acme", "seat_add", 6, 10); ev("acme", "limit_hit", 2, 5);
+    ev("globex", "onboarding_complete", 1, 40); ev("globex", "key_action", 9, 15);
+    ev("soylent", "activation", 4, 10);
+    ev("initech", "activation", 3, 12);
+    ev("umbrella", "churn_risk", 2, 8); ev("umbrella", "login", 1, 24 * 24);
+    if (evs.length) await supabase.from("account_events").insert(evs);
+    // Emit the PQL signals these crossings would have produced (so /signals and
+    // the GTM strategy board show the sell motion the product generated).
+    const titleFor = (s: string, n: string) => s === "qualified" ? `PQL: ${n} is product-qualified` : s === "expansion" ? `Expansion signal: ${n}` : `Churn risk: ${n}`;
+    const sigs = (created ?? []).filter((x) => ["qualified", "expansion", "at_risk"].includes(x.pql_state))
+      .map((x) => ({ org_id: orgId, scope: "org", origin: "internal", category: "gtm", title: titleFor(x.pql_state, x.name).slice(0, 280), why: x.score_reason, conf_level: 0.9, conf_label: "High", observed_at: iso(2), metadata: { domain: "usage", account_id: x.id, pql_state: x.pql_state } }));
+    if (sigs.length) await supabase.from("signals").insert(sigs);
+    return `+${rows.length}`;
+  });
+
+  // ---- Outcome track record (the Learn loop: shipped work, scored) ----
+  await step("outcome track record", async () => {
+    const { count: c } = await supabase.from("expected_outcomes").select("id", { count: "exact", head: true });
+    if (c) return "exist";
+    const TITLE = "Ship agent orchestration as a demoable capability";
+    let { data: b } = await supabase.from("strategy_bundles").select("id").eq("title", TITLE).maybeSingle();
+    if (!b) ({ data: b } = await supabase.from("strategy_bundles").insert({ org_id: orgId, title: TITLE, rationale: "Buyers expect built-in orchestration; make it first-class and demoable.", state: "promoted", promoted_at: iso(40 * 24) }).select("id").single());
+    if (!b) return "no bundle";
+    const rows = [
+      { org_id: orgId, bundle_id: b.id, title: "Demo-to-trial conversion rises", measure_kind: "signal", direction: "up", horizon_days: 30, review_due_at: iso(5 * 24), baseline_at: iso(40 * 24), status: "hit", ai_verdict: "hit", ai_rationale: "Multiple signals show the orchestration demo converting; trial starts up ~20%.", resolved_at: iso(3), resolved_by: "human", resolution_note: "Confirmed — the orchestration demo is the new default and lifted conversion." },
+      { org_id: orgId, bundle_id: b.id, title: "“AI wrapper” objection fades", measure_kind: "signal", direction: "down", horizon_days: 45, review_due_at: iso(-15 * 24), baseline_at: iso(40 * 24), status: "watching" },
+    ];
+    const { error } = await supabase.from("expected_outcomes").insert(rows);
+    if (error) throw error; return "+2";
+  });
+
   const summary = report.join(" · ");
   return {
     created: errors.length === 0,
     message: errors.length
       ? `Loaded with issues — ${summary}. ⚠️ ERRORS: ${errors.join(" | ")}`
-      : `SingleStack workspace loaded ✓ — ${summary}. Open Signals (Product/GTM tabs).`,
+      : `SingleStack workspace loaded ✓ — ${summary}. Operator view: Signals → Strategy. Seller view: Competitive → Competitors (battle cards), Go-to-market → Qualified leads (PQLs).`,
   };
 }
