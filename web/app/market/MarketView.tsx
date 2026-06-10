@@ -11,6 +11,7 @@ import { getOrgId } from "@/lib/org";
 import { fireWorkflows } from "@/lib/triggers";
 import { Chip, Banner, Confidence, Modal } from "@/components/ui";
 import { fetchAgentKey, errText } from "@/lib/strategy";
+import { signalDomain, SIGNAL_DOMAIN } from "@/lib/signals";
 import { LiveReply, useAliveReply, streamAgentChat } from "@/components/alive";
 import { Markdown } from "@/components/Markdown";
 import SourceManager from "@/components/SourceManager";
@@ -49,7 +50,7 @@ export default function MarketView() {
 
   const load = useCallback(async () => {
     const { data } = await supabase.from("signals").select("id, title, why, conf_label, conf_level, observed_at, origin, metadata").order("observed_at", { ascending: false, nullsFirst: false });
-    setSignals(((data ?? []) as Signal[]).filter((s) => s.metadata?.domain === "market"));
+    setSignals(((data ?? []) as Signal[]).filter((s) => signalDomain(s) === SIGNAL_DOMAIN.market));
     setAgentKey(await fetchAgentKey(supabase));
     setLoading(false);
   }, [supabase]);

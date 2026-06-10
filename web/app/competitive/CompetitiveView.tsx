@@ -14,6 +14,7 @@ import SourceManager from "@/components/SourceManager";
 import CapabilityCellDrawer, { type Cell } from "@/components/CapabilityCellDrawer";
 import CompetitiveGrid from "@/components/CompetitiveGrid";
 import SignalProfile from "@/components/SignalProfile";
+import { signalDomain, SIGNAL_DOMAIN } from "@/lib/signals";
 
 type Competitor = { id: string; name: string; relationship: string; website: string | null; notes: string | null };
 type Capability = { id: string; name: string; category: string | null };
@@ -54,7 +55,7 @@ export default function CompetitiveView() {
   }, [supabase]);
   useEffect(() => { load(); }, [load]);
 
-  const compSignals = signals.filter((s) => s.metadata?.domain === "competitive");
+  const compSignals = signals.filter((s) => signalDomain(s) === SIGNAL_DOMAIN.competitive);
 
   return (
     <div>
@@ -513,7 +514,7 @@ function Feed({ signals, competitors, reload }: { signals: Signal[]; competitors
   const [err, setErr] = useState<string | null>(null);
 
   const compName = (id?: string) => competitors.find((c) => c.id === id)?.name;
-  const all = signals.filter((s) => s.metadata?.domain === "competitive");
+  const all = signals.filter((s) => signalDomain(s) === SIGNAL_DOMAIN.competitive);
   const feed = all.filter((s) => (originTab === "internal" ? s.origin === "internal" : s.origin !== "internal"))
     .filter((s) => compFilter === "all" || s.metadata?.competitor_id === compFilter);
   const counts = { internal: all.filter((s) => s.origin === "internal").length, external: all.filter((s) => s.origin !== "internal").length };

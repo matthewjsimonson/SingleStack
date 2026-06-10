@@ -11,6 +11,7 @@ import { useCallback, useEffect, useState } from "react";
 import { createClient } from "@/lib/supabase/client";
 import { getOrgId } from "@/lib/org";
 import { fireWorkflows } from "@/lib/triggers";
+import { signalDomain, SIGNAL_DOMAIN } from "@/lib/signals";
 import { Section, Chip, Banner } from "@/components/ui";
 import CapabilityDrawer, { type DrawerCapability } from "@/components/CapabilityDrawer";
 
@@ -61,7 +62,7 @@ export default function FrontierView() {
       supabase.from("workflows").select("id, name, trigger, is_active, agent_id, skill_ids").eq("trigger", "on_capability_update").order("created_at"),
       supabase.from("connections").select("agent_id").eq("kind", "internal").eq("area", "capabilities"),
     ]);
-    setCaps(((sigs ?? []) as Cap[]).filter((s) => s.metadata?.domain === "capability"));
+    setCaps(((sigs ?? []) as Cap[]).filter((s) => signalDomain(s) === SIGNAL_DOMAIN.capability));
     setAgents(ag ?? []); setSkills(sk ?? []); setWorkflows((wfs ?? []) as Workflow[]);
     setWatchingIds(new Set((conns ?? []).map((c) => c.agent_id).filter(Boolean)));
     setLoading(false);

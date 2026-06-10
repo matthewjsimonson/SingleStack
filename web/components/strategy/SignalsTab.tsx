@@ -9,6 +9,7 @@ import { createClient } from "@/lib/supabase/client";
 import { getOrgId } from "@/lib/org";
 import { Chip, Banner } from "@/components/ui";
 import { SCORE_LABEL, gapsOf, confText, errText, isProductSignal, type Cap, type Score, type Competitor } from "@/lib/strategy";
+import { signalDomain, SIGNAL_DOMAIN } from "@/lib/signals";
 
 type Signal = { id: string; title: string; why: string | null; origin: string; category: string | null; metadata: { domain?: string } | null; conf_level: number | null; conf_label: string | null };
 type Theme = { id: string; title: string; signal_ids: string[] | null };
@@ -44,7 +45,7 @@ export default function SignalsTab({ onStartEpicFromGap }: { onStartEpicFromGap:
   useEffect(() => { load(); }, [load]);
 
   const orgIdOr = async () => { const o = await getOrgId(); if (!o) throw new Error("Could not resolve your organization."); return o; };
-  const dom = (s: Signal) => s.metadata?.domain ?? null;
+  const dom = (s: Signal) => signalDomain(s);
   const sourceOf = (s: Signal) => (dom(s) === "competitive" ? "competitive" : dom(s) === "market" ? "market" : dom(s) === "capability" ? "frontier" : s.origin);
   const gaps = gapsOf(caps, scores, competitors);
 
