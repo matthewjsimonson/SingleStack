@@ -8,13 +8,15 @@ import { Chip, Banner, Empty } from "@/components/ui";
 import { ensureTeam } from "@/lib/ensureTeam";
 import PageBar from "@/components/PageBar";
 import RosterReview from "@/components/RosterReview";
+import { useProductScope } from "@/lib/ProductContext";
 
-type Agent = { id: string; key: string; name: string; role: string | null; model: string | null; system_prompt: string | null; is_active: boolean };
+type Agent = { id: string; key: string; name: string; role: string | null; model: string | null; system_prompt: string | null; is_active: boolean; product_id: string | null };
 type Align = { agent_id: string; initiative_id: string | null; workstream_id: string | null };
 const BLANK = { key: "", name: "", role: "", model: "claude-opus-4-8", system_prompt: "", is_active: true };
 
 export default function AgentsView() {
   const supabase = createClient();
+  const { inScope, scopedProductId, products } = useProductScope(); // shared agents show in every line; dedicated ones only in theirs
   const [agents, setAgents] = useState<Agent[]>([]);
   const [aligns, setAligns] = useState<Align[]>([]);
   const [inits, setInits] = useState<{ id: string; title: string }[]>([]);
@@ -28,7 +30,7 @@ export default function AgentsView() {
   const load = useCallback(async () => {
     await ensureTeam(supabase); // seed the standard executive roster if this org has none
     const [{ data }, { data: al }, { data: it }, { data: cs }] = await Promise.all([
-      supabase.from("agents").select("id, key, name, role, model, system_prompt, is_active").order("name"),
+      supabase.from("agents").select("id, key, name, role, model, system_prompt, is_active, product_id").order("name"),
       supabase.from("agent_alignments").select("agent_id, initiative_id, workstream_id"),
       supabase.from("initiatives").select("id, title").order("created_at", { ascending: false }).limit(200),
       supabase.from("agent_skills").select("agent_id, skills(name)").eq("is_cornerstone", true),
@@ -52,6 +54,11 @@ export default function AgentsView() {
   const coveredInits = new Set(aligns.map((a) => a.initiative_id).filter(Boolean) as string[]);
   const uncovered = inits.filter((i) => !coveredInits.has(i.id));
 
+  // Scope to the active line: shared agents (product_id null) show everywhere,
+  // dedicated agents only in their line. No-op for single-product orgs.
+  const scopedAgents = agents.filter(inScope);
+  const productName = (id: string | null) => products.find((p) => p.id === id)?.name ?? null;
+
   function startNew() { setForm(BLANK); setEditing("new"); setError(null); }
 
   async function save(e: React.FormEvent) {
@@ -65,7 +72,9 @@ export default function AgentsView() {
       if (editing === "new") {
         const orgId = await getOrgId();
         if (!orgId) throw new Error("Could not resolve your organization.");
-        const { error } = await supabase.from("agents").insert({ org_id: orgId, ...payload });
+        // Inherit the active line: dedicated agent inside a product, shared (null)
+        // when created from all/company view.
+        const { error } = await supabase.from("agents").insert({ org_id: orgId, ...payload, product_id: scopedProductId });
         if (error) throw error;
       } else {
         const { error } = await supabase.from("agents").update(payload).eq("id", editing!);
@@ -131,14 +140,15 @@ export default function AgentsView() {
       )}
 
       {loading ? <div className="t-sub t-muted">Loading…</div>
-        : agents.length === 0 && editing === null ? (
+        : scopedAgents.length === 0 && editing === null ? (
           <Empty title="No agents yet" hint="Create an agent to start generating proposals on your records."
             action={<button className="btn" onClick={startNew}>+ Create your first agent</button>} />
         ) : (
           <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(240px, 1fr))", gap: "var(--sp-4)" }}>
-            {agents.map((a) => {
+            {scopedAgents.map((a) => {
               const c = countsByAgent[a.id];
               const corner = cornerstones[a.id];
+              const line = productName(a.product_id);
               return (
                 <a key={a.id} href={`/agents/${a.id}`} className="card card-link card-pad" style={{ display: "flex", flexDirection: "column", gap: 8, minHeight: 132 }}>
                   <div className="row-between" style={{ gap: 8, alignItems: "flex-start" }}>
@@ -147,6 +157,7 @@ export default function AgentsView() {
                   </div>
                   <div className="row gap-2" style={{ flexWrap: "wrap", alignItems: "center" }}>
                     <Chip>{a.key}</Chip>
+                    {line && <Chip tone="accent">{line}</Chip>}
                     <span className="t-mono-xs t-muted">{a.model}</span>
                   </div>
                   <div className="t-sub t-muted" style={{ fontSize: 12, lineHeight: 1.4, flex: 1 }}>{a.role || "No role set"}</div>

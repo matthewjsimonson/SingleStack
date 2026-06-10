@@ -15,8 +15,9 @@ import CapabilityCellDrawer, { type Cell } from "@/components/CapabilityCellDraw
 import CompetitiveGrid from "@/components/CompetitiveGrid";
 import SignalProfile from "@/components/SignalProfile";
 import { signalDomain, SIGNAL_DOMAIN } from "@/lib/signals";
+import { useProductScope } from "@/lib/ProductContext";
 
-type Competitor = { id: string; name: string; relationship: string; website: string | null; notes: string | null };
+type Competitor = { id: string; name: string; relationship: string; website: string | null; notes: string | null; product_id: string | null };
 type Capability = { id: string; name: string; category: string | null };
 type Score = { id: string; capability_id: string; competitor_id: string | null; score: number };
 type Card = { id: string; competitor_id: string | null; kind: string; title: string; detail: string | null };
@@ -26,6 +27,7 @@ type Tab = "dashboard" | "profile" | "competitors" | "feed";
 
 export default function CompetitiveView() {
   const supabase = createClient();
+  const { inScope, scopedProductId } = useProductScope(); // competitors are per-line; company-wide rivals show everywhere
   const [tab, setTab] = useState<Tab>("dashboard");
   const [competitors, setCompetitors] = useState<Competitor[]>([]);
   const [capabilities, setCapabilities] = useState<Capability[]>([]);
@@ -38,7 +40,7 @@ export default function CompetitiveView() {
 
   const load = useCallback(async () => {
     const [{ data: comp }, { data: caps }, { data: scs }, { data: cds }, { data: sigs }] = await Promise.all([
-      supabase.from("competitors").select("id, name, relationship, website, notes").order("position").order("created_at"),
+      supabase.from("competitors").select("id, name, relationship, website, notes, product_id").order("position").order("created_at"),
       supabase.from("capabilities").select("id, name, category").order("position").order("created_at"),
       supabase.from("capability_scores").select("id, capability_id, competitor_id, score"),
       supabase.from("battlecard_items").select("id, competitor_id, kind, title, detail").order("position").order("created_at"),
@@ -56,6 +58,9 @@ export default function CompetitiveView() {
   useEffect(() => { load(); }, [load]);
 
   const compSignals = signals.filter((s) => signalDomain(s) === SIGNAL_DOMAIN.competitive);
+  // Scope to the active product line (+ company-wide rivals). The switcher only
+  // appears for multi-product orgs, so single-product orgs see every competitor.
+  const scopedCompetitors = competitors.filter(inScope);
 
   return (
     <div>
@@ -66,10 +71,10 @@ export default function CompetitiveView() {
       <Banner>{error}</Banner>
 
       {loading ? <div className="t-sub t-muted">Loading…</div>
-        : tab === "dashboard" ? <Dashboard competitors={competitors} capabilities={capabilities} scores={scores} compSignals={compSignals} overview={overview} reload={load} setError={setError} />
+        : tab === "dashboard" ? <Dashboard competitors={scopedCompetitors} capabilities={capabilities} scores={scores} compSignals={compSignals} overview={overview} reload={load} setError={setError} />
         : tab === "profile" ? <SignalProfile scope="landscape" />
-        : tab === "competitors" ? <Competitors competitors={competitors} cards={cards} overview={overview} capabilities={capabilities} scores={scores} compSignals={compSignals} reload={load} setError={setError} />
-        : <Feed signals={signals} competitors={competitors} reload={load} />}
+        : tab === "competitors" ? <Competitors competitors={scopedCompetitors} cards={cards} overview={overview} capabilities={capabilities} scores={scores} compSignals={compSignals} newProductId={scopedProductId} reload={load} setError={setError} />
+        : <Feed signals={signals} competitors={scopedCompetitors} reload={load} />}
     </div>
   );
 }
@@ -249,9 +254,9 @@ const KINDS: [string, string, string][] = [
   ["discovery", "Discovery questions", "bd"],
 ];
 const TONE_BORDER: Record<string, string> = { gn: "var(--gn)", am: "var(--am-text)", vl: "var(--vl)", bd: "var(--border-strong)" };
-function Competitors({ competitors, cards, overview, capabilities, scores, compSignals, reload, setError }: {
+function Competitors({ competitors, cards, overview, capabilities, scores, compSignals, newProductId, reload, setError }: {
   competitors: Competitor[]; cards: Card[]; overview: { name: string; overview: string | null; valueProp: string | null } | null;
-  capabilities: Capability[]; scores: Score[]; compSignals: Signal[]; reload: () => void; setError: (s: string | null) => void;
+  capabilities: Capability[]; scores: Score[]; compSignals: Signal[]; newProductId: string | null; reload: () => void; setError: (s: string | null) => void;
 }) {
   const supabase = createClient();
   const [scope, setScope] = useState<string | null>(null); // selected competitor id; null = tile grid
@@ -269,7 +274,9 @@ function Competitors({ competitors, cards, overview, capabilities, scores, compS
   async function addCompetitor(e: React.FormEvent) {
     e.preventDefault(); if (!comp.name.trim()) return;
     const orgId = await getOrgId(); if (!orgId) return;
-    const { error } = await supabase.from("competitors").insert({ org_id: orgId, name: comp.name.trim(), relationship: comp.relationship });
+    // Inherit the active line so a competitor added inside a product belongs to
+    // it; null when viewing all/company = a company-wide rival shown everywhere.
+    const { error } = await supabase.from("competitors").insert({ org_id: orgId, name: comp.name.trim(), relationship: comp.relationship, product_id: newProductId });
     if (error) setError(error.message); else { setAddingComp(false); setComp({ name: "", relationship: "direct" }); reload(); }
   }
   async function doRemoveComp() {

@@ -31,7 +31,17 @@ type Ctx = {
   activeLabel: string;
   // The canonical "does this row belong in the current view?" predicate —
   // mirrors the DB's spans_product(): a line shows its own rows + cross-sell rows.
+  // Company-wide rows (product_id null) are HIDDEN under a specific line — use
+  // this for intel buckets (signals/themes) where company-wide is its own lens.
   matches: (row: ScopedRow) => boolean;
+  // "Scoped-or-shared": like matches, but company-wide rows (product_id null)
+  // stay visible inside every line. Use this for SHARED entities — a shared
+  // agent, a platform-wide competitor, a company-wide watch — that apply across
+  // all lines as well as the active one.
+  inScope: (row: ScopedRow) => boolean;
+  // The product_id to stamp on a NEW row created in the current context: the
+  // active line, or null when viewing "all"/"company" (i.e. shared/company-wide).
+  scopedProductId: string | null;
 };
 
 const ProductCtx = createContext<Ctx | null>(null);
@@ -79,12 +89,22 @@ export function ProductProvider({ children }: { children: ReactNode }) {
     return row.product_id === active || (row.co_product_ids ?? []).includes(active);
   }, [active]);
 
+  // Scoped-or-shared: company-wide rows (no product_id) stay visible in every
+  // line; a specific line additionally sees its own + cross-sell rows.
+  const inScope = useCallback((row: ScopedRow) => {
+    if (active === "all") return true;
+    if (!row.product_id) return true; // shared / company-wide — visible everywhere
+    return row.product_id === active || (row.co_product_ids ?? []).includes(active);
+  }, [active]);
+
+  const scopedProductId = active === "all" || active === "company" ? null : active;
+
   const activeLabel = active === "all" ? "All products"
     : active === "company" ? "Company-wide"
     : products.find((p) => p.id === active)?.name ?? "Product";
 
   return (
-    <ProductCtx.Provider value={{ active, setActive, products, loading, activeLabel, matches }}>
+    <ProductCtx.Provider value={{ active, setActive, products, loading, activeLabel, matches, inScope, scopedProductId }}>
       {children}
     </ProductCtx.Provider>
   );
