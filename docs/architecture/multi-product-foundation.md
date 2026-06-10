@@ -13,11 +13,13 @@ Status: **partially implemented** (see status below) · Owner: SingleStack
   (`sources.competitor_id`) and per-competitor signal profiles exist
   (`20260608000001_signal_profiles`). Still open: per-competitor **themes**
   (`signal_themes.competitor_id`) and the grouping proposed below.
-- **Technical layer — partially done at the build level:** Build Items carry a
-  Technical Scope context bundle gating agent readiness
-  (`20260603170000_build_module_foundation`). Still open: the product- and
-  module-level technical *record fields* proposed below
-  (`record_fields.module_id`).
+- **Technical layer — DONE (Phase 3, `20260610000003_technical_foundation`).**
+  `record_fields.module_id` (the third parent) gives each module its own
+  technical fields; `signals.module_id` attaches tech-shift intel to the module
+  it affects. UI: the product Technical section gained debt + evolution-watchlist
+  fields, and each module now has a technical panel (fields + attached signals +
+  a build readout). This is the STANDING technical description, distinct from a
+  Build Item's executable Technical Scope (`build_context_links`).
 - **Agents:** plays were built then retired (`20260607000300_drop_plays`) in
   favor of the cornerstone + child skills model. The battlecard agent pair
   below should be expressed as skills in that model, not as plays.
