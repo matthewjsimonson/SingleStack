@@ -114,7 +114,31 @@ async function scoreOrg(db: SupabaseClient, orgId: string, accountId?: string): 
       });
     }
   }
-  if (signalRows.length) await db.from("signals").insert(signalRows);
+  if (signalRows.length) {
+    const { data: createdSigs } = await db.from("signals").insert(signalRows).select("id, title, metadata");
+    // Extend the automation spine to the Sell loop: fire on_pql workflows when an
+    // account crosses into a PQL state. Propose-only; one pending run per account.
+    try {
+      const { data: wfs } = await db.from("workflows").select("id, name").eq("org_id", orgId).eq("trigger", "on_pql").eq("is_active", true);
+      if (wfs?.length) {
+        const { data: open } = await db.from("workflow_runs").select("workflow_id, context").in("workflow_id", wfs.map((w) => w.id)).eq("status", "pending");
+        // deno-lint-ignore no-explicit-any
+        const wfRows: any[] = [];
+        for (const sig of (createdSigs ?? [])) {
+          // deno-lint-ignore no-explicit-any
+          const accId = (sig.metadata as any)?.account_id;
+          for (const w of wfs) {
+            // deno-lint-ignore no-explicit-any
+            if ((open ?? []).some((r) => r.workflow_id === w.id && (r.context as any)?.accountId === accId)) continue;
+            wfRows.push({ org_id: orgId, workflow_id: w.id, trigger: "on_pql", status: "pending",
+              context: { label: sig.title, signalId: sig.id, accountId: accId },
+              summary: `${w.name} — ${sig.title}`, proposed_action: `Draft a sell play (outreach / expansion) for “${sig.title}”.` });
+          }
+        }
+        if (wfRows.length) { await db.from("workflow_runs").insert(wfRows); await db.from("workflows").update({ last_run_at: nowIso }).in("id", [...new Set(wfRows.map((r) => r.workflow_id))]); }
+      }
+    } catch { /* firing is best-effort — never fail scoring */ }
+  }
   return { scored, signals: signalRows.length };
 }
 

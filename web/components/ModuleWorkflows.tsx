@@ -17,6 +17,7 @@ const TRIGGERS: { key: string; label: string }[] = [
   { key: "manual", label: "Manual (run on demand)" },
   { key: "scheduled", label: "Scheduled" },
   { key: "on_signal", label: "When a signal lands" },
+  { key: "on_pql", label: "When an account becomes a PQL" },
   { key: "on_release", label: "On release" },
   { key: "on_capability_update", label: "On new capability" },
 ];

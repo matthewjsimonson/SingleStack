@@ -8,8 +8,9 @@
 import { useCallback, useEffect, useState } from "react";
 import { createClient } from "@/lib/supabase/client";
 import { getOrgId } from "@/lib/org";
-import { Section, Chip, Banner, Modal } from "@/components/ui";
-import { errText, authHeader } from "@/lib/strategy";
+import { Chip, Banner, Modal } from "@/components/ui";
+import { Markdown } from "@/components/Markdown";
+import { errText, authHeader, fetchAgentKey } from "@/lib/strategy";
 
 type Account = {
   id: string; external_ref: string; name: string; domain: string | null; plan: string | null; status: string;
@@ -53,6 +54,8 @@ export default function PqlBoard() {
   const [openAcct, setOpenAcct] = useState<Account | null>(null);
   const [events, setEvents] = useState<Ev[]>([]);
   const [signals, setSignals] = useState<Sig[]>([]);
+  const [outreach, setOutreach] = useState<string | null>(null);
+  const [draftingOut, setDraftingOut] = useState(false);
 
   const load = useCallback(async () => {
     const [{ data: a }, { data: k }] = await Promise.all([
@@ -95,8 +98,24 @@ export default function PqlBoard() {
     finally { setBusy(null); }
   }
 
+  async function draftOutreach(a: Account) {
+    setDraftingOut(true); setOutreach(null); setError(null);
+    try {
+      const agentKey = await fetchAgentKey(supabase);
+      if (!agentKey) throw new Error("No officer available (seed agents first).");
+      const recent = events.slice(0, 8).map((e) => `${e.kind}${e.value != null ? ` ×${e.value}` : ""}`).join(", ");
+      const motion = a.pql_state === "at_risk" ? "retention / save" : a.pql_state === "expansion" ? "expansion" : "activation→sales";
+      const prompt = `Account "${a.name}"${a.plan ? ` (${a.plan} plan)` : ""} just reached state: ${a.pql_state}. ${a.score_reason ?? ""} Recent usage: ${recent || "n/a"}.\nDraft a ${motion} outreach: (1) the play in one line, then (2) a 3–4 sentence email a rep can send, referencing the actual usage. Be concrete and specific. No preamble.`;
+      const { data, error } = await supabase.functions.invoke("agent-chat", { body: { agent_key: agentKey, messages: [{ role: "user", content: prompt }] }, headers: await authHeader(supabase) });
+      if (error) throw error;
+      if (data?.error) throw new Error(data.error);
+      setOutreach(String(data?.reply ?? ""));
+    } catch (e) { setError(errText(e, "Could not draft outreach.")); }
+    finally { setDraftingOut(false); }
+  }
+
   async function openEvidence(a: Account) {
-    setOpenAcct(a); setEvents([]); setSignals([]);
+    setOpenAcct(a); setEvents([]); setSignals([]); setOutreach(null);
     const [{ data: ev }, { data: sg }] = await Promise.all([
       supabase.from("account_events").select("id, kind, value, occurred_at").eq("account_id", a.id).order("occurred_at", { ascending: false }).limit(40),
       supabase.from("signals").select("id, title, why, observed_at").contains("metadata", { account_id: a.id }).order("observed_at", { ascending: false }).limit(20),
@@ -184,9 +203,12 @@ export default function PqlBoard() {
           <div className="row gap-2" style={{ flexWrap: "wrap", alignItems: "center", marginBottom: 10 }}>
             <Chip tone={(STATE[openAcct.pql_state] ?? STATE.none).tone}>{(STATE[openAcct.pql_state] ?? STATE.none).label}</Chip>
             {openAcct.last_seen_at && <span className="t-mono-xs t-muted">last seen {new Date(openAcct.last_seen_at).toLocaleDateString()}</span>}
-            <button className="btn btn-secondary btn-sm" style={{ marginLeft: "auto" }} disabled={busy === openAcct.id} onClick={async () => { setBusy(openAcct.id); await supabase.functions.invoke("score-accounts", { body: { account_id: openAcct.id }, headers: await authHeader(supabase) }); setBusy(null); await load(); const fresh = (await supabase.from("accounts").select("id, external_ref, name, domain, plan, status, metrics, last_seen_at, activation_score, expansion_score, churn_risk, pql_state, score_reason, scored_at").eq("id", openAcct.id).maybeSingle()).data as Account | null; if (fresh) openEvidence(fresh); }}>↻ Rescore</button>
+            <span style={{ flex: 1 }} />
+            <button className="btn btn-sm" disabled={draftingOut} onClick={() => draftOutreach(openAcct)} style={{ background: "var(--ac)", color: "#fff" }}>{draftingOut ? "Drafting…" : "✦ Draft outreach"}</button>
+            <button className="btn btn-secondary btn-sm" disabled={busy === openAcct.id} onClick={async () => { setBusy(openAcct.id); await supabase.functions.invoke("score-accounts", { body: { account_id: openAcct.id }, headers: await authHeader(supabase) }); setBusy(null); await load(); const fresh = (await supabase.from("accounts").select("id, external_ref, name, domain, plan, status, metrics, last_seen_at, activation_score, expansion_score, churn_risk, pql_state, score_reason, scored_at").eq("id", openAcct.id).maybeSingle()).data as Account | null; if (fresh) openEvidence(fresh); }}>↻ Rescore</button>
           </div>
           {openAcct.score_reason && <div className="card card-pad" style={{ background: "var(--panel-2)", marginBottom: 12 }}><div className="t-sub" style={{ fontSize: 12.5 }}>{openAcct.score_reason}</div></div>}
+          {outreach && <div className="card card-pad" style={{ borderLeft: "3px solid var(--ac)", marginBottom: 12 }}><div className="t-label" style={{ marginBottom: 4 }}>Drafted outreach</div><Markdown className="t-sub" style={{ fontSize: 12.5, lineHeight: 1.55 }} text={outreach} /></div>}
 
           <div className="t-label" style={{ marginBottom: 6 }}>PQL signals · {signals.length}</div>
           <div className="stack-2" style={{ marginBottom: 14 }}>

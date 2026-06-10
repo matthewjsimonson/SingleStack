@@ -8,7 +8,7 @@ import type { SupabaseClient } from "@supabase/supabase-js";
 // while keeping the spine intact: agents propose, humans ratify.
 // ----------------------------------------------------------------------------
 
-export type TriggerKind = "on_signal" | "on_release" | "on_capability_update";
+export type TriggerKind = "on_signal" | "on_release" | "on_capability_update" | "on_pql";
 
 export type TriggerCtx = {
   label: string;          // human-readable name of the thing that fired it
@@ -16,6 +16,7 @@ export type TriggerCtx = {
   releaseId?: string;
   capabilityId?: string;
   signalId?: string;
+  accountId?: string;
 };
 
 // What accepting a run of this trigger will DO (shown to the human, executed on accept).
@@ -27,10 +28,12 @@ function actionFor(trigger: TriggerKind, ctx: TriggerCtx): string {
       return `Draft an initiative to evaluate and leverage “${ctx.label}”.`;
     case "on_signal":
       return `Draft an initiative responding to the signal “${ctx.label}”.`;
+    case "on_pql":
+      return `Draft a sell play (outreach / expansion) for “${ctx.label}”.`;
   }
 }
 
-const ctxKey = (ctx: TriggerCtx) => ctx.releaseId ?? ctx.capabilityId ?? ctx.signalId ?? ctx.label;
+const ctxKey = (ctx: TriggerCtx) => ctx.releaseId ?? ctx.capabilityId ?? ctx.signalId ?? ctx.accountId ?? ctx.label;
 
 // Fire all active workflows listening for `trigger`. Returns how many runs were
 // enqueued. Idempotent per (workflow, event): won't double-enqueue a still
