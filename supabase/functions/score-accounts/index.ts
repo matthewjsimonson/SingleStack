@@ -90,14 +90,16 @@ async function scoreOrg(db: SupabaseClient, orgId: string, accountId?: string): 
   const nowIso = new Date().toISOString();
   // deno-lint-ignore no-explicit-any
   const signalRows: any[] = [];
-  let scored = 0;
+  // deno-lint-ignore no-explicit-any
+  const acctUpdates: { id: string; patch: Record<string, any> }[] = [];
   for (const a of accts as Acct[]) {
     const s = scoreAccount(a, byAccount.get(a.id) ?? []);
-    await db.from("accounts").update({
+    // Stage the update — don't write yet. State must advance only AFTER the
+    // signal/workflow side effects succeed, or a transition can be lost.
+    acctUpdates.push({ id: a.id, patch: {
       activation_score: s.activation, expansion_score: s.expansion, churn_risk: s.churn,
       pql_state: s.state, score_reason: s.reason, scored_at: nowIso, updated_at: nowIso,
-    }).eq("id", a.id);
-    scored++;
+    } });
     // Emit a signal ONLY on a transition INTO an actionable state (no spam).
     if (s.state !== a.pql_state && EMIT_STATES.has(s.state)) {
       const titleByState: Record<string, string> = {
@@ -114,8 +116,11 @@ async function scoreOrg(db: SupabaseClient, orgId: string, accountId?: string): 
       });
     }
   }
+  // Emit signals + fire workflows BEFORE advancing pql_state, so a failure here
+  // doesn't silently consume the transition — it retries on the next run.
   if (signalRows.length) {
-    const { data: createdSigs } = await db.from("signals").insert(signalRows).select("id, title, metadata");
+    const { data: createdSigs, error: sigErr } = await db.from("signals").insert(signalRows).select("id, title, metadata");
+    if (sigErr) throw sigErr;
     // Extend the automation spine to the Sell loop: fire on_pql workflows when an
     // account crosses into a PQL state. Propose-only; one pending run per account.
     try {
@@ -139,7 +144,9 @@ async function scoreOrg(db: SupabaseClient, orgId: string, accountId?: string): 
       }
     } catch { /* firing is best-effort — never fail scoring */ }
   }
-  return { scored, signals: signalRows.length };
+  // Persist scores + states only now — after the signal/workflow side effects.
+  for (const u of acctUpdates) await db.from("accounts").update(u.patch).eq("id", u.id);
+  return { scored: acctUpdates.length, signals: signalRows.length };
 }
 
 Deno.serve(async (req: Request) => {
