@@ -32,6 +32,7 @@ const json = (b: unknown, s = 200) => new Response(JSON.stringify(b), { status: 
 
 const WINDOW_DAYS = 35;
 const MAX_ACCOUNTS_PER_TICK = 500;
+const MAX_ORGS_PER_TICK = 50;
 const clamp = (n: number) => Math.max(0, Math.min(1, n));
 
 const ACTIVATION = new Set(["activation", "feature_adopt", "key_action", "onboarding_complete"]);
@@ -145,7 +146,11 @@ async function scoreOrg(db: SupabaseClient, orgId: string, accountId?: string): 
     } catch { /* firing is best-effort — never fail scoring */ }
   }
   // Persist scores + states only now — after the signal/workflow side effects.
-  for (const u of acctUpdates) await db.from("accounts").update(u.patch).eq("id", u.id);
+  // Bounded-parallel (chunks) so a tickful of accounts isn't N serial round trips.
+  const CHUNK = 25;
+  for (let i = 0; i < acctUpdates.length; i += CHUNK) {
+    await Promise.all(acctUpdates.slice(i, i + CHUNK).map((u) => db.from("accounts").update(u.patch).eq("id", u.id)));
+  }
   return { scored: acctUpdates.length, signals: signalRows.length };
 }
 
@@ -163,13 +168,17 @@ Deno.serve(async (req: Request) => {
     const { account_id } = await req.json().catch(() => ({}));
 
     if (isMachine && !account_id) {
-      // Sweep all orgs that have accounts (bounded by per-org cap inside scoreOrg).
+      // Sweep orgs that have accounts. Cap orgs/tick (hourly catches up) and
+      // isolate per-org failures so one bad org can't sink the whole sweep.
       const db = createClient(url, serviceKey);
       const { data: orgs } = await db.from("accounts").select("org_id").limit(5000);
-      const orgIds = [...new Set((orgs ?? []).map((o) => o.org_id))];
-      let scored = 0, signals = 0;
-      for (const orgId of orgIds) { const r = await scoreOrg(db, orgId, undefined); scored += r.scored; signals += r.signals; }
-      return json({ orgs: orgIds.length, scored, signals });
+      const orgIds = [...new Set((orgs ?? []).map((o) => o.org_id))].slice(0, MAX_ORGS_PER_TICK);
+      let scored = 0, signals = 0; const errors: string[] = [];
+      for (const orgId of orgIds) {
+        try { const r = await scoreOrg(db, orgId, undefined); scored += r.scored; signals += r.signals; }
+        catch (e) { errors.push(`${orgId}: ${e instanceof Error ? e.message : String(e)}`); }
+      }
+      return json({ orgs: orgIds.length, scored, signals, ...(errors.length ? { errors } : {}) });
     }
 
     // User mode: RLS-scoped to the caller's org.

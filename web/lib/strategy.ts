@@ -46,16 +46,18 @@ export const confText = (x: { conf_level: number | null; conf_label?: string | n
   x.conf_label || (x.conf_level != null ? `${Math.round(x.conf_level * 100)}%` : null);
 
 // Product Strategy shows PRODUCT signals — everything except pure GTM-messaging
-// signals (gtm-categorized with no special domain). Competitive / market /
-// frontier and product/both/unsorted all inform what to build.
+// signals (gtm-categorized with no special domain) and Sell-loop usage/PQL
+// signals (a GTM concern). Competitive / market / frontier and product/both/
+// unsorted all inform what to build.
 export function isProductSignal(s: { category?: string | null; metadata: { domain?: string } | null }): boolean {
+  if (s.metadata?.domain === "usage") return false; // PQL / usage signals are GTM-lens only
   return !(s.category === "gtm" && !s.metadata?.domain);
 }
 
-// GTM Strategy shows GTM signals — those categorized 'gtm' (or both). The GTM
-// board organizes these into themes that translate to campaigns & content.
+// GTM Strategy shows GTM signals — categorized 'gtm'/'both', plus the market and
+// usage (PQL / Sell-loop) domains. Organizes these into campaign/content themes.
 export function isGtmSignal(s: { category?: string | null; metadata: { domain?: string } | null }): boolean {
-  return s.category === "gtm" || s.category === "both" || s.metadata?.domain === "market";
+  return s.category === "gtm" || s.category === "both" || s.metadata?.domain === "market" || s.metadata?.domain === "usage";
 }
 
 export const errText = (e: unknown, f: string) =>
