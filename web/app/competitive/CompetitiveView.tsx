@@ -14,13 +14,14 @@ import SourceManager from "@/components/SourceManager";
 import CapabilityCellDrawer, { type Cell } from "@/components/CapabilityCellDrawer";
 import CompetitiveGrid from "@/components/CompetitiveGrid";
 import SignalProfile from "@/components/SignalProfile";
+import CompetitiveSetup from "@/components/CompetitiveSetup";
 import BattlecardItemDrawer, { type CardItem } from "@/components/BattlecardItemDrawer";
 import { signalDomain, SIGNAL_DOMAIN } from "@/lib/signals";
 import { useProductScope } from "@/lib/ProductContext";
 
 type Competitor = { id: string; name: string; relationship: string; website: string | null; notes: string | null; product_id: string | null };
 type Capability = { id: string; name: string; category: string | null };
-type Score = { id: string; capability_id: string; competitor_id: string | null; score: number };
+type Score = { id: string; capability_id: string; competitor_id: string | null; score: number; scored_by: string | null; evidence_at: string | null };
 type Card = { id: string; competitor_id: string | null; kind: string; title: string; detail: string | null; proposed_by: string | null; signal_ids: string[] | null; updated_at: string | null; audience: string | null };
 type Signal = { id: string; title: string; why: string | null; conf_label: string | null; conf_level: number | null; observed_at: string | null; origin: string | null; competitor_id: string | null; metadata: { domain?: string; competitor_id?: string; channel?: string } | null; source_id: string | null };
 type Theme = { id: string; title: string; summary: string | null; recommendation: string | null; category: string; competitor_id: string | null; conf_level: number | null; state: string };
@@ -48,7 +49,7 @@ export default function CompetitiveView() {
     const [{ data: comp }, { data: caps }, { data: scs }, { data: cds }, { data: sigs }, { data: ths }] = await Promise.all([
       supabase.from("competitors").select("id, name, relationship, website, notes, product_id").order("position").order("created_at"),
       supabase.from("capabilities").select("id, name, category").order("position").order("created_at"),
-      supabase.from("capability_scores").select("id, capability_id, competitor_id, score"),
+      supabase.from("capability_scores").select("id, capability_id, competitor_id, score, scored_by, evidence_at"),
       supabase.from("battlecard_items").select("id, competitor_id, kind, title, detail, proposed_by, signal_ids, updated_at, audience").order("position").order("created_at"),
       supabase.from("signals").select("id, title, why, conf_label, conf_level, observed_at, origin, competitor_id, metadata, source_id").order("observed_at", { ascending: false, nullsFirst: false }),
       supabase.from("signal_themes").select("id, title, summary, recommendation, category, competitor_id, conf_level, state").not("competitor_id", "is", null).order("last_evidence_at", { ascending: false, nullsFirst: false }),
@@ -78,7 +79,7 @@ export default function CompetitiveView() {
       <Banner>{error}</Banner>
 
       {loading ? <div className="t-sub t-muted">Loading…</div>
-        : tab === "dashboard" ? <Dashboard competitors={scopedCompetitors} capabilities={capabilities} scores={scores} compSignals={compSignals} overview={overview} reload={load} setError={setError} />
+        : tab === "dashboard" ? <Dashboard competitors={scopedCompetitors} capabilities={capabilities} scores={scores} compSignals={compSignals} overview={overview} reload={load} setError={setError} newProductId={scopedProductId} />
         : tab === "profile" ? <SignalProfile scope="landscape" />
         : tab === "competitors" ? <Competitors competitors={scopedCompetitors} cards={cards} overview={overview} capabilities={capabilities} scores={scores} compSignals={compSignals} themes={themes} newProductId={scopedProductId} reload={load} setError={setError} />
         : <Feed signals={signals} competitors={scopedCompetitors} reload={load} />}
@@ -87,8 +88,8 @@ export default function CompetitiveView() {
 }
 
 // ---------- Dashboard: capability heat-map + metrics ----------
-function Dashboard({ competitors, capabilities, scores, compSignals, overview, reload, setError }: {
-  competitors: Competitor[]; capabilities: Capability[]; scores: Score[]; compSignals: Signal[]; overview: { name: string; overview: string | null; valueProp: string | null } | null; reload: () => void; setError: (s: string | null) => void;
+function Dashboard({ competitors, capabilities, scores, compSignals, overview, reload, setError, newProductId }: {
+  competitors: Competitor[]; capabilities: Capability[]; scores: Score[]; compSignals: Signal[]; overview: { name: string; overview: string | null; valueProp: string | null } | null; reload: () => void; setError: (s: string | null) => void; newProductId?: string | null;
 }) {
   const supabase = createClient();
   const [addingCap, setAddingCap] = useState(false);
@@ -97,8 +98,23 @@ function Dashboard({ competitors, capabilities, scores, compSignals, overview, r
   const [openMetric, setOpenMetric] = useState<"gaps" | "moves" | null>(null);
   const [matrixView, setMatrixView] = useState<"matrix" | "grid">("matrix");
 
+  // Guided setup: the front door. Auto-opens for an empty module; always
+  // reachable from the header so you can expand the board later.
+  const empty = competitors.length === 0 && capabilities.length === 0;
+  const [setupOpen, setSetupOpen] = useState(empty);
+  useEffect(() => { if (empty) setSetupOpen(true); }, [empty]);
+
   const direct = competitors.filter((c) => c.relationship === "direct");
   const scoreOf = (capId: string, compId: string | null) => scores.find((s) => s.capability_id === capId && s.competitor_id === compId)?.score ?? 0;
+  // Provenance + currency of a cell: ✦ = evidence-derived (ratified through the
+  // gate); stale = newer signals on this competitor than the score's evidence.
+  const provOf = (capId: string, compId: string | null) => scores.find((s) => s.capability_id === capId && s.competitor_id === compId);
+  const staleCell = (capId: string, compId: string | null) => {
+    if (!compId) return false;
+    const p = provOf(capId, compId);
+    if (!p?.scored_by || !p.evidence_at) return false;
+    return compSignals.some((sg) => sigComp(sg) === compId && sg.observed_at && sg.observed_at > p.evidence_at!);
+  };
 
   async function addCapability(e: React.FormEvent) {
     e.preventDefault(); if (!capName.trim()) return;
@@ -124,6 +140,10 @@ function Dashboard({ competitors, capabilities, scores, compSignals, overview, r
     [recent, "Moves · 30d", recent > 0, "moves"],
   ];
 
+  if (setupOpen) {
+    return <CompetitiveSetup productId={newProductId} onDone={() => { setSetupOpen(false); reload(); }} />;
+  }
+
   return (
     <div>
       {/* Capability matrix / momentum grid — the differentiator, up top */}
@@ -135,6 +155,7 @@ function Dashboard({ competitors, capabilities, scores, compSignals, overview, r
             ))}
           </div>
           {!addingCap && <button className="btn btn-secondary btn-sm" onClick={() => setAddingCap(true)}>+ Capability</button>}
+          <button className="btn btn-secondary btn-sm" onClick={() => setSetupOpen(true)} title="Guided, AI-assisted setup — find rivals, design the matrix, stand up monitoring">✦ Guided setup</button>
         </div>
       }>
         <div className="t-sub t-muted" style={{ fontSize: 12.5, marginBottom: 12 }}>{matrixView === "matrix" ? "Functionality vectors × competitors (you vs each). Click any cell for the agent's read — reasons, sources, implications — then set the rating yourself." : "Coverage × momentum quadrant — where each player sits, you vs them (G2-style). Top-right leads."}</div>
@@ -166,9 +187,11 @@ function Dashboard({ competitors, capabilities, scores, compSignals, overview, r
                       const who = compId === null ? "Us" : compById(compId)?.name ?? "Competitor";
                       return (
                         <td key={compId ?? "us"} style={{ padding: "6px 8px", textAlign: "center" }}>
-                          <button onClick={() => setOpenCell({ capabilityId: cap.id, capabilityName: cap.name, competitorId: compId, who, score: s, competitorNotes: compById(compId)?.notes ?? null, productValueProp: overview?.valueProp ?? overview?.overview ?? null })} title={`${heatText(s)} — open for context`}
-                            style={{ width: "100%", minWidth: 64, padding: "8px 6px", borderRadius: 6, border: compId === null ? "1px solid var(--ac)" : "1px solid var(--border)", background: heat(s), cursor: "pointer", fontSize: 11, fontWeight: 600, color: "var(--tp)" }}>
-                            {heatText(s)}
+                          <button onClick={() => setOpenCell({ capabilityId: cap.id, capabilityName: cap.name, competitorId: compId, who, score: s, competitorNotes: compById(compId)?.notes ?? null, productValueProp: overview?.valueProp ?? overview?.overview ?? null })}
+                            title={`${heatText(s)}${provOf(cap.id, compId)?.scored_by ? ` — ✦ scored from evidence by ${provOf(cap.id, compId)?.scored_by}` : " — set by hand"}${staleCell(cap.id, compId) ? " · new evidence since scored" : ""} — open for context`}
+                            style={{ width: "100%", minWidth: 64, padding: "8px 6px", borderRadius: 6, border: compId === null ? "1px solid var(--ac)" : "1px solid var(--border)", background: heat(s), cursor: "pointer", fontSize: 11, fontWeight: 600, color: "var(--tp)", position: "relative" }}>
+                            {heatText(s)}{provOf(cap.id, compId)?.scored_by ? " ✦" : ""}
+                            {staleCell(cap.id, compId) && <span title="New evidence since this was scored" style={{ position: "absolute", top: 3, right: 4, width: 6, height: 6, borderRadius: 3, background: "var(--am-text)" }} />}
                           </button>
                         </td>
                       );
@@ -394,6 +417,27 @@ function Competitors({ competitors, cards, overview, capabilities, scores, compS
     } catch (e) { setError(e instanceof Error ? e.message : `The ${which} step failed.`); }
     finally { setAgentBusy(null); }
   }
+  // Matrix currency watch: alert on the homepage when new evidence lands after
+  // this rival's cells were scored (the matrix twin of the battlecard watch).
+  const [watchingMatrix, setWatchingMatrix] = useState(false);
+  useEffect(() => {
+    if (!scope) return;
+    supabase.from("update_alerts").select("id").eq("kind", "matrix_refresh").eq("competitor_id", scope).eq("is_active", true).maybeSingle()
+      .then(({ data }) => setWatchingMatrix(!!data));
+  }, [supabase, scope]);
+  async function toggleWatchMatrix() {
+    if (!scope) return;
+    setError(null);
+    if (watchingMatrix) {
+      const { error } = await supabase.from("update_alerts").delete().eq("kind", "matrix_refresh").eq("competitor_id", scope);
+      if (error) setError(error.message); else setWatchingMatrix(false);
+    } else {
+      const orgId = await getOrgId(); if (!orgId) return;
+      const { error } = await supabase.from("update_alerts").insert({ org_id: orgId, kind: "matrix_refresh", competitor_id: scope });
+      if (error) setError(error.message); else setWatchingMatrix(true);
+    }
+  }
+
   // Evidence-derived scoring: the agent proposes matrix scores for this rival
   // from its signals/themes; each lands in the review gate (Signals → Review).
   async function runScore() {
@@ -596,6 +640,10 @@ function Competitors({ competitors, cards, overview, capabilities, scores, compS
               title={stepReady(0) ? `Step 1 (your agent × skill) scores ${selected?.name ?? "them"} on each capability from their signals — each score cites its evidence and lands in Signals → Review` : "Needs a workflow with step 1 = agent × skill"}>
               {scoreBusy ? "Scoring…" : "✦ Score from evidence"}
             </button>
+            <button className="btn btn-secondary btn-sm" onClick={toggleWatchMatrix}
+              title={watchingMatrix ? "Stop alerting when new evidence lands after these scores" : "Alert me on the homepage when new evidence lands after these scores"}>
+              {watchingMatrix ? "🔔 Watching" : "🔕 Watch matrix"}
+            </button>
           </div>
         }>
           {scoreNote && <div className="card card-pad" style={{ marginBottom: 12, background: "var(--panel-2)", fontSize: 12.5 }}>{scoreNote}</div>}
@@ -617,10 +665,18 @@ function Competitors({ competitors, cards, overview, capabilities, scores, compS
                   {capabilities.map((cap) => {
                     const us = scoreOf(cap.id, null), them = scope ? scoreOf(cap.id, scope) : 0;
                     const ed = us - them;
-                    const cell = (compId: string | null, sc: number, who: string) => (
-                      <button onClick={() => setOpenCell({ capabilityId: cap.id, capabilityName: cap.name, competitorId: compId, who, score: sc, competitorNotes: selected?.notes ?? null, productValueProp: overview?.valueProp ?? overview?.overview ?? null })}
-                        title={`${heatText(sc)} — open for the officer's read`} style={{ minWidth: 58, padding: "5px 10px", borderRadius: 6, border: "1px solid var(--border)", background: heat(sc), fontSize: 11, fontWeight: 600, cursor: "pointer" }}>{heatText(sc)}</button>
-                    );
+                    const cell = (compId: string | null, sc: number, who: string) => {
+                      const p = scores.find((x) => x.capability_id === cap.id && x.competitor_id === compId);
+                      const stale = !!(compId && p?.scored_by && p.evidence_at && compSignals.some((sg) => sigComp(sg) === compId && sg.observed_at && sg.observed_at > p.evidence_at!));
+                      return (
+                        <button onClick={() => setOpenCell({ capabilityId: cap.id, capabilityName: cap.name, competitorId: compId, who, score: sc, competitorNotes: selected?.notes ?? null, productValueProp: overview?.valueProp ?? overview?.overview ?? null })}
+                          title={`${heatText(sc)}${p?.scored_by ? ` — ✦ scored from evidence by ${p.scored_by}` : " — set by hand"}${stale ? " · new evidence since scored" : ""}`}
+                          style={{ minWidth: 58, padding: "5px 10px", borderRadius: 6, border: "1px solid var(--border)", background: heat(sc), fontSize: 11, fontWeight: 600, cursor: "pointer", position: "relative" }}>
+                          {heatText(sc)}{p?.scored_by ? " ✦" : ""}
+                          {stale && <span style={{ position: "absolute", top: 2, right: 3, width: 6, height: 6, borderRadius: 3, background: "var(--am-text)" }} />}
+                        </button>
+                      );
+                    };
                     return (
                       <tr key={cap.id} style={{ borderTop: "1px solid var(--border)" }}>
                         <td style={{ padding: "8px 14px", fontWeight: 600 }}>{cap.name}</td>
