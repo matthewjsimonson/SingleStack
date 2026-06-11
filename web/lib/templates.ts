@@ -85,6 +85,7 @@ export const GTM_TEMPLATE: TemplateSection[] = [
     blurb: "Who it's for and the people who decide. Add a field per persona — champion, economic buyer, user, etc.",
     fields: [
       { key: "icp", label: "Ideal customer profile", placeholder: "The accounts this is built for — and how to qualify them." },
+      { key: "industries", label: "Industries / verticals", placeholder: "The verticals you serve — key to who you actually compete with." },
       { key: "primary_persona", label: "Primary persona", placeholder: "The main person you speak to: role, goals, pains. Add more personas with '+ Field' (economic buyer, end user, …)." },
     ],
   },

@@ -13,6 +13,7 @@ import { createClient } from "@/lib/supabase/client";
 import { getOrgId } from "@/lib/org";
 import { Chip, Banner, Modal } from "@/components/ui";
 import { useAgentRun, AgentProgress } from "@/components/AgentProgress";
+import ProfileReadiness from "@/components/ProfileReadiness";
 import { CATALOG_BY_KIND } from "@/lib/sources";
 import { SKILL_DEFS } from "@/lib/skills.generated";
 
@@ -286,8 +287,43 @@ export default function CompetitiveSetup({ onDone, productId }: { onDone: () => 
       setPicture(data.picture || "");
       setCtx({ product: data.product || "", features: data.features || "", who: data.who || "", industries: data.industries || "", positioning: data.positioning || "", more: data.more || "" });
       setChatDone(true);
+      // HOLD what the interview surfaced: queue a proposal on the GTM record so
+      // the answers update the PROFILE (personas / industries / positioning),
+      // not just this session. Through the gate — you accept it in the drawer.
+      if (history.length > 0) void persistInterview(data);
     } catch (e) { setError(e instanceof Error ? e.message : "Could not paint the picture."); }
     finally { setChatBusy(false); }
+  }
+  const [profileNote, setProfileNote] = useState<string | null>(null);
+  async function persistInterview(d: { who?: string; industries?: string; positioning?: string }) {
+    try {
+      const orgId = await getOrgId(); if (!orgId) return;
+      const { data: g } = await supabase.from("gtm_records").select("id").order("created_at").limit(1).maybeSingle();
+      if (!g) return;
+      const { data: gf } = await supabase.from("record_fields").select("id, field_key, value").eq("gtm_record_id", g.id);
+      const want: [string, string, string | undefined][] = [
+        ["personas", "Personas", d.who], ["industries", "Industries / verticals", d.industries], ["positioning", "Positioning", d.positioning],
+      ];
+      const changes = want.filter(([k, , v]) => v?.trim() && v.trim() !== (gf?.find((f) => f.field_key === k)?.value ?? "").trim());
+      if (!changes.length) return;
+      const { data: prop, error: pErr } = await supabase.from("proposals").insert({
+        org_id: orgId, gtm_record_id: g.id, title: "Interview learnings → GTM record",
+        rationale: "The competitive-setup drill-down surfaced sharper buyer/positioning detail than the record carries. Accepting keeps the profile current — and future setups start from it.",
+        proposed_by: "Setup interview", status: "pending",
+      }).select("id").single();
+      if (pErr || !prop) return;
+      await supabase.from("proposal_changes").insert(changes.map(([k, label, v]) => {
+        const ex = gf?.find((f) => f.field_key === k);
+        return {
+          org_id: orgId, proposal_id: prop.id,
+          change_kind: ex ? "update_field" : "add_field",
+          record_field_id: ex?.id ?? null, old_value: ex?.value ?? null,
+          field_key: ex ? null : k, label: ex ? null : label,
+          proposed_value: v!.trim(),
+        };
+      }));
+      setProfileNote(`Queued ${changes.length} GTM-record update${changes.length === 1 ? "" : "s"} from your answers (personas / industries / positioning) — review in the record's proposal drawer.`);
+    } catch { /* best-effort: the wizard flow never fails on profile persistence */ }
   }
 
   // ---- step 2: propose rivals (web search), confirm, insert ------------------
@@ -434,6 +470,10 @@ export default function CompetitiveSetup({ onDone, productId }: { onDone: () => 
 
       {step === 1 && (
         <div className="stack-3">
+          {/* The durable gauge: derived from records + matrix + signal flow, so it
+              updates as the company evolves — the chat's session score is only a
+              conversation aid. */}
+          <ProfileReadiness nonce={chat.length + (picture ? 1 : 0)} />
           {/* ONE context card — read from the records (product, modules, GTM), no
               re-typing, no redundant fields. ✎ Edit opens the popup where every
               line can be adjusted, added to, or eliminated. */}
@@ -479,6 +519,7 @@ export default function CompetitiveSetup({ onDone, productId }: { onDone: () => 
               <div className="t-label" style={{ color: "var(--tm)", marginBottom: 6 }}>The full picture — confirm before the search runs</div>
               <div className="t-sub" style={{ fontSize: 13, lineHeight: 1.6, whiteSpace: "pre-wrap" }}>{picture}</div>
               <div className="t-mono-xs t-muted" style={{ marginTop: 6 }}>Synthesized from your records + the interview. ✎ Edit adjusts the distilled fields; ✦ Drill down continues the conversation.</div>
+              {profileNote && <div className="t-mono-xs" style={{ marginTop: 4, color: "var(--gn-text, #15803d)" }}>✓ {profileNote}</div>}
             </div>
           )}
           {compsRun.active ? (

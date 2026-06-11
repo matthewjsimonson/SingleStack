@@ -15,6 +15,7 @@ import CapabilityCellDrawer, { type Cell } from "@/components/CapabilityCellDraw
 import CompetitiveGrid from "@/components/CompetitiveGrid";
 import SignalProfile from "@/components/SignalProfile";
 import CompetitiveSetup from "@/components/CompetitiveSetup";
+import ProfileReadiness from "@/components/ProfileReadiness";
 import BattlecardItemDrawer, { type CardItem } from "@/components/BattlecardItemDrawer";
 import { signalDomain, SIGNAL_DOMAIN } from "@/lib/signals";
 import { useProductScope } from "@/lib/ProductContext";
@@ -161,6 +162,8 @@ function Dashboard({ competitors, capabilities, scores, compSignals, themes, ove
 
   return (
     <div>
+      {/* The living gauge — records + matrix + signal flow, auto-updating. */}
+      <div style={{ marginBottom: "var(--sp-4)" }}><ProfileReadiness compact /></div>
       {/* Capability matrix / momentum grid — the differentiator, up top */}
       <Section label="Capability landscape" action={
         <div className="row gap-2">
