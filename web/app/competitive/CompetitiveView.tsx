@@ -112,6 +112,17 @@ function Dashboard({ competitors, capabilities, scores, compSignals, overview, r
   const [setupOpen, setSetupOpen] = useState(empty);
   useEffect(() => { if (empty) setSetupOpen(true); }, [empty]);
 
+  // Purge the unevidenced: deletes every score that was NOT derived from
+  // evidence through the gate (hand-set + demo seed). Evidence-scored cells
+  // (✦) survive. This is how a polluted matrix becomes an honest one.
+  const [confirmClear, setConfirmClear] = useState(false);
+  const handSetCount = scores.filter((sc) => !sc.scored_by).length;
+  async function clearHandSet() {
+    setConfirmClear(false); setError(null);
+    const { error } = await supabase.from("capability_scores").delete().is("scored_by", null);
+    if (error) setError(error.message); else reload();
+  }
+
   const direct = competitors.filter((c) => c.relationship === "direct");
   const scoreOf = (capId: string, compId: string | null) => scores.find((s) => s.capability_id === capId && s.competitor_id === compId)?.score ?? 0;
   // Provenance + currency of a cell: ✦ = evidence-derived (ratified through the
@@ -164,8 +175,21 @@ function Dashboard({ competitors, capabilities, scores, compSignals, overview, r
           </div>
           {!addingCap && <button className="btn btn-secondary btn-sm" onClick={() => setAddingCap(true)}>+ Capability</button>}
           <button className="btn btn-secondary btn-sm" onClick={() => setSetupOpen(true)} title="Guided, AI-assisted setup — find rivals, design the matrix, stand up monitoring">✦ Guided setup</button>
+          {handSetCount > 0 && (
+            <button className="btn btn-secondary btn-sm" onClick={() => setConfirmClear(true)}
+              title="Delete every score that was NOT derived from evidence (hand-set + demo data). ✦ evidence-scored cells survive.">
+              ⌫ Clear hand-set scores · {handSetCount}
+            </button>
+          )}
         </div>
       }>
+        {confirmClear && (
+          <ConfirmDialog
+            title="Clear hand-set scores?"
+            message={<>Deletes <b>{handSetCount}</b> score{handSetCount === 1 ? "" : "s"} that did NOT come through the evidence gate — hand-typed ratings and demo data alike. ✦ evidence-scored cells survive untouched. Competitor cells refill as agents score from signals (you ratify each); &ldquo;Us&rdquo; you re-rate yourself — that call is yours to make.</>}
+            confirmLabel="Clear them" onConfirm={clearHandSet} onCancel={() => setConfirmClear(false)}
+          />
+        )}
         <div className="t-sub t-muted" style={{ fontSize: 12.5, marginBottom: 12 }}>{matrixView === "matrix" ? "Functionality vectors × competitors (you vs each). Click any cell for the agent's read — reasons, sources, implications — then set the rating yourself." : "Coverage × momentum quadrant — where each player sits, you vs them (G2-style). Top-right leads."}</div>
         {matrixView === "grid" ? (
           capabilities.length === 0 ? <div className="t-sub t-muted">Add capabilities to plot the grid.</div>
