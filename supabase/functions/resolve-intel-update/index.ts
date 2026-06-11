@@ -72,7 +72,7 @@ Deno.serve(async (req: Request) => {
             title: p.title, detail: (p.detail as string | null) ?? null,
             signal_ids: (p.signal_ids as string[] | undefined) ?? [],
             theme_id: (p.theme_id as string | null) ?? null,
-            proposed_by: "Competitive analyst",
+            proposed_by: (p.proposed_by as string | null) ?? "agent", // the workflow step's agent, carried in the payload
           });
           if (bcErr) throw new Error(`could not create battlecard item: ${bcErr.message}`);
           break;

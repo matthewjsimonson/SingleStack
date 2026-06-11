@@ -17,7 +17,9 @@
 // The creative half (battlecard-messaging) reads the RATIFIED items and drafts
 // seller-facing copy — persuasion built on this function's facts.
 //
-// Input (POST): { competitor_id }
+// Input (POST): { competitor_id, workflow_id } — step 1 of the workflow is the analyst:
+//   the USER'S agent + cornerstone skills + analyst child skill carry identity
+//   and playbook; this function is only the execution substrate + the gate.
 // Runs as caller (JWT) → RLS fences everything to the org. Secret: ANTHROPIC_API_KEY.
 // ============================================================================
 
@@ -35,8 +37,6 @@ const CORS = {
 };
 const json = (b: unknown, s = 200) => new Response(JSON.stringify(b), { status: s, headers: { ...CORS, "content-type": "application/json" } });
 
-const AGENT_KEY = "battlecard_analyst";
-const AGENT_NAME = "Competitive analyst";
 const KINDS = ["win", "lose", "strength", "objection", "trap", "pricing", "proof", "discovery"];
 
 // Structured output: a list of evidence-cited battlecard items.
@@ -80,21 +80,33 @@ Deno.serve(async (req: Request) => {
 
   const body = await req.json().catch(() => ({}));
   const competitorId = body.competitor_id as string | undefined;
+  const workflowId = body.workflow_id as string | undefined;
   if (!competitorId) return json({ error: "competitor_id required" }, 400);
+  if (!workflowId) return json({ error: "workflow_id required — attach a workflow (agent × skills) for the battlecard pair" }, 400);
 
   const { data: orgId } = await supabase.rpc("current_org_id");
   if (!orgId) return json({ error: "could not resolve org" }, 401);
 
-  // Get-or-create the analyst's agents row (attribution + roster visibility).
-  let { data: agent } = await supabase.from("agents").select("id, name, model, system_prompt").eq("key", AGENT_KEY).maybeSingle();
-  if (!agent) {
-    const { data: created } = await supabase.from("agents").insert({
-      org_id: orgId, key: AGENT_KEY, name: AGENT_NAME, model: MODEL,
-      role: "Proposes battlecard items from a competitor's themes, matrix position, and signals — grounded and conservative; every item cites its evidence.",
-    }).select("id, name, model, system_prompt").single();
-    agent = created;
+  // The USER-BUILT configuration: this function is only the execution substrate
+  // + the gate. Step 1 of the attached workflow is the analyst — its agent and
+  // child skill carry the identity and the playbook; nothing is hardcoded here.
+  const { data: wf } = await supabase.from("workflows").select("id, name, steps").eq("id", workflowId).maybeSingle();
+  if (!wf) return json({ error: `no workflow with id '${workflowId}'` }, 404);
+  const step = (Array.isArray(wf.steps) ? wf.steps : [])[0] as { agent_id?: string; skill_id?: string | null; instruction?: string } | undefined;
+  if (!step?.agent_id) return json({ error: `workflow "${wf.name}" has no step 1 with an agent — add one (agent × analyst skill)` }, 400);
+
+  const { data: agent } = await supabase.from("agents").select("id, name, role, model, system_prompt").eq("id", step.agent_id).eq("is_active", true).maybeSingle();
+  if (!agent) return json({ error: "step 1's agent was not found or is inactive" }, 404);
+  // Cornerstone skills (always on) + the step's child skill (the analyst play).
+  const { data: corner } = await supabase.from("agent_skills").select("skills ( name, instructions )").eq("agent_id", agent.id).eq("is_cornerstone", true);
+  // deno-lint-ignore no-explicit-any
+  const cornerstones = ((corner ?? []) as any[]).map((r) => r.skills).filter(Boolean) as { name: string; instructions: string | null }[];
+  let childSkill: { name: string; instructions: string | null } | null = null;
+  if (step.skill_id) {
+    const { data: sk } = await supabase.from("skills").select("name, instructions").eq("id", step.skill_id).maybeSingle();
+    childSkill = sk ?? null;
   }
-  if (!agent) return json({ error: "could not resolve the analyst agent" }, 500);
+  if (!childSkill) return json({ error: `workflow "${wf.name}" step 1 has no skill — attach your analyst skill to it` }, 400);
   const model = agent.model || MODEL;
 
   const { data: run } = await supabase.from("agent_runs")
@@ -148,13 +160,21 @@ Deno.serve(async (req: Request) => {
       (existing ?? []).length ? `EXISTING BATTLECARD ITEMS (do not duplicate):\n${(existing ?? []).map((e) => `- [${e.kind}] ${e.title}`).join("\n")}` : "",
     ].filter(Boolean).join("\n\n");
 
+    // Identity and judgment come from the USER'S configuration (agent system
+    // prompt + cornerstone skills + the analyst child skill + the step's
+    // instruction). Only the GATE CONTRACT — the output shape battlecard_items
+    // requires (cited signal indices, no unevidenced claims) — is fixed here.
+    const system = [
+      agent.system_prompt || `You are ${agent.name}${agent.role ? `, ${agent.role}` : ""}, an executive agent in SingleStack.`,
+      cornerstones.length ? `\nYOUR CORNERSTONE SKILLS (always on):\n${cornerstones.map((s) => `## ${s.name}\n${s.instructions ?? ""}`).join("\n\n")}` : "",
+      `\nTHE SKILL FOR THIS TASK — apply it:\n## ${childSkill.name}\n${childSkill.instructions ?? ""}`,
+      step.instruction ? `\nSTEP INSTRUCTION: ${step.instruction}` : "",
+      `\nGATE CONTRACT (non-negotiable output rules): you are proposing STRUCTURED battlecard items (kinds: ${KINDS.join(", ")}) about this competitor, strictly from the evidence provided. Every item MUST cite the signal indices that back it (signal_indices) — an item you cannot back with at least one listed signal or a clear matrix delta must not be proposed. Set theme_index to the {T#} that motivated the item, or -1. Never invent capabilities, pricing, or quotes. Prefer fewer, well-evidenced items over coverage. Do not duplicate existing items. title = the point a seller needs (one line); detail = the substantiation (2-3 sentences, factual tone).`,
+    ].filter(Boolean).join("\n");
+
     const resp = await anthropic.messages.create({
       model, max_tokens: 3000,
-      system: agent.system_prompt || [
-        `You are the ${AGENT_NAME}: the grounded, conservative half of a battlecard agent pair. You propose STRUCTURED battlecard items (kinds: ${KINDS.join(", ")}) about a competitor, strictly from the evidence provided.`,
-        "Rules: every item MUST cite the signal indices that back it (signal_indices) — an item you cannot back with at least one listed signal or a clear matrix delta must not be proposed. Set theme_index to the {T#} that motivated the item, or -1. Never invent capabilities, pricing, or quotes. Prefer fewer, well-evidenced items over coverage. Do not duplicate existing items.",
-        "Write title as the point a seller needs (one line) and detail as the substantiation (2-3 sentences, factual tone).",
-      ].join("\n"),
+      system,
       messages: [{ role: "user", content: prompt }],
       output_config: { effort: "high", format: { type: "json_schema", schema: SCHEMA } },
       // deno-lint-ignore no-explicit-any
@@ -177,13 +197,13 @@ Deno.serve(async (req: Request) => {
       if (autonomous) {
         const { error } = await supabase.from("battlecard_items").insert({
           org_id: orgId, competitor_id: competitorId, kind: it.kind, title: it.title.trim(), detail: it.detail?.trim() || null,
-          signal_ids, theme_id, proposed_by: AGENT_NAME,
+          signal_ids, theme_id, proposed_by: agent.name,
         });
         if (!error) created++;
       } else {
         const { error } = await supabase.from("intel_updates").insert({
           org_id: orgId, scope: "battlecard", kind: "battlecard_item", theme_id,
-          payload: { competitor_id: competitorId, kind: it.kind, title: it.title.trim(), detail: it.detail?.trim() || null, signal_ids, theme_id, rationale: it.rationale },
+          payload: { competitor_id: competitorId, kind: it.kind, title: it.title.trim(), detail: it.detail?.trim() || null, signal_ids, theme_id, rationale: it.rationale, proposed_by: agent.name },
           summary: `${comp.name} battlecard · ${it.kind}: "${it.title.trim()}" (${signal_ids.length} signal${signal_ids.length === 1 ? "" : "s"})`,
           status: "pending",
         });

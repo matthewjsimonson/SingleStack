@@ -15,7 +15,7 @@
 // items' cited evidence forward. Honors the 'records' autonomy dial:
 // autonomous → accept_proposal() applies it immediately (ratified as the agent).
 //
-// Input (POST): { competitor_id }
+// Input (POST): { competitor_id, workflow_id } — step 2 of the workflow is the messenger.
 // Runs as caller (JWT) → RLS fences everything to the org. Secret: ANTHROPIC_API_KEY.
 // ============================================================================
 
@@ -33,8 +33,6 @@ const CORS = {
 };
 const json = (b: unknown, s = 200) => new Response(JSON.stringify(b), { status: s, headers: { ...CORS, "content-type": "application/json" } });
 
-const AGENT_KEY = "battlecard_messaging";
-const AGENT_NAME = "Messaging agent";
 const SECTION = "Battlecard";
 // The seller-facing fields this agent owns on the GTM record.
 const FIELDS: { key: string; label: string }[] = [
@@ -81,20 +79,32 @@ Deno.serve(async (req: Request) => {
 
   const body = await req.json().catch(() => ({}));
   const competitorId = body.competitor_id as string | undefined;
+  const workflowId = body.workflow_id as string | undefined;
   if (!competitorId) return json({ error: "competitor_id required" }, 400);
+  if (!workflowId) return json({ error: "workflow_id required — attach a workflow (agent × skills) for the battlecard pair" }, 400);
 
   const { data: orgId } = await supabase.rpc("current_org_id");
   if (!orgId) return json({ error: "could not resolve org" }, 401);
 
-  let { data: agent } = await supabase.from("agents").select("id, name, model, system_prompt").eq("key", AGENT_KEY).maybeSingle();
-  if (!agent) {
-    const { data: created } = await supabase.from("agents").insert({
-      org_id: orgId, key: AGENT_KEY, name: AGENT_NAME, model: MODEL,
-      role: "Drafts the GTM record's seller-facing Battlecard section — talk tracks and objection responses — from RATIFIED battlecard items. Persuasive in the org's voice; introduces no claims beyond the analyst's facts.",
-    }).select("id, name, model, system_prompt").single();
-    agent = created;
+  // The USER-BUILT configuration: step 2 of the attached workflow is the
+  // messenger — its agent and child skill carry the identity and the playbook;
+  // this function is only the execution substrate + the proposals gate.
+  const { data: wf } = await supabase.from("workflows").select("id, name, steps").eq("id", workflowId).maybeSingle();
+  if (!wf) return json({ error: `no workflow with id '${workflowId}'` }, 404);
+  const step = (Array.isArray(wf.steps) ? wf.steps : [])[1] as { agent_id?: string; skill_id?: string | null; instruction?: string } | undefined;
+  if (!step?.agent_id) return json({ error: `workflow "${wf.name}" has no step 2 with an agent — add one (agent × messenger skill)` }, 400);
+
+  const { data: agent } = await supabase.from("agents").select("id, name, role, model, system_prompt").eq("id", step.agent_id).eq("is_active", true).maybeSingle();
+  if (!agent) return json({ error: "step 2's agent was not found or is inactive" }, 404);
+  const { data: corner } = await supabase.from("agent_skills").select("skills ( name, instructions )").eq("agent_id", agent.id).eq("is_cornerstone", true);
+  // deno-lint-ignore no-explicit-any
+  const cornerstones = ((corner ?? []) as any[]).map((r) => r.skills).filter(Boolean) as { name: string; instructions: string | null }[];
+  let childSkill: { name: string; instructions: string | null } | null = null;
+  if (step.skill_id) {
+    const { data: sk } = await supabase.from("skills").select("name, instructions").eq("id", step.skill_id).maybeSingle();
+    childSkill = sk ?? null;
   }
-  if (!agent) return json({ error: "could not resolve the messaging agent" }, 500);
+  if (!childSkill) return json({ error: `workflow "${wf.name}" step 2 has no skill — attach your messenger skill to it` }, 400);
   const model = agent.model || MODEL;
 
   const { data: run } = await supabase.from("agent_runs")
@@ -144,10 +154,13 @@ Deno.serve(async (req: Request) => {
 
     const resp = await anthropic.messages.create({
       model, max_tokens: 2500,
-      system: agent.system_prompt || [
-        `You are the ${AGENT_NAME}: the creative half of a battlecard agent pair. You turn RATIFIED battlecard items into seller-facing copy — a battlecard summary, a talk track, and objection responses — in the org's voice (mirror the GTM record's tone and personas).`,
-        "Rules: every claim must trace to a ratified item or the GTM record — introduce nothing new. Objection responses address the [objection] items directly. Write for a rep mid-call: tight, confident, usable verbatim. rationale = one paragraph on how you used the facts; conf_level 0..1.",
-      ].join("\n"),
+      system: [
+        agent.system_prompt || `You are ${agent.name}${agent.role ? `, ${agent.role}` : ""}, an executive agent in SingleStack.`,
+        cornerstones.length ? `\nYOUR CORNERSTONE SKILLS (always on):\n${cornerstones.map((s) => `## ${s.name}\n${s.instructions ?? ""}`).join("\n\n")}` : "",
+        `\nTHE SKILL FOR THIS TASK — apply it:\n## ${childSkill.name}\n${childSkill.instructions ?? ""}`,
+        step.instruction ? `\nSTEP INSTRUCTION: ${step.instruction}` : "",
+        "\nGATE CONTRACT (non-negotiable output rules): you are turning RATIFIED battlecard items into seller-facing copy — a battlecard summary, a talk track, and objection responses. Every claim must trace to a ratified item or the GTM record — introduce nothing new. Objection responses address the [objection] items directly. Write for a rep mid-call: tight, confident, usable verbatim. rationale = one paragraph on how you used the facts; conf_level 0..1.",
+      ].filter(Boolean).join("\n"),
       messages: [{ role: "user", content: prompt }],
       output_config: { effort: "high", format: { type: "json_schema", schema: SCHEMA } },
       // deno-lint-ignore no-explicit-any
@@ -165,7 +178,7 @@ Deno.serve(async (req: Request) => {
       title: `Battlecard messaging · ${comp.name}`,
       rationale: out.rationale, conf_level: conf,
       conf_label: conf >= 0.75 ? "High" : conf >= 0.5 ? "Medium" : "Low",
-      proposed_by: AGENT_NAME,
+      proposed_by: agent.name,
     }).select("id").single();
     if (propErr || !prop) throw new Error(`could not create proposal: ${propErr?.message ?? "no row"}`);
 
@@ -191,7 +204,7 @@ Deno.serve(async (req: Request) => {
     const { data: polRow } = await supabase.from("review_policies").select("mode").eq("org_id", orgId).eq("surface", "records").maybeSingle();
     let autoAccepted = false;
     if (polRow?.mode === "autonomous") {
-      const { error: accErr } = await supabase.rpc("accept_proposal", { p_proposal: prop.id, p_ratifier: AGENT_NAME });
+      const { error: accErr } = await supabase.rpc("accept_proposal", { p_proposal: prop.id, p_ratifier: agent.name });
       autoAccepted = !accErr;
     }
 

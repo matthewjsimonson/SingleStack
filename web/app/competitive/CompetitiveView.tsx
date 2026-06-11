@@ -312,23 +312,37 @@ function Competitors({ competitors, cards, overview, capabilities, scores, compS
   }
   async function remove(id: string) { setError(null); await supabase.from("battlecard_items").delete().eq("id", id); reload(); }
 
-  // The battlecard agent pair. Analyst (grounded): proposes items from this
-  // competitor's themes + matrix, every item citing signals — lands in the
-  // intelligence review queue (or directly, when the policy is autonomous).
-  // Messaging (creative): turns the RATIFIED items into the GTM record's
-  // Battlecard section via the normal proposal gate.
+  // The battlecard agent pair runs the USER'S workflow — agents and their
+  // skills (cornerstone + child) are built by the user; the functions are only
+  // execution substrates + gates. Contract: step 1 = analyst (→ battlecard
+  // items via the intelligence review queue), step 2 = messenger (→ the GTM
+  // record's Battlecard section via the proposal gate). Context is pulled from
+  // THIS page (the competitor's themes, matrix, signals, items) with awareness
+  // of the rest (product value prop, GTM voice).
+  type Wf = { id: string; name: string; steps: { agent_id?: string; skill_id?: string | null }[] };
+  const [workflows, setWorkflows] = useState<Wf[]>([]);
+  const [wfId, setWfId] = useState<string>("");
   const [agentBusy, setAgentBusy] = useState<"analyst" | "messaging" | null>(null);
   const [agentNote, setAgentNote] = useState<string | null>(null);
+  useEffect(() => {
+    supabase.from("workflows").select("id, name, steps").eq("is_active", true).order("created_at").then(({ data }) => {
+      const ws = ((data ?? []) as Wf[]).filter((w) => Array.isArray(w.steps) && w.steps.length > 0);
+      setWorkflows(ws);
+      setWfId((cur) => cur || ws[0]?.id || "");
+    });
+  }, [supabase]);
+  const wf = workflows.find((w) => w.id === wfId) ?? null;
+  const stepReady = (i: number) => !!(wf?.steps?.[i]?.agent_id && wf?.steps?.[i]?.skill_id);
   async function runAgent(which: "analyst" | "messaging") {
-    if (!scope || agentBusy) return;
+    if (!scope || !wfId || agentBusy) return;
     setAgentBusy(which); setAgentNote(null); setError(null);
     try {
       const fn = which === "analyst" ? "battlecard-analyst" : "battlecard-messaging";
-      const { data, error } = await supabase.functions.invoke(fn, { body: { competitor_id: scope } });
+      const { data, error } = await supabase.functions.invoke(fn, { body: { competitor_id: scope, workflow_id: wfId } });
       if (error) throw error;
       setAgentNote((data as { message?: string })?.message ?? "Done.");
       reload();
-    } catch (e) { setError(e instanceof Error ? e.message : `The ${which} agent run failed.`); }
+    } catch (e) { setError(e instanceof Error ? e.message : `The ${which} step failed.`); }
     finally { setAgentBusy(null); }
   }
 
@@ -452,15 +466,27 @@ function Competitors({ competitors, cards, overview, capabilities, scores, compS
         <>
           <div className="row-between" style={{ marginBottom: 12, gap: 10, flexWrap: "wrap" }}>
             <div className="t-sub t-muted" style={{ fontSize: 12.5 }}>Best-practice sections — fill the ones that help a rep win against {selected?.name}.</div>
-            <div className="row gap-2" style={{ flexShrink: 0 }}>
-              <button className="btn btn-secondary btn-sm" disabled={!!agentBusy} onClick={() => runAgent("analyst")} title="Grounded: proposes items from this competitor's themes + matrix, citing signals">
-                {agentBusy === "analyst" ? "Analyzing…" : "✦ Run analyst"}
+            <div className="row gap-2" style={{ flexShrink: 0, alignItems: "center" }}>
+              {workflows.length > 0 && (
+                <select className="select" value={wfId} onChange={(e) => setWfId(e.target.value)} style={{ maxWidth: 220 }} title="The workflow whose steps power the battlecard pair: step 1 = analyst, step 2 = messenger">
+                  {workflows.map((w) => <option key={w.id} value={w.id}>{w.name}</option>)}
+                </select>
+              )}
+              <button className="btn btn-secondary btn-sm" disabled={!!agentBusy || !stepReady(0)} onClick={() => runAgent("analyst")}
+                title={stepReady(0) ? "Step 1 (your agent × analyst skill): proposes items from this competitor's themes + matrix, citing signals" : "Needs a workflow with step 1 = agent × analyst skill"}>
+                {agentBusy === "analyst" ? "Analyzing…" : "✦ Run analyst step"}
               </button>
-              <button className="btn btn-secondary btn-sm" disabled={!!agentBusy} onClick={() => runAgent("messaging")} title="Creative: drafts the GTM Battlecard section from the ratified items">
-                {agentBusy === "messaging" ? "Drafting…" : "✦ Draft messaging"}
+              <button className="btn btn-secondary btn-sm" disabled={!!agentBusy || !stepReady(1)} onClick={() => runAgent("messaging")}
+                title={stepReady(1) ? "Step 2 (your agent × messenger skill): drafts the GTM Battlecard section from the ratified items" : "Needs a workflow with step 2 = agent × messenger skill"}>
+                {agentBusy === "messaging" ? "Drafting…" : "✦ Run messenger step"}
               </button>
             </div>
           </div>
+          {(!wf || !stepReady(0)) && (
+            <div className="card card-pad" style={{ marginBottom: 12, background: "var(--panel-2)", fontSize: 12.5 }}>
+              The battlecard pair runs <b>your</b> agents and skills. Build them on the Agents page (cornerstone + child skills), then create a workflow — e.g. &ldquo;Competitive analysis &amp; messaging&rdquo; — with <b>step 1</b> = agent × analyst skill (proposes battlecard items, every item citing signals) and <b>step 2</b> = agent × messenger skill (drafts the GTM Battlecard section from ratified items).
+            </div>
+          )}
           {agentNote && <div className="card card-pad" style={{ marginBottom: 12, background: "var(--panel-2)", fontSize: 12.5 }}>{agentNote}</div>}
           <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "var(--sp-4)" }}>
             {KINDS.map(([kind, label, tone]) => (

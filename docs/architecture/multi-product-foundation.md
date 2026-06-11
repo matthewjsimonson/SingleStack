@@ -18,15 +18,22 @@ Status: **partially implemented** (see status below) · Owner: SingleStack
   each competitor gains a Themes tab splitting Product moves from GTM moves.
   Sources can also be competitor-scoped (`sources.competitor_id`) and
   per-competitor signal profiles exist (`20260608000001_signal_profiles`).
-- **Battlecard agent pair — DONE (Phase 5, `20260611000000_battlecard_agents`).**
-  `battlecard-analyst` (grounded) proposes evidence-cited `battlecard_items`
-  from a competitor's themes + matrix through the `intel_updates` gate
-  (kind `battlecard_item`); `battlecard-messaging` (creative) turns ratified
-  items into the GTM record's Battlecard section via the `proposals` gate
-  (`proposal_changes.section` added so agent-added fields land in their
-  section). Items carry provenance (`signal_ids`, `theme_id`, `proposed_by`).
-  Both honor the autonomy dial for their surface and run from the competitor's
-  GTM battlecard tab.
+- **Battlecard agent pair — DONE (Phase 5, `20260611000000_battlecard_agents`),
+  expressed in the cornerstone + child skills model per the note below.** The
+  user builds the agents and skills and attaches them to a workflow (e.g.
+  "Competitive analysis & messaging"): step 1 = agent × analyst skill, step 2 =
+  agent × messenger skill. `battlecard-analyst` / `battlecard-messaging` are
+  execution substrates + gates only — they compose the step's agent system
+  prompt + cornerstone skills + child skill + the PAGE's context (the
+  competitor's themes, matrix, signals, items) with cross-page awareness
+  (product value prop, GTM voice), then write through the gates: analyst →
+  evidence-cited `battlecard_items` via `intel_updates` (kind
+  `battlecard_item`); messenger → the GTM record's Battlecard section via
+  `proposals` (`proposal_changes.section` added so agent-added fields land in
+  their section). Items carry provenance (`signal_ids`, `theme_id`,
+  `proposed_by` = the step agent's name). Both honor the autonomy dial for
+  their surface; unconfigured = buttons disabled with guidance (the system
+  never improvises a prompt).
 - **Technical layer — DONE (Phase 3, `20260610000003_technical_foundation`).**
   `record_fields.module_id` (the third parent) gives each module its own
   technical fields; `signals.module_id` attaches tech-shift intel to the module
