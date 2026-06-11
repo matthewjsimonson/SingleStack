@@ -246,6 +246,17 @@ export default function CompetitiveSetup({ onDone, productId }: { onDone: () => 
     setChatOpen(true);
     if (chat.length === 0 && !chatBusy) void nextQuestion([]);
   }
+  // Go back: re-open a previous answer (partial or wrong), discard everything
+  // after it, and continue the interview from there. The question that prompted
+  // it stays on screen; readiness re-scores on the next send.
+  function editAnswer(i: number) {
+    if (chatBusy) return;
+    const prev = chat[i];
+    if (prev?.role !== "a") return;
+    setAnswer(prev.text);
+    setChat(chat.slice(0, i));   // keep the question, drop this answer + all that followed
+    setChatDone(false); setPicture(""); setReadyDelta(null); setChatWhy(null);
+  }
   async function sendAnswer(e: React.FormEvent) {
     e.preventDefault(); if (!answer.trim() || chatBusy) return;
     const history = [...chat, { role: "a" as const, text: answer.trim() }];
@@ -497,7 +508,13 @@ export default function CompetitiveSetup({ onDone, productId }: { onDone: () => 
                 <div style={{ flex: 1, overflowY: "auto", padding: "16px 20px" }} className="stack-3">
                   {chat.map((m, i) => (
                     <div key={i} className="card card-pad" style={{ background: m.role === "q" ? "var(--panel-2)" : "var(--ac-fill, var(--fill))", marginLeft: m.role === "a" ? 32 : 0, marginRight: m.role === "q" ? 32 : 0 }}>
-                      <div className="t-mono-xs t-muted" style={{ marginBottom: 3 }}>{m.role === "q" ? "✦ AI" : "You"}</div>
+                      <div className="row-between" style={{ marginBottom: 3, alignItems: "baseline" }}>
+                        <span className="t-mono-xs t-muted">{m.role === "q" ? "✦ AI" : "You"}</span>
+                        {m.role === "a" && !chatBusy && (
+                          <button className="t-mono-xs" onClick={() => editAnswer(i)} title="Edit this answer — the questions and answers after it are discarded and the interview continues from here"
+                            style={{ background: "none", border: "none", cursor: "pointer", color: "var(--ac-text, var(--ac))", fontWeight: 600, padding: 0 }}>✎ Edit</button>
+                        )}
+                      </div>
                       <div style={{ fontSize: 13, lineHeight: 1.55, whiteSpace: "pre-wrap" }}>{m.text}</div>
                     </div>
                   ))}
@@ -505,7 +522,7 @@ export default function CompetitiveSetup({ onDone, productId }: { onDone: () => 
                   {chatBusy && <div className="t-sub t-muted" style={{ fontSize: 12.5 }}>{chatDone || chat.length === 0 ? "Thinking…" : chat[chat.length - 1]?.role === "a" ? "Reading your answer…" : "Painting the full picture…"}</div>}
                   {chatDone && !chatBusy && (
                     <div className="card card-pad" style={{ borderLeft: "3px solid var(--gn-text, #15803d)", fontSize: 12.5 }}>
-                      Got what it needs — the full picture is on the setup screen. Review it, ✎ Edit anything, then ✦ Find my competitors.
+                      Got what it needs — the full picture is on the setup screen. Review it, ✎ Edit anything (including any answer above), then ✦ Find my competitors.
                     </div>
                   )}
                 </div>
