@@ -29,6 +29,10 @@ type Theme = { id: string; title: string; summary: string | null; recommendation
 // The competitor a signal is about — first-class column, with a fallback to the
 // legacy metadata link for any pre-Phase-4 rows the backfill couldn't resolve.
 const sigComp = (s: Signal) => s.competitor_id ?? s.metadata?.competitor_id ?? null;
+// Competitor tiers: direct (full battlecard motion) / adjacent (partial
+// overlap) / watching (radar only — signals collected, no active motion).
+const REL_TIERS = ["direct", "adjacent", "watching"] as const;
+const relTone = (r: string): "accent" | "violet" | "default" => r === "direct" ? "accent" : r === "adjacent" ? "violet" : "default";
 
 type Tab = "dashboard" | "profile" | "competitors" | "feed";
 
@@ -122,6 +126,16 @@ function Dashboard({ competitors, capabilities, scores, compSignals, themes, ove
 
   const direct = competitors.filter((c) => c.relationship === "direct");
   const scoreOf = (capId: string, compId: string | null) => scores.find((s) => s.capability_id === capId && s.competitor_id === compId)?.score ?? 0;
+  // Grouping — keeps the matrix readable as the tracked set grows: filter to a
+  // tier (direct / adjacent / watching) and order columns by tier or by overall
+  // capability coverage.
+  const [relFilter, setRelFilter] = useState<string>("all");
+  const [orderBy, setOrderBy] = useState<"tier" | "capability">("tier");
+  const covOf = (compId: string) => capabilities.length ? capabilities.reduce((a, c) => a + scoreOf(c.id, compId), 0) / (capabilities.length * 3) : 0;
+  const tierRank = (r: string) => REL_TIERS.indexOf(r as typeof REL_TIERS[number]) === -1 ? 99 : REL_TIERS.indexOf(r as typeof REL_TIERS[number]);
+  const matrixCompetitors = competitors
+    .filter((c) => relFilter === "all" || c.relationship === relFilter)
+    .sort((a, b) => orderBy === "capability" ? covOf(b.id) - covOf(a.id) : tierRank(a.relationship) - tierRank(b.relationship));
   // Provenance + currency of a cell: ✦ = evidence-derived (ratified through the
   // gate); stale = newer signals on this competitor than the score's evidence.
   const provOf = (capId: string, compId: string | null) => scores.find((s) => s.capability_id === capId && s.competitor_id === compId);
@@ -189,10 +203,37 @@ function Dashboard({ competitors, capabilities, scores, compSignals, themes, ove
             confirmLabel="Clear them" onConfirm={clearHandSet} onCancel={() => setConfirmClear(false)}
           />
         )}
+        <div className="row-between" style={{ marginBottom: 10, gap: 8, flexWrap: "wrap" }}>
+          <span className="row" style={{ gap: 2 }}>
+            {[["all", "All"], ...REL_TIERS.map((t) => [t, t.charAt(0).toUpperCase() + t.slice(1)])].map(([k, label]) => {
+              const n = k === "all" ? competitors.length : competitors.filter((c) => c.relationship === k).length;
+              if (k !== "all" && n === 0) return null;
+              return (
+                <button key={k} onClick={() => setRelFilter(k as string)} className="t-mono-xs"
+                  style={{ padding: "3px 9px", borderRadius: 6, border: "none", cursor: "pointer", background: relFilter === k ? "var(--ac)" : "var(--fill)", color: relFilter === k ? "#fff" : "var(--tm)", fontWeight: 600 }}>
+                  {label} · {n}
+                </button>
+              );
+            })}
+          </span>
+          {matrixView === "matrix" && (
+            <span className="row gap-2" style={{ alignItems: "center" }}>
+              <span className="t-mono-xs t-muted">order by</span>
+              <span className="row" style={{ gap: 2 }}>
+                {([["tier", "Tier"], ["capability", "Capability"]] as const).map(([k, label]) => (
+                  <button key={k} onClick={() => setOrderBy(k)} className="t-mono-xs"
+                    style={{ padding: "3px 9px", borderRadius: 6, border: "none", cursor: "pointer", background: orderBy === k ? "var(--ac)" : "var(--fill)", color: orderBy === k ? "#fff" : "var(--tm)", fontWeight: 600 }}>
+                    {label}
+                  </button>
+                ))}
+              </span>
+            </span>
+          )}
+        </div>
         <div className="t-sub t-muted" style={{ fontSize: 12.5, marginBottom: 12 }}>{matrixView === "matrix" ? "Functionality vectors × competitors (you vs each). Click any cell for the agent's read — reasons, sources, implications — then set the rating yourself." : "Coverage × momentum quadrant — where each player sits, you vs them (G2-style). Top-right leads."}</div>
         {matrixView === "grid" ? (
           capabilities.length === 0 ? <div className="t-sub t-muted">Add capabilities to plot the grid.</div>
-          : <CompetitiveGrid competitors={competitors} capabilities={capabilities} scores={scores} compSignals={compSignals} onOpenCompetitor={setOpenComp} />
+          : <CompetitiveGrid competitors={matrixCompetitors} capabilities={capabilities} scores={scores} compSignals={compSignals} onOpenCompetitor={setOpenComp} />
         ) : (<>
         {addingCap && (
           <form onSubmit={addCapability} className="card card-pad" style={{ marginBottom: "var(--sp-3)" }}>
@@ -206,14 +247,17 @@ function Dashboard({ competitors, capabilities, scores, compSignals, themes, ove
                 <tr>
                   <th style={{ textAlign: "left", padding: "10px 14px", fontWeight: 600, color: "var(--tm)", fontSize: 11, textTransform: "uppercase", letterSpacing: "0.05em" }}>Capability</th>
                   <th style={{ padding: "10px 8px", fontWeight: 700, fontSize: 12, position: "sticky" }}>Us</th>
-                  {competitors.map((c) => <th key={c.id} style={{ padding: "10px 8px", fontWeight: 600, fontSize: 12, color: "var(--ts)" }}>{c.name}</th>)}
+                  {matrixCompetitors.map((c) => <th key={c.id} style={{ padding: "10px 8px", fontWeight: 600, fontSize: 12, color: "var(--ts)" }}>
+                    <span title={`${c.relationship}${orderBy === "capability" ? ` · coverage ${Math.round(covOf(c.id) * 100)}%` : ""}`}>{c.name}</span>
+                    <div className="t-mono-xs" style={{ fontWeight: 600, color: c.relationship === "direct" ? "var(--ac-text, var(--ac))" : c.relationship === "adjacent" ? "var(--vl)" : "var(--tm)", marginTop: 1 }}>{orderBy === "capability" ? `${Math.round(covOf(c.id) * 100)}%` : c.relationship}</div>
+                  </th>)}
                 </tr>
               </thead>
               <tbody>
                 {capabilities.map((cap) => (
                   <tr key={cap.id} style={{ borderTop: "1px solid var(--border)" }}>
                     <td style={{ padding: "8px 14px", fontWeight: 600 }}>{cap.name}</td>
-                    {[null, ...competitors.map((c) => c.id)].map((compId) => {
+                    {[null, ...matrixCompetitors.map((c) => c.id)].map((compId) => {
                       const s = scoreOf(cap.id, compId);
                       const who = compId === null ? "Us" : compById(compId)?.name ?? "Competitor";
                       return (
@@ -560,7 +604,7 @@ function Competitors({ competitors, cards, overview, capabilities, scores, compS
             <div className="row gap-2">
               <input className="input" autoFocus placeholder="Competitor name" value={comp.name} onChange={(e) => setComp({ ...comp, name: e.target.value })} style={{ flex: 1 }} />
               <select className="select" value={comp.relationship} onChange={(e) => setComp({ ...comp, relationship: e.target.value })} style={{ width: 140 }}>
-                <option value="direct">Direct</option><option value="adjacent">Adjacent</option>
+                <option value="direct">Direct</option><option value="adjacent">Adjacent</option><option value="watching">Watching</option>
               </select>
               <button className="btn btn-sm" type="submit">Add</button>
               <button className="btn btn-secondary btn-sm" type="button" onClick={() => setAddingComp(false)}>Cancel</button>
@@ -570,15 +614,22 @@ function Competitors({ competitors, cards, overview, capabilities, scores, compS
         {competitors.length === 0 && !addingComp ? (
           <div className="t-sub t-muted">No competitors yet. Add direct and adjacent competitors — each gets an overview, battlecard, product board, and signal feed here.</div>
         ) : (
+          <div className="stack-3">
+            {REL_TIERS.map((tier) => {
+              const group = competitors.filter((c) => c.relationship === tier);
+              if (!group.length) return null;
+              return (
+            <div key={tier}>
+            <div className="t-label" style={{ color: "var(--tm)", marginBottom: 8 }}>{tier === "direct" ? "Direct — head-on rivals" : tier === "adjacent" ? "Adjacent — partial overlap" : "Watching — on the radar"} · {group.length}</div>
           <div className="grid-cards">
-            {competitors.map((c) => {
+            {group.map((c) => {
               const e = edge(c.id);
               return (
                 <div key={c.id} className="card card-link card-pad" style={{ textAlign: "left", cursor: "pointer", position: "relative" }} onClick={() => { setScope(c.id); setCdTab("overview"); }}>
                   <div className="row-between" style={{ marginBottom: 8, gap: 6 }}>
                     <span style={{ fontSize: 15, fontWeight: 620 }}>{c.name}</span>
                     <span className="row gap-2" style={{ alignItems: "center" }}>
-                      <Chip tone={c.relationship === "direct" ? "accent" : "violet"}>{c.relationship}</Chip>
+                      <Chip tone={relTone(c.relationship)}>{c.relationship}</Chip>
                       <button onClick={(ev) => { ev.stopPropagation(); setPendingDelete(c); }} title={`Remove ${c.name}`} aria-label={`Remove ${c.name}`}
                         style={{ background: "none", border: "none", cursor: "pointer", fontSize: 16, lineHeight: 1, color: "var(--tm)", padding: "0 2px" }}>×</button>
                     </span>
@@ -589,6 +640,10 @@ function Competitors({ competitors, cards, overview, capabilities, scores, compS
                     <span className="t-mono-xs" style={{ color: "var(--tm)" }}>{countFor(c.id)} card{countFor(c.id) === 1 ? "" : "s"}</span>
                   </div>
                 </div>
+              );
+            })}
+          </div>
+            </div>
               );
             })}
           </div>
@@ -603,7 +658,7 @@ function Competitors({ competitors, cards, overview, capabilities, scores, compS
         <button className="t-sub" style={{ display: "inline-flex", alignItems: "center", gap: 5, fontWeight: 600, background: "none", border: "none", cursor: "pointer" }} onClick={() => { setScope(null); setAdding(null); }}>
           <span style={{ fontSize: 15 }}>‹</span> All competitors
         </button>
-        <div className="row gap-2"><span className="t-h2" style={{ fontSize: 15 }}>{selected?.name}</span>{selected && <Chip tone={selected.relationship === "direct" ? "accent" : "violet"}>{selected.relationship}</Chip>}</div>
+        <div className="row gap-2"><span className="t-h2" style={{ fontSize: 15 }}>{selected?.name}</span>{selected && <Chip tone={relTone(selected.relationship)}>{selected.relationship}</Chip>}</div>
       </div>
 
       <div className="card" style={{ overflow: "hidden" }}>
@@ -885,6 +940,9 @@ function Feed({ signals, competitors, reload }: { signals: Signal[]; competitors
   const supabase = createClient();
   const [originTab, setOriginTab] = useState<"external" | "internal">("external");
   const [compFilter, setCompFilter] = useState<string>("all");
+  // Tier filter: keeps the stream readable as the tracked set grows.
+  const [relTier, setRelTier] = useState<string>("all");
+  const tierOf = (id: string | null) => competitors.find((c) => c.id === id)?.relationship ?? null;
   const [logging, setLogging] = useState(false);
   const [form, setForm] = useState({ title: "", why: "", origin: "internal", competitor_id: "", channel: "", conf: "0.7" });
   const [busy, setBusy] = useState(false);
@@ -893,7 +951,8 @@ function Feed({ signals, competitors, reload }: { signals: Signal[]; competitors
   const compName = (id?: string) => competitors.find((c) => c.id === id)?.name;
   const all = signals.filter((s) => signalDomain(s) === SIGNAL_DOMAIN.competitive);
   const feed = all.filter((s) => (originTab === "internal" ? s.origin === "internal" : s.origin !== "internal"))
-    .filter((s) => compFilter === "all" || sigComp(s) === compFilter);
+    .filter((s) => compFilter === "all" || sigComp(s) === compFilter)
+    .filter((s) => relTier === "all" || tierOf(sigComp(s)) === relTier);
   const counts = { internal: all.filter((s) => s.origin === "internal").length, external: all.filter((s) => s.origin !== "internal").length };
   const CHANNELS = form.origin === "internal" ? ["Gong call", "Salesforce opp", "Win/loss", "Support", "Field note"] : ["Website", "Pricing page", "G2 / reviews", "Launch / release", "Job posting", "News"];
 
@@ -957,6 +1016,16 @@ function Feed({ signals, competitors, reload }: { signals: Signal[]; competitors
               <button key={o} onClick={() => setOriginTab(o)} className="btn-sm" style={{ border: "none", background: originTab === o ? "var(--ac)" : "var(--panel)", color: originTab === o ? "#fff" : "var(--ts)", fontWeight: 600, padding: "6px 14px", cursor: "pointer", textTransform: "capitalize" }}>{o} · {counts[o]}</button>
             ))}
           </div>
+          <span className="row" style={{ gap: 2, alignItems: "center" }}>
+            {[["all", "All"], ...REL_TIERS.map((t) => [t, t.charAt(0).toUpperCase() + t.slice(1)])].map(([k, label]) => {
+              const n = k === "all" ? competitors.length : competitors.filter((c) => c.relationship === k).length;
+              if (k !== "all" && n === 0) return null;
+              return (
+                <button key={k} onClick={() => setRelTier(k as string)} className="t-mono-xs"
+                  style={{ padding: "3px 9px", borderRadius: 6, border: "none", cursor: "pointer", background: relTier === k ? "var(--ac)" : "var(--fill)", color: relTier === k ? "#fff" : "var(--tm)", fontWeight: 600 }}>{label}</button>
+              );
+            })}
+          </span>
           <select className="select" value={compFilter} onChange={(e) => setCompFilter(e.target.value)} style={{ maxWidth: 220 }}>
             <option value="all">All competitors</option>
             {competitors.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}

@@ -383,7 +383,7 @@ export default function CompetitiveSetup({ onDone, productId }: { onDone: () => 
     try {
       const orgId = await getOrgId(); if (!orgId) throw new Error("Could not resolve your organization.");
       const { data, error } = await supabase.from("competitors").insert(keep.map((c, i) => ({
-        org_id: orgId, name: c.name.trim(), relationship: c.relationship === "adjacent" ? "adjacent" : "direct",
+        org_id: orgId, name: c.name.trim(), relationship: ["adjacent", "watching"].includes(c.relationship) ? c.relationship : "direct",
         website: c.website.trim() || null,
         notes: [c.why, c.overlap ? `Overlap: ${c.overlap}` : "", c.match < 100 ? `Match at setup: ${c.match}%` : ""].filter(Boolean).join(" · ") || null,
         position: i, product_id: productId ?? null,
@@ -684,7 +684,7 @@ export default function CompetitiveSetup({ onDone, productId }: { onDone: () => 
                 <div className="row gap-2" style={{ marginBottom: 4 }}>
                   <input className="input" value={c.name} onChange={(e) => setComps(comps.map((x, j) => j === i ? { ...x, name: e.target.value } : x))} style={{ fontWeight: 640, maxWidth: 220 }} />
                   <select className="select" value={c.relationship} onChange={(e) => setComps(comps.map((x, j) => j === i ? { ...x, relationship: e.target.value } : x))} style={{ width: 110 }}>
-                    <option value="direct">Direct</option><option value="adjacent">Adjacent</option>
+                    <option value="direct">Direct</option><option value="adjacent">Adjacent</option><option value="watching">Watching</option>
                   </select>
                   <input className="input" value={c.website} onChange={(e) => setComps(comps.map((x, j) => j === i ? { ...x, website: e.target.value } : x))} placeholder="https://…" style={{ flex: 1, minWidth: 140 }} />
                 </div>

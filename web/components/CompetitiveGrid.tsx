@@ -84,12 +84,13 @@ export default function CompetitiveGrid({ competitors, capabilities, scores, com
           const x = px(p.cov), y = py(p.mom);
           const r = 7 + Math.min(8, Math.round((p.cells + p.recent) / 2));
           const direct = p.c.relationship === "direct";
+          const dotColor = direct ? "var(--ac, #4F46E5)" : p.c.relationship === "watching" ? "var(--tm, #94A3B8)" : "var(--vl, #A78BFA)";
           return (
             <g key={p.c.id} style={onOpenCompetitor ? { cursor: "pointer" } : undefined}
                onClick={() => onOpenCompetitor?.(p.c.id)}>
               <title>{`${p.c.name} — ${p.cells} rated cell${p.cells === 1 ? "" : "s"}, ${p.recent} signal${p.recent === 1 ? "" : "s"} · 60d${p.evidenced ? " · ✦ evidence-scored" : ""} — click for the work`}</title>
-              <circle cx={x} cy={y} r={r + 4} fill={direct ? "var(--ac, #4F46E5)" : "var(--vl, #A78BFA)"} opacity={0.12} />
-              <circle cx={x} cy={y} r={r} fill={direct ? "var(--ac, #4F46E5)" : "var(--vl, #A78BFA)"} opacity={direct ? 0.92 : 0.8} stroke="var(--panel, #fff)" strokeWidth={1.5} />
+              <circle cx={x} cy={y} r={r + 4} fill={dotColor} opacity={0.12} />
+              <circle cx={x} cy={y} r={r} fill={dotColor} opacity={direct ? 0.92 : 0.8} stroke="var(--panel, #fff)" strokeWidth={1.5} />
               {p.evidenced && <text x={x} y={y + 3.5} fontSize={9} fontWeight={700} fill="#fff" textAnchor="middle">✦</text>}
               <text x={x} y={y + r + 14} fontSize={11} fontWeight={620} fill="var(--ts, #5A5E68)" textAnchor="middle">{p.c.name}</text>
             </g>
@@ -101,6 +102,7 @@ export default function CompetitiveGrid({ competitors, capabilities, scores, com
           <span className="t-mono-xs" style={{ color: "var(--ac-text, #4F46E5)", fontWeight: 700 }}>┊ us</span>
           <span className="t-mono-xs" style={{ color: "var(--ac, #4F46E5)", fontWeight: 600 }}>● direct</span>
           <span className="t-mono-xs" style={{ color: "var(--vl, #A78BFA)", fontWeight: 600 }}>● adjacent</span>
+          <span className="t-mono-xs" style={{ color: "var(--tm, #94A3B8)", fontWeight: 600 }}>● watching</span>
           <span className="t-mono-xs t-muted">size = evidence · ✦ = ratified scores</span>
         </span>
         <span className="t-mono-xs t-muted">click a player for the work behind its position</span>
