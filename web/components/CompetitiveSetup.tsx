@@ -28,9 +28,12 @@ export default function CompetitiveSetup({ onDone, productId }: { onDone: () => 
   const supabase = createClient();
   const [step, setStep] = useState<Step>(1);
   const [busy, setBusy] = useState<string | null>(null);
-  // Staged progress for the long AI actions — the search visibly SEARCHES.
-  const compsRun = useAgentRun("setupComps");
+  // Staged progress for the capability proposal; the SEARCH gets REAL phase
+  // status (phase + elapsed seconds + token usage) instead of a guessed cadence.
   const capsRun = useAgentRun("setupCaps");
+  const [searchPhase, setSearchPhase] = useState<string | null>(null);
+  const [searchSecs, setSearchSecs] = useState(0);
+  const [searchUsage, setSearchUsage] = useState<{ input: number; output: number } | null>(null);
   const [error, setError] = useState<string | null>(null);
 
   // step 1 — anchor: the market context comes FROM the records the user already
@@ -41,7 +44,7 @@ export default function CompetitiveSetup({ onDone, productId }: { onDone: () => 
   // Structured, ALWAYS-editable market context — pre-filled from the records,
   // never locked. Personas and industries are first-class: they decide which
   // rivals actually compete for the same buyer.
-  const [ctx, setCtx] = useState({ product: "", features: "", who: "", industries: "", positioning: "", more: "" });
+  const [ctx, setCtx] = useState({ product: "", features: "", who: "", industries: "", positioning: "", more: "", competitors: "" });
   const ctxSet = (k: keyof typeof ctx) => (e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement>) => setCtx((c) => ({ ...c, [k]: e.target.value }));
   const [editCtx, setEditCtx] = useState(false);
   // The FULL records dump (every product + GTM field + modules) — what the
@@ -203,6 +206,7 @@ export default function CompetitiveSetup({ onDone, productId }: { onDone: () => 
         industries: cur.industries, // no canonical record field yet — the human owns this one
         positioning: cur.positioning.trim() ? cur.positioning : posLine,
         more: cur.more,
+        competitors: cur.competitors,
       }));
     })();
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -216,6 +220,7 @@ export default function CompetitiveSetup({ onDone, productId }: { onDone: () => 
     ctx.who.trim() ? `Who we sell to (personas): ${ctx.who.trim()}` : "",
     ctx.industries.trim() ? `Industries / verticals: ${ctx.industries.trim()}` : "",
     ctx.positioning.trim() ? `How we position / against what: ${ctx.positioning.trim()}` : "",
+    ctx.competitors.trim() ? `KNOWN COMPETITORS (user-named — verify these first, then search beyond them): ${ctx.competitors.trim()}` : "",
     ctx.more.trim() ? `Also: ${ctx.more.trim()}` : "",
   ].filter(Boolean).join("\n");
 
@@ -285,7 +290,7 @@ export default function CompetitiveSetup({ onDone, productId }: { onDone: () => 
     try {
       const data = await invoke({ step: "picture", records: recordsDump, transcript: history });
       setPicture(data.picture || "");
-      setCtx({ product: data.product || "", features: data.features || "", who: data.who || "", industries: data.industries || "", positioning: data.positioning || "", more: data.more || "" });
+      setCtx({ product: data.product || "", features: data.features || "", who: data.who || "", industries: data.industries || "", positioning: data.positioning || "", more: data.more || "", competitors: data.known_competitors || "" });
       setChatDone(true);
       // HOLD what the interview surfaced: queue a proposal on the GTM record so
       // the answers update the PROFILE (personas / industries / positioning),
@@ -328,21 +333,25 @@ export default function CompetitiveSetup({ onDone, productId }: { onDone: () => 
 
   // ---- step 2: propose rivals (web search), confirm, insert ------------------
   async function findCompetitors() {
-    setBusy("comps"); setError(null);
+    setBusy("comps"); setError(null); setSearchUsage(null); setSearchSecs(0);
+    const t0 = Date.now();
+    const tick = setInterval(() => setSearchSecs(Math.round((Date.now() - t0) / 1000)), 1000);
     try {
-      await compsRun.go(async () => {
-        // Two phases, retried independently: the live search (long) returns a
-        // briefing; extraction (short) turns it into scored candidates. No
-        // single request flirts with the function's wall clock.
-        const land = await invokeRetry({ step: "landscape", market: marketCtx, product: { name: prod?.name, value_prop: prod?.value_prop } });
-        const data = await invokeRetry({ step: "competitors", market: marketCtx, briefing: land.briefing, product: { name: prod?.name, value_prop: prod?.value_prop } });
-        const list = (data.competitors ?? []) as Omit<CompCand, "keep">[];
-        if (!list.length) throw new Error("No rivals found — try describing the market more specifically.");
-        setComps(list.map((c) => ({ ...c, keep: true })));
-        setStep(2);
-      });
+      // Two phases, retried independently — and the status is REAL: it changes
+      // when the work actually changes, with elapsed time and token cost shown.
+      setSearchPhase(ctx.competitors.trim() ? `Phase 1/2 · verifying ${ctx.competitors.split(",").length} named rival${ctx.competitors.includes(",") ? "s" : ""} + searching beyond them` : "Phase 1/2 · live web search across the landscape (≤3 searches, budgeted)");
+      const land = await invokeRetry({ step: "landscape", market: marketCtx, product: { name: prod?.name, value_prop: prod?.value_prop } });
+      const u1 = (land.usage ?? { input: 0, output: 0 }) as { input: number; output: number };
+      setSearchPhase("Phase 2/2 · scoring match levels across the four overlap dimensions");
+      const data = await invokeRetry({ step: "competitors", market: marketCtx, briefing: land.briefing, product: { name: prod?.name, value_prop: prod?.value_prop } });
+      const u2 = (data.usage ?? { input: 0, output: 0 }) as { input: number; output: number };
+      setSearchUsage({ input: u1.input + u2.input, output: u1.output + u2.output });
+      const list = (data.competitors ?? []) as Omit<CompCand, "keep">[];
+      if (!list.length) throw new Error("No rivals found — try describing the market more specifically.");
+      setComps(list.map((c) => ({ ...c, keep: true })));
+      setStep(2);
     } catch (e) { setError(e instanceof Error ? e.message : "The landscape search failed."); }
-    finally { setBusy(null); }
+    finally { clearInterval(tick); setSearchPhase(null); setBusy(null); }
   }
   async function confirmCompetitors() {
     const keep = comps.filter((c) => c.keep && c.name.trim());
@@ -484,7 +493,7 @@ export default function CompetitiveSetup({ onDone, productId }: { onDone: () => 
             </div>
             {marketCtx ? (
               <div className="stack-2">
-                {([["Product", ctx.product], ["Features / modules", ctx.features], ["Personas", ctx.who], ["Industries", ctx.industries], ["Positioning", ctx.positioning], ["Also", ctx.more]] as const).map(([label, v]) => v.trim() && (
+                {([["Product", ctx.product], ["Features / modules", ctx.features], ["Personas", ctx.who], ["Industries", ctx.industries], ["Positioning", ctx.positioning], ["Known competitors", ctx.competitors], ["Also", ctx.more]] as const).map(([label, v]) => v.trim() && (
                   <div key={label} style={{ fontSize: 12.5, lineHeight: 1.5 }}><b style={{ color: "var(--tm)", fontWeight: 640 }}>{label}:</b> <span className="t-sub">{v}</span></div>
                 ))}
                 {!ctx.industries.trim() && <div className="t-sub t-muted" style={{ fontSize: 12 }}>No industries yet — worth adding (✎ Edit): verticals decide who actually competes for your buyer.</div>}
@@ -509,6 +518,8 @@ export default function CompetitiveSetup({ onDone, productId }: { onDone: () => 
               </div>
               <label className="field"><span className="t-label">How you position — against what</span>
                 <input className="input" value={ctx.positioning} onChange={ctxSet("positioning")} placeholder="The category you claim and what you replace" /></label>
+              <label className="field"><span className="t-label">Known competitors <span className="t-muted" style={{ fontWeight: 400, textTransform: "none", letterSpacing: 0 }}>— name them; they anchor the search</span></span>
+                <input className="input" value={ctx.competitors} onChange={ctxSet("competitors")} placeholder="e.g. Crayon, Klue, Productboard" /></label>
               <label className="field"><span className="t-label">Anything else</span>
                 <input className="input" value={ctx.more} onChange={ctxSet("more")} placeholder="e.g. also watch the open-source alternatives" /></label>
               <div className="row gap-2"><button className="btn btn-sm" onClick={() => setEditCtx(false)}>Done</button></div>
@@ -522,10 +533,13 @@ export default function CompetitiveSetup({ onDone, productId }: { onDone: () => 
               {profileNote && <div className="t-mono-xs" style={{ marginTop: 4, color: "var(--gn-text, #15803d)" }}>✓ {profileNote}</div>}
             </div>
           )}
-          {compsRun.active ? (
+          {searchPhase ? (
             <div className="card card-pad" style={{ borderLeft: "3px solid var(--ac)" }}>
-              <AgentProgress run={compsRun} />
-              <div className="t-mono-xs t-muted" style={{ marginTop: 6 }}>Live web search across the landscape — typically 30–60 seconds. Every candidate comes back with a match % and its overlap explained.</div>
+              <div className="row-between" style={{ alignItems: "baseline" }}>
+                <span style={{ fontSize: 13, fontWeight: 640 }}><span className="agent-progress-dot" aria-hidden style={{ marginRight: 8 }} />{searchPhase}</span>
+                <span className="t-mono-xs t-muted">{searchSecs}s</span>
+              </div>
+              <div className="t-mono-xs t-muted" style={{ marginTop: 6 }}>Hard-budgeted: ≤3 web searches, capped tokens. Typically 20–40s total; each candidate returns with a match % and its overlap explained.</div>
             </div>
           ) : (
             <div className="row gap-2">
@@ -629,7 +643,8 @@ export default function CompetitiveSetup({ onDone, productId }: { onDone: () => 
           <button className="btn btn-secondary btn-sm" onClick={() => setComps([...comps, { name: "", website: "", relationship: "direct", match: 100, why: "Added by you.", overlap: "", keep: true }])}>+ Add one they missed</button>
           <div className="row gap-2">
             <button className="btn btn-sm" disabled={busy === "save-comps"} onClick={confirmCompetitors}>{busy === "save-comps" ? "Saving…" : `Confirm ${comps.filter((c) => c.keep && c.name.trim()).length} competitor${comps.filter((c) => c.keep && c.name.trim()).length === 1 ? "" : "s"} →`}</button>
-            {compsRun.active ? <AgentProgress run={compsRun} compact /> : <button className="btn btn-secondary btn-sm" onClick={findCompetitors}>↻ Search again</button>}
+            {searchPhase ? <span className="t-mono-xs t-muted">{searchPhase} · {searchSecs}s</span> : <button className="btn btn-secondary btn-sm" onClick={findCompetitors}>↻ Search again</button>}
+            {searchUsage && !searchPhase && <span className="t-mono-xs t-muted" title="Exact token cost of this search (input + output across both phases)">{((searchUsage.input + searchUsage.output) / 1000).toFixed(1)}k tokens</span>}
           </div>
         </div>
       )}

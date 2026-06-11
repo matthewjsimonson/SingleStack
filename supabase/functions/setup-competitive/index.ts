@@ -74,8 +74,9 @@ const PICTURE_SCHEMA = {
     industries: { type: "string" },   // verticals
     positioning: { type: "string" },  // category claim / what it replaces
     more: { type: "string" },         // anything else competitive-relevant ("" if none)
+    known_competitors: { type: "string" }, // rivals the user NAMED in records/interview ("" if none)
   },
-  required: ["picture", "product", "features", "who", "industries", "positioning", "more"],
+  required: ["picture", "product", "features", "who", "industries", "positioning", "more", "known_competitors"],
 };
 
 const CAPABILITIES_SCHEMA = {
@@ -99,26 +100,30 @@ const CAPABILITIES_SCHEMA = {
 
 // Web-search loop (same pause_turn pattern as connector-runner): returns one
 // citation-grounded briefing the structured pass then extracts from.
-async function searchBriefing(key: string, sys: string, user: string): Promise<string> {
+async function searchBriefing(key: string, sys: string, user: string): Promise<{ text: string; usage: { input: number; output: number } }> {
   const anthropic = new Anthropic({ apiKey: key });
   // deno-lint-ignore no-explicit-any
   let messages: any[] = [{ role: "user", content: user }];
   let text = "";
-  for (let i = 0; i < 3; i++) {
+  const usage = { input: 0, output: 0 };
+  // BUDGETED HARD for latency + cost: ≤3 searches, ≤2 rounds, tight tokens,
+  // no extended thinking. The briefing is for extraction, not prose.
+  for (let i = 0; i < 2; i++) {
     const resp = (await anthropic.messages.create({
       model: MODEL,
-      max_tokens: 4000,
-      thinking: { type: "adaptive" },
-      tools: [{ type: "web_search_20260209", name: "web_search", max_uses: 5 }],
-      system: [{ type: "text", text: sys }],
+      max_tokens: 2200,
+      tools: [{ type: "web_search_20260209", name: "web_search", max_uses: 3 }],
+      system: [{ type: "text", text: sys + " BE FAST: run at most 3 focused searches, then write the briefing immediately — terse bullets, no prose padding." }],
       messages,
       // deno-lint-ignore no-explicit-any
     } as any)) as Anthropic.Message;
+    usage.input += resp.usage?.input_tokens ?? 0;
+    usage.output += resp.usage?.output_tokens ?? 0;
     for (const b of resp.content) if (b.type === "text") text += b.text + "\n";
     if (resp.stop_reason === "pause_turn") { messages = [...messages, { role: "assistant", content: resp.content }]; continue; }
     break;
   }
-  return text.trim();
+  return { text: text.trim().slice(0, 12_000), usage };
 }
 
 Deno.serve(async (req: Request) => {
@@ -153,7 +158,7 @@ Deno.serve(async (req: Request) => {
         model: MODEL, max_tokens: 1200,
         thinking: { type: "adaptive" },
         output_config: { effort: "medium", format: { type: "json_schema", schema: INTERVIEW_SCHEMA } },
-        system: "You are doing competitive-intelligence intake. You have everything the user's records already say, plus the interview so far. Ask the SINGLE most discriminating question the records do NOT answer — the one whose answer most changes WHO their real competitors are. High-value angles when missing: deal-deciding personas, industries/verticals served, segment (SMB/mid/enterprise), deployment model, price band, geography, who they actually lose deals to today, and which feature wins deals. MATURITY MODEL: first infer the company's stage from the records/transcript (exploring = pre-launch; early = first users/deals; scaling = repeatable motion; established = mature) — ask ONE stage question only if you can't infer it. Then never ask a question the stage can't answer: no deal-loss or win-rate questions pre-revenue, no pricing-history questions pre-pricing; for young companies favor intended buyer, the alternative people use today, and the wedge. Rules: never ask anything the records or transcript already answer; one question at a time, conversational and concrete; set done=true (question='') once you have enough specificity for a precise competitor search — typically after 3-5 good answers, or immediately if the records already cover it all. ALWAYS score readiness (0..100): how precisely could a competitor search run RIGHT NOW on what's known? Calibrate across the dimensions that decide rivals — product+features, personas, industries, segment, positioning, deal-loss hints: all strong ≈ 85-95; most covered ≈ 65-80; basics only ≈ 35-55 — GRADED FOR THE STAGE: an exploring-stage company with crisp identity + intended buyer + the alternative they replace can hit 80+ without deal history. Honest, monotonic with information (an answer never lowers it). gaps = one plain line on what's still thin ('' when nothing material). Set done=true when readiness ≥ 80 or further questions would add little.",
+        system: "You are doing competitive-intelligence intake. You have everything the user's records already say, plus the interview so far. Ask the SINGLE most discriminating question the records do NOT answer — the one whose answer most changes WHO their real competitors are. High-value angles when missing: deal-deciding personas, industries/verticals served, segment (SMB/mid/enterprise), deployment model, price band, geography, who they actually lose deals to today, WHICH COMPETITORS THEY ALREADY KNOW THEY FACE (always worth asking early — named rivals anchor the whole search), and which feature wins deals. MATURITY MODEL: first infer the company's stage from the records/transcript (exploring = pre-launch; early = first users/deals; scaling = repeatable motion; established = mature) — ask ONE stage question only if you can't infer it. Then never ask a question the stage can't answer: no deal-loss or win-rate questions pre-revenue, no pricing-history questions pre-pricing; for young companies favor intended buyer, the alternative people use today, and the wedge. Rules: never ask anything the records or transcript already answer; one question at a time, conversational and concrete; set done=true (question='') once you have enough specificity for a precise competitor search — typically after 3-5 good answers, or immediately if the records already cover it all. ALWAYS score readiness (0..100): how precisely could a competitor search run RIGHT NOW on what's known? Calibrate across the dimensions that decide rivals — product+features, personas, industries, segment, positioning, deal-loss hints: all strong ≈ 85-95; most covered ≈ 65-80; basics only ≈ 35-55 — GRADED FOR THE STAGE: an exploring-stage company with crisp identity + intended buyer + the alternative they replace can hit 80+ without deal history. Honest, monotonic with information (an answer never lowers it). gaps = one plain line on what's still thin ('' when nothing material). Set done=true when readiness ≥ 80 or further questions would add little.",
         messages: [{ role: "user", content: [
           records ? `THE RECORDS (everything already known):\n${records}` : "THE RECORDS: (none yet)",
           transcriptText ? `INTERVIEW SO FAR:\n${transcriptText}` : "INTERVIEW SO FAR: (not started)",
@@ -169,7 +174,7 @@ Deno.serve(async (req: Request) => {
         model: MODEL, max_tokens: 2000,
         thinking: { type: "adaptive" },
         output_config: { effort: "high", format: { type: "json_schema", schema: PICTURE_SCHEMA } },
-        system: "Synthesize the records + interview into the FULL PICTURE of this product and its market — the brief a competitive researcher needs to find exactly the right rivals. picture = 1-2 tight paragraphs: what it is, who buys it (personas + industries + segment), how it positions and what it replaces, the features that win deals, and any deal-loss/competitor hints from the interview. The structured fields = the same content, distilled. Ground every claim in the records/transcript — no embellishment.",
+        system: "Synthesize the records + interview into the FULL PICTURE of this product and its market — the brief a competitive researcher needs to find exactly the right rivals. picture = 1-2 tight paragraphs: what it is, who buys it (personas + industries + segment), how it positions and what it replaces, the features that win deals, and any deal-loss/competitor hints from the interview. The structured fields = the same content, distilled. known_competitors = every rival the user NAMED in the records or interview (comma-separated; empty string if none) — these seed and anchor the search. Ground every claim in the records/transcript — no embellishment.",
         messages: [{ role: "user", content: [
           records ? `THE RECORDS:\n${records}` : "THE RECORDS: (none)",
           transcriptText ? `THE INTERVIEW:\n${transcriptText}` : "",
@@ -188,9 +193,9 @@ Deno.serve(async (req: Request) => {
       if (!market && !product.name) return json({ error: "Describe your market (or name your product) so the search has an aim." }, 400);
       const { data: existing } = await supabase.from("competitors").select("name");
       const known = (existing ?? []).map((c) => c.name);
-      const briefing = await searchBriefing(
+      const { text: briefing, usage } = await searchBriefing(
         key,
-        "You are a competitive-landscape researcher. Use web search to identify the REAL competitors in the user's market — companies a buyer would actually evaluate against them. Assess every candidate on FOUR dimensions: (1) buyer overlap — do they sell to the same personas? (2) industry overlap — same verticals? (3) capability overlap — which of the user's features/modules do they also offer? (4) positioning collision — do they claim the same category or replace the same thing? For each rival report: company name, homepage URL, head-on (direct) vs partial/adjacent, and the per-dimension read with what you found. Concrete and current — cite what you find. 6–10 rivals that genuinely matter, not a directory dump.",
+        "You are a competitive-landscape researcher. If the user NAMES known competitors in the market context, verify those FIRST (site, current positioning), then search beyond them. Use web search to identify the REAL competitors in the user's market — companies a buyer would actually evaluate against them. Assess every candidate on FOUR dimensions: (1) buyer overlap — do they sell to the same personas? (2) industry overlap — same verticals? (3) capability overlap — which of the user's features/modules do they also offer? (4) positioning collision — do they claim the same category or replace the same thing? For each rival report: company name, homepage URL, head-on (direct) vs partial/adjacent, and the per-dimension read with what you found. Concrete and current — cite what you find. 6–10 rivals that genuinely matter, not a directory dump.",
         [
           product.name ? `OUR PRODUCT: ${product.name}` : "",
           product.value_prop ? `VALUE PROP: ${product.value_prop}` : "",
@@ -199,7 +204,7 @@ Deno.serve(async (req: Request) => {
         ].filter(Boolean).join("\n"),
       );
       if (!briefing) return json({ error: "The landscape search returned nothing — try describing the market more specifically." }, 502);
-      return json({ briefing });
+      return json({ briefing, usage });
     }
 
     if (step === "competitors") {
@@ -210,7 +215,7 @@ Deno.serve(async (req: Request) => {
 
       // Two-phase path: the client passes the landscape briefing; only when
       // absent do we search inline (backward-compatible single-call mode).
-      const briefing = (body.briefing as string | undefined)?.trim() || await searchBriefing(
+      const briefing = (body.briefing as string | undefined)?.trim() || (await searchBriefing(
         key,
         "You are a competitive-landscape researcher. Use web search to identify the REAL competitors in the user's market — companies a buyer would actually evaluate against them. Assess every candidate on FOUR dimensions: (1) buyer overlap — do they sell to the same personas? (2) industry overlap — same verticals? (3) capability overlap — which of the user's features/modules do they also offer? (4) positioning collision — do they claim the same category or replace the same thing? For each rival report: company name, homepage URL, head-on (direct) vs partial/adjacent, and the per-dimension read with what you found. Concrete and current — cite what you find. 6–10 rivals that genuinely matter, not a directory dump.",
         [
@@ -219,11 +224,11 @@ Deno.serve(async (req: Request) => {
           market ? `OUR MARKET (user's words): ${market}` : "",
           known.length ? `ALREADY TRACKED (skip these): ${known.join(", ")}` : "",
         ].filter(Boolean).join("\n"),
-      );
+      )).text;
       if (!briefing) return json({ error: "The landscape search returned nothing — try describing the market more specifically." }, 502);
 
       const resp = (await anthropic.messages.create({
-        model: MODEL, max_tokens: 2500,
+        model: MODEL, max_tokens: 2000,
         output_config: { effort: "medium", format: { type: "json_schema", schema: COMPETITORS_SCHEMA } },
         system: "Extract the competitors from the research briefing into the schema. Keep only real, named companies with a clear competitive rationale. website = their homepage URL from the briefing ('' if absent). match = an HONEST 0..100 competitive-overlap score derived from the four dimensions in the briefing (buyer, industry, capability, positioning): head-on across all four ≈ 80-95; strong on two-three ≈ 50-75; adjacent/partial ≈ 25-50. Never inflate; if the briefing is thin on a dimension, score conservatively. overlap = one line naming which dimensions overlap and which don't (e.g. 'same buyer (PMM) + capability (battlecards); different industry focus, no unified record'). Do not invent companies not in the briefing.",
         messages: [{ role: "user", content: briefing }],
@@ -237,7 +242,7 @@ Deno.serve(async (req: Request) => {
         .map((c) => ({ ...c, name: c.name.trim(), relationship: c.relationship === "adjacent" ? "adjacent" : "direct",
           match: Math.min(100, Math.max(0, Math.round(Number((c as { match?: number }).match) || 0))) }))
         .sort((a, b) => b.match - a.match);
-      return json({ competitors, briefing });
+      return json({ competitors, usage: { input: resp.usage?.input_tokens ?? 0, output: resp.usage?.output_tokens ?? 0 } });
     }
 
     if (step === "capabilities") {
