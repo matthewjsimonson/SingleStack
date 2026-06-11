@@ -13,6 +13,7 @@ import { Section, SubTabs } from "@/components/ui";
 import ExecutiveRow from "@/components/ExecutiveRow";
 import InitiativeLifecycleBoard from "@/components/InitiativeLifecycleBoard";
 import ReviewDrawer from "@/components/ReviewDrawer";
+import PortfolioRollup from "@/components/PortfolioRollup";
 
 type Run = { id: string; status: string; started_at: string; cost_usd: number | null };
 
@@ -50,14 +51,19 @@ export default function FoundationView() {
     let sigQ = supabase.from("signals").select("id", { count: "exact", head: true }).gte("observed_at", d7);
     let prodQ = supabase.from("product_records").select("id", { count: "exact", head: true });
     let gtmQ = supabase.from("gtm_records").select("id", { count: "exact", head: true });
+    let pendingQ = supabase.from("proposals").select("id", { count: "exact", head: true }).eq("status", "pending");
     if (ofProduct) {
       fieldsQ = fieldsQ.eq("product_id", active);
       sigQ = sigQ.eq("product_id", active);
       prodQ = prodQ.eq("id", active);
       gtmQ = gtmQ.eq("product_id", active);
+      // Pending proposals belong to a line via product_id OR through their GTM record.
+      const { data: gtmIds } = await supabase.from("gtm_records").select("id").eq("product_id", active);
+      const ids = (gtmIds ?? []).map((g) => g.id);
+      pendingQ = pendingQ.or(ids.length ? `product_id.eq.${active},gtm_record_id.in.(${ids.join(",")})` : `product_id.eq.${active}`);
     }
     const [{ count: pending }, { data: runs }, { count: sig7 }, { data: fields }, { data: cost }, { count: prodCount }, { count: gtmCount }] = await Promise.all([
-      supabase.from("proposals").select("id", { count: "exact", head: true }).eq("status", "pending"),
+      pendingQ,
       supabase.from("agent_runs").select("id, status, started_at").gte("started_at", d7),
       sigQ,
       fieldsQ,
@@ -129,6 +135,10 @@ export default function FoundationView() {
 
           {/* executive team */}
           <ExecutiveRow />
+
+          {/* Portfolio roll-up — per-line cards when viewing All products on a
+              multi-line org; clicking a card switches the app-wide context. */}
+          <PortfolioRollup />
 
           {/* KPI widgets — dynamic, useful */}
           <Section label="At a glance">

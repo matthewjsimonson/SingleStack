@@ -1,6 +1,6 @@
 # Multi-Product Foundation — architecture design
 
-Status: **partially implemented** (see status below) · Owner: SingleStack
+Status: **implemented — Phases 1-6 complete** (see status below) · Owner: SingleStack
 
 ## Implementation status (2026-06-10, reconciled against develop)
 
@@ -41,6 +41,13 @@ Status: **partially implemented** (see status below) · Owner: SingleStack
   fields, and each module now has a technical panel (fields + attached signals +
   a build readout). This is the STANDING technical description, distinct from a
   Build Item's executable Technical Scope (`build_context_links`).
+- **Homepage roll-up — DONE (Phase 6, view-layer only).** The homepage was
+  already line-scoped when a product is active (completeness, signals, and now
+  pending reviews via product_id/GTM mapping). "All products" on a multi-line
+  org adds the per-line portfolio roll-up (recommended answer to open question
+  4): a card per line with template-expected completeness, 7-day signals,
+  pending reviews, and active themes — clicking a card switches the app-wide
+  context. Single-product orgs see no change.
 - **Agents:** plays were built then retired (`20260607000300_drop_plays`) in
   favor of the cornerstone + child skills model. The battlecard agent pair
   below should be expressed as skills in that model, not as plays.
