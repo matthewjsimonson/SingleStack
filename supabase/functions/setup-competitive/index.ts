@@ -58,8 +58,10 @@ const INTERVIEW_SCHEMA = {
     done: { type: "boolean" },      // true = enough specificity; stop asking
     question: { type: "string" },   // the next question ("" when done)
     why: { type: "string" },        // one line: why this question sharpens the competitor search
+    readiness: { type: "integer" }, // 0..100 — how precisely a competitor search could run RIGHT NOW
+    gaps: { type: "string" },       // what's still thin, one line ("" when nothing material)
   },
-  required: ["done", "question", "why"],
+  required: ["done", "question", "why", "readiness", "gaps"],
 };
 
 const PICTURE_SCHEMA = {
@@ -151,7 +153,7 @@ Deno.serve(async (req: Request) => {
         model: MODEL, max_tokens: 1200,
         thinking: { type: "adaptive" },
         output_config: { effort: "medium", format: { type: "json_schema", schema: INTERVIEW_SCHEMA } },
-        system: "You are doing competitive-intelligence intake. You have everything the user's records already say, plus the interview so far. Ask the SINGLE most discriminating question the records do NOT answer — the one whose answer most changes WHO their real competitors are. High-value angles when missing: deal-deciding personas, industries/verticals served, segment (SMB/mid/enterprise), deployment model, price band, geography, who they actually lose deals to today, and which feature wins deals. Rules: never ask anything the records or transcript already answer; one question at a time, conversational and concrete; set done=true (question='') once you have enough specificity for a precise competitor search — typically after 3-5 good answers, or immediately if the records already cover it all.",
+        system: "You are doing competitive-intelligence intake. You have everything the user's records already say, plus the interview so far. Ask the SINGLE most discriminating question the records do NOT answer — the one whose answer most changes WHO their real competitors are. High-value angles when missing: deal-deciding personas, industries/verticals served, segment (SMB/mid/enterprise), deployment model, price band, geography, who they actually lose deals to today, and which feature wins deals. Rules: never ask anything the records or transcript already answer; one question at a time, conversational and concrete; set done=true (question='') once you have enough specificity for a precise competitor search — typically after 3-5 good answers, or immediately if the records already cover it all. ALWAYS score readiness (0..100): how precisely could a competitor search run RIGHT NOW on what's known? Calibrate across the dimensions that decide rivals — product+features, personas, industries, segment, positioning, deal-loss hints: all strong ≈ 85-95; most covered ≈ 65-80; basics only ≈ 35-55. Honest, monotonic with information (an answer never lowers it). gaps = one plain line on what's still thin ('' when nothing material). Set done=true when readiness ≥ 80 or further questions would add little.",
         messages: [{ role: "user", content: [
           records ? `THE RECORDS (everything already known):\n${records}` : "THE RECORDS: (none yet)",
           transcriptText ? `INTERVIEW SO FAR:\n${transcriptText}` : "INTERVIEW SO FAR: (not started)",

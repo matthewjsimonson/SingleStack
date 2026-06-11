@@ -12,6 +12,7 @@ import { useEffect, useState } from "react";
 import { createClient } from "@/lib/supabase/client";
 import { getOrgId } from "@/lib/org";
 import { Chip, Banner, Modal } from "@/components/ui";
+import { useAgentRun, AgentProgress } from "@/components/AgentProgress";
 import { CATALOG_BY_KIND } from "@/lib/sources";
 import { SKILL_DEFS } from "@/lib/skills.generated";
 
@@ -26,6 +27,9 @@ export default function CompetitiveSetup({ onDone, productId }: { onDone: () => 
   const supabase = createClient();
   const [step, setStep] = useState<Step>(1);
   const [busy, setBusy] = useState<string | null>(null);
+  // Staged progress for the long AI actions — the search visibly SEARCHES.
+  const compsRun = useAgentRun("setupComps");
+  const capsRun = useAgentRun("setupCaps");
   const [error, setError] = useState<string | null>(null);
 
   // step 1 — anchor: the market context comes FROM the records the user already
@@ -51,6 +55,11 @@ export default function CompetitiveSetup({ onDone, productId }: { onDone: () => 
   const [chatBusy, setChatBusy] = useState(false);
   const [chatDone, setChatDone] = useState(false);
   const [picture, setPicture] = useState("");
+  // Search readiness: scored by the interviewer after every answer — how
+  // precisely the competitor search could run right now, and what's thin.
+  const [ready, setReady] = useState<number | null>(null);
+  const [readyDelta, setReadyDelta] = useState<number | null>(null);
+  const [gaps, setGaps] = useState("");
   // step 2 — competitors
   const [comps, setComps] = useState<CompCand[]>([]);
   const [savedComps, setSavedComps] = useState<{ id: string; name: string; website: string | null }[]>([]);
@@ -225,6 +234,9 @@ export default function CompetitiveSetup({ onDone, productId }: { onDone: () => 
     setChatBusy(true); setError(null);
     try {
       const data = await invoke({ step: "interview", records: recordsDump, transcript: history });
+      const r = Math.min(100, Math.max(0, Math.round(Number(data.readiness) || 0)));
+      setReady((prev) => { setReadyDelta(prev !== null ? r - prev : null); return r; });
+      setGaps((data.gaps as string) || "");
       if (data.done || !data.question) { setChatDone(true); setChatWhy(null); await paintPicture(history); }
       else { setChat([...history, { role: "q", text: data.question }]); setChatWhy(data.why || null); }
     } catch (e) { setError(e instanceof Error ? e.message : "The interviewer stalled."); }
@@ -255,11 +267,13 @@ export default function CompetitiveSetup({ onDone, productId }: { onDone: () => 
   async function findCompetitors() {
     setBusy("comps"); setError(null);
     try {
-      const data = await invoke({ step: "competitors", market: marketCtx, product: { name: prod?.name, value_prop: prod?.value_prop } });
-      const list = (data.competitors ?? []) as Omit<CompCand, "keep">[];
-      if (!list.length) throw new Error("No rivals found — try describing the market more specifically.");
-      setComps(list.map((c) => ({ ...c, keep: true })));
-      setStep(2);
+      await compsRun.go(async () => {
+        const data = await invoke({ step: "competitors", market: marketCtx, product: { name: prod?.name, value_prop: prod?.value_prop } });
+        const list = (data.competitors ?? []) as Omit<CompCand, "keep">[];
+        if (!list.length) throw new Error("No rivals found — try describing the market more specifically.");
+        setComps(list.map((c) => ({ ...c, keep: true })));
+        setStep(2);
+      });
     } catch (e) { setError(e instanceof Error ? e.message : "The landscape search failed."); }
     finally { setBusy(null); }
   }
@@ -292,8 +306,10 @@ export default function CompetitiveSetup({ onDone, productId }: { onDone: () => 
   async function proposeCapabilities(rivals: string[]) {
     setBusy("caps"); setError(null);
     try {
-      const data = await invoke({ step: "capabilities", market: marketCtx, product: { name: prod?.name, value_prop: prod?.value_prop }, competitors: rivals });
-      setCaps(((data.capabilities ?? []) as Omit<CapCand, "keep">[]).map((c) => ({ ...c, keep: true })));
+      await capsRun.go(async () => {
+        const data = await invoke({ step: "capabilities", market: marketCtx, product: { name: prod?.name, value_prop: prod?.value_prop }, competitors: rivals });
+        setCaps(((data.capabilities ?? []) as Omit<CapCand, "keep">[]).map((c) => ({ ...c, keep: true })));
+      });
     } catch (e) { setError(e instanceof Error ? e.message : "Could not propose capabilities."); }
     finally { setBusy(null); }
   }
@@ -434,14 +450,21 @@ export default function CompetitiveSetup({ onDone, productId }: { onDone: () => 
               <div className="t-mono-xs t-muted" style={{ marginTop: 6 }}>Synthesized from your records + the interview. ✎ Edit adjusts the distilled fields; ✦ Drill down continues the conversation.</div>
             </div>
           )}
-          <div className="row gap-2">
-            <button className="btn btn-secondary btn-sm" onClick={openChat}>{chat.length ? "✦ Continue the drill-down" : "✦ Drill down with AI"}</button>
-            <button className="btn btn-sm" disabled={busy === "comps" || !marketCtx} onClick={findCompetitors}
-              title={picture ? "Search from the confirmed full picture" : "You can search now, or drill down first for a sharper match"}>
-              {busy === "comps" ? "Searching the landscape…" : "✦ Find my competitors"}
-            </button>
-            <button className="btn btn-secondary btn-sm" onClick={onDone}>Skip — set up by hand</button>
-          </div>
+          {compsRun.active ? (
+            <div className="card card-pad" style={{ borderLeft: "3px solid var(--ac)" }}>
+              <AgentProgress run={compsRun} />
+              <div className="t-mono-xs t-muted" style={{ marginTop: 6 }}>Live web search across the landscape — typically 30–60 seconds. Every candidate comes back with a match % and its overlap explained.</div>
+            </div>
+          ) : (
+            <div className="row gap-2">
+              <button className="btn btn-secondary btn-sm" onClick={openChat}>{chat.length ? "✦ Continue the drill-down" : "✦ Drill down with AI"}</button>
+              <button className="btn btn-sm" disabled={!marketCtx} onClick={findCompetitors}
+                title={picture ? "Search from the confirmed full picture" : "You can search now, or drill down first for a sharper match"}>
+                ✦ Find my competitors
+              </button>
+              <button className="btn btn-secondary btn-sm" onClick={onDone}>Skip — set up by hand</button>
+            </div>
+          )}
 
           {/* The drill-down — a side pop-out chat. The AI asks one discriminating
               question at a time (never re-asking what the records answer); the
@@ -454,6 +477,23 @@ export default function CompetitiveSetup({ onDone, productId }: { onDone: () => 
                   <span className="t-h2" style={{ fontSize: 15 }}>Drill down — so the search gets specific</span>
                   <button className="btn btn-secondary btn-sm" onClick={() => setChatOpen(false)}>Close</button>
                 </div>
+                {ready !== null && (
+                  <div style={{ padding: "10px 20px", borderBottom: "1px solid var(--border)" }}>
+                    <div className="row-between" style={{ marginBottom: 5, alignItems: "baseline" }}>
+                      <span className="t-label" style={{ color: "var(--tm)" }}>Search readiness</span>
+                      <span className="row gap-2" style={{ alignItems: "baseline" }}>
+                        {readyDelta !== null && readyDelta > 0 && <span className="t-mono-xs" style={{ color: "var(--gn-text, #15803d)", fontWeight: 700 }}>+{readyDelta}</span>}
+                        <span className="t-mono-xs" style={{ fontWeight: 700, color: ready >= 80 ? "var(--gn-text, #15803d)" : ready >= 55 ? "var(--am-text)" : "var(--tm)" }}>{chatDone ? 100 : ready}%</span>
+                      </span>
+                    </div>
+                    <div style={{ height: 6, borderRadius: 3, background: "var(--fill)", overflow: "hidden" }}>
+                      <div style={{ width: `${chatDone ? 100 : ready}%`, height: "100%", borderRadius: 3, background: ready >= 80 || chatDone ? "var(--gn-text, #15803d)" : ready >= 55 ? "var(--am-text, #D97706)" : "var(--ac)", transition: "width 0.4s ease" }} />
+                    </div>
+                    <div className="t-mono-xs t-muted" style={{ marginTop: 5 }}>
+                      {chatDone ? "Specific enough — the picture is painted." : ready >= 80 ? "Good enough to move on — answer more only if you want a sharper cut." : gaps ? `Still thin: ${gaps}` : "Keep going — each answer narrows who you actually compete with."}
+                    </div>
+                  </div>
+                )}
                 <div style={{ flex: 1, overflowY: "auto", padding: "16px 20px" }} className="stack-3">
                   {chat.map((m, i) => (
                     <div key={i} className="card card-pad" style={{ background: m.role === "q" ? "var(--panel-2)" : "var(--ac-fill, var(--fill))", marginLeft: m.role === "a" ? 32 : 0, marginRight: m.role === "q" ? 32 : 0 }}>
@@ -475,8 +515,10 @@ export default function CompetitiveSetup({ onDone, productId }: { onDone: () => 
                       onKeyDown={(e) => { if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) sendAnswer(e); }} />
                     <div className="row gap-2">
                       <button className="btn btn-sm" type="submit" disabled={chatBusy || !answer.trim()}>{chatBusy ? "…" : "Send"}</button>
-                      <button className="btn btn-secondary btn-sm" type="button" disabled={chatBusy || chat.length < 2} onClick={() => paintPicture(chat)}
-                        title="Stop here and synthesize the picture from what's answered so far">Enough — paint the picture</button>
+                      <button className={(ready ?? 0) >= 80 ? "btn btn-sm" : "btn btn-secondary btn-sm"} type="button" disabled={chatBusy || chat.length < 2} onClick={() => paintPicture(chat)}
+                        style={(ready ?? 0) >= 80 ? { background: "var(--gn-text, #15803d)", color: "#fff" } : undefined}
+                        title={(ready ?? 0) >= 80 ? "You're at a good level — synthesize and move on" : "Stop here and synthesize the picture from what's answered so far"}>
+                        {(ready ?? 0) >= 80 ? "✓ Good level — paint the picture" : "Enough — paint the picture"}</button>
                     </div>
                   </form>
                 )}
@@ -509,7 +551,7 @@ export default function CompetitiveSetup({ onDone, productId }: { onDone: () => 
           <button className="btn btn-secondary btn-sm" onClick={() => setComps([...comps, { name: "", website: "", relationship: "direct", match: 100, why: "Added by you.", overlap: "", keep: true }])}>+ Add one they missed</button>
           <div className="row gap-2">
             <button className="btn btn-sm" disabled={busy === "save-comps"} onClick={confirmCompetitors}>{busy === "save-comps" ? "Saving…" : `Confirm ${comps.filter((c) => c.keep && c.name.trim()).length} competitor${comps.filter((c) => c.keep && c.name.trim()).length === 1 ? "" : "s"} →`}</button>
-            <button className="btn btn-secondary btn-sm" disabled={busy === "comps"} onClick={findCompetitors}>↻ Search again</button>
+            {compsRun.active ? <AgentProgress run={compsRun} compact /> : <button className="btn btn-secondary btn-sm" onClick={findCompetitors}>↻ Search again</button>}
           </div>
         </div>
       )}
@@ -517,7 +559,7 @@ export default function CompetitiveSetup({ onDone, productId }: { onDone: () => 
       {step === 3 && (
         <div className="stack-3">
           <div className="t-sub t-muted" style={{ fontSize: 12.5 }}>The functionality vectors to compare on — proposed from your product, market, and rivals. These become the matrix rows; scores then come from <b>evidence</b>, ratified by you, never hand-typed guesses.</div>
-          {busy === "caps" && caps.length === 0 ? <div className="t-sub t-muted">Designing the matrix…</div> : caps.map((c, i) => (
+          {capsRun.active && caps.length === 0 ? <div className="card card-pad" style={{ borderLeft: "3px solid var(--ac)" }}><AgentProgress run={capsRun} /></div> : caps.map((c, i) => (
             <div key={i} className="card card-pad row gap-2" style={{ alignItems: "flex-start", opacity: c.keep ? 1 : 0.45 }}>
               <input type="checkbox" checked={c.keep} onChange={() => setCaps(caps.map((x, j) => j === i ? { ...x, keep: !x.keep } : x))} style={{ marginTop: 5 }} />
               <div style={{ flex: 1, minWidth: 0 }}>

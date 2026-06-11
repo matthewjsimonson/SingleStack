@@ -3,6 +3,20 @@
 // AgentProgress to make AI moments feel alive without any backend change.
 
 export const AGENT_STAGES: Record<string, string[]> = {
+  // setup-competitive · competitors (live web search — the long one)
+  setupComps: [
+    "Reading your full picture",
+    "Searching the live landscape",
+    "Assessing buyer & industry overlap",
+    "Checking capability collisions",
+    "Scoring honest match levels",
+  ],
+  // setup-competitive · capabilities
+  setupCaps: [
+    "Reading product, market, and rivals",
+    "Finding the vectors that decide deals",
+    "Trimming to a usable matrix",
+  ],
   // agent-propose (an officer reviews a record and drafts a change)
   propose: [
     "Reading the record",
