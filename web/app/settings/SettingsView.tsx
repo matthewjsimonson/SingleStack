@@ -119,6 +119,24 @@ export default function SettingsView() {
     finally { setClearing(false); }
   }
 
+  // Reset the competitive board for a clean, legit re-run of the guided setup:
+  // competitors (cascades sources, scores, battlecards, profiles), their
+  // signals, and the matrix rows. Records, agents, skills, workflows stay.
+  const [clearingComp, setClearingComp] = useState(false);
+  const [confirmComp, setConfirmComp] = useState(false);
+  async function clearCompetitive() {
+    setConfirmComp(false); setClearingComp(true); setError(null); setSeedNote(null);
+    try {
+      const { data: comps } = await supabase.from("competitors").select("id");
+      const ids = (comps ?? []).map((c) => c.id);
+      if (ids.length) await supabase.from("signals").delete().in("competitor_id", ids);
+      const { count: cDel } = await supabase.from("competitors").delete({ count: "exact" }).gte("created_at", "1970-01-01");
+      const { count: kDel } = await supabase.from("capabilities").delete({ count: "exact" }).gte("created_at", "1970-01-01");
+      setSeedNote(`Competitive board cleared — ${cDel ?? 0} competitors (with their sources, scores, battlecards, profiles) and ${kDel ?? 0} matrix rows removed. Run ✦ Guided setup on Competitive to rebuild it legit.`);
+    } catch (e) { setError(e instanceof Error ? e.message : "Could not clear the competitive board."); }
+    finally { setClearingComp(false); }
+  }
+
   return (
     <div>
       <h1 className="t-page" style={{ marginBottom: "var(--sp-4)" }}>Settings</h1>
@@ -144,6 +162,13 @@ export default function SettingsView() {
                 Load SingleStack&apos;s own workspace — we use SingleStack to build SingleStack: the product &amp; a GTM record, <strong>signals</strong> (GTM + market), real <strong>competitors</strong>, <strong>frontier-model capabilities</strong>, durable themes, and skills wired to your executive agents. Data only — the platform stays product-agnostic. Writes to your workspace; safe to run once.
               </div>
               {seedNote && <div className="banner" style={{ marginBottom: 12 }}>{seedNote}</div>}
+              {confirmComp && (
+                <ConfirmDialog
+                  title="Clear the competitive board?"
+                  message={<>Removes <b>every competitor</b> — with their monitored sources, capability scores, battlecards, signal profiles, and competitor-tagged signals — plus all matrix rows. Records, agents, skills, and workflows stay. Use this for a clean re-run of the guided setup. This can&rsquo;t be undone.</>}
+                  confirmLabel="Clear the board" onConfirm={clearCompetitive} onCancel={() => setConfirmComp(false)}
+                />
+              )}
               {confirmClear && (
                 <ConfirmDialog
                   title="Clear demo intel?"
@@ -153,6 +178,10 @@ export default function SettingsView() {
               )}
               <div className="row gap-2" style={{ flexWrap: "wrap", alignItems: "center" }}>
                 <button className="btn" onClick={seed} disabled={seeding}>{seeding ? "Loading…" : "Load SingleStack workspace"}</button>
+                <button className="btn btn-secondary" onClick={() => setConfirmComp(true)} disabled={clearingComp}
+                  title="Remove all competitors (their sources, scores, battlecards, profiles, signals) and matrix rows — for a clean re-run of the guided setup.">
+                  {clearingComp ? "Clearing…" : "⌫ Clear competitive board"}
+                </button>
                 <button className="btn btn-secondary" onClick={() => setConfirmClear(true)} disabled={clearing}
                   title="Remove the demo intel (signals, themes, battle cards, accounts, outcomes) — your records, competitors, and configuration stay.">
                   {clearing ? "Clearing…" : "⌫ Clear demo intel"}

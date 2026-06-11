@@ -19,7 +19,7 @@ export default function SignalProfile({ scope, competitorId, competitorName }: {
   const [headline, setHeadline] = useState("");
   const [fields, setFields] = useState<Field[]>([]);
   const [loading, setLoading] = useState(true);
-  const [busy, setBusy] = useState<null | "save" | "ai" | "create" | "push">(null);
+  const [busy, setBusy] = useState<null | "save" | "ai" | "create" | "push" | "battlecard">(null);
   const [error, setError] = useState<string | null>(null);
   const [dirty, setDirty] = useState(false);
   const [note, setNote] = useState<string | null>(null);
@@ -82,6 +82,27 @@ export default function SignalProfile({ scope, competitorId, competitorName }: {
     finally { setBusy(null); }
   }
 
+  // The profile is the RAW battlecard: hand it to the analyst, who refines it
+  // (plus themes/signals/matrix) into evidence-cited battlecard items — every
+  // one through Signals → Review, then the messenger turns ratified items into
+  // the GTM battlecard copy.
+  async function fillBattlecard() {
+    if (!profile || scope !== "competitor") return;
+    if (dirty) { setError("Save your changes first — the analyst reads the saved profile."); return; }
+    setBusy("battlecard"); setError(null); setNote(null);
+    try {
+      const { data: wfs } = await supabase.from("workflows").select("id, steps").eq("is_active", true).order("created_at");
+      const wf = ((wfs ?? []) as { id: string; steps: { agent_id?: string; skill_id?: string | null }[] }[])
+        .find((w) => Array.isArray(w.steps) && w.steps[0]?.agent_id && w.steps[0]?.skill_id);
+      if (!wf) throw new Error("No runnable workflow yet — use ✦ Stand up analysis + messaging on the GTM battlecard tab first.");
+      const { data, error } = await supabase.functions.invoke("battlecard-analyst", { body: { competitor_id: competitorId, workflow_id: wf.id } });
+      if (error) throw error;
+      if (data?.error) throw new Error(data.error);
+      setNote((data as { message?: string })?.message ?? "Battlecard items proposed — review them in Signals → Review, then run the messenger to refine into the GTM battlecard.");
+    } catch (e) { setError(e instanceof Error ? e.message : "Could not fill the battlecard."); }
+    finally { setBusy(null); }
+  }
+
   async function pushToStrategy() {
     if (!profile) return;
     if (dirty) { setError("Save your changes first, then push to strategy."); return; }
@@ -102,7 +123,7 @@ export default function SignalProfile({ scope, competitorId, competitorName }: {
 
   if (loading) return <div className="t-sub t-muted">Loading…</div>;
 
-  const title = scope === "landscape" ? "Signal Profile — your place in the market" : `Signal Profile — ${competitorName ?? "competitor"}`;
+  const title = scope === "landscape" ? "Signal Profile — your place in the market" : `Signal Profile — ${competitorName ?? "competitor"} (the raw battlecard)`;
   const blurb = scope === "landscape"
     ? "A living, editable read of the competitive landscape and where you sit — synthesized from internal + external signals. This should dictate your product and GTM strategy."
     : "Where you stand against this competitor — synthesized from internal (deals, calls) + external (public) signals, editable by hand.";
@@ -127,6 +148,12 @@ export default function SignalProfile({ scope, competitorId, competitorName }: {
         </div>
         <div className="row gap-2" style={{ flexShrink: 0 }}>
           <button className="btn btn-secondary btn-sm" onClick={draftAI} disabled={busy === "ai"} style={{ color: "var(--ac-text)" }}>{busy === "ai" ? "Synthesizing…" : "✨ Draft / refresh with AI"}</button>
+          {scope === "competitor" && (
+            <button className="btn btn-secondary btn-sm" onClick={fillBattlecard} disabled={busy === "battlecard" || dirty}
+              title={dirty ? "Save first" : "This profile is the raw battlecard — the analyst refines it into evidence-cited items (through review), then the messenger drafts the GTM battlecard copy"}>
+              {busy === "battlecard" ? "Filling…" : "→ Fill the battlecard"}
+            </button>
+          )}
           <button className="btn btn-secondary btn-sm" onClick={pushToStrategy} disabled={busy === "push" || dirty} title={dirty ? "Save first" : "Derive product + GTM strategy themes from this profile"}>{busy === "push" ? "Pushing…" : dirty ? "Save to push to strategy" : "→ Push to strategy"}</button>
           <button className="btn btn-sm" onClick={save} disabled={busy === "save" || !dirty}>{busy === "save" ? "Saving…" : dirty ? "Save" : "Saved"}</button>
         </div>

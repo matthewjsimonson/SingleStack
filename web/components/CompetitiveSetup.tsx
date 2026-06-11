@@ -18,7 +18,7 @@ import { CATALOG_BY_KIND } from "@/lib/sources";
 import { standUpCompetitiveAgents } from "@/lib/standUpCompetitive";
 
 type Step = 1 | 2 | 3 | 4 | 5;
-type CompCand = { name: string; website: string; relationship: string; match: number; why: string; overlap: string; keep: boolean };
+type CompCand = { name: string; website: string; linkedin: string; overview: string; relationship: string; match: number; why: string; overlap: string; keep: boolean };
 type CapCand = { name: string; category: string; why: string; keep: boolean };
 const MONITOR_KINDS = [
   ["website", "Website"], ["press", "Press & news"], ["linkedin_jobs", "LinkedIn jobs"], ["linkedin_posts", "LinkedIn posts"],
@@ -79,7 +79,7 @@ export default function CompetitiveSetup({ onDone, productId }: { onDone: () => 
   const [gaps, setGaps] = useState("");
   // step 2 — competitors
   const [comps, setComps] = useState<CompCand[]>([]);
-  const [savedComps, setSavedComps] = useState<{ id: string; name: string; website: string | null }[]>([]);
+  const [savedComps, setSavedComps] = useState<{ id: string; name: string; website: string | null; linkedin: string | null }[]>([]);
   // step 3 — capabilities
   const [caps, setCaps] = useState<CapCand[]>([]);
   const [capsSaved, setCapsSaved] = useState(0);
@@ -95,6 +95,12 @@ export default function CompetitiveSetup({ onDone, productId }: { onDone: () => 
     linkedin_posts: "Announcements, launches, hiring pushes, narrative shifts — note where a post cross-validates other moves.",
   });
   const [createdSources, setCreatedSources] = useState<{ id: string; label: string }[]>([]);
+  // Specific links the engine couldn't know — a pricing page, a LinkedIn
+  // people/jobs area, a docs site. Each becomes its own monitored source:
+  // LinkedIn URLs anchor a search-backed monitor (LinkedIn blocks direct
+  // fetch); anything else is fetched directly.
+  const [extraLinks, setExtraLinks] = useState<{ compId: string; url: string }[]>([]);
+  const [extraDraft, setExtraDraft] = useState({ compId: "", url: "" });
   // step 5 — ignite: each pull is the VERIFICATION — reachable or exact error,
   // and a preview of the actual signals harvested so you see what it pulls
   // before daily monitoring runs on it.
@@ -345,14 +351,20 @@ export default function CompetitiveSetup({ onDone, productId }: { onDone: () => 
       const { data, error } = await supabase.from("competitors").insert(keep.map((c, i) => ({
         org_id: orgId, name: c.name.trim(), relationship: ["adjacent", "watching"].includes(c.relationship) ? c.relationship : "direct",
         website: c.website.trim() || null,
-        notes: [c.why, c.overlap ? `Overlap: ${c.overlap}` : "", c.match < 100 ? `Match at setup: ${c.match}%` : ""].filter(Boolean).join(" · ") || null,
+        // The pulled overview IS the record: who they are, then the match rationale.
+        notes: [c.overview, c.why, c.overlap ? `Overlap: ${c.overlap}` : "", c.match < 100 ? `Match at setup: ${c.match}%` : ""].filter(Boolean).join("\n") || null,
         position: i, product_id: productId ?? null,
       }))).select("id, name, website");
       if (error) throw error;
-      setSavedComps(data ?? []);
-      // default monitoring: every kind on, website only when we know the URL
+      // carry the confirmed LinkedIn URLs (not a competitors column — they live on the sources)
+      const withLi = (data ?? []).map((d) => ({ ...d, linkedin: keep.find((k) => k.name.trim() === d.name)?.linkedin.trim() || null }));
+      setSavedComps(withLi);
+      // LEGIT monitoring only: a kind is on ONLY when its confirmed link exists —
+      // website needs the site URL; jobs/posts need the LinkedIn page. Press is
+      // name-anchored search (no link needed).
       const m: Record<string, Set<string>> = {};
-      for (const c of data ?? []) m[c.id] = new Set(MONITOR_KINDS.map(([k]) => k).filter((k) => k !== "website" || !!c.website));
+      for (const c of withLi) m[c.id] = new Set(MONITOR_KINDS.map(([k]) => k).filter((k) =>
+        k === "press" ? true : k === "website" ? !!c.website : !!c.linkedin));
       setMonitor(m);
       setStep(3);
       // pre-fetch capability proposals while the user reads
@@ -406,11 +418,27 @@ export default function CompetitiveSetup({ onDone, productId }: { onDone: () => 
             org_id: orgId, label: `${c.name} — ${def.label}`, icon: def.icon,
             origin: def.origin, kind, status: "connected", auth_mode: def.authMode, access_scope: def.accessScope,
             focus: def.defaultFocus ?? "both", max_per_pull: def.defaultMaxPerPull, cadence,
-            config: kind === "website" && c.website ? { url: c.website } : null,
+            config: kind === "website" && c.website ? { url: c.website }
+              : kind === "linkedin_jobs" && c.linkedin ? { url: c.linkedin.replace(/\/+$/, "") + "/jobs" }
+              : kind === "linkedin_posts" && c.linkedin ? { url: c.linkedin }
+              : null,
             guidance: kindGuide[kind]?.trim() || null,
             competitor_id: c.id,
           });
         }
+      }
+      for (const x of extraLinks) {
+        const c = savedComps.find((sc) => sc.id === x.compId); if (!c || !x.url.trim()) continue;
+        const isLi = /linkedin\.com/i.test(x.url);
+        const def = CATALOG_BY_KIND[isLi ? "linkedin_posts" : "website"]; if (!def) continue;
+        rows.push({
+          org_id: orgId, label: `${c.name} — ${x.url.replace(/^https?:\/\//, "").slice(0, 40)}`, icon: def.icon,
+          origin: "external", kind: isLi ? "linkedin_posts" : "website", status: "connected", auth_mode: def.authMode, access_scope: def.accessScope,
+          focus: "both", max_per_pull: def.defaultMaxPerPull, cadence,
+          config: { url: x.url.trim() },
+          guidance: isLi ? "Go through this specific LinkedIn area thoroughly." : "Read this page fully — everything decision-useful on it.",
+          competitor_id: c.id,
+        });
       }
       if (!rows.length) { setStep(5); setBusy(null); return; }
       const { data, error } = await supabase.from("sources").insert(rows).select("id, label");
@@ -444,6 +472,17 @@ export default function CompetitiveSetup({ onDone, productId }: { onDone: () => 
       } catch (e) {
         setPullLog((l) => [...l.slice(0, -1), { text: `${src.label} — ${e instanceof Error ? e.message : "failed"}`, ok: false }]);
       }
+    }
+    // Signals landed → synthesize immediately, so setup ends with CONTENT:
+    // themes on the competitors, proposals in review — not just raw rows.
+    setPullLog((l) => [...l, { text: "Synthesizing signals into themes…" }]);
+    try {
+      const { data, error } = await supabase.functions.invoke("synthesize-signals", { body: {}, headers: token ? { Authorization: `Bearer ${token}` } : undefined });
+      if (error) throw error;
+      if (data?.error) throw new Error(data.error);
+      setPullLog((l) => [...l.slice(0, -1), { text: "Synthesis complete — themes are forming on your competitors; high-judgment changes await you in Signals → Review", ok: true }]);
+    } catch (e) {
+      setPullLog((l) => [...l.slice(0, -1), { text: `Synthesis: ${e instanceof Error ? e.message : "failed"} — run it from the Signal feed`, ok: false }]);
     }
     setBusy(null);
   }
@@ -649,15 +688,17 @@ export default function CompetitiveSetup({ onDone, productId }: { onDone: () => 
                   <select className="select" value={c.relationship} onChange={(e) => setComps(comps.map((x, j) => j === i ? { ...x, relationship: e.target.value } : x))} style={{ width: 110 }}>
                     <option value="direct">Direct</option><option value="adjacent">Adjacent</option><option value="watching">Watching</option>
                   </select>
-                  <input className="input" value={c.website} onChange={(e) => setComps(comps.map((x, j) => j === i ? { ...x, website: e.target.value } : x))} placeholder="https://…" style={{ flex: 1, minWidth: 140 }} />
+                  <input className="input" value={c.website} onChange={(e) => setComps(comps.map((x, j) => j === i ? { ...x, website: e.target.value } : x))} placeholder="https://their-site.com" style={{ flex: 1, minWidth: 140 }} title="Their website — found by the search; confirm or fix it" />
+                  <input className="input" value={c.linkedin} onChange={(e) => setComps(comps.map((x, j) => j === i ? { ...x, linkedin: e.target.value } : x))} placeholder="linkedin.com/company/…" style={{ flex: 1, minWidth: 150 }} title="Their LinkedIn company page — required for jobs/posts monitoring; confirm or fix it" />
                 </div>
+                {c.overview && <div className="t-sub" style={{ fontSize: 12, lineHeight: 1.5, marginBottom: 3 }}>{c.overview}</div>}
                 <div className="t-sub t-muted" style={{ fontSize: 12 }}>{c.why}</div>
                 {c.overlap && <div className="t-mono-xs" style={{ marginTop: 3 }}>{c.overlap}</div>}
               </div>
               <Chip tone={c.match >= 70 ? "accent" : c.match >= 45 ? "violet" : "default"}>{c.match}% match</Chip>
             </div>
           ))}
-          <button className="btn btn-secondary btn-sm" onClick={() => setComps([...comps, { name: "", website: "", relationship: "direct", match: 100, why: "Added by you.", overlap: "", keep: true }])}>+ Add one they missed</button>
+          <button className="btn btn-secondary btn-sm" onClick={() => setComps([...comps, { name: "", website: "", linkedin: "", overview: "", relationship: "direct", match: 100, why: "Added by you.", overlap: "", keep: true }])}>+ Add one they missed</button>
           <div className="row gap-2">
             <button className="btn btn-sm" disabled={busy === "save-comps"} onClick={confirmCompetitors}>{busy === "save-comps" ? "Saving…" : `Confirm ${comps.filter((c) => c.keep && c.name.trim()).length} competitor${comps.filter((c) => c.keep && c.name.trim()).length === 1 ? "" : "s"} →`}</button>
             {searchStep !== null ? <span className="row gap-2 t-mono-xs t-muted" style={{ alignItems: "center" }}><span className="agent-progress-dot" aria-hidden />{SEARCH_STEPS[searchStep]}… · {searchSecs}s</span> : <button className="btn btn-secondary btn-sm" onClick={findCompetitors}>↻ Search again</button>}
@@ -710,16 +751,44 @@ export default function CompetitiveSetup({ onDone, productId }: { onDone: () => 
               <tbody>
                 {savedComps.map((c) => (
                   <tr key={c.id} style={{ borderTop: "1px solid var(--border)" }}>
-                    <td style={{ padding: "8px 14px", fontWeight: 600 }}>{c.name}{!c.website && <span className="t-mono-xs t-muted" style={{ marginLeft: 6 }}>no site URL</span>}</td>
-                    {MONITOR_KINDS.map(([k]) => (
-                      <td key={k} style={{ padding: "6px 8px", textAlign: "center" }}>
-                        <input type="checkbox" disabled={k === "website" && !c.website} checked={monitor[c.id]?.has(k) ?? false} onChange={() => toggleMonitor(c.id, k)} />
-                      </td>
-                    ))}
+                    <td style={{ padding: "8px 14px", fontWeight: 600 }}>{c.name}
+                      {!c.website && <span className="t-mono-xs t-muted" style={{ marginLeft: 6 }}>no site URL</span>}
+                      {!c.linkedin && <span className="t-mono-xs t-muted" style={{ marginLeft: 6 }}>no LinkedIn URL</span>}
+                    </td>
+                    {MONITOR_KINDS.map(([k]) => {
+                      const blocked = k === "website" ? !c.website : (k === "linkedin_jobs" || k === "linkedin_posts") ? !c.linkedin : false;
+                      return (
+                        <td key={k} style={{ padding: "6px 8px", textAlign: "center" }} title={blocked ? "Needs the confirmed link (go back and add it) — nothing is monitored without one" : undefined}>
+                          <input type="checkbox" disabled={blocked} checked={monitor[c.id]?.has(k) ?? false} onChange={() => toggleMonitor(c.id, k)} />
+                        </td>
+                      );
+                    })}
                   </tr>
                 ))}
               </tbody>
             </table>
+          </div>
+          <div className="card card-pad" style={{ background: "var(--panel-2)" }}>
+            <div className="t-label" style={{ color: "var(--tm)", marginBottom: 6 }}>Specific links the search couldn&rsquo;t know <span className="t-sub t-muted" style={{ textTransform: "none", letterSpacing: 0 }}>— a pricing page, a LinkedIn area, docs; each becomes its own monitor</span></div>
+            {extraLinks.length > 0 && (
+              <div className="stack-2" style={{ marginBottom: 8 }}>
+                {extraLinks.map((x, i) => (
+                  <div key={i} className="row-between" style={{ fontSize: 12.5 }}>
+                    <span><b>{savedComps.find((c) => c.id === x.compId)?.name ?? "?"}</b> · {x.url}</span>
+                    <button className="t-muted" onClick={() => setExtraLinks(extraLinks.filter((_, j) => j !== i))} style={{ background: "none", border: "none", cursor: "pointer" }}>×</button>
+                  </div>
+                ))}
+              </div>
+            )}
+            <div className="row gap-2" style={{ flexWrap: "wrap" }}>
+              <select className="select" value={extraDraft.compId} onChange={(e) => setExtraDraft({ ...extraDraft, compId: e.target.value })} style={{ width: 170 }}>
+                <option value="">— competitor —</option>
+                {savedComps.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
+              </select>
+              <input className="input" value={extraDraft.url} onChange={(e) => setExtraDraft({ ...extraDraft, url: e.target.value })} placeholder="https://… (their pricing page, a LinkedIn jobs/people area, docs)" style={{ flex: 1, minWidth: 220 }} />
+              <button className="btn btn-secondary btn-sm" disabled={!extraDraft.compId || !extraDraft.url.trim()}
+                onClick={() => { setExtraLinks([...extraLinks, { compId: extraDraft.compId, url: extraDraft.url.trim() }]); setExtraDraft({ compId: extraDraft.compId, url: "" }); }}>+ Add link</button>
+            </div>
           </div>
           <div className="card card-pad" style={{ background: "var(--panel-2)" }}>
             <div className="t-label" style={{ color: "var(--tm)", marginBottom: 6 }}>How you want each source — instructions aim every pull <span className="t-sub t-muted" style={{ textTransform: "none", letterSpacing: 0 }}>(editable later per source)</span></div>

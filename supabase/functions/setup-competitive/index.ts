@@ -39,13 +39,15 @@ const COMPETITORS_SCHEMA = {
         type: "object", additionalProperties: false,
         properties: {
           name: { type: "string" },
-          website: { type: "string" },         // homepage URL, or "" when unknown
+          website: { type: "string" },         // homepage URL from the briefing, or "" — never invented
+          linkedin: { type: "string" },        // linkedin.com/company/... URL from the briefing, or "" — never invented
+          overview: { type: "string" },        // 2-3 factual sentences: who they are, what they sell, to whom
           relationship: { type: "string", enum: ["direct", "adjacent"] },
           match: { type: "integer" },          // 0..100 — honest competitive-overlap score
           why: { type: "string" },             // one line: why they're a rival
           overlap: { type: "string" },         // the dimensions: buyer / industry / capability / positioning — which overlap, which don't
         },
-        required: ["name", "website", "relationship", "match", "why", "overlap"],
+        required: ["name", "website", "linkedin", "overview", "relationship", "match", "why", "overlap"],
       },
     },
   },
@@ -230,12 +232,12 @@ Deno.serve(async (req: Request) => {
       const resp = (await anthropic.messages.create({
         model: MODEL, max_tokens: 2000,
         output_config: { effort: "medium", format: { type: "json_schema", schema: COMPETITORS_SCHEMA } },
-        system: "Extract the competitors from the research briefing into the schema. Keep only real, named companies with a clear competitive rationale. website = their homepage URL from the briefing ('' if absent). match = an HONEST 0..100 competitive-overlap score derived from the four dimensions in the briefing (buyer, industry, capability, positioning): head-on across all four ≈ 80-95; strong on two-three ≈ 50-75; adjacent/partial ≈ 25-50. Never inflate; if the briefing is thin on a dimension, score conservatively. overlap = one line naming which dimensions overlap and which don't (e.g. 'same buyer (PMM) + capability (battlecards); different industry focus, no unified record'). Do not invent companies not in the briefing.",
+        system: "Extract the competitors from the research briefing into the schema. Keep only real, named companies with a clear competitive rationale. website = their homepage URL from the briefing ('' if absent). linkedin = their LinkedIn company page URL from the briefing ('' if absent) — NEVER constructed. overview = 2-3 factual sentences on who they are from the briefing. match = an HONEST 0..100 competitive-overlap score derived from the four dimensions in the briefing (buyer, industry, capability, positioning): head-on across all four ≈ 80-95; strong on two-three ≈ 50-75; adjacent/partial ≈ 25-50. Never inflate; if the briefing is thin on a dimension, score conservatively. overlap = one line naming which dimensions overlap and which don't (e.g. 'same buyer (PMM) + capability (battlecards); different industry focus, no unified record'). Do not invent companies not in the briefing.",
         messages: [{ role: "user", content: briefing }],
         // deno-lint-ignore no-explicit-any
       } as any)) as Anthropic.Message;
       const text = resp.content.filter((b) => b.type === "text").map((b) => (b as { text: string }).text).join("");
-      const out = JSON.parse(text) as { competitors: { name: string; website: string; relationship: string; match: number; why: string; overlap: string }[] };
+      const out = JSON.parse(text) as { competitors: { name: string; website: string; linkedin: string; overview: string; relationship: string; match: number; why: string; overlap: string }[] };
       const knownLower = new Set(known.map((n) => n.toLowerCase()));
       const competitors = (out.competitors ?? [])
         .filter((c) => c.name?.trim() && !knownLower.has(c.name.trim().toLowerCase()))

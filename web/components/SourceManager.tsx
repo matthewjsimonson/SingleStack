@@ -346,7 +346,9 @@ export default function SourceManager({ scope = {}, title = "Sources" }: { scope
 
             <div className="t-label" style={{ marginBottom: 8 }}>…or pick a source type</div>
             <div className="row gap-2" style={{ flexWrap: "wrap" }}>
-              {SOURCE_CATALOG.filter((d) => d.kind !== "manual").map((d) => (
+              {/* Only kinds that genuinely pull today — aspirational connectors
+                  don't render as if they worked. */}
+              {SOURCE_CATALOG.filter((d) => d.kind !== "manual" && d.live).map((d) => (
                 <button key={d.kind} className="btn btn-secondary btn-sm" onClick={() => pick(d)} title={`${d.blurb}\n🔒 ${d.accessScope}`}>
                   {d.icon} {d.label}
                 </button>
