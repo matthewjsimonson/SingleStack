@@ -35,9 +35,27 @@ const CORS = {
 const json = (b: unknown, s = 200) => new Response(JSON.stringify(b), { status: s, headers: { ...CORS, "content-type": "application/json" } });
 
 const MAX_CHARS_TO_MODEL = SECURITY.MAX_CHARS_TO_MODEL;
-const AUTH_KINDS_LIVE = new Set(["website", "youtube", "web_search"]); // run for real, no creds
 
-// Source kinds we can fetch without credentials. Others need the secret store.
+// Search-backed kinds: no per-source credential, no scrape-blocked direct fetch.
+// They run through Anthropic's server-side web search (citations included), aimed
+// by a kind-specific intent + the competitor/subject. This is the legit path for
+// LinkedIn jobs/posts, press, reviews, social, github — sources whose pages block
+// bots or live behind search — turning them from shells into real daily pulls.
+const SEARCH_BACKED = new Set(["linkedin_posts", "linkedin_jobs", "press", "reviews", "social", "github"]);
+// What each search-backed kind is hunting for. {subject} = the competitor name
+// (or the source label). Kept factual: concrete, recent, dated, attributed.
+const KIND_SEARCH_FRAMING: Record<string, string> = {
+  linkedin_jobs: "Find the CURRENT open job postings for {subject} — check LinkedIn Jobs and their careers page. Report the roles, the teams (engineering / product / GTM / etc.), seniority, and locations. Open roles reveal where they're investing and what they're building next.",
+  linkedin_posts: "Find RECENT public LinkedIn activity from {subject} — the company page and its key executives. Report announcements, launches, hiring pushes, positioning lines, and narrative shifts, each with a date and the post's source URL.",
+  press: "Find RECENT press releases, news, and announcements about {subject} — their newsroom, PR wires, and tech press. Report launches, funding, partnerships, executive changes, and pricing/packaging changes, each with a date and source URL.",
+  reviews: "Find RECENT user reviews and ratings of {subject} on review sites (G2, TrustRadius, Capterra, and Reddit threads). Report what users consistently praise and complain about, head-to-head comparisons, and any rating/sentiment shift, each with its source.",
+  social: "Find RECENT public discussion of {subject} on X and Reddit. Report notable advocacy, complaints, comparisons, and narrative shifts, each with a source and date.",
+  github: "Find {subject}'s recent public GitHub activity — releases, notable repositories, and shipping cadence. Report what they shipped and when, each with a source URL.",
+};
+
+// Source kinds we can pull without a stored credential: direct-fetch tiers,
+// live web search, and every search-backed kind above.
+const AUTH_KINDS_LIVE = new Set(["website", "youtube", "web_search", ...SEARCH_BACKED]);
 const liveKind = (kind: string) => AUTH_KINDS_LIVE.has(kind);
 
 // YouTube without auth: oEmbed gives title/author; we also pull the watch page
@@ -61,8 +79,13 @@ async function fetchYouTube(rawUrl: string): Promise<{ url: string; text: string
 // before distilling. This is how market/competitive signals get "weight" without
 // a per-source secret store. Third-party search MCPs can layer on later.
 // deno-lint-ignore no-explicit-any
-async function fetchViaWebSearch(key: string, source: any): Promise<{ label: string; url: string; text: string }> {
+async function fetchViaWebSearch(key: string, source: any, framing?: { intent: string; subject: string; url?: string | null }): Promise<{ label: string; url: string; text: string }> {
   const aim = [
+    // For a search-backed kind (LinkedIn jobs/posts, press, reviews…), the
+    // kind-specific INTENT leads, aimed at the named subject; the user's own
+    // tailoring narrows it further.
+    framing ? framing.intent.replace(/\{subject\}/g, framing.subject) : "",
+    framing?.url ? `Anchor on this page/handle when relevant: ${framing.url}` : "",
     source.guidance ? `Focus: ${source.guidance}` : "",
     source.include_terms ? `Only surface things about: ${source.include_terms}` : "",
     source.exclude_terms ? `Ignore anything about: ${source.exclude_terms}` : "",
@@ -252,13 +275,23 @@ Deno.serve(async (req: Request) => {
         const doc = await fetchViaMcp(key, source, mcpConn, mcpToken);
         screenAndKeep(doc.label, doc.url, doc.text);
       } catch (e) { fetchErrors.push(`mcp: ${e instanceof Error ? e.message : String(e)}`); }
-    } else if (source.kind === "web_search") {
-      // Live web search via Anthropic's server-side tool — aimed by the source's
-      // guidance/terms/targets. Still screened before distilling.
+    } else if (source.kind === "web_search" || SEARCH_BACKED.has(source.kind)) {
+      // Live web search via Anthropic's server-side tool. For a search-backed
+      // kind, lead with that kind's intent aimed at the competitor (or the
+      // source label); plain web_search just uses the source's own tailoring.
       try {
-        const doc = await fetchViaWebSearch(key, source);
+        let framing: { intent: string; subject: string; url?: string | null } | undefined;
+        if (SEARCH_BACKED.has(source.kind)) {
+          let subject = source.label as string;
+          if (source.competitor_id) {
+            const { data: c } = await supabase.from("competitors").select("name").eq("id", source.competitor_id).maybeSingle();
+            if (c?.name) subject = c.name;
+          }
+          framing = { intent: KIND_SEARCH_FRAMING[source.kind], subject, url: (source.config as { url?: string } | null)?.url ?? null };
+        }
+        const doc = await fetchViaWebSearch(key, source, framing);
         screenAndKeep(doc.label, doc.url, doc.text);
-      } catch (e) { fetchErrors.push(`web_search: ${e instanceof Error ? e.message : String(e)}`); }
+      } catch (e) { fetchErrors.push(`${source.kind}: ${e instanceof Error ? e.message : String(e)}`); }
     } else {
       // Resolve what to fetch: the source's url + each pointing TARGET of type url.
       const cfgUrl = (source.config as { url?: string } | null)?.url;

@@ -26,7 +26,7 @@ const CORS = {
 };
 const json = (b: unknown, s = 200) => new Response(JSON.stringify(b), { status: s, headers: { ...CORS, "content-type": "application/json" } });
 
-const LIVE_KINDS = new Set(["website", "youtube", "web_search", "mcp"]);
+const LIVE_KINDS = new Set(["website", "youtube", "web_search", "mcp", "linkedin_posts", "linkedin_jobs", "press", "reviews", "social", "github"]);
 const MAX_PULLS_PER_TICK = 12;
 // Due = last pull older than the window (with slack so a daily source pulled
 // at 09:00 is still picked up by the 08:00 tick the next day).
