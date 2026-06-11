@@ -8,14 +8,16 @@ import { useEffect, useState, useCallback } from "react";
 import { createClient } from "@/lib/supabase/client";
 import { getOrgId } from "@/lib/org";
 import { Section, Chip, Banner } from "@/components/ui";
+import { useProductScope } from "@/lib/ProductContext";
 
-type Topic = { id: string; category: string; prompt: string; focus: string | null; origin: string; status: string };
+type Topic = { id: string; category: string; prompt: string; focus: string | null; origin: string; status: string; product_id: string | null };
 
 export default function TrackingTopics({ category, suggestions = [] }: {
   category: "signals" | "competitive" | "market";
   suggestions?: string[]; // example blind-spots offered as one-click adds (origin=ai_suggested)
 }) {
   const supabase = createClient();
+  const { inScope, scopedProductId } = useProductScope(); // company-wide watches show in every line; line-specific only in theirs
   const [topics, setTopics] = useState<Topic[]>([]);
   const [loading, setLoading] = useState(true);
   const [text, setText] = useState("");
@@ -24,7 +26,7 @@ export default function TrackingTopics({ category, suggestions = [] }: {
   const [error, setError] = useState<string | null>(null);
 
   const load = useCallback(async () => {
-    const { data } = await supabase.from("tracking_topics").select("id, category, prompt, focus, origin, status").eq("category", category).order("created_at", { ascending: false });
+    const { data } = await supabase.from("tracking_topics").select("id, category, prompt, focus, origin, status, product_id").eq("category", category).order("created_at", { ascending: false });
     setTopics(data ?? []);
     setLoading(false);
   }, [supabase, category]);
@@ -38,7 +40,7 @@ export default function TrackingTopics({ category, suggestions = [] }: {
     try {
       const orgId = await getOrgId();
       if (!orgId) throw new Error("Could not resolve your organization.");
-      const { error } = await supabase.from("tracking_topics").insert({ org_id: orgId, category, prompt: p, focus: focus || null, origin, status });
+      const { error } = await supabase.from("tracking_topics").insert({ org_id: orgId, category, prompt: p, focus: focus || null, origin, status, product_id: scopedProductId });
       if (error) throw error;
       setText("");
       await load();
@@ -49,7 +51,8 @@ export default function TrackingTopics({ category, suggestions = [] }: {
   async function setStatus(id: string, status: string) { setError(null); await supabase.from("tracking_topics").update({ status }).eq("id", id); await load(); }
   async function remove(id: string) { setError(null); await supabase.from("tracking_topics").delete().eq("id", id); await load(); }
 
-  const active = topics.filter((t) => t.status === "active");
+  // Scope to the active line (+ company-wide watches). No-op for single-product orgs.
+  const active = topics.filter((t) => t.status === "active" && inScope(t));
   const tracked = new Set(topics.map((t) => t.prompt.toLowerCase()));
   // blind-spot suggestions not already added
   const openSuggestions = suggestions.filter((s) => !tracked.has(s.toLowerCase()));

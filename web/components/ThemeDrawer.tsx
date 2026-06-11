@@ -10,6 +10,7 @@ import { createClient } from "@/lib/supabase/client";
 import { getOrgId } from "@/lib/org";
 import { spawnInitiative } from "@/lib/routing";
 import { Chip, Confidence } from "@/components/ui";
+import { Markdown } from "@/components/Markdown";
 
 type Theme = {
   id: string; title: string; summary: string | null; recommendation: string | null;
@@ -165,7 +166,9 @@ export default function ThemeDrawer({ themeId, onClose, onChanged }: { themeId: 
                 {thread.map((m, i) => (
                   <div key={i} className="card card-pad" style={{ background: m.role === "user" ? "var(--panel)" : "var(--fill)", borderLeft: m.role === "assistant" ? "2px solid var(--ac)" : undefined }}>
                     <div className="t-label" style={{ color: "var(--tm)", marginBottom: 4 }}>{m.role === "user" ? "You" : officer.name}</div>
-                    <div className="t-sub" style={{ fontSize: 13, lineHeight: 1.55, whiteSpace: "pre-wrap" }}>{m.content}</div>
+                    {m.role === "user"
+                      ? <div className="t-sub" style={{ fontSize: 13, lineHeight: 1.55, whiteSpace: "pre-wrap" }}>{m.content}</div>
+                      : <Markdown className="t-sub" style={{ fontSize: 13, lineHeight: 1.55 }} text={m.content} />}
                     {m.role === "assistant" && m.runId && (
                       <div className="row gap-2" style={{ marginTop: 6 }}>
                         {m.rating

@@ -1,20 +1,21 @@
 // ============================================================================
-// orchestrate-roster — the Chief of Staff. Reviews the WHOLE agent roster
-// against the current intelligence (themes + capabilities + signals) and
-// proposes skill evolution, WITH RESTRAINT.
+// orchestrate-roster — the Chief of Staff. Reviews the WHOLE agent roster and
+// evolves the AGENTS THEMSELVES — their SKILLS (cornerstone + play) and how they
+// run their workflows — so the team is the best it can be at serving OUR USERS,
+// evidenced by internal & external signals. WITH RESTRAINT.
 //
-// The whole point is to NOT over-rotate (mirrors living-records'
-// "gated cadence" and compounding-intelligence's anti-goals): it only proposes
-// changes driven by durable, corroborated intelligence (escalating/active
-// themes, capabilities), caps how many changes it makes, skips skills changed
-// or reviewed very recently, and EXPLICITLY records what it considered but is
-// leaving alone (kind='hold'). A review that changes little is healthy.
+// IMPORTANT — this is NOT about records. A roster review proposes changes to the
+// agents' SKILLS only. Changes to product/GTM RECORD content (positioning,
+// messaging, fields) are "Proposals" — a separate, human-ratified mechanism the
+// agents use ON records. The Chief of Staff never proposes record changes here.
 //
-// Writes roster_recommendations (one batch) and stamps skills.reviewed_at. It
-// applies NOTHING to skills — humans ratify each change on /agents.
+// Restraint is load-bearing (anti-over-rotation): it only changes skills when a
+// durable, corroborated pattern warrants it, caps changes per run, skips skills
+// changed recently, and EXPLICITLY records what it left alone (kind='hold').
 //
-// Runs as the caller (JWT forwarded) → RLS scopes everything. Secret:
-// ANTHROPIC_API_KEY. Mirrors evolve-skills / distill-lessons conventions.
+// Writes roster_recommendations (one batch) + stamps skills.reviewed_at. Applies
+// NOTHING — humans ratify each skill change on /agents. JWT forwarded → RLS.
+// Secret: ANTHROPIC_API_KEY.
 // ============================================================================
 
 import Anthropic from "npm:@anthropic-ai/sdk@0.69.0";
@@ -25,7 +26,7 @@ const MAX_CHANGES = 5;       // hard cap on proposed changes per run (anti-over-
 const RECENT_DAYS = 7;       // skills evolved within this window are skipped
 const CORS = {
   "Access-Control-Allow-Origin": "*",
-  "Access-Control-Allow-Headers": "authorization, content-type",
+  "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type, x-supabase-api-version",
   "Access-Control-Allow-Methods": "POST, OPTIONS",
 };
 const json = (b: unknown, s = 200) => new Response(JSON.stringify(b), { status: s, headers: { ...CORS, "content-type": "application/json" } });
@@ -86,72 +87,96 @@ Deno.serve(async (req: Request) => {
 
     const { data: links } = await supabase
       .from("agent_skills")
-      .select("agent_id, skills ( id, name, description, instructions, category, last_evolved_at )");
+      .select("agent_id, is_cornerstone, skills ( id, name, description, instructions, category, last_evolved_at )");
     // deno-lint-ignore no-explicit-any
-    const byAgent = new Map<string, any[]>();
+    const byAgent = new Map<string, { cornerstone: boolean; skill: any }[]>();
     for (const l of (links ?? [])) {
       // deno-lint-ignore no-explicit-any
-      const arr = byAgent.get((l as any).agent_id) ?? [];
-      // deno-lint-ignore no-explicit-any
-      if ((l as any).skills) arr.push((l as any).skills);
-      // deno-lint-ignore no-explicit-any
-      byAgent.set((l as any).agent_id, arr);
+      const ll = l as any;
+      if (!ll.skills) continue;
+      const arr = byAgent.get(ll.agent_id) ?? [];
+      arr.push({ cornerstone: !!ll.is_cornerstone, skill: ll.skills });
+      byAgent.set(ll.agent_id, arr);
     }
 
-    // ---- The intelligence. Only durable, corroborated patterns are candidates
-    // for change (restraint). Plus capabilities (leverage) + recent signals. ---
+    // ---- The intelligence: our USERS' needs (internal signals) + the MARKET
+    // (external signals) + durable themes + new platform capabilities. This is
+    // what the agents must get better at serving. -----------------------------
     const recentCut = new Date(Date.now() - RECENT_DAYS * 86400_000).toISOString();
-    const [{ data: themes }, { data: rawSigs }] = await Promise.all([
+    const [{ data: themes }, { data: rawSigs }, { data: wfs }] = await Promise.all([
       supabase.from("signal_themes")
         .select("title, summary, recommendation, state, momentum, conf_level, category")
         .in("state", ["escalating", "active", "steady"])
         .order("last_evidence_at", { ascending: false }).limit(24),
-      supabase.from("signals").select("title, why, metadata").order("observed_at", { ascending: false }).limit(40),
+      supabase.from("signals").select("title, why, metadata, sources ( origin )").order("observed_at", { ascending: false }).limit(50),
+      supabase.from("workflows").select("name, description, steps").eq("is_active", true).limit(20),
     ]);
     // deno-lint-ignore no-explicit-any
     const allSigs = (rawSigs ?? []) as any[];
+    // deno-lint-ignore no-explicit-any
+    const originOf = (s: any) => (s.sources?.origin === "external" ? "external" : "internal");
     const capSigs = allSigs.filter((s) => s.metadata?.domain === "capability");
-    const otherSigs = allSigs.filter((s) => s.metadata?.domain !== "capability").slice(0, 24);
+    const internalSigs = allSigs.filter((s) => s.metadata?.domain !== "capability" && originOf(s) === "internal").slice(0, 20);
+    const externalSigs = allSigs.filter((s) => s.metadata?.domain !== "capability" && originOf(s) === "external").slice(0, 20);
 
     if ((themes ?? []).length === 0 && allSigs.length === 0) {
-      return json({ recommendations: [], message: "No durable intelligence yet — synthesize signals (and log capabilities) first, then review the roster." });
+      return json({ recommendations: [], message: "No intelligence yet — synthesize signals (internal & external) first, then review the roster." });
     }
 
     const intel = [
-      "DURABLE THEMES (escalating/active/steady — the only patterns strong enough to justify changing an agent):",
+      "DURABLE THEMES (corroborated patterns — the strongest justification for evolving an agent):",
       ...(themes ?? []).map((t) => `• [${t.state}/${t.momentum}${t.conf_level != null ? `, conf ${t.conf_level}` : ""}] (${t.category}) ${t.title}${t.summary ? ` — ${t.summary}` : ""}${t.recommendation ? ` → ${t.recommendation}` : ""}`),
-      ...(capSigs.length ? ["", "PLATFORM CAPABILITIES (what's now possible to leverage):", ...capSigs.map((s) => `• ${s.metadata?.provider ? `[${s.metadata.provider}${s.metadata?.area ? `/${s.metadata.area}` : ""}] ` : ""}${s.title}${s.why ? ` — ${s.why}` : ""}`)] : []),
-      "", "RECENT SIGNALS (context, weaker — should not by themselves drive change):",
-      ...otherSigs.map((s) => `• ${s.title}${s.why ? ` (${s.why})` : ""}`),
+      "", "INTERNAL SIGNALS (our users & our own systems — what our users need):",
+      ...(internalSigs.length ? internalSigs.map((s) => `• ${s.title}${s.why ? ` — ${s.why}` : ""}`) : ["(none on record)"]),
+      "", "EXTERNAL SIGNALS (the market & competitors):",
+      ...(externalSigs.length ? externalSigs.map((s) => `• ${s.title}${s.why ? ` — ${s.why}` : ""}`) : ["(none on record)"]),
+      ...(capSigs.length ? ["", "NEW PLATFORM CAPABILITIES (what's now possible to leverage):", ...capSigs.map((s) => `• ${s.metadata?.provider ? `[${s.metadata.provider}${s.metadata?.area ? `/${s.metadata.area}` : ""}] ` : ""}${s.title}${s.why ? ` — ${s.why}` : ""}`)] : []),
     ].join("\n");
 
-    // Roster rendering, marking skills changed recently (don't churn them).
+    // Roster: each agent's CORNERSTONE skills (always-on identity) + PLAY skills
+    // (task-specific), marking ones changed recently so we don't churn them.
     const roster = (agents ?? []).map((a) => {
-      const sk = byAgent.get(a.id) ?? [];
-      const lines = sk.length
-        ? sk.map((s) => {
-            const recent = s.last_evolved_at && s.last_evolved_at > recentCut;
-            return `  - skill_id ${s.id} · "${s.name}" (${s.category ?? "general"})${recent ? " [changed recently — leave unless a NEW capability demands it]" : ""}\n      instructions: ${(s.instructions ?? "(none)").slice(0, 400)}`;
-          }).join("\n")
-        : "  (no skills attached)";
+      const items = byAgent.get(a.id) ?? [];
+      // deno-lint-ignore no-explicit-any
+      const render = (it: { cornerstone: boolean; skill: any }) => {
+        const s = it.skill;
+        const recent = s.last_evolved_at && s.last_evolved_at > recentCut;
+        return `  - [${it.cornerstone ? "CORNERSTONE" : "play"}] skill_id ${s.id} · "${s.name}" (${s.category ?? "general"})${recent ? " [changed recently — leave unless newly warranted]" : ""}\n      instructions: ${(s.instructions ?? "(none)").slice(0, 400)}`;
+      };
+      const lines = items.length ? items.map(render).join("\n") : "  (no skills attached)";
       return `AGENT ${a.key} — ${a.name}${a.role ? ` (${a.role})` : ""}\n${lines}`;
     }).join("\n\n");
 
+    // The workflows these agents run — a good skill change should make these better.
+    // deno-lint-ignore no-explicit-any
+    const nameById = new Map((agents ?? []).map((a: any) => [a.id, a.name]));
+    // deno-lint-ignore no-explicit-any
+    const workflowsBlock = (((wfs ?? []) as any[]).map((w) => {
+      // deno-lint-ignore no-explicit-any
+      const steps = (w.steps ?? []).map((st: any, i: number) => `${i + 1}.${nameById.get(st.agent_id) ?? "officer"}`).join(" → ");
+      return `• "${w.name}"${w.description ? ` — ${w.description}` : ""}${steps ? `  [${steps}]` : ""}`;
+    }).join("\n")) || "(no workflows yet)";
+
     const system = [
-      "You are the Chief of Staff for an executive agent roster. Your job is to keep each agent's skills (playbooks) current with durable intelligence — and CRUCIALLY, to NOT over-rotate.",
+      "You are the Chief of Staff for an executive AGENT roster. You make the AGENTS — their skills and the workflows they run — the best they can be at serving OUR USERS, evidenced by internal & external signals. You exercise RESTRAINT.",
+      "",
+      "WHAT YOU EVOLVE — and what you must NOT touch:",
+      "• You evolve the AGENTS themselves: their SKILLS. Two kinds — CORNERSTONE skills (an agent's always-on identity & method) and PLAY skills (task/process-specific). Revise or add either.",
+      "• You do NOT propose changes to product or GTM record CONTENT (positioning copy, messaging, field values). Those are 'Proposals' — a completely separate, human-ratified mechanism the agents use ON records. Even if a signal implies a record should change, that is OUT OF SCOPE here. Your output is ONLY about improving the agents' skills.",
       "",
       "Rules of restraint (load-bearing):",
-      `• Propose AT MOST ${MAX_CHANGES} changes total across the whole roster. Fewer is better. A review that changes little is HEALTHY, not a failure.`,
-      "• Only propose a change when a DURABLE theme (escalating/active) or a real platform capability clearly warrants it. A single recent signal is NOT enough.",
-      "• Match each change to the RIGHT agent (by its role) and the right skill. Revise an existing skill when the capability is the same but should be applied differently; propose a NEW skill only for a capability the agent genuinely lacks.",
-      "• Do NOT churn skills marked 'changed recently' unless a brand-new capability demands it.",
+      `• Propose AT MOST ${MAX_CHANGES} skill changes total across the whole roster. Fewer is better — a review that changes little is HEALTHY.`,
+      "• Change a skill only when a durable theme or a corroborated internal/external pattern (not one weak signal) clearly shows the agent would serve our users better. Tie each change to specific signals/themes.",
+      "• Match each change to the RIGHT agent and RIGHT skill. Revise a CORNERSTONE skill to sharpen the agent's core method; revise/add a PLAY skill to improve a specific task or workflow step. Add a NEW skill only for a capability the agent genuinely lacks.",
+      "• Don't churn skills marked 'changed recently' unless newly warranted.",
+      "• Consider the agents' WORKFLOWS: a good skill change should make those processes better for users.",
       "",
-      "For things you CONSIDERED but are deliberately NOT changing, emit kind='hold' with a one-line rationale (this restraint record is required, not optional — include a few). Cite exact theme/capability/signal titles in drivers for every item.",
+      "For things you CONSIDERED but are deliberately NOT changing, emit kind='hold' with a one-line rationale (required — include a few). Cite exact theme/signal/capability titles in drivers for every item.",
       "",
       "Output: revise_skill needs agent_key + skill_id + proposed_instructions (full rewritten playbook). new_skill needs agent_key + new_name + new_description + new_category + new_instructions. hold needs agent_key (+ skill_id if about a specific skill).",
     ].join("\n");
 
-    const userMsg = `CURRENT INTELLIGENCE:\n${intel}\n\nTHE ROSTER:\n${roster}\n\nReview the roster and return your recommendations (changes + holds), exercising restraint.`;
+    const userMsg = `CURRENT INTELLIGENCE (our users' needs + the market):\n${intel}\n\nTHE ROSTER (agents, their cornerstone + play skills):\n${roster}\n\nTHE WORKFLOWS THESE AGENTS RUN:\n${workflowsBlock}\n\nReturn skill changes + holds that make the agents and their workflows the best they can be for our users — exercising restraint, and NEVER proposing record-content changes.`;
 
     const anthropic = new Anthropic({ apiKey: key });
     const resp = (await anthropic.messages.create({

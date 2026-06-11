@@ -114,7 +114,7 @@ export default function WorkstreamBoard({ area, title, meta }: { area: "build" |
                     return (
                       <div key={t.id} className="card card-pad" style={{ borderLeft: `3px solid var(--${area === "build" ? "ac" : "vl"})` }}>
                         {ini ? (
-                          <a href={`/initiatives/${ini.id}`} title="Open Build Item — scope, technical bundle, readiness" style={{ display: "block", fontSize: 13.5, fontWeight: 620, marginBottom: 6, color: "var(--tp)", textDecoration: "none" }} onMouseEnter={(e) => (e.currentTarget.style.textDecoration = "underline")} onMouseLeave={(e) => (e.currentTarget.style.textDecoration = "none")}>{t.title}</a>
+                          <a href={`/initiatives/${ini.id}?from=enablement`} title="Open Build Item — scope, technical bundle, readiness" style={{ display: "block", fontSize: 13.5, fontWeight: 620, marginBottom: 6, color: "var(--tp)", textDecoration: "none" }} onMouseEnter={(e) => (e.currentTarget.style.textDecoration = "underline")} onMouseLeave={(e) => (e.currentTarget.style.textDecoration = "none")}>{t.title}</a>
                         ) : (
                           <div style={{ fontSize: 13.5, fontWeight: 620, marginBottom: 6 }}>{t.title}</div>
                         )}
@@ -137,7 +137,7 @@ export default function WorkstreamBoard({ area, title, meta }: { area: "build" |
                             </select>
                           </div>
                         )}
-                        {ini && <a href={`/initiatives/${ini.id}`} className="t-sub" style={{ display: "inline-block", marginTop: 6, fontSize: 11, color: "var(--tm)", textDecoration: "none" }}>↑ {ini.title}</a>}
+                        {ini && <a href={`/initiatives/${ini.id}?from=enablement`} className="t-sub" style={{ display: "inline-block", marginTop: 6, fontSize: 11, color: "var(--tm)", textDecoration: "none" }}>↑ {ini.title}</a>}
                       </div>
                     );
                   })}

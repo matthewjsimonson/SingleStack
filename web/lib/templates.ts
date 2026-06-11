@@ -42,6 +42,8 @@ export const PRODUCT_TEMPLATE: TemplateSection[] = [
       { key: "data_model", label: "Data & AI", placeholder: "Key data, models, and how AI is used." },
       { key: "security", label: "Security & compliance", placeholder: "Security posture, certifications, data handling." },
       { key: "performance", label: "Performance & scale", placeholder: "Latency, throughput, reliability targets." },
+      { key: "tech_debt", label: "Known constraints & debt", placeholder: "Where the implementation is aging or constrained — the honest debt list." },
+      { key: "evolution_watch", label: "Evolution watchlist", placeholder: "Technologies & capabilities that could upgrade or obsolete parts of the stack — what to watch and re-evaluate." },
     ],
   },
   // Note: market-facing PROOF (metrics, reference customers, outcomes) lives on
@@ -142,7 +144,27 @@ export const BUILD_TEMPLATE: TemplateSection[] = [
   },
 ];
 
-export function templateFor(kind: "product" | "gtm" | "build") {
+// ---- MODULE: how one module actually works ---------------------------------
+// The product Technical section describes the whole product; this is the same
+// lens at the MODULE grain — how this specific module is built and where it's
+// aging. Lives in record_fields under module_id (the third parent). Pairs with
+// the module's open signals (technical shifts that affect it) to flag drift.
+export const MODULE_TEMPLATE: TemplateSection[] = [
+  {
+    section: "Technical",
+    blurb: "How this module works and what it's built on — kept honest against its signals and build.",
+    fields: [
+      { key: "how_it_works", label: "How it works", placeholder: "What this module does under the hood — the mechanism, not the marketing." },
+      { key: "built_on", label: "Built on", placeholder: "Core technologies, models, services, and libraries this module depends on." },
+      { key: "dependencies", label: "Key dependencies", placeholder: "Internal modules and external systems this leans on." },
+      { key: "debt_notes", label: "Debt & refactor notes", placeholder: "Where this module is aging or fragile, and what a refactor would address." },
+      { key: "evolution_watch", label: "Evolution watchlist", placeholder: "New tech/capabilities that could replace or upgrade how this module works." },
+    ],
+  },
+];
+
+export function templateFor(kind: "product" | "gtm" | "build" | "module") {
   if (kind === "build") return BUILD_TEMPLATE;
+  if (kind === "module") return MODULE_TEMPLATE;
   return kind === "product" ? PRODUCT_TEMPLATE : GTM_TEMPLATE;
 }

@@ -63,8 +63,9 @@ const GROUPS: Group[] = [
     ],
   },
   {
-    label: "Build",
+    label: "Product",
     items: [
+      { label: "Strategy", href: "/strategy" },
       { label: "Roadmap", href: "/roadmap" },
       { label: "Ship", href: "/ship" },
     ],
@@ -72,6 +73,9 @@ const GROUPS: Group[] = [
   {
     label: "Go-to-market",
     items: [
+      { label: "Strategy", href: "/gtm-strategy" },
+      { label: "Sell desk", href: "/sell" },
+      { label: "Qualified leads", href: "/pql" },
       { label: "Content", href: "/content" },
       { label: "Campaigns", href: "/campaigns" },
       { label: "Enablement", href: "/enablement" },
@@ -151,8 +155,8 @@ export default function Shell({
             <a href="/agents" style={itemStyle(isActive("/agents"))}>
               <span>Agents</span>
             </a>
-            <a href="/plays" style={itemStyle(isActive("/plays"))}>
-              <span>Plays</span>
+            <a href="/skills" style={itemStyle(isActive("/skills"))}>
+              <span>Skills library</span>
             </a>
             <a href="/settings" style={itemStyle(isActive("/settings"))}>
               <span>Settings</span>

@@ -24,7 +24,7 @@ type Source = {
   targets: { type?: string; ref: string; label?: string }[] | null; guidance: string | null;
 };
 
-const LIVE_PULL_KINDS = new Set(["website", "youtube"]); // run for real today (no creds)
+const LIVE_PULL_KINDS = new Set(["website", "youtube", "web_search"]); // run for real today (no creds)
 
 type Scope = { competitorId?: string; marketLens?: string };
 

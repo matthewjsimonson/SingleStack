@@ -13,12 +13,14 @@ import { templateFor } from "@/lib/templates";
 import MetricField from "@/components/MetricField";
 
 type Field = { id: string; field_key: string; label: string; value: string | null; section: string | null; position: number; field_kind?: string; metric_unit?: string | null };
-type Target = { kind: "product" | "gtm"; id: string };
+type TargetKind = "product" | "gtm" | "module";
+type Target = { kind: TargetKind; id: string };
 
 const UNGROUPED = "Details";
-const fk = (t: Target) => (t.kind === "product" ? "product_id" : "gtm_record_id");
+const FK: Record<TargetKind, string> = { product: "product_id", gtm: "gtm_record_id", module: "module_id" };
+const fk = (t: Target) => FK[t.kind];
 
-function guides(kind: "product" | "gtm") {
+function guides(kind: TargetKind) {
   const sectionBlurb: Record<string, string> = {};
   const fieldHint: Record<string, string> = {};
   for (const s of templateFor(kind)) {
@@ -235,7 +237,7 @@ export default function SectionedFields({ target }: { target: Target }) {
       {filledFields.length === 0 && !panelOpen ? (
         <div className="empty">
           <div className="t-body" style={{ fontWeight: 600, marginBottom: 6 }}>Nothing captured yet</div>
-          <div className="t-sub" style={{ maxWidth: 460, marginInline: "auto" }}>Use “+ recommended” above to fill in the structured fields for this {target.kind === "product" ? "product" : "GTM record"}.</div>
+          <div className="t-sub" style={{ maxWidth: 460, marginInline: "auto" }}>Use “+ recommended” above to fill in the structured fields for this {target.kind === "product" ? "product" : target.kind === "module" ? "module" : "GTM record"}.</div>
         </div>
       ) : (
         order.map((sName) => {

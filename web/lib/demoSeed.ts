@@ -12,6 +12,7 @@
 // writes to the caller's org.
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { EXECUTIVE_TEAM } from "@/lib/team";
+import { SKILL_DEFS } from "@/lib/skills.generated";
 
 const DEMO_PRODUCT = "SingleStack";
 const GTM_NAME = "Homepage hero · messaging";
@@ -153,6 +154,30 @@ export async function loadDemoData(supabase: SupabaseClient, orgId: string): Pro
     if (error) throw error; return "+3";
   });
 
+  // ---- Battle cards (the SELLER's asset — what to SAY, per competitor) ----
+  await step("battle cards", async () => {
+    const { count: c } = await supabase.from("battlecard_items").select("id", { count: "exact", head: true });
+    if (c) return "exist";
+    const { data: comps } = await supabase.from("competitors").select("id, name");
+    const cid = (n: string) => comps?.find((x) => x.name === n)?.id ?? null;
+    const cards: [string, string, string, string][] = [
+      // [competitor, kind, title, detail]
+      ["Productboard", "win", "We unify product AND GTM in one ratified record", "Spark builds battlecards, but the truth still lives in scattered docs. We keep product + messaging in one place that only moves when a human ratifies — so it never drifts."],
+      ["Productboard", "lose", "They own roadmapping depth", "If the buyer's core need is roadmap prioritization and delivery, they're deeper there. Reframe to the unified record + GTM, where they're thin."],
+      ["Productboard", "objection", "“Doesn't Spark already do competitive AI?”", "Spark automates CI research; it doesn't keep your product+GTM record current with human-in-the-loop ratification. Different job — surfacing intel vs. owning ratified change."],
+      ["Productboard", "proof", "HITL governance is auditable", "Every change is a ratified proposal with a full trail — exactly what procurement now asks about."],
+      ["Crayon", "win", "A living record, not a CI feed", "Crayon monitors the market; we turn that monitoring into ratified change in your product + GTM record. Intel → governed action, not just a dashboard."],
+      ["Crayon", "lose", "Breadth of CI sources", "Crayon tracks 100+ data types. If the buyer just wants the widest net, acknowledge it — then pivot to who actually owns acting on the intel."],
+      ["Crayon", "trap", "Ask: who owns acting on the intel?", "CI tools surface signals; nobody owns turning them into ratified product/GTM updates. That ownership gap is our wedge — set it early."],
+      ["Klue", "win", "Beyond sales enablement", "Klue pushes battlecards to sales; we keep the whole product+GTM record current. Battlecards are one output of our system, not the system."],
+      ["Klue", "objection", "“We already have battlecards in Klue.”", "Great — and they're static until someone updates them. Ours stay current from live signals, human-ratified, so reps never quote a stale card."],
+      ["Gong", "win", "Gong is a signal source; we're the system of record", "We can ingest Gong-style signals; Gong can't keep your product + GTM record current. Position as complementary — feed us, we govern the change."],
+    ];
+    const rows = cards.flatMap(([name, kind, title, detail], i) => { const id = cid(name); return id ? [{ org_id: orgId, competitor_id: id, kind, title, detail, position: i }] : []; });
+    if (rows.length) { const { error } = await supabase.from("battlecard_items").insert(rows); if (error) throw error; }
+    return `+${rows.length}`;
+  });
+
   // ---- GTM record (find or create) ----
   let gtmId: string | undefined;
   await step("gtm record", async () => {
@@ -170,6 +195,9 @@ export async function loadDemoData(supabase: SupabaseClient, orgId: string): Pro
       ["personas", "Personas", "Heads of Product, founders, and RevOps leads at scaling B2B software companies.", 1],
       ["positioning", "Positioning", "A living system of record — not a doc, not a dashboard. It proposes change; you ratify.", 2],
       ["objections", "Objections", "“Is this just another AI wrapper?” — No: humans ratify every change; nothing moves on its own.", 3],
+      ["value_prop", "Value proposition", "Your product & GTM strategy stays current automatically — agents propose sharp updates from live signals, and you ratify. The record and the messaging never go stale.", 4],
+      ["pillars", "Message pillars", "1) Living system of record (not a doc/dashboard). 2) Human-in-the-loop governance — nothing moves unratified. 3) Unifies product + GTM in one record. 4) Leverages new frontier-model capability as it ships.", 5],
+      ["proof_points", "Proof points", "6 design partners · 41 weekly active operators · 28 proposals ratified/week · every change carries an auditable trail.", 6],
     ].map(([field_key, label, value, position]) => ({ org_id: orgId, gtm_record_id: gtmId, field_key, label, value, position })));
     if (error) throw error; return "created";
   });
@@ -222,21 +250,77 @@ export async function loadDemoData(supabase: SupabaseClient, orgId: string): Pro
 
   // ---- Skills + attach ----
   await step("skills", async () => {
-    const skillDefs: { key: string; name: string; description: string; category: string; instructions: string; agents: string[] }[] = [
-      { key: "demo_positioning_sharpening", name: "Positioning sharpening", category: "product", description: "Tighten how the product is positioned against alternatives.", instructions: "Sharpen positioning to be specific and defensible. Lead with the category we're reframing, name the alternative we are NOT (roadmapping tools, CI feeds, call analytics), and ground every claim in a signal. Avoid hype; prefer concrete proof.", agents: ["cpo"] },
-      { key: "demo_roadmap_prioritization", name: "Roadmap prioritization", category: "product", description: "Decide what to build next from evidence.", instructions: "Prioritize by corroborated demand (escalating themes), strategic fit, and buildability. Recommend the smallest change that moves the metric; cite the signals behind it.", agents: ["cpo"] },
-      { key: "demo_architecture_review", name: "Architecture review", category: "general", description: "Keep technical claims precise and buildable.", instructions: "Review technical fields for accuracy and feasibility. Flag risk, keep stack/integration detail precise, and separate what's buildable now from later. Watch frontier-model capabilities for what's newly possible.", agents: ["ceng"] },
-      { key: "demo_competitive_battlecard", name: "Competitive battlecard", category: "gtm", description: "Equip GTM to win against alternatives.", instructions: "Frame the win against named competitors (Productboard, Crayon, Klue, Aha!, Gong): where we're clearly better, where to reframe, and the proof. Ground in competitive and market signals; keep it honest and specific.", agents: ["cro"] },
-      { key: "demo_persona_messaging", name: "Persona messaging", category: "gtm", description: "Tune messaging to each buyer.", instructions: "Match the message to the persona. Lead with the outcome they care about, address their top objection, and use language pulled from real signals.", agents: ["cro"] },
-      { key: "demo_narrative_voice", name: "Narrative & brand voice", category: "gtm", description: "Keep the story consistent and compelling.", instructions: "Keep the narrative consistent across records: confident, concrete, human-in-the-loop. Avoid AI hype; emphasize control and living truth.", agents: ["cco"] },
-    ];
+    const skillDefs = SKILL_DEFS; // canonical source: web/skills/**/SKILL.md → skills.generated.ts
     let made = 0;
     for (const s of skillDefs) {
-      let { data: sk } = await supabase.from("skills").insert({ org_id: orgId, key: s.key, name: s.name, description: s.description, category: s.category, instructions: s.instructions, source: "template" }).select("id").maybeSingle();
-      if (!sk) { const { data: found } = await supabase.from("skills").select("id").eq("key", s.key).maybeSingle(); sk = found; } else made++;
-      if (sk) {
-        for (const k of s.agents) { const aid = agentId(k); if (aid) await supabase.from("agent_skills").upsert({ org_id: orgId, agent_id: aid, skill_id: sk.id }, { onConflict: "agent_id,skill_id", ignoreDuplicates: true }); }
+      // SKILL.md is the source of truth for built-in (template) skills: insert if missing,
+      // otherwise sync content — but never clobber a skill a human/agent has evolved.
+      let sk: { id: string } | null = null;
+      const { data: existing } = await supabase.from("skills").select("id, source").eq("key", s.key).maybeSingle();
+      if (existing) {
+        sk = { id: (existing as { id: string }).id };
+        if ((existing as { source?: string }).source === "template") {
+          await supabase.from("skills").update({ name: s.name, description: s.description, category: s.category, instructions: s.instructions, areas: s.areas, connectors: s.connectors }).eq("id", sk.id);
+        }
+      } else {
+        const { data: created } = await supabase.from("skills").insert({ org_id: orgId, key: s.key, name: s.name, description: s.description, category: s.category, instructions: s.instructions, source: "template", areas: s.areas, connectors: s.connectors }).select("id").single();
+        if (created) { sk = { id: (created as { id: string }).id }; made++; }
       }
+      if (sk) {
+        for (const k of s.agents) {
+          const aid = agentId(k); if (!aid) continue;
+          await supabase.from("agent_skills").upsert({ org_id: orgId, agent_id: aid, skill_id: sk.id, is_cornerstone: s.cornerstone }, { onConflict: "agent_id,skill_id", ignoreDuplicates: true });
+          // Backfill: the upsert above ignores existing rows, so set the cornerstone flag
+          // explicitly for already-attached skills (fixes orgs seeded before cornerstones).
+          if (s.cornerstone) await supabase.from("agent_skills").update({ is_cornerstone: true }).eq("agent_id", aid).eq("skill_id", sk.id);
+        }
+      }
+    }
+    return made ? `+${made}` : "exist";
+  });
+
+  // ---- Agentic tasks (multi-step workflows) ----
+  // Real, ordered processes: each step is an officer applying its skills, drawing on
+  // internal/external signals; its output feeds the next. run-workflow executes them.
+  await step("agentic workflows", async () => {
+    const uid = () => (globalThis.crypto?.randomUUID?.() ?? `s_${Math.random().toString(36).slice(2)}`);
+    const A = (k: string) => agentId(k);
+    const { data: have } = await supabase.from("workflows").select("name");
+    const names = new Set((have ?? []).map((w) => w.name));
+    const defs: { name: string; description: string; steps: { agent: string; signals: "none" | "internal" | "external" | "both"; instruction: string }[] }[] = [
+      {
+        name: "Harden a GTM record",
+        description: "Three officers pass a GTM record forward: sharpen positioning, tighten the narrative, then check it against the product truth.",
+        steps: [
+          { agent: "cro", signals: "external", instruction: "Read the GTM record and the latest competitive + market signals. Sharpen the positioning against named competitors — where we win, where to reframe, the proof. Hand the tightened positioning to the narrative pass." },
+          { agent: "cco", signals: "none", instruction: "Take the CRO's positioning and make the narrative consistent, concrete, and human-in-the-loop across the record. Strip hype; keep the one story. Hand the polished narrative forward." },
+          { agent: "cpo", signals: "internal", instruction: "Verify the GTM claims align with the product record and the evidence. Flag anything overclaimed or unsupported, and note the single change that would most improve the record." },
+        ],
+      },
+      {
+        name: "Competitive teardown",
+        description: "Tear down a named competitor, then map the read back to our own product truth — where we win, where we're exposed, and the one move that matters.",
+        steps: [
+          { agent: "cro", signals: "external", instruction: "Tear down the named competitor using the latest competitive + market signals (and any connector you have for their docs/site). Cover their positioning, pricing posture, strongest claims, and where they're vulnerable. Be concrete and cite the signals you leaned on. Hand the teardown forward." },
+          { agent: "cpo", signals: "internal", instruction: "Take the CRO's teardown and map it against our product record and evidence: where we genuinely win, where we're exposed, and what's overclaimed on either side. Recommend the single highest-leverage move in response." },
+        ],
+      },
+      {
+        name: "Frontier capability sweep",
+        description: "Engineering scans what's newly possible; product turns it into priorities.",
+        steps: [
+          { agent: "ceng", signals: "both", instruction: "Review the recent frontier-model & platform capabilities. Flag what is newly buildable for us and what each unlocks — separate now from later, and note the dependency on each 'later'." },
+          { agent: "cpo", signals: "internal", instruction: "Translate engineering's read into product implications: which newly-possible capabilities map to corroborated demand, and the smallest change that would move the metric. Recommend the top one or two to prioritize." },
+        ],
+      },
+    ];
+    let made = 0;
+    for (const d of defs) {
+      if (names.has(d.name)) continue;
+      const steps = d.steps.flatMap((s) => { const id = A(s.agent); return id ? [{ id: uid(), agent_id: id, skill_id: null, signals: s.signals, instruction: s.instruction }] : []; });
+      if (!steps.length) continue;
+      const { error } = await supabase.from("workflows").insert({ org_id: orgId, agent_id: steps[0].agent_id, name: d.name, description: d.description, trigger: "manual", target_type: "none", steps, is_active: true });
+      if (!error) made++;
     }
     return made ? `+${made}` : "exist";
   });
@@ -266,88 +350,17 @@ export async function loadDemoData(supabase: SupabaseClient, orgId: string): Pro
     if (error) throw error; return `+${toAdd.length}`;
   });
 
-  // ---- Strategy: objective -> cross-functional initiatives -> workstreams ----
+  // ---- Strategy north star (objective only — no fake in-flight work) ----
+  // De-faked: we no longer seed pretend initiatives / roadmap / content. The
+  // Build workflow starts EMPTY and is filled for real by shipping bundles from
+  // Product Strategy (the seeded signals above are the raw intake). We keep one
+  // real objective as the strategic frame.
   await step("strategy", async () => {
     const OBJ = "Win the AI-native product + GTM category in 2026";
-    let { data: obj } = await supabase.from("objectives").select("id").eq("title", OBJ).maybeSingle();
-    if (!obj) ({ data: obj } = await supabase.from("objectives").insert({ org_id: orgId, title: OBJ, pillar: "Growth", description: "Be the living system of record for product + GTM before the category consolidates.", status: "active" }).select("id").single());
-    const { data: ppl } = await supabase.from("people").select("id, name");
-    const who = (n: string) => ppl?.find((p) => p.name === n)?.id ?? null;
-
-    const defs: { title: string; kind: string; lane: string; lifecycle: string; gtm: boolean; assignee: string | null; stage: string; ws: [string, string, string | null][] }[] = [
-      { title: "Agent orchestration v1", kind: "module", lane: "ship", lifecycle: "build", gtm: true, assignee: who("Maya Chen"), stage: "active", ws: [
-        ["build", "Ship multi-agent orchestration", who("Sam Rivera")], ["build", "Orchestration telemetry & guardrails", who("Sam Rivera")],
-        ["gtm", "Orchestration launch post + demo", who("Jordan Lee")], ["gtm", "Update competitive battlecards", who("Jordan Lee")],
-      ] },
-      { title: "Pricing clarity", kind: "feature", lane: "enablement", lifecycle: "plan", gtm: true, assignee: who("Jordan Lee"), stage: "backlog", ws: [
-        ["gtm", "Publish transparent pricing tiers", who("Jordan Lee")], ["gtm", "Pricing FAQ for demo follow-up", who("Jordan Lee")],
-        ["build", "Pricing page UX + mobile hero", who("Maya Chen")],
-      ] },
-    ];
-    let made = 0;
-    for (const d of defs) {
-      const { data: exi } = await supabase.from("initiatives").select("id").eq("title", d.title).maybeSingle();
-      if (exi) continue;
-      const { data: ini, error } = await supabase.from("initiatives").insert({
-        org_id: orgId, lane: d.lane, title: d.title, kind: d.kind, lifecycle: d.lifecycle, scope: "both", objective_id: obj?.id ?? null,
-        product_id: pid, gtm_record_id: d.gtm ? gtmId ?? null : null, assignee_id: d.assignee, stage: d.stage, priority: "high",
-      }).select("id").single();
-      if (error) throw error; made++;
-      await supabase.from("initiative_workstreams").insert(d.ws.map(([area, title, assignee], i) => ({ org_id: orgId, initiative_id: ini.id, area, lifecycle_stage: d.lifecycle, title, assignee_id: assignee, stage: i === 0 && d.stage === "active" ? "active" : "backlog" })));
-    }
-    return made ? `+${made}` : "exist";
-  });
-
-  // ---- Roadmap: releases populated by tagged build tasks (the changelog) ----
-  await step("roadmap", async () => {
-    const rels: { name: string; version: string; summary: string; stage: string; days: number }[] = [
-      { name: "Agent orchestration", version: "v1.0", summary: "Multi-agent orchestration ships — a single agent plans and runs multi-step product + GTM work.", stage: "in_dev", days: 21 },
-      { name: "Pricing & onboarding", version: "v1.1", summary: "Transparent pricing tiers and a mobile-first onboarding hero.", stage: "planned", days: 55 },
-    ];
-    const id: Record<string, string> = {};
-    let made = 0;
-    for (const r of rels) {
-      let { data: ex } = await supabase.from("releases").select("id").eq("name", r.name).maybeSingle();
-      if (!ex) { ({ data: ex } = await supabase.from("releases").insert({ org_id: orgId, product_id: pid, name: r.name, version: r.version, summary: r.summary, stage: r.stage, target_date: new Date(Date.now() + r.days * 864e5).toISOString().slice(0, 10) }).select("id").single()); made++; }
-      if (ex) id[r.version] = ex.id;
-    }
-    // Tag existing build tasks into releases with a change_type → the changelog.
-    const tag: [string, string, string][] = [
-      ["Ship multi-agent orchestration", "v1.0", "feature"],
-      ["Orchestration telemetry & guardrails", "v1.0", "enhancement"],
-      ["Pricing page UX + mobile hero", "v1.1", "feature_update"],
-    ];
-    for (const [title, ver, ct] of tag) {
-      if (!id[ver]) continue;
-      await supabase.from("initiative_workstreams").update({ release_id: id[ver], change_type: ct }).eq("area", "build").eq("title", title).is("release_id", null);
-    }
-    return made ? `+${made}` : "exist";
-  });
-
-  // ---- Content: typed content tasks that roll up to initiatives ----
-  await step("content", async () => {
-    const { data: existing } = await supabase.from("initiative_workstreams").select("id").not("content_type", "is", null).limit(1);
-    if (existing && existing.length) return "exist";
-    const { data: ini } = await supabase.from("initiatives").select("id, lifecycle").eq("title", "Agent orchestration v1").maybeSingle();
-    const { data: rel } = await supabase.from("releases").select("id").eq("name", "Agent orchestration").maybeSingle();
-    const { data: gtm } = await supabase.from("gtm_records").select("id").limit(1).maybeSingle();
-    const { data: ppl } = await supabase.from("people").select("id, name");
-    const who = (n: string) => ppl?.find((p) => p.name === n)?.id ?? null;
-    const ls = ini?.lifecycle ?? "launch";
-    // A coordinated push the launch content rolls into — closes the campaign↔content loop.
-    let { data: camp } = await supabase.from("campaigns").select("id").eq("name", "Orchestration launch week").maybeSingle();
-    if (!camp) ({ data: camp } = await supabase.from("campaigns").insert({ org_id: orgId, name: "Orchestration launch week", objective: "Coordinated launch of agent orchestration across blog, video, and social.", channels: "LinkedIn, email, webinar", gtm_record_id: gtm?.id ?? null, status: "active" }).select("id").single());
-    const rows = [
-      { content_type: "blog", title: "Launch blog — orchestration v1", stage: "active", assignee: who("Jordan Lee"), release_id: rel?.id ?? null, campaign_id: camp?.id ?? null, details: null },
-      { content_type: "video", title: "90s orchestration explainer", stage: "backlog", assignee: who("Jordan Lee"), release_id: rel?.id ?? null, campaign_id: camp?.id ?? null, details: { hook: "Your AI shouldn't need a babysitter for every step.", script: "", prompts: ["Cold open: messy multi-tool workflow", "Reveal: one agent orchestrating it"], descript_steps: [] } },
-      { content_type: "social", title: "Launch-week teaser thread", stage: "backlog", assignee: who("Jordan Lee"), release_id: null, campaign_id: camp?.id ?? null, details: null },
-      { content_type: "testimonial", title: "Design-partner testimonial — orchestration", stage: "backlog", assignee: who("Alex Kim"), release_id: null, campaign_id: null, details: null },
-    ];
-    await supabase.from("initiative_workstreams").insert(rows.map((r) => ({
-      org_id: orgId, area: "gtm", title: r.title, content_type: r.content_type, stage: r.stage,
-      initiative_id: ini?.id ?? null, lifecycle_stage: ls, assignee_id: r.assignee, release_id: r.release_id, campaign_id: r.campaign_id, details: r.details,
-    })));
-    return `+${rows.length}`;
+    const { data: obj } = await supabase.from("objectives").select("id").eq("title", OBJ).maybeSingle();
+    if (obj) return "exist";
+    await supabase.from("objectives").insert({ org_id: orgId, title: OBJ, pillar: "Growth", description: "Be the living system of record for product + GTM before the category consolidates.", status: "active" });
+    return "+1";
   });
 
   // ---- Automations: an on_release workflow + one fired (pending) run ----
@@ -414,11 +427,61 @@ export async function loadDemoData(supabase: SupabaseClient, orgId: string): Pro
     if (error) throw error; return `+${toAdd.length}`;
   });
 
+  // ---- Accounts → usage → PQL (the Sell loop has real content) ----
+  await step("accounts (usage / PQL)", async () => {
+    const { count: c } = await supabase.from("accounts").select("id", { count: "exact", head: true });
+    if (c) return "exist";
+    // [ref, name, domain, plan, activation, expansion, churn, pql_state, reason, lastSeenH]
+    const accts: [string, string, string, string, number, number, number, string, string, number][] = [
+      ["acme", "Acme Robotics", "acme.io", "Team", 0.82, 0.7, 0.1, "expansion", "Activation 82% — 12 activation actions in 35d; 6 seats added and hitting plan limits.", 6],
+      ["globex", "Globex", "globex.com", "Pro", 0.74, 0.2, 0.15, "qualified", "Activation 74% — onboarding complete, 9 key actions. Product-qualified.", 10],
+      ["soylent", "Soylent", "soylent.io", "Pro", 0.6, 0.1, 0.1, "qualified", "Activation 60% — crossed the activation bar this week.", 14],
+      ["initech", "Initech", "initech.co", "Starter", 0.35, 0.05, 0.2, "activating", "Activation 35% — onboarding underway (3 actions).", 18],
+      ["umbrella", "Umbrella Corp", "umbrella.com", "Team", 0.4, 0.0, 0.7, "at_risk", "Churn risk 70% — logins down ~60%, last seen 24d ago.", 24 * 24],
+    ];
+    const rows = accts.map(([external_ref, name, domain, plan, a, e, ch, pql, reason, h]) => ({ org_id: orgId, external_ref, name, domain, plan, status: "active", metrics: {}, last_seen_at: iso(h), activation_score: a, expansion_score: e, churn_risk: ch, pql_state: pql, score_reason: reason, scored_at: iso(2) }));
+    const { data: created, error } = await supabase.from("accounts").insert(rows).select("id, external_ref, name, pql_state, score_reason");
+    if (error) throw error;
+    const refId = new Map((created ?? []).map((x) => [x.external_ref, x.id]));
+    // Usage events — the evidence behind each score.
+    const evs: Record<string, unknown>[] = [];
+    const ev = (ref: string, kind: string, value: number, h: number) => { const id = refId.get(ref); if (id) evs.push({ org_id: orgId, account_id: id, kind, value, occurred_at: iso(h) }); };
+    ev("acme", "activation", 5, 30); ev("acme", "feature_adopt", 4, 20); ev("acme", "seat_add", 6, 10); ev("acme", "limit_hit", 2, 5);
+    ev("globex", "onboarding_complete", 1, 40); ev("globex", "key_action", 9, 15);
+    ev("soylent", "activation", 4, 10);
+    ev("initech", "activation", 3, 12);
+    ev("umbrella", "churn_risk", 2, 8); ev("umbrella", "login", 1, 24 * 24);
+    if (evs.length) await supabase.from("account_events").insert(evs);
+    // Emit the PQL signals these crossings would have produced (so /signals and
+    // the GTM strategy board show the sell motion the product generated).
+    const titleFor = (s: string, n: string) => s === "qualified" ? `PQL: ${n} is product-qualified` : s === "expansion" ? `Expansion signal: ${n}` : `Churn risk: ${n}`;
+    const sigs = (created ?? []).filter((x) => ["qualified", "expansion", "at_risk"].includes(x.pql_state))
+      .map((x) => ({ org_id: orgId, scope: "org", origin: "internal", category: "gtm", title: titleFor(x.pql_state, x.name).slice(0, 280), why: x.score_reason, conf_level: 0.9, conf_label: "High", observed_at: iso(2), metadata: { domain: "usage", account_id: x.id, pql_state: x.pql_state } }));
+    if (sigs.length) await supabase.from("signals").insert(sigs);
+    return `+${rows.length}`;
+  });
+
+  // ---- Outcome track record (the Learn loop: shipped work, scored) ----
+  await step("outcome track record", async () => {
+    const { count: c } = await supabase.from("expected_outcomes").select("id", { count: "exact", head: true });
+    if (c) return "exist";
+    const TITLE = "Ship agent orchestration as a demoable capability";
+    let { data: b } = await supabase.from("strategy_bundles").select("id").eq("title", TITLE).maybeSingle();
+    if (!b) ({ data: b } = await supabase.from("strategy_bundles").insert({ org_id: orgId, title: TITLE, rationale: "Buyers expect built-in orchestration; make it first-class and demoable.", state: "promoted", promoted_at: iso(40 * 24) }).select("id").single());
+    if (!b) return "no bundle";
+    const rows = [
+      { org_id: orgId, bundle_id: b.id, title: "Demo-to-trial conversion rises", measure_kind: "signal", direction: "up", horizon_days: 30, review_due_at: iso(5 * 24), baseline_at: iso(40 * 24), status: "hit", ai_verdict: "hit", ai_rationale: "Multiple signals show the orchestration demo converting; trial starts up ~20%.", resolved_at: iso(3), resolved_by: "human", resolution_note: "Confirmed — the orchestration demo is the new default and lifted conversion." },
+      { org_id: orgId, bundle_id: b.id, title: "“AI wrapper” objection fades", measure_kind: "signal", direction: "down", horizon_days: 45, review_due_at: iso(-15 * 24), baseline_at: iso(40 * 24), status: "watching" },
+    ];
+    const { error } = await supabase.from("expected_outcomes").insert(rows);
+    if (error) throw error; return "+2";
+  });
+
   const summary = report.join(" · ");
   return {
     created: errors.length === 0,
     message: errors.length
       ? `Loaded with issues — ${summary}. ⚠️ ERRORS: ${errors.join(" | ")}`
-      : `SingleStack workspace loaded ✓ — ${summary}. Open Signals (Product/GTM tabs).`,
+      : `SingleStack workspace loaded ✓ — ${summary}. Operator view: Signals → Strategy. Seller view: Competitive → Competitors (battle cards), Go-to-market → Qualified leads (PQLs).`,
   };
 }

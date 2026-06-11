@@ -13,41 +13,46 @@ import TrackingTopics from "@/components/TrackingTopics";
 import SourceManager from "@/components/SourceManager";
 import CapabilityCellDrawer, { type Cell } from "@/components/CapabilityCellDrawer";
 import CompetitiveGrid from "@/components/CompetitiveGrid";
-import PlacedPlays from "@/components/PlacedPlays";
+import SignalProfile from "@/components/SignalProfile";
+import { signalDomain, SIGNAL_DOMAIN } from "@/lib/signals";
+import { useProductScope } from "@/lib/ProductContext";
 
-type Competitor = { id: string; name: string; relationship: string; website: string | null; notes: string | null };
+type Competitor = { id: string; name: string; relationship: string; website: string | null; notes: string | null; product_id: string | null };
 type Capability = { id: string; name: string; category: string | null };
 type Score = { id: string; capability_id: string; competitor_id: string | null; score: number };
 type Card = { id: string; competitor_id: string | null; kind: string; title: string; detail: string | null };
-type Signal = { id: string; title: string; why: string | null; conf_label: string | null; conf_level: number | null; observed_at: string | null; metadata: { domain?: string; competitor_id?: string } | null; source_id: string | null };
+type Signal = { id: string; title: string; why: string | null; conf_label: string | null; conf_level: number | null; observed_at: string | null; origin: string | null; competitor_id: string | null; metadata: { domain?: string; competitor_id?: string; channel?: string } | null; source_id: string | null };
+type Theme = { id: string; title: string; summary: string | null; recommendation: string | null; category: string; competitor_id: string | null; conf_level: number | null; state: string };
+// The competitor a signal is about — first-class column, with a fallback to the
+// legacy metadata link for any pre-Phase-4 rows the backfill couldn't resolve.
+const sigComp = (s: Signal) => s.competitor_id ?? s.metadata?.competitor_id ?? null;
 
-type Tab = "dashboard" | "competitors" | "feed";
+type Tab = "dashboard" | "profile" | "competitors" | "feed";
 
 export default function CompetitiveView() {
   const supabase = createClient();
+  const { inScope, scopedProductId } = useProductScope(); // competitors are per-line; company-wide rivals show everywhere
   const [tab, setTab] = useState<Tab>("dashboard");
   const [competitors, setCompetitors] = useState<Competitor[]>([]);
   const [capabilities, setCapabilities] = useState<Capability[]>([]);
   const [scores, setScores] = useState<Score[]>([]);
   const [cards, setCards] = useState<Card[]>([]);
   const [signals, setSignals] = useState<Signal[]>([]);
+  const [themes, setThemes] = useState<Theme[]>([]);
   const [overview, setOverview] = useState<{ name: string; overview: string | null; valueProp: string | null } | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  // Opening a competitor from the Dashboard hands off to the inline Battlecards
-  // view (the single competitor surface) — no separate detail page.
-  const [focusComp, setFocusComp] = useState<string | null>(null);
-  const clearFocus = useCallback(() => setFocusComp(null), []);
 
   const load = useCallback(async () => {
-    const [{ data: comp }, { data: caps }, { data: scs }, { data: cds }, { data: sigs }] = await Promise.all([
-      supabase.from("competitors").select("id, name, relationship, website, notes").order("position").order("created_at"),
+    const [{ data: comp }, { data: caps }, { data: scs }, { data: cds }, { data: sigs }, { data: ths }] = await Promise.all([
+      supabase.from("competitors").select("id, name, relationship, website, notes, product_id").order("position").order("created_at"),
       supabase.from("capabilities").select("id, name, category").order("position").order("created_at"),
       supabase.from("capability_scores").select("id, capability_id, competitor_id, score"),
       supabase.from("battlecard_items").select("id, competitor_id, kind, title, detail").order("position").order("created_at"),
-      supabase.from("signals").select("id, title, why, conf_label, conf_level, observed_at, metadata, source_id").order("observed_at", { ascending: false, nullsFirst: false }),
+      supabase.from("signals").select("id, title, why, conf_label, conf_level, observed_at, origin, competitor_id, metadata, source_id").order("observed_at", { ascending: false, nullsFirst: false }),
+      supabase.from("signal_themes").select("id, title, summary, recommendation, category, competitor_id, conf_level, state").not("competitor_id", "is", null).order("last_evidence_at", { ascending: false, nullsFirst: false }),
     ]);
-    setCompetitors(comp ?? []); setCapabilities(caps ?? []); setScores(scs ?? []); setCards(cds ?? []); setSignals(sigs ?? []);
+    setCompetitors(comp ?? []); setCapabilities(caps ?? []); setScores(scs ?? []); setCards(cds ?? []); setSignals(sigs ?? []); setThemes(ths ?? []);
     // Our product overview — anchors the "us vs them" framing on battlecards.
     const { data: prod } = await supabase.from("product_records").select("id, name").order("created_at").limit(1).maybeSingle();
     if (prod) {
@@ -58,65 +63,47 @@ export default function CompetitiveView() {
   }, [supabase]);
   useEffect(() => { load(); }, [load]);
 
-  const compSignals = signals.filter((s) => s.metadata?.domain === "competitive");
+  const compSignals = signals.filter((s) => signalDomain(s) === SIGNAL_DOMAIN.competitive);
+  // Scope to the active product line (+ company-wide rivals). The switcher only
+  // appears for multi-product orgs, so single-product orgs see every competitor.
+  const scopedCompetitors = competitors.filter(inScope);
 
   return (
     <div>
       <SubTabs<Tab>
-        tabs={[{ key: "dashboard", label: "Dashboard" }, { key: "competitors", label: "Competitors" }, { key: "feed", label: "Signal feed" }]}
+        tabs={[{ key: "dashboard", label: "Dashboard" }, { key: "profile", label: "Signal profile" }, { key: "competitors", label: "Competitors" }, { key: "feed", label: "Signal feed" }]}
         active={tab} onChange={setTab}
       />
       <Banner>{error}</Banner>
 
       {loading ? <div className="t-sub t-muted">Loading…</div>
-        : tab === "dashboard" ? <Dashboard competitors={competitors} capabilities={capabilities} scores={scores} compSignals={compSignals} overview={overview} reload={load} setError={setError} onOpenCompetitor={(id) => { setFocusComp(id); setTab("competitors"); }} />
-        : tab === "competitors" ? <Competitors competitors={competitors} cards={cards} overview={overview} capabilities={capabilities} scores={scores} compSignals={compSignals} reload={load} setError={setError} initialScope={focusComp} onConsumeScope={clearFocus} />
-        : <Feed signals={signals} />}
+        : tab === "dashboard" ? <Dashboard competitors={scopedCompetitors} capabilities={capabilities} scores={scores} compSignals={compSignals} overview={overview} reload={load} setError={setError} />
+        : tab === "profile" ? <SignalProfile scope="landscape" />
+        : tab === "competitors" ? <Competitors competitors={scopedCompetitors} cards={cards} overview={overview} capabilities={capabilities} scores={scores} compSignals={compSignals} themes={themes} newProductId={scopedProductId} reload={load} setError={setError} />
+        : <Feed signals={signals} competitors={scopedCompetitors} reload={load} />}
     </div>
   );
 }
 
-// ---------- Dashboard: competitors + capability heat-map ----------
-function Dashboard({ competitors, capabilities, scores, compSignals, overview, reload, setError, onOpenCompetitor }: {
-  competitors: Competitor[]; capabilities: Capability[]; scores: Score[]; compSignals: Signal[]; overview: { name: string; overview: string | null; valueProp: string | null } | null; reload: () => void; setError: (s: string | null) => void; onOpenCompetitor: (id: string) => void;
+// ---------- Dashboard: capability heat-map + metrics ----------
+function Dashboard({ competitors, capabilities, scores, compSignals, overview, reload, setError }: {
+  competitors: Competitor[]; capabilities: Capability[]; scores: Score[]; compSignals: Signal[]; overview: { name: string; overview: string | null; valueProp: string | null } | null; reload: () => void; setError: (s: string | null) => void;
 }) {
   const supabase = createClient();
-  const [addingComp, setAddingComp] = useState(false);
-  const [comp, setComp] = useState({ name: "", relationship: "direct" });
   const [addingCap, setAddingCap] = useState(false);
   const [capName, setCapName] = useState("");
   const [openCell, setOpenCell] = useState<Cell | null>(null);
   const [openMetric, setOpenMetric] = useState<"gaps" | "moves" | null>(null);
   const [matrixView, setMatrixView] = useState<"matrix" | "grid">("matrix");
-  const [pendingDelete, setPendingDelete] = useState<Competitor | null>(null); // staged for in-app confirm
 
   const direct = competitors.filter((c) => c.relationship === "direct");
-  const adjacent = competitors.filter((c) => c.relationship === "adjacent");
   const scoreOf = (capId: string, compId: string | null) => scores.find((s) => s.capability_id === capId && s.competitor_id === compId)?.score ?? 0;
 
-  async function addCompetitor(e: React.FormEvent) {
-    e.preventDefault(); if (!comp.name.trim()) return;
-    const orgId = await getOrgId(); if (!orgId) return;
-    const { error } = await supabase.from("competitors").insert({ org_id: orgId, name: comp.name.trim(), relationship: comp.relationship });
-    if (error) setError(error.message); else { setAddingComp(false); setComp({ name: "", relationship: "direct" }); reload(); }
-  }
   async function addCapability(e: React.FormEvent) {
     e.preventDefault(); if (!capName.trim()) return;
     const orgId = await getOrgId(); if (!orgId) return;
     const { error } = await supabase.from("capabilities").insert({ org_id: orgId, name: capName.trim() });
     if (error) setError(error.message); else { setAddingCap(false); setCapName(""); reload(); }
-  }
-  // Remove a competitor that shouldn't be tracked. The × button stages it; an
-  // in-app ConfirmDialog (not the browser popup) confirms the destructive delete.
-  function removeCompetitor(e: React.MouseEvent, c: Competitor) {
-    e.preventDefault(); e.stopPropagation(); // the row is a link; don't navigate
-    setPendingDelete(c);
-  }
-  async function doRemove() {
-    const c = pendingDelete; if (!c) return;
-    setError(null); setPendingDelete(null);
-    const { error } = await supabase.from("competitors").delete().eq("id", c.id);
-    if (error) setError(error.message); else reload();
   }
   const compById = (id: string | null) => competitors.find((c) => c.id === id) ?? null;
   const heat = (s: number) => ["var(--fill)", "#FCE4C7", "#CDEBD6", "#9FD9B4"][s] || "var(--fill)";
@@ -138,15 +125,6 @@ function Dashboard({ competitors, capabilities, scores, compSignals, overview, r
 
   return (
     <div>
-      {pendingDelete && (
-        <ConfirmDialog
-          title="Remove competitor?"
-          message={<>Remove <b>{pendingDelete.name}</b> from competitive intel? This deletes its capability scores and battlecards, and can&rsquo;t be undone.</>}
-          confirmLabel="Remove"
-          onConfirm={doRemove}
-          onCancel={() => setPendingDelete(null)}
-        />
-      )}
       {/* Capability matrix / momentum grid — the differentiator, up top */}
       <Section label="Capability landscape" action={
         <div className="row gap-2">
@@ -217,23 +195,6 @@ function Dashboard({ competitors, capabilities, scores, compSignals, overview, r
         })}
       </div>
 
-      {/* What's happening — high-value competitive moves */}
-      {compSignals.length > 0 && (
-        <Section label="What's happening">
-          <div className="stack-3">
-            {compSignals.slice(0, 4).map((s) => (
-              <div key={s.id} className="card card-pad signal-card" style={{ borderLeft: "3px solid var(--vl)" }}>
-                <div className="row-between" style={{ gap: 12, alignItems: "flex-start", marginBottom: 4 }}>
-                  <span style={{ fontSize: 14, fontWeight: 620 }}>{s.title}</span>
-                  <Confidence label={s.conf_label} level={s.conf_level} />
-                </div>
-                {s.why && <div className="t-sub t-muted" style={{ fontSize: 12.5, lineHeight: 1.45 }}>{s.why}</div>}
-              </div>
-            ))}
-          </div>
-        </Section>
-      )}
-
       {/* Gaps / Moves drill-in drawer */}
       {openMetric && (
         <>
@@ -274,46 +235,8 @@ function Dashboard({ competitors, capabilities, scores, compSignals, overview, r
         </>
       )}
 
-      {/* Competitors */}
-      <Section label="Competitors" action={!addingComp ? <button className="btn btn-secondary btn-sm" onClick={() => setAddingComp(true)}>+ Competitor</button> : undefined}>
-        {addingComp && (
-          <form onSubmit={addCompetitor} className="card card-pad" style={{ marginBottom: "var(--sp-3)" }}>
-            <div className="row gap-2">
-              <input className="input" autoFocus placeholder="Competitor name" value={comp.name} onChange={(e) => setComp({ ...comp, name: e.target.value })} style={{ flex: 1 }} />
-              <select className="select" value={comp.relationship} onChange={(e) => setComp({ ...comp, relationship: e.target.value })} style={{ width: 140 }}>
-                <option value="direct">Direct</option><option value="adjacent">Adjacent</option>
-              </select>
-              <button className="btn btn-sm" type="submit">Add</button>
-              <button className="btn btn-secondary btn-sm" type="button" onClick={() => setAddingComp(false)}>Cancel</button>
-            </div>
-          </form>
-        )}
-        {competitors.length === 0 && !addingComp ? <div className="t-sub t-muted">No competitors yet. Add direct and adjacent competitors to map the landscape.</div> : (
-          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "var(--sp-4)" }}>
-            {[["Direct", direct, "accent"], ["Adjacent", adjacent, "violet"]].map(([label, list, tone]) => (
-              <div key={label as string}>
-                <div className="t-label" style={{ marginBottom: 8 }}>{label as string} · {(list as Competitor[]).length}</div>
-                <div className="stack-3">
-                  {(list as Competitor[]).map((c) => (
-                    <div key={c.id} onClick={() => onOpenCompetitor(c.id)} className="card card-link card-pad row-between" style={{ cursor: "pointer" }}>
-                      <span style={{ fontSize: 14, fontWeight: 600 }}>{c.name}</span>
-                      <span className="row gap-2" style={{ alignItems: "center" }}>
-                        <Chip tone={tone as "accent" | "violet"}>{c.relationship}</Chip>
-                        <span className="t-sub" style={{ color: "var(--ac-text)", fontWeight: 600, fontSize: 12 }}>Open →</span>
-                        <button onClick={(e) => { e.stopPropagation(); removeCompetitor(e, c); }} title={`Remove ${c.name}`} aria-label={`Remove ${c.name}`}
-                          style={{ background: "none", border: "none", cursor: "pointer", fontSize: 16, lineHeight: 1, color: "var(--tm)", padding: "0 2px" }}>×</button>
-                      </span>
-                    </div>
-                  ))}
-                  {(list as Competitor[]).length === 0 && <div className="t-sub t-muted" style={{ fontSize: 12.5 }}>None</div>}
-                </div>
-              </div>
-            ))}
-          </div>
-        )}
-      </Section>
-
-      {/* Org-wide competitive sources (cross-competitor) */}
+      {/* Org-wide competitive sources (cross-competitor). Competitors are added &
+          managed on the Competitors tab. */}
       <SourceManager title="Competitive sources (all competitors)" />
 
       <CapabilityCellDrawer key={openCell ? `${openCell.capabilityId}:${openCell.competitorId}` : "none"} cell={openCell} onClose={() => setOpenCell(null)} onChanged={reload} />
@@ -322,7 +245,7 @@ function Dashboard({ competitors, capabilities, scores, compSignals, overview, r
 }
 
 // ---------- Battlecards ----------
-type CdTab = "overview" | "gtm" | "product" | "signals";
+type CdTab = "overview" | "profile" | "themes" | "gtm" | "product" | "signals";
 
 // Best-practice battlecard sections — the set is the suggestion; fill the ones
 // that help a rep win against each competitor.
@@ -337,21 +260,37 @@ const KINDS: [string, string, string][] = [
   ["discovery", "Discovery questions", "bd"],
 ];
 const TONE_BORDER: Record<string, string> = { gn: "var(--gn)", am: "var(--am-text)", vl: "var(--vl)", bd: "var(--border-strong)" };
-function Competitors({ competitors, cards, overview, capabilities, scores, compSignals, reload, setError, initialScope, onConsumeScope }: {
+function Competitors({ competitors, cards, overview, capabilities, scores, compSignals, themes, newProductId, reload, setError }: {
   competitors: Competitor[]; cards: Card[]; overview: { name: string; overview: string | null; valueProp: string | null } | null;
-  capabilities: Capability[]; scores: Score[]; compSignals: Signal[]; reload: () => void; setError: (s: string | null) => void;
-  initialScope?: string | null; onConsumeScope?: () => void;
+  capabilities: Capability[]; scores: Score[]; compSignals: Signal[]; themes: Theme[]; newProductId: string | null; reload: () => void; setError: (s: string | null) => void;
 }) {
   const supabase = createClient();
   const [scope, setScope] = useState<string | null>(null); // selected competitor id; null = tile grid
   const [cdTab, setCdTab] = useState<CdTab>("overview");
-  // Handoff from the Dashboard ("Open" a competitor) selects it here, then clears.
-  useEffect(() => { if (initialScope) { setScope(initialScope); setCdTab("overview"); onConsumeScope?.(); } }, [initialScope, onConsumeScope]);
   const [adding, setAdding] = useState<string | null>(null);
   const [form, setForm] = useState({ title: "", detail: "" });
   const [openCell, setOpenCell] = useState<Cell | null>(null);
   const [editNotes, setEditNotes] = useState(false);
   const [notes, setNotes] = useState("");
+  // Add / remove competitors lives here now (moved off the Dashboard).
+  const [addingComp, setAddingComp] = useState(false);
+  const [comp, setComp] = useState({ name: "", relationship: "direct" });
+  const [pendingDelete, setPendingDelete] = useState<Competitor | null>(null);
+
+  async function addCompetitor(e: React.FormEvent) {
+    e.preventDefault(); if (!comp.name.trim()) return;
+    const orgId = await getOrgId(); if (!orgId) return;
+    // Inherit the active line so a competitor added inside a product belongs to
+    // it; null when viewing all/company = a company-wide rival shown everywhere.
+    const { error } = await supabase.from("competitors").insert({ org_id: orgId, name: comp.name.trim(), relationship: comp.relationship, product_id: newProductId });
+    if (error) setError(error.message); else { setAddingComp(false); setComp({ name: "", relationship: "direct" }); reload(); }
+  }
+  async function doRemoveComp() {
+    const c = pendingDelete; if (!c) return;
+    setError(null); setPendingDelete(null);
+    const { error } = await supabase.from("competitors").delete().eq("id", c.id);
+    if (error) setError(error.message); else { if (scope === c.id) setScope(null); reload(); }
+  }
 
   const cardsFor = (kind: string) => cards.filter((c) => c.kind === kind && c.competitor_id === scope);
   const countFor = (compId: string) => cards.filter((c) => c.competitor_id === compId).length;
@@ -359,8 +298,9 @@ function Competitors({ competitors, cards, overview, capabilities, scores, compS
   const scoreOf = (capId: string, compId: string | null) => scores.find((s) => s.capability_id === capId && s.competitor_id === compId)?.score ?? 0;
   const heat = (s: number) => ["var(--fill)", "#FCE4C7", "#CDEBD6", "#9FD9B4"][s] || "var(--fill)";
   const heatText = (s: number) => ["—", "Partial", "Good", "Strong"][s] || "—";
-  // Real competitor↔signal link (metadata.competitor_id), not a name match.
-  const sigsFor = (compId: string | null) => (compId ? compSignals.filter((s) => s.metadata?.competitor_id === compId) : []);
+  // Real competitor↔signal link (first-class column, legacy metadata fallback).
+  const sigsFor = (compId: string | null) => (compId ? compSignals.filter((s) => sigComp(s) === compId) : []);
+  const themesFor = (compId: string | null, cat: string) => (compId ? themes.filter((t) => t.competitor_id === compId && t.category === cat) : []);
   const edge = (compId: string) => capabilities.reduce((a, c) => { const u = scoreOf(c.id, null), t = scoreOf(c.id, compId); return { we: a.we + (u > t ? 1 : 0), they: a.they + (t > u ? 1 : 0) }; }, { we: 0, they: 0 });
   async function saveNotes() { if (!scope) return; setError(null); await supabase.from("competitors").update({ notes: notes.trim() || null }).eq("id", scope); setEditNotes(false); reload(); }
 
@@ -373,28 +313,51 @@ function Competitors({ competitors, cards, overview, capabilities, scores, compS
   async function remove(id: string) { setError(null); await supabase.from("battlecard_items").delete().eq("id", id); reload(); }
 
 
-  // Tile grid — pick a competitor to drill in.
+  // Tile grid — pick a competitor to drill in. Add / remove competitors here.
   if (!scope) {
     return (
-      <Section label="Competitors">
-        {competitors.length === 0 ? (
-          <div className="t-sub t-muted">No competitors yet. Add direct and adjacent competitors on the Dashboard — each gets an overview, battlecard, product board, and signal feed here.</div>
+      <Section label="Competitors" action={!addingComp ? <button className="btn btn-secondary btn-sm" onClick={() => setAddingComp(true)}>+ Competitor</button> : undefined}>
+        {pendingDelete && (
+          <ConfirmDialog
+            title="Remove competitor?"
+            message={<>Remove <b>{pendingDelete.name}</b> from competitive intel? This deletes its capability scores and battlecards, and can&rsquo;t be undone.</>}
+            confirmLabel="Remove" onConfirm={doRemoveComp} onCancel={() => setPendingDelete(null)}
+          />
+        )}
+        {addingComp && (
+          <form onSubmit={addCompetitor} className="card card-pad" style={{ marginBottom: "var(--sp-3)" }}>
+            <div className="row gap-2">
+              <input className="input" autoFocus placeholder="Competitor name" value={comp.name} onChange={(e) => setComp({ ...comp, name: e.target.value })} style={{ flex: 1 }} />
+              <select className="select" value={comp.relationship} onChange={(e) => setComp({ ...comp, relationship: e.target.value })} style={{ width: 140 }}>
+                <option value="direct">Direct</option><option value="adjacent">Adjacent</option>
+              </select>
+              <button className="btn btn-sm" type="submit">Add</button>
+              <button className="btn btn-secondary btn-sm" type="button" onClick={() => setAddingComp(false)}>Cancel</button>
+            </div>
+          </form>
+        )}
+        {competitors.length === 0 && !addingComp ? (
+          <div className="t-sub t-muted">No competitors yet. Add direct and adjacent competitors — each gets an overview, battlecard, product board, and signal feed here.</div>
         ) : (
           <div className="grid-cards">
             {competitors.map((c) => {
               const e = edge(c.id);
               return (
-                <button key={c.id} className="card card-link card-pad" style={{ textAlign: "left" }} onClick={() => { setScope(c.id); setCdTab("overview"); }}>
-                  <div className="row-between" style={{ marginBottom: 8 }}>
+                <div key={c.id} className="card card-link card-pad" style={{ textAlign: "left", cursor: "pointer", position: "relative" }} onClick={() => { setScope(c.id); setCdTab("overview"); }}>
+                  <div className="row-between" style={{ marginBottom: 8, gap: 6 }}>
                     <span style={{ fontSize: 15, fontWeight: 620 }}>{c.name}</span>
-                    <Chip tone={c.relationship === "direct" ? "accent" : "violet"}>{c.relationship}</Chip>
+                    <span className="row gap-2" style={{ alignItems: "center" }}>
+                      <Chip tone={c.relationship === "direct" ? "accent" : "violet"}>{c.relationship}</Chip>
+                      <button onClick={(ev) => { ev.stopPropagation(); setPendingDelete(c); }} title={`Remove ${c.name}`} aria-label={`Remove ${c.name}`}
+                        style={{ background: "none", border: "none", cursor: "pointer", fontSize: 16, lineHeight: 1, color: "var(--tm)", padding: "0 2px" }}>×</button>
+                    </span>
                   </div>
                   <div className="row gap-2" style={{ flexWrap: "wrap" }}>
                     <span className="t-mono-xs" style={{ color: "var(--gn-text)" }}>we lead {e.we}</span>
                     <span className="t-mono-xs" style={{ color: "var(--am-text)" }}>they lead {e.they}</span>
                     <span className="t-mono-xs" style={{ color: "var(--tm)" }}>{countFor(c.id)} card{countFor(c.id) === 1 ? "" : "s"}</span>
                   </div>
-                </button>
+                </div>
               );
             })}
           </div>
@@ -414,7 +377,7 @@ function Competitors({ competitors, cards, overview, capabilities, scores, compS
 
       <div className="card" style={{ overflow: "hidden" }}>
         <div className="row" style={{ gap: 4, padding: "8px 8px 0", borderBottom: "1px solid var(--border)", flexWrap: "wrap" }}>
-          {([["overview", "Overview"], ["gtm", "GTM battlecard"], ["product", "Product board"], ["signals", `Signals${sigsFor(scope).length ? ` · ${sigsFor(scope).length}` : ""}`]] as [CdTab, string][]).map(([k, label]) => {
+          {([["overview", "Overview"], ["profile", "Signal profile"], ["themes", `Themes${scope && themes.filter((t) => t.competitor_id === scope).length ? ` · ${themes.filter((t) => t.competitor_id === scope).length}` : ""}`], ["gtm", "GTM battlecard"], ["product", "Product board"], ["signals", `Signals${sigsFor(scope).length ? ` · ${sigsFor(scope).length}` : ""}`]] as [CdTab, string][]).map(([k, label]) => {
             const on = cdTab === k;
             return <button key={k} onClick={() => setCdTab(k)} style={{ background: "none", border: "none", borderBottom: on ? "2px solid var(--ac)" : "2px solid transparent", color: on ? "var(--tp)" : "var(--ts)", fontWeight: on ? 680 : 600, fontSize: 13, padding: "8px 14px", cursor: "pointer", marginBottom: -1 }}>{label}</button>;
           })}
@@ -463,8 +426,6 @@ function Competitors({ competitors, cards, overview, capabilities, scores, compS
               </div>
             </div>
 
-            {/* the four officers each analyze this competitor through their own lens */}
-            {selected && <PlacedPlays surfaceKey="competitor_home" targetType="competitor" targetId={selected.id} targetName={selected.name} heading="Officer analyses" />}
           </div>
         );
       })() : cdTab === "gtm" ? (
@@ -527,6 +488,40 @@ function Competitors({ competitors, cards, overview, capabilities, scores, compS
           )}
           <div className="t-sub t-muted" style={{ fontSize: 11.5, marginTop: 8 }}>Click any cell for the officer&rsquo;s reasoning, sources, and the rating control.</div>
         </Section>
+      ) : cdTab === "profile" ? (
+        <SignalProfile scope="competitor" competitorId={scope} competitorName={selected?.name} />
+      ) : cdTab === "themes" ? (
+        <div className="stack-3">
+          <div className="t-sub t-muted" style={{ fontSize: 12.5 }}>
+            Synthesized from {selected?.name}&rsquo;s signals — grouped by lens. <b>Product</b> moves inform the capability matrix and our technical foundation; <b>GTM</b> moves inform battlecards and our messaging. Run synthesis in the Signal feed to refresh.
+          </div>
+          {(["product", "gtm"] as const).map((cat) => {
+            const list = themesFor(scope, cat);
+            return (
+              <Section key={cat} label={cat === "product" ? "Product moves" : "GTM moves"}>
+                {list.length === 0 ? (
+                  <div className="t-sub t-muted" style={{ fontSize: 12.5 }}>No {cat === "product" ? "product" : "GTM"} themes yet for {selected?.name}. Log {cat === "product" ? "capability/roadmap" : "pricing/messaging"} signals and run synthesis.</div>
+                ) : (
+                  <div className="stack-3">
+                    {list.map((t) => (
+                      <div key={t.id} className="card card-pad" style={{ borderLeft: `3px solid ${cat === "product" ? "var(--ac)" : "var(--vl)"}` }}>
+                        <div className="row-between" style={{ gap: 12, alignItems: "flex-start", marginBottom: 4 }}>
+                          <span style={{ fontSize: 14, fontWeight: 620 }}>{t.title}</span>
+                          <div className="row gap-2" style={{ flexShrink: 0, alignItems: "center" }}>
+                            {t.state && <Chip tone={cat === "product" ? "accent" : "violet"}>{t.state}</Chip>}
+                            <Confidence label={null} level={t.conf_level} />
+                          </div>
+                        </div>
+                        {t.summary && <div className="t-sub t-muted" style={{ fontSize: 12.5, lineHeight: 1.45 }}>{t.summary}</div>}
+                        {t.recommendation && <div className="t-sub" style={{ fontSize: 12.5, marginTop: 6 }}><b>Recommendation:</b> {t.recommendation}</div>}
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </Section>
+            );
+          })}
+        </div>
       ) : (
         <Section label={`Signals on ${selected?.name}`}>
           {sigsFor(scope).length === 0 ? <div className="t-sub t-muted" style={{ fontSize: 12.5 }}>No signals tagged to {selected?.name} yet. Log competitive intel in the Signal feed and tag it to them.</div> : (
@@ -551,23 +546,108 @@ function Competitors({ competitors, cards, overview, capabilities, scores, compS
   );
 }
 
-// ---------- Signal feed ----------
-function Feed({ signals }: { signals: Signal[] }) {
-  const feed = signals.filter((s) => s.metadata?.domain === "competitive");
+// ---------- Signal feed — internal vs external, filterable, with capture ----------
+// Competitive intel is BOTH internal (what our own teams hear — deals, calls,
+// win/loss) and external (public — reviews, launches, pricing). The Signal
+// Profile synthesizes across both, so capture them here with origin + competitor.
+function Feed({ signals, competitors, reload }: { signals: Signal[]; competitors: Competitor[]; reload: () => void }) {
+  const supabase = createClient();
+  const [originTab, setOriginTab] = useState<"external" | "internal">("external");
+  const [compFilter, setCompFilter] = useState<string>("all");
+  const [logging, setLogging] = useState(false);
+  const [form, setForm] = useState({ title: "", why: "", origin: "internal", competitor_id: "", channel: "", conf: "0.7" });
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState<string | null>(null);
+
+  const compName = (id?: string) => competitors.find((c) => c.id === id)?.name;
+  const all = signals.filter((s) => signalDomain(s) === SIGNAL_DOMAIN.competitive);
+  const feed = all.filter((s) => (originTab === "internal" ? s.origin === "internal" : s.origin !== "internal"))
+    .filter((s) => compFilter === "all" || sigComp(s) === compFilter);
+  const counts = { internal: all.filter((s) => s.origin === "internal").length, external: all.filter((s) => s.origin !== "internal").length };
+  const CHANNELS = form.origin === "internal" ? ["Gong call", "Salesforce opp", "Win/loss", "Support", "Field note"] : ["Website", "Pricing page", "G2 / reviews", "Launch / release", "Job posting", "News"];
+
+  async function log(e: React.FormEvent) {
+    e.preventDefault(); if (!form.title.trim()) return;
+    setBusy(true); setErr(null);
+    try {
+      const orgId = await getOrgId(); if (!orgId) throw new Error("Could not resolve your organization.");
+      const lvl = parseFloat(form.conf);
+      const { error } = await supabase.from("signals").insert({
+        org_id: orgId, scope: "org", title: form.title.trim(), why: form.why.trim() || null,
+        conf_level: isNaN(lvl) ? null : lvl, conf_label: isNaN(lvl) ? null : lvl >= 0.75 ? "High" : lvl >= 0.5 ? "Medium" : "Low",
+        observed_at: new Date().toISOString(), origin: form.origin,
+        // First-class link drives synthesis; metadata stays mirrored for the
+        // legacy readers (capability cell drawer, synthesize-profile).
+        competitor_id: form.competitor_id || null,
+        metadata: { domain: "competitive", competitor_id: form.competitor_id || undefined, channel: form.channel || undefined },
+      });
+      if (error) throw error;
+      setLogging(false); setForm({ title: "", why: "", origin: form.origin, competitor_id: "", channel: "", conf: "0.7" }); reload();
+    } catch (e) { setErr(e instanceof Error ? e.message : "Could not log the signal."); }
+    finally { setBusy(false); }
+  }
+
   return (
     <div>
       <SourceManager title="Competitive sources" />
       <TrackingTopics category="competitive" suggestions={["Competitor pricing & packaging changes", "New competitor launches", "Win/loss themes vs top rivals", "Competitor messaging shifts"]} />
-      <Section label="Competitive signals">
-        {feed.length === 0 ? <div className="t-sub t-muted">No competitive signals yet. Log intel (it'll appear here) or add sources above.</div> : (
+
+      <Section label="Competitive signals" action={<button className="btn btn-sm" onClick={() => setLogging((v) => !v)} style={{ background: "var(--ac)", color: "#fff" }}>{logging ? "Close" : "+ Log signal"}</button>}>
+        <Banner>{err}</Banner>
+        {logging && (
+          <form onSubmit={log} className="card card-pad" style={{ marginBottom: "var(--sp-3)", background: "var(--panel-2)" }}>
+            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: "var(--sp-3)" }}>
+              <label className="field"><span className="t-label">Origin</span>
+                <select className="select" value={form.origin} onChange={(e) => setForm({ ...form, origin: e.target.value, channel: "" })}>
+                  <option value="internal">Internal — what we hear</option>
+                  <option value="external">External — public</option>
+                </select></label>
+              <label className="field"><span className="t-label">Competitor</span>
+                <select className="select" value={form.competitor_id} onChange={(e) => setForm({ ...form, competitor_id: e.target.value })}>
+                  <option value="">— none / general —</option>
+                  {competitors.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
+                </select></label>
+              <label className="field"><span className="t-label">Channel</span>
+                <select className="select" value={form.channel} onChange={(e) => setForm({ ...form, channel: e.target.value })}>
+                  <option value="">— where from —</option>
+                  {CHANNELS.map((c) => <option key={c} value={c}>{c}</option>)}
+                </select></label>
+            </div>
+            <label className="field"><span className="t-label">What happened</span><input className="input" autoFocus value={form.title} onChange={(e) => setForm({ ...form, title: e.target.value })} placeholder={form.origin === "internal" ? "e.g. Acme undercut us 20% in the Globex deal" : "e.g. Acme shipped SSO/SAML on the Team plan"} /></label>
+            <label className="field"><span className="t-label">Why it matters <span className="t-muted" style={{ fontWeight: 400 }}>— optional</span></span><input className="input" value={form.why} onChange={(e) => setForm({ ...form, why: e.target.value })} placeholder="So what for our positioning / strategy?" /></label>
+            <div className="row gap-2"><button className="btn btn-sm" type="submit" disabled={busy}>{busy ? "Logging…" : "Log signal"}</button><button className="btn btn-secondary btn-sm" type="button" onClick={() => setLogging(false)}>Cancel</button></div>
+          </form>
+        )}
+
+        {/* Internal vs external + competitor filter */}
+        <div className="row-between" style={{ alignItems: "center", marginBottom: "var(--sp-3)", gap: 8, flexWrap: "wrap" }}>
+          <div className="row" style={{ border: "1px solid var(--border)", borderRadius: 8, overflow: "hidden" }}>
+            {(["external", "internal"] as const).map((o) => (
+              <button key={o} onClick={() => setOriginTab(o)} className="btn-sm" style={{ border: "none", background: originTab === o ? "var(--ac)" : "var(--panel)", color: originTab === o ? "#fff" : "var(--ts)", fontWeight: 600, padding: "6px 14px", cursor: "pointer", textTransform: "capitalize" }}>{o} · {counts[o]}</button>
+            ))}
+          </div>
+          <select className="select" value={compFilter} onChange={(e) => setCompFilter(e.target.value)} style={{ maxWidth: 220 }}>
+            <option value="all">All competitors</option>
+            {competitors.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
+          </select>
+        </div>
+
+        {feed.length === 0 ? (
+          <div className="t-sub t-muted">No {originTab} competitive signals{compFilter !== "all" ? ` for ${compName(compFilter)}` : ""} yet. {originTab === "internal" ? "Log what your teams hear in deals and calls." : "Log public moves or add sources above."}</div>
+        ) : (
           <div className="stack-3">
             {feed.map((s) => (
-              <div key={s.id} className="card card-pad">
+              <div key={s.id} className="card card-pad" style={{ borderLeft: `3px solid ${s.origin === "internal" ? "var(--ac)" : "var(--vl)"}` }}>
                 <div className="row-between" style={{ gap: 12, alignItems: "flex-start", marginBottom: 5 }}>
                   <span style={{ fontSize: 14.5, fontWeight: 620 }}>{s.title}</span>
                   <Confidence label={s.conf_label} level={s.conf_level} />
                 </div>
                 {s.why && <p className="t-sub" style={{ lineHeight: 1.5 }}>{s.why}</p>}
+                <div className="row gap-2" style={{ marginTop: 6, flexWrap: "wrap", alignItems: "center" }}>
+                  <Chip tone={s.origin === "internal" ? "accent" : "violet"}>{s.origin === "internal" ? "internal" : "external"}</Chip>
+                  {sigComp(s) && <Chip>{compName(sigComp(s) ?? undefined) ?? "competitor"}</Chip>}
+                  {s.metadata?.channel && <span className="t-mono-xs t-muted">{s.metadata.channel}</span>}
+                </div>
               </div>
             ))}
           </div>

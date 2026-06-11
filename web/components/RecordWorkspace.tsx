@@ -4,7 +4,7 @@
 // content (delegated to SectionedFields), and proposals to review/accept.
 import { useEffect, useState, useCallback } from "react";
 import { createClient } from "@/lib/supabase/client";
-import { Section, Chip, Banner, Confidence } from "@/components/ui";
+import { Section, Chip, Banner, Modal } from "@/components/ui";
 import SectionedFields from "@/components/SectionedFields";
 import RecordAdvisors from "@/components/RecordAdvisors";
 
@@ -25,9 +25,13 @@ export default function RecordWorkspace({ target, recordName }: { target: Target
   const [agents, setAgents] = useState<Agent[]>([]);
   const [proposals, setProposals] = useState<Proposal[]>([]);
   const [loading, setLoading] = useState(true);
-  const [acceptingId, setAcceptingId] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [fieldsNonce, setFieldsNonce] = useState(0); // bump to refresh SectionedFields after accept
+  // "Set up with AI" — import existing content into the review queue.
+  const [imp, setImp] = useState(false);
+  const [src, setSrc] = useState({ mode: "paste" as "paste" | "url", content: "", url: "", guidance: "" });
+  const [importing, setImporting] = useState(false);
+  const [impNote, setImpNote] = useState<string | null>(null);
 
   const load = useCallback(async () => {
     const [{ data: ags }, { data: props }] = await Promise.all([
@@ -41,30 +45,30 @@ export default function RecordWorkspace({ target, recordName }: { target: Target
 
   useEffect(() => { load(); }, [load]);
 
-  // Run an officer's proposal pass. Throws on failure so the advisor card can
-  // show its own running/error state; the card refreshes via onRan.
-  const proposeFor = useCallback(async (key: string) => {
-    const { data: s } = await supabase.auth.getSession();
-    const token = s.session?.access_token;
-    const body = target.kind === "product"
-      ? { agent_key: key, product_id: target.id }
-      : { agent_key: key, gtm_record_id: target.id };
-    const { data, error } = await supabase.functions.invoke("agent-propose", {
-      body, headers: token ? { Authorization: `Bearer ${token}` } : undefined,
-    });
-    if (error) throw error;
-    if (data?.error) throw new Error(data.error);
-  }, [supabase, target]);
+  // Drawer actions (accept / reject / hide) call this: refresh proposal counts and,
+  // since an accept changes field values, re-mount the content panels.
+  const refresh = useCallback(() => { load(); setFieldsNonce((n) => n + 1); }, [load]);
 
-  async function accept(id: string) {
-    setAcceptingId(id); setError(null);
+  async function runImport() {
+    const hasInput = src.mode === "url" ? src.url.trim() : src.content.trim();
+    if (!hasInput) { setError(src.mode === "url" ? "Enter a public URL." : "Paste some content."); return; }
+    setImporting(true); setError(null); setImpNote(null);
     try {
-      const { error } = await supabase.rpc("accept_proposal", { p_proposal: id, p_ratifier: "web" });
+      const body: Record<string, unknown> = target.kind === "product" ? { product_id: target.id } : { gtm_record_id: target.id };
+      if (src.mode === "url") body.url = src.url.trim(); else body.content = src.content.trim();
+      if (src.guidance.trim()) body.guidance = src.guidance.trim();
+      const { data, error } = await supabase.functions.invoke("import-record", { body });
       if (error) throw error;
-      await load();
-      setFieldsNonce((n) => n + 1); // field values changed — refresh the content panels
-    } catch (e) { setError(e instanceof Error ? e.message : "Accept failed."); }
-    finally { setAcceptingId(null); }
+      if (data?.error) throw new Error(data.error);
+      if (!data?.changes_saved) {
+        setImpNote(data?.message || "Nothing groundable was found to propose — try a richer source.");
+      } else {
+        setImpNote(`Proposed ${data.changes_saved} field${data.changes_saved === 1 ? "" : "s"} — review them in Advisors (the “waiting” pill).`);
+        setSrc({ mode: src.mode, content: "", url: "", guidance: "" });
+        refresh();
+      }
+    } catch (e) { setError(e instanceof Error ? e.message : "Import failed."); }
+    finally { setImporting(false); }
   }
 
   const pending = proposals.filter((p) => p.status === "pending");
@@ -75,35 +79,38 @@ export default function RecordWorkspace({ target, recordName }: { target: Target
     <div>
       <Banner>{error}</Banner>
 
+      {/* Set up with AI — import existing content into the review queue */}
+      <div className="card card-pad row-between" style={{ marginBottom: "var(--sp-4)", gap: 12, flexWrap: "wrap" }}>
+        <div style={{ minWidth: 0 }}>
+          <div style={{ fontWeight: 640, fontSize: 13.5 }}>Set up with AI</div>
+          <div className="t-sub t-muted" style={{ fontSize: 12.5, marginTop: 2 }}>Already have this written down? Import a doc or a public URL — AI drafts fields into your review queue; you accept what&rsquo;s right.</div>
+        </div>
+        <button className="btn btn-sm" onClick={() => { setImpNote(null); setImp(true); }} style={{ background: "var(--ac)", color: "#fff", flexShrink: 0 }}>Set up with AI</button>
+      </div>
+
+      <Modal open={imp} onClose={() => setImp(false)} title="Set up this record with AI" width={620}>
+        <div className="t-sub t-muted" style={{ fontSize: 12.5, marginBottom: 12 }}>Paste content you already have (a brief, a doc, your website/positioning copy) or point at a public URL. AI proposes fields into your <strong>review queue</strong> — nothing is applied until you accept it. Imported content is treated as untrusted and screened.</div>
+        <div className="row gap-2" style={{ marginBottom: 10 }}>
+          <button type="button" className={`btn btn-sm ${src.mode === "paste" ? "" : "btn-secondary"}`} onClick={() => setSrc({ ...src, mode: "paste" })}>Paste text</button>
+          <button type="button" className={`btn btn-sm ${src.mode === "url" ? "" : "btn-secondary"}`} onClick={() => setSrc({ ...src, mode: "url" })}>From a URL</button>
+        </div>
+        {src.mode === "paste"
+          ? <label className="field"><span className="t-label">Source content</span><textarea className="textarea" rows={8} value={src.content} onChange={(e) => setSrc({ ...src, content: e.target.value })} placeholder="Paste your overview, positioning, value prop, ICP — whatever you have." /></label>
+          : <label className="field"><span className="t-label">Public URL</span><input className="input" value={src.url} onChange={(e) => setSrc({ ...src, url: e.target.value })} placeholder="https://yourcompany.com/product" /></label>}
+        <label className="field"><span className="t-label">Focus <span className="t-muted" style={{ fontWeight: 400 }}>— optional</span></span><input className="input" value={src.guidance} onChange={(e) => setSrc({ ...src, guidance: e.target.value })} placeholder="e.g. emphasize positioning and ICP; ignore pricing" /></label>
+        {impNote && <div className="banner" style={{ marginBottom: 12 }}>{impNote}</div>}
+        <div className="row gap-2"><button className="btn" disabled={importing} onClick={runImport}>{importing ? "Reading & drafting…" : "Import → review queue"}</button><button className="btn btn-secondary" onClick={() => setImp(false)}>Close</button></div>
+      </Modal>
+
       {/* Advisors — the agents that live on this record, aligned to its area */}
       {loading ? <div className="t-sub t-muted" style={{ marginBottom: "var(--sp-6)" }}>Loading…</div>
-        : <RecordAdvisors target={target} recordName={recordName} agents={agents} pendingByName={pendingByName} onRun={proposeFor} onRan={load} onError={setError} />}
+        : <RecordAdvisors target={target} recordName={recordName} agents={agents} pendingByName={pendingByName} onRan={refresh} />}
 
       {/* Structured content */}
       <SectionedFields key={fieldsNonce} target={target} />
 
-      {/* Proposals */}
-      <Section label={<span className="row gap-2" style={{ gap: 8 }}>Proposals {pending.length > 0 && <Chip tone="violet">{pending.length} pending</Chip>}</span>}>
-        {pending.length === 0 && <div className="t-sub t-muted">No pending proposals. Run an agent to generate one.</div>}
-        <div className="stack-3">
-          {pending.map((p) => (
-            <div key={p.id} className="card card-pad" style={{ borderLeft: "2px solid var(--vl)" }}>
-              <div className="row-between" style={{ gap: 12, marginBottom: 8, alignItems: "flex-start" }}>
-                <div style={{ fontSize: 15, fontWeight: 620 }}>{p.title}</div>
-                <Confidence label={p.conf_label} level={p.conf_level} />
-              </div>
-              {p.rationale && <p className="t-sub" style={{ lineHeight: 1.55, marginBottom: 14 }}>{p.rationale}</p>}
-              <div className="row gap-3">
-                <button className="btn btn-success" disabled={acceptingId !== null} onClick={() => accept(p.id)}>
-                  {acceptingId === p.id ? "Accepting…" : "Accept"}
-                </button>
-                <span className="t-mono-xs">{p.proposed_by} · {new Date(p.created_at).toLocaleDateString()}</span>
-              </div>
-            </div>
-          ))}
-        </div>
-      </Section>
-
+      {/* Pending proposals live in the Advisors' side drawer (the "N waiting" pill).
+          Only resolved proposals are logged here, as history. */}
       {resolved.length > 0 && (
         <Section label="History">
           <div className="stack-3">

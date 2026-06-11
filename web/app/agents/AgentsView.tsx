@@ -5,18 +5,22 @@ import { useEffect, useState, useCallback } from "react";
 import { createClient } from "@/lib/supabase/client";
 import { getOrgId } from "@/lib/org";
 import { Chip, Banner, Empty } from "@/components/ui";
+import { ensureTeam } from "@/lib/ensureTeam";
 import PageBar from "@/components/PageBar";
 import RosterReview from "@/components/RosterReview";
+import { useProductScope } from "@/lib/ProductContext";
 
-type Agent = { id: string; key: string; name: string; role: string | null; model: string | null; system_prompt: string | null; is_active: boolean };
+type Agent = { id: string; key: string; name: string; role: string | null; model: string | null; system_prompt: string | null; is_active: boolean; product_id: string | null };
 type Align = { agent_id: string; initiative_id: string | null; workstream_id: string | null };
 const BLANK = { key: "", name: "", role: "", model: "claude-opus-4-8", system_prompt: "", is_active: true };
 
 export default function AgentsView() {
   const supabase = createClient();
+  const { inScope, scopedProductId, products } = useProductScope(); // shared agents show in every line; dedicated ones only in theirs
   const [agents, setAgents] = useState<Agent[]>([]);
   const [aligns, setAligns] = useState<Align[]>([]);
   const [inits, setInits] = useState<{ id: string; title: string }[]>([]);
+  const [cornerstones, setCornerstones] = useState<Record<string, string>>({}); // agent_id -> cornerstone skill name
   const [loading, setLoading] = useState(true);
   const [editing, setEditing] = useState<string | "new" | null>(null);
   const [form, setForm] = useState<typeof BLANK>(BLANK);
@@ -24,12 +28,20 @@ export default function AgentsView() {
   const [error, setError] = useState<string | null>(null);
 
   const load = useCallback(async () => {
-    const [{ data }, { data: al }, { data: it }] = await Promise.all([
-      supabase.from("agents").select("id, key, name, role, model, system_prompt, is_active").order("name"),
+    await ensureTeam(supabase); // seed the standard executive roster if this org has none
+    const [{ data }, { data: al }, { data: it }, { data: cs }] = await Promise.all([
+      supabase.from("agents").select("id, key, name, role, model, system_prompt, is_active, product_id").order("name"),
       supabase.from("agent_alignments").select("agent_id, initiative_id, workstream_id"),
       supabase.from("initiatives").select("id, title").order("created_at", { ascending: false }).limit(200),
+      supabase.from("agent_skills").select("agent_id, skills(name)").eq("is_cornerstone", true),
     ]);
-    setAgents(data ?? []); setAligns(al ?? []); setInits(it ?? []); setLoading(false);
+    setAgents(data ?? []); setAligns(al ?? []); setInits(it ?? []);
+    const cmap: Record<string, string> = {};
+    for (const r of (cs ?? []) as { agent_id: string; skills: { name: string } | { name: string }[] | null }[]) {
+      const sk = Array.isArray(r.skills) ? r.skills[0] : r.skills;
+      if (r.agent_id && sk?.name) cmap[r.agent_id] = sk.name;
+    }
+    setCornerstones(cmap); setLoading(false);
   }, [supabase]);
   useEffect(() => { load(); }, [load]);
 
@@ -41,6 +53,11 @@ export default function AgentsView() {
   }
   const coveredInits = new Set(aligns.map((a) => a.initiative_id).filter(Boolean) as string[]);
   const uncovered = inits.filter((i) => !coveredInits.has(i.id));
+
+  // Scope to the active line: shared agents (product_id null) show everywhere,
+  // dedicated agents only in their line. No-op for single-product orgs.
+  const scopedAgents = agents.filter(inScope);
+  const productName = (id: string | null) => products.find((p) => p.id === id)?.name ?? null;
 
   function startNew() { setForm(BLANK); setEditing("new"); setError(null); }
 
@@ -55,7 +72,9 @@ export default function AgentsView() {
       if (editing === "new") {
         const orgId = await getOrgId();
         if (!orgId) throw new Error("Could not resolve your organization.");
-        const { error } = await supabase.from("agents").insert({ org_id: orgId, ...payload });
+        // Inherit the active line: dedicated agent inside a product, shared (null)
+        // when created from all/company view.
+        const { error } = await supabase.from("agents").insert({ org_id: orgId, ...payload, product_id: scopedProductId });
         if (error) throw error;
       } else {
         const { error } = await supabase.from("agents").update(payload).eq("id", editing!);
@@ -67,7 +86,7 @@ export default function AgentsView() {
   }
 
   return (
-    <div style={{ maxWidth: 760, margin: "0 auto" }}>
+    <div style={{ maxWidth: 1040, margin: "0 auto" }}>
       <PageBar actions={editing === null ? <button className="btn btn-sm" onClick={startNew}>+ New agent</button> : undefined} />
 
       {editing === null && <div style={{ marginBottom: "var(--sp-6)" }}><RosterReview onChanged={load} /></div>}
@@ -121,30 +140,36 @@ export default function AgentsView() {
       )}
 
       {loading ? <div className="t-sub t-muted">Loading…</div>
-        : agents.length === 0 && editing === null ? (
+        : scopedAgents.length === 0 && editing === null ? (
           <Empty title="No agents yet" hint="Create an agent to start generating proposals on your records."
             action={<button className="btn" onClick={startNew}>+ Create your first agent</button>} />
         ) : (
-          <div className="stack-3">
-            {agents.map((a) => (
-              <a key={a.id} href={`/agents/${a.id}`} className="card card-link card-pad row-between" style={{ gap: 12 }}>
-                <div style={{ minWidth: 0 }}>
-                  <div className="row gap-2">
-                    <span style={{ fontSize: 15, fontWeight: 620 }}>{a.name}</span>
-                    <Chip>{a.key}</Chip>
+          <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(240px, 1fr))", gap: "var(--sp-4)" }}>
+            {scopedAgents.map((a) => {
+              const c = countsByAgent[a.id];
+              const corner = cornerstones[a.id];
+              const line = productName(a.product_id);
+              return (
+                <a key={a.id} href={`/agents/${a.id}`} className="card card-link card-pad" style={{ display: "flex", flexDirection: "column", gap: 8, minHeight: 132 }}>
+                  <div className="row-between" style={{ gap: 8, alignItems: "flex-start" }}>
+                    <span style={{ fontSize: 15, fontWeight: 660, minWidth: 0 }}>{a.name}</span>
                     {!a.is_active && <Chip tone="amber">inactive</Chip>}
                   </div>
-                  <div className="t-sub" style={{ marginTop: 3 }}>
-                    {a.role || <span className="t-muted">No role</span>}
-                    <span className="t-mono-xs" style={{ marginLeft: 8 }}>{a.model}</span>
-                    {(() => { const c = countsByAgent[a.id]; return c && (c.inits || c.tasks)
-                      ? <span className="t-mono-xs" style={{ marginLeft: 8 }}>· aligned to {c.inits} init{c.inits === 1 ? "" : "s"}{c.tasks ? `, ${c.tasks} task${c.tasks === 1 ? "" : "s"}` : ""}</span>
-                      : <span className="t-mono-xs" style={{ marginLeft: 8, color: "var(--tm)" }}>· no alignment</span>; })()}
+                  <div className="row gap-2" style={{ flexWrap: "wrap", alignItems: "center" }}>
+                    <Chip>{a.key}</Chip>
+                    {line && <Chip tone="accent">{line}</Chip>}
+                    <span className="t-mono-xs t-muted">{a.model}</span>
                   </div>
-                </div>
-                <span className="t-sub" style={{ color: "var(--ac-text)", fontWeight: 600, fontSize: 13 }}>Configure →</span>
-              </a>
-            ))}
+                  <div className="t-sub t-muted" style={{ fontSize: 12, lineHeight: 1.4, flex: 1 }}>{a.role || "No role set"}</div>
+                  <div style={{ fontSize: 11.5, color: corner ? "var(--vl-text, var(--ac-text))" : "var(--tm)" }}>
+                    {corner ? <>★ {corner}</> : "No cornerstone yet"}
+                  </div>
+                  <div className="t-mono-xs t-muted">
+                    {c && (c.inits || c.tasks) ? `aligned · ${c.inits} init${c.inits === 1 ? "" : "s"}${c.tasks ? `, ${c.tasks} task${c.tasks === 1 ? "" : "s"}` : ""}` : "no alignment"}
+                  </div>
+                </a>
+              );
+            })}
           </div>
         )}
     </div>

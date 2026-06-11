@@ -22,7 +22,7 @@ type Run = {
 };
 type Done = { kind: "proposal" | "initiative"; href: string; label: string };
 
-const TRIGGER_LABEL: Record<string, string> = { on_release: "On release", on_capability_update: "On new capability", on_signal: "When a signal lands" };
+const TRIGGER_LABEL: Record<string, string> = { on_release: "On release", on_capability_update: "On new capability", on_signal: "When a signal lands", on_pql: "When an account becomes a PQL" };
 
 // The brief handed to the officer — carries the event so the draft is grounded.
 function instructionFor(trigger: string, ctx: Ctx): string {
@@ -111,6 +111,8 @@ export default function WorkflowRunsReview({ onChanged }: { onChanged?: () => vo
           await spawnInitiative(supabase, orgId, { title: `Launch follow-through: ${label}`, scope: "gtm", lifecycle: "launch", priority: "medium", tasks: [{ area: "gtm", title: `Launch comms & enablement — ${label}` }] });
         } else if (r.trigger === "on_capability_update") {
           await spawnInitiative(supabase, orgId, { title: `Leverage: ${label}`, scope: "product", lifecycle: "plan", priority: "medium", signalIds: ctx.capabilityId ? [ctx.capabilityId] : [], tasks: [{ area: "build", title: `Evaluate & apply — ${label}` }] });
+        } else if (r.trigger === "on_pql") {
+          await spawnInitiative(supabase, orgId, { title: `Sell play: ${label}`, scope: "gtm", lifecycle: "launch", priority: "high", signalIds: ctx.signalId ? [ctx.signalId] : [], tasks: [{ area: "gtm", title: `Outreach / expansion play — ${label}` }] });
         } else {
           await spawnInitiative(supabase, orgId, { title: `Respond to: ${label}`, scope: "product", lifecycle: "plan", priority: "medium", signalIds: ctx.signalId ? [ctx.signalId] : [], tasks: [{ area: "build", title: `Address — ${label}` }] });
         }

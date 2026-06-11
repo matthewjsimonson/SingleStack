@@ -9,6 +9,7 @@ import { createClient } from "@/lib/supabase/client";
 import { getOrgId } from "@/lib/org";
 import { Section, Banner, ConfirmDialog } from "@/components/ui";
 import ModuleWorkflows from "@/components/ModuleWorkflows";
+import ModuleTechnical from "@/components/ModuleTechnical";
 
 type Module = { id: string; name: string; description: string | null };
 type Feature = { id: string; module_id: string; name: string; description: string | null };
@@ -240,6 +241,9 @@ export default function Modules({ productId }: { productId: string }) {
                     ))}
                   </div>
                 )}
+
+                {/* module-level TECHNICAL foundation: how it's built, its signals, its build */}
+                <ModuleTechnical moduleId={active.id} productId={productId} featureCount={activeFeatures.length} />
 
                 {/* module-level workflows: agent × skills × trigger for this module */}
                 <ModuleWorkflows moduleId={active.id} productId={productId} />

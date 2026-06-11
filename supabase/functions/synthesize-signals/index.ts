@@ -30,7 +30,7 @@ import { inferScope, selectRelevantThemes, capCandidates, linesPresent } from ".
 const MODEL = "claude-opus-4-8";
 const CORS = {
   "Access-Control-Allow-Origin": "*",
-  "Access-Control-Allow-Headers": "authorization, content-type",
+  "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type, x-supabase-api-version",
   "Access-Control-Allow-Methods": "POST, OPTIONS",
 };
 const json = (b: unknown, s = 200) => new Response(JSON.stringify(b), { status: s, headers: { ...CORS, "content-type": "application/json" } });
@@ -137,6 +137,20 @@ Deno.serve(async (req: Request) => {
     const { data: orgId } = await supabase.rpc("current_org_id");
     if (!orgId) return json({ error: "could not resolve org" }, 400);
 
+    // Autonomy dial for the 'intelligence' surface. Default propose_only:
+    // judgment-call deltas queue for review. autonomous: the AI creates NEW
+    // themes directly (highest-value auto-action; structural edits still queue),
+    // with a full audit trail. (review_policies; absent row ⇒ propose_only.)
+    const { data: polRow } = await supabase.from("review_policies").select("mode").eq("org_id", orgId).eq("surface", "intelligence").maybeSingle();
+    const intelAutonomous = polRow?.mode === "autonomous";
+
+    // Optional LENS scope: run synthesis for one strategy lens so product and GTM
+    // themes are reconciled separately (no cross-lens bleed). Absent → all lenses
+    // (legacy behavior). 'product' = product/both/unsorted; 'gtm' = gtm/both.
+    const body = await req.json().catch(() => ({}));
+    const lens: "product" | "gtm" | null = body?.lens === "gtm" ? "gtm" : body?.lens === "product" ? "product" : null;
+    const inLens = (cat: string | null | undefined) => !lens || (lens === "gtm" ? (cat === "gtm" || cat === "both") : cat !== "gtm");
+
     // Existing living themes + their attached signal ids (what reconciliation updates).
     const { data: themes } = await supabase
       .from("signal_themes").select("id, title, summary, recommendation, category, state, conf_level, product_id, co_product_ids");
@@ -154,11 +168,11 @@ Deno.serve(async (req: Request) => {
     // Candidate signals to reconcile = those not yet attached to any theme.
     const { data: allSignals } = await supabase
       .from("signals")
-      .select("id, title, why, conf_level, scope, category, origin, observed_at, product_id, sources(label, origin)")
+      .select("id, title, why, conf_level, scope, category, origin, observed_at, product_id, competitor_id, sources(label, origin)")
       .order("observed_at", { ascending: false, nullsFirst: false })
       .limit(200);
     // Cap candidates so the prompt's signal half stays bounded (newest first).
-    const candidates = capCandidates((allSignals ?? []).filter((s) => !attachedIds.has(s.id)));
+    const candidates = capCandidates((allSignals ?? []).filter((s) => !attachedIds.has(s.id) && inLens((s as { category?: string | null }).category)));
 
     // First run with no themes and no signals: nothing to do.
     if ((themes ?? []).length === 0 && candidates.length === 0) {
@@ -170,7 +184,7 @@ Deno.serve(async (req: Request) => {
     // lines), capped. Keeps cost/latency flat as the org grows and prevents the
     // context-window cliff — without losing cross-product (cross-sell) detection.
     // The model only sees, and may only reference, this subset.
-    const promptThemes = selectRelevantThemes(themes ?? [], linesPresent(candidates));
+    const promptThemes = selectRelevantThemes((themes ?? []).filter((t) => inLens(t.category)), linesPresent(candidates));
 
     const sigList = candidates.map((s, i) => {
       // deno-lint-ignore no-explicit-any
@@ -202,6 +216,7 @@ Deno.serve(async (req: Request) => {
       "• decays: existing theme ids with no fresh evidence that should wind down.",
       "• new_themes: genuinely NEW patterns not covered by any existing theme, each with supporting signal_indices.",
       "Also classify each unsorted signal's lens in signal_categories: product | gtm | both.",
+      lens ? `LENS SCOPE: this run is the ${lens.toUpperCase()} lens only. Every new_theme.category MUST be "${lens}" (use "both" only for a genuinely cross-cutting pattern). Do not create themes for the other lens.` : "",
       "PRODUCT LINES: every signal and theme is tagged with its line (or 'company-wide'). Different lines are different businesses — do NOT attach a signal to a theme of a different line, and do NOT merge themes across lines. Keep each new theme within one line.",
       "CROSS-SELL EXCEPTION: if a pattern GENUINELY spans two lines (the same buyer need pulls two products together), that is valuable — create ONE new theme and include the supporting signals from BOTH lines. The system will record it as a cross-product theme.",
       "Be conservative: only create a new theme when no existing theme fits. Prefer accretion. Set conf_level 0..1 by evidence strength.",
@@ -289,13 +304,37 @@ Deno.serve(async (req: Request) => {
     //   two lines becomes a first-class cross-product theme rather than a muddled
     //   company-wide NULL (docs/architecture/cross-sell-and-scope.md).
     const productOfSignal = new Map<string, string | null>(candidates.map((s) => [s.id, (s as { product_id?: string | null }).product_id ?? null]));
+    // A theme is per-competitor only when its evidence UNANIMOUSLY points at one
+    // competitor (every supporting signal carries the same non-null competitor_id).
+    // Mixed or general evidence → NULL (an org-wide market theme). Mirrors how
+    // product scope is inferred from the evidence, not guessed by the model.
+    const competitorOfSignal = new Map<string, string | null>(candidates.map((s) => [s.id, (s as { competitor_id?: string | null }).competitor_id ?? null]));
+    const inferCompetitor = (ids: string[]): string | null => {
+      const cs = ids.map((id) => competitorOfSignal.get(id) ?? null);
+      if (cs.length === 0 || cs.some((c) => !c)) return null;
+      return cs.every((c) => c === cs[0]) ? cs[0] : null;
+    };
+    let autoCreated = 0;
     for (const t of diff.new_themes ?? []) {
       const sigIds = (t.signal_indices ?? []).map(sigIdAt).filter(Boolean);
       const sc = inferScope(sigIds, productOfSignal);
+      const competitorId = inferCompetitor(sigIds);
       const xLines = sc.co_product_ids.length;
-      queued.push({ org_id: orgId, kind: "new_theme", theme_id: null,
-        payload: { category: t.category === "gtm" ? "gtm" : "product", title: t.title, summary: t.summary, recommendation: t.recommendation, conf_level: Math.min(1, Math.max(0, Number(t.conf_level) || 0)), signal_ids: sigIds, product_id: sc.product_id, co_product_ids: sc.co_product_ids },
-        summary: `New ${t.category}${xLines ? " cross-product" : ""} theme: "${t.title}" (${sigIds.length} signal${sigIds.length === 1 ? "" : "s"}${xLines ? `, spans ${xLines + 1} lines` : ""})` });
+      const category = t.category === "gtm" ? "gtm" : "product";
+      const conf = Math.min(1, Math.max(0, Number(t.conf_level) || 0));
+      if (intelAutonomous) {
+        // Autonomous: create the theme live (audited via theme_events), no queue.
+        const { data: created } = await supabase.from("signal_themes").insert({
+          org_id: orgId, category, title: t.title, summary: t.summary, recommendation: t.recommendation,
+          conf_level: conf, state: "active", merged_by: "synthesis",
+          product_id: sc.product_id, co_product_ids: sc.co_product_ids, competitor_id: competitorId, signal_ids: sigIds, last_evidence_at: now,
+        }).select("id").single();
+        if (created) { await attachSignals(created.id, sigIds); await ev(created.id, "created", { auto: true, policy: "autonomous" }, orgId); autoCreated++; }
+      } else {
+        queued.push({ org_id: orgId, kind: "new_theme", theme_id: null,
+          payload: { category, title: t.title, summary: t.summary, recommendation: t.recommendation, conf_level: conf, signal_ids: sigIds, product_id: sc.product_id, co_product_ids: sc.co_product_ids, competitor_id: competitorId },
+          summary: `New ${t.category}${xLines ? " cross-product" : ""} theme: "${t.title}" (${sigIds.length} signal${sigIds.length === 1 ? "" : "s"}${xLines ? `, spans ${xLines + 1} lines` : ""})` });
+      }
     }
     if (queued.length) {
       await supabase.from("intel_updates").insert(queued.map((q) => ({ ...q, scope: "synthesis", status: "pending" })));
@@ -340,6 +379,7 @@ Deno.serve(async (req: Request) => {
       themes: (liveThemes ?? []).length,
       attached, categorized,
       proposed,          // high-judgment changes queued for review
+      autoCreated,       // new themes auto-created (autonomous policy)
       appliedLessons,    // lessons from past feedback applied this run
       // Bounded-prompt observability: how much the scoping pruned this run.
       themesConsidered: promptThemes.length,

@@ -25,9 +25,11 @@ function deriveFromPath(pathname: string): Derived {
   if (productMatch) return { context: { area: "products", record_type: "product", record_id: productMatch[1] }, team: PRODUCT_TEAM, place: "this product record" };
   if (gtmMatch) return { context: { area: "gtm", record_type: "gtm", record_id: gtmMatch[1] }, team: GTM_TEAM, place: "this GTM record" };
 
+  if (pathname.startsWith("/strategy")) return { context: { area: "products", page: "strategy", label: "Product Strategy" }, team: PRODUCT_TEAM, place: "your product strategy" };
   if (pathname.startsWith("/products") || pathname.startsWith("/roadmap") || pathname.startsWith("/ship")) return { context: { area: "products" }, team: PRODUCT_TEAM, place: "your product" };
   if (pathname.startsWith("/gtm") || pathname.startsWith("/content") || pathname.startsWith("/campaigns") || pathname.startsWith("/enablement")) return { context: { area: "gtm" }, team: GTM_TEAM, place: "your go-to-market" };
-  if (pathname.startsWith("/signals") || pathname.startsWith("/competitive") || pathname.startsWith("/market")) return { context: { area: "signals" }, team: EXECUTIVE_TEAM.map((e) => e.key), place: "your intelligence" };
+  if (pathname.startsWith("/competitive") || pathname.startsWith("/market")) return { context: { area: "signals", page: "market", label: "Market & competitors" }, team: EXECUTIVE_TEAM.map((e) => e.key), place: "the market" };
+  if (pathname.startsWith("/signals")) return { context: { area: "signals" }, team: EXECUTIVE_TEAM.map((e) => e.key), place: "your intelligence" };
 
   return { context: {}, team: EXECUTIVE_TEAM.map((e) => e.key), place: "your workspace" };
 }
@@ -103,7 +105,7 @@ export default function AgentLauncher() {
         </div>
       )}
 
-      <AgentDrawer exec={exec} open={!!exec} onClose={() => setExec(null)} context={context} />
+      <AgentDrawer exec={exec} open={!!exec} onClose={() => setExec(null)} context={context} runner="agent-run" />
     </div>
   );
 }

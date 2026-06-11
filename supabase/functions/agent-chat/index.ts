@@ -35,9 +35,14 @@ const PRICING: Record<string, { input: number; output: number }> = {
 
 const CORS = {
   "Access-Control-Allow-Origin": "*",
-  "Access-Control-Allow-Headers": "authorization, content-type",
+  "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type, x-supabase-api-version",
   "Access-Control-Allow-Methods": "POST, OPTIONS",
 };
+
+// Marker the streaming response uses to separate the reasoning trace from the
+// answer. A Record-Separator glyph — won't occur in normal model output. The
+// client splits on the same constant.
+const ANSWER_MARK = "␞";
 
 function json(body: unknown, status = 200): Response {
   return new Response(JSON.stringify(body), { status, headers: { ...CORS, "content-type": "application/json" } });
@@ -70,9 +75,9 @@ Deno.serve(async (req: Request) => {
     { global: { headers: { Authorization: authHeader } } },
   );
 
-  let input: { agent_key?: string; messages?: ChatMsg[]; context?: Ctx };
+  let input: { agent_key?: string; messages?: ChatMsg[]; context?: Ctx; stream?: boolean };
   try { input = await req.json(); } catch { return json({ error: "invalid JSON body" }, 400); }
-  const { agent_key, messages, context } = input;
+  const { agent_key, messages, context, stream } = input;
   if (!agent_key) return json({ error: "agent_key is required" }, 400);
   if (!Array.isArray(messages) || messages.length === 0) return json({ error: "messages required" }, 400);
 
@@ -266,6 +271,57 @@ Deno.serve(async (req: Request) => {
     ].join("\n");
 
     const anthropic = new Anthropic({ apiKey: anthropicKey });
+
+    // Streaming path: emit the model's REAL reasoning (extended-thinking deltas)
+    // first, then a 0x00 separator, then the answer deltas — so the UI can show the
+    // actual work as it forms, then type the answer. Logs the run when done.
+    if (stream) {
+      const encoder = new TextEncoder();
+      const body = new ReadableStream({
+        async start(controller) {
+          let full = "";
+          let inAnswer = false;
+          try {
+            const s = anthropic.messages.stream({
+              model,
+              max_tokens: 2000,
+              thinking: { type: "adaptive", display: "summarized" }, // summarized → reasoning text is populated on Opus 4.8
+              system: [{ type: "text", text: system, cache_control: { type: "ephemeral" } }],
+              messages: messages.map((m) => ({ role: m.role, content: m.content })),
+              // deno-lint-ignore no-explicit-any
+            } as any);
+            // deno-lint-ignore no-explicit-any
+            for await (const ev of s as any) {
+              if (ev.type !== "content_block_delta") continue;
+              if (ev.delta?.type === "thinking_delta" && ev.delta.thinking) {
+                controller.enqueue(encoder.encode(ev.delta.thinking)); // reasoning trace
+              } else if (ev.delta?.type === "text_delta" && ev.delta.text) {
+                if (!inAnswer) { inAnswer = true; controller.enqueue(encoder.encode(ANSWER_MARK)); } // marks reasoning -> answer
+                full += ev.delta.text;
+                controller.enqueue(encoder.encode(ev.delta.text));
+              }
+            }
+            if (!inAnswer) controller.enqueue(encoder.encode(ANSWER_MARK)); // ensure marker even with no thinking
+            const finalMsg = await s.finalMessage();
+            const u = finalMsg.usage;
+            const price = PRICING[model];
+            const cost = price ? (u.input_tokens * price.input + u.output_tokens * price.output) / 1_000_000 : null;
+            await supabase.from("agent_runs").insert({
+              org_id: orgId, agent_id: agent.id, status: "succeeded",
+              input: { kind: "chat", messages, context: context ?? null, skills: skills.length, areas }, output: full, model,
+              input_tokens: u.input_tokens, output_tokens: u.output_tokens, cost_usd: cost,
+              finished_at: new Date().toISOString(),
+            });
+          } catch (e) {
+            controller.enqueue(encoder.encode(` [error: ${e instanceof Error ? e.message : String(e)}]`));
+          } finally {
+            controller.close();
+          }
+        },
+      });
+      return new Response(body, { headers: { ...CORS, "content-type": "text/plain; charset=utf-8", "cache-control": "no-cache" } });
+    }
+
     const resp = (await anthropic.messages.create({
       model,
       max_tokens: 2000,

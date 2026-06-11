@@ -79,7 +79,7 @@ export default function ExecutiveRow() {
         </div>
       )}
 
-      <AgentDrawer exec={openExec} open={drawerOpen} onClose={() => setDrawerOpen(false)} />
+      <AgentDrawer exec={openExec} open={drawerOpen} onClose={() => setDrawerOpen(false)} runner="agent-run" />
     </Section>
   );
 }
