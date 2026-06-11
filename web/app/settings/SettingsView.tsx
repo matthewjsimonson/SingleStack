@@ -5,9 +5,9 @@
 import { useEffect, useState, useCallback } from "react";
 import { createClient } from "@/lib/supabase/client";
 import { getOrgId } from "@/lib/org";
-import { Section, Chip, Banner } from "@/components/ui";
+import { Section, Chip, Banner, ConfirmDialog } from "@/components/ui";
 import { SOURCE_CATALOG, type SourceDef } from "@/lib/sources";
-import { loadDemoData } from "@/lib/demoSeed";
+import { loadDemoData, clearDemoIntel } from "@/lib/demoSeed";
 import TeamManager from "@/components/TeamManager";
 
 type Source = { id: string; label: string; icon: string; origin: string; kind: string; status: string };
@@ -105,6 +105,20 @@ export default function SettingsView() {
     finally { setSeeding(false); }
   }
 
+  // The broom: removes the demo INTEL (signals, themes, battle cards, accounts,
+  // outcomes) so the workspace runs on legit data only. Records/competitors/
+  // configuration stay. Guarded by an explicit confirm.
+  const [clearing, setClearing] = useState(false);
+  const [confirmClear, setConfirmClear] = useState(false);
+  async function clearDemo() {
+    setConfirmClear(false); setClearing(true); setError(null); setSeedNote(null);
+    try {
+      const res = await clearDemoIntel(supabase);
+      setSeedNote(res.message);
+    } catch (e) { setError(e instanceof Error ? e.message : "Could not clear demo intel."); }
+    finally { setClearing(false); }
+  }
+
   return (
     <div>
       <h1 className="t-page" style={{ marginBottom: "var(--sp-4)" }}>Settings</h1>
@@ -130,8 +144,19 @@ export default function SettingsView() {
                 Load SingleStack&apos;s own workspace — we use SingleStack to build SingleStack: the product &amp; a GTM record, <strong>signals</strong> (GTM + market), real <strong>competitors</strong>, <strong>frontier-model capabilities</strong>, durable themes, and skills wired to your executive agents. Data only — the platform stays product-agnostic. Writes to your workspace; safe to run once.
               </div>
               {seedNote && <div className="banner" style={{ marginBottom: 12 }}>{seedNote}</div>}
+              {confirmClear && (
+                <ConfirmDialog
+                  title="Clear demo intel?"
+                  message={<>Deletes the demo <b>signals, themes, battle cards, accounts, outcomes, and the seeded matrix rows</b> (their scores go with them — matrix and grid empty together) — matched precisely, so intel you logged yourself survives. Your product &amp; GTM records, competitors, and agents/skills/workflows stay. This can&rsquo;t be undone.</>}
+                  confirmLabel="Clear demo intel" onConfirm={clearDemo} onCancel={() => setConfirmClear(false)}
+                />
+              )}
               <div className="row gap-2" style={{ flexWrap: "wrap", alignItems: "center" }}>
                 <button className="btn" onClick={seed} disabled={seeding}>{seeding ? "Loading…" : "Load SingleStack workspace"}</button>
+                <button className="btn btn-secondary" onClick={() => setConfirmClear(true)} disabled={clearing}
+                  title="Remove the demo intel (signals, themes, battle cards, accounts, outcomes) — your records, competitors, and configuration stay.">
+                  {clearing ? "Clearing…" : "⌫ Clear demo intel"}
+                </button>
                 {seedNote && <><a className="btn btn-secondary btn-sm" href="/products">Product →</a><a className="btn btn-secondary btn-sm" href="/competitive">Competitors →</a><a className="btn btn-secondary btn-sm" href="/frontier">Frontier models →</a><a className="btn btn-secondary btn-sm" href="/agents">Run agent review →</a></>}
               </div>
             </Section>

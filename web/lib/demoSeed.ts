@@ -485,3 +485,87 @@ export async function loadDemoData(supabase: SupabaseClient, orgId: string): Pro
       : `SingleStack workspace loaded ✓ — ${summary}. Operator view: Signals → Strategy. Seller view: Competitive → Competitors (battle cards), Go-to-market → Qualified leads (PQLs).`,
   };
 }
+
+// ============================================================================
+// clearDemoIntel — the broom for "we're doing legit now".
+//
+// Deletes the DEMO INTEL the seed above inserted — signals, themes, battle
+// cards, accounts, outcomes, and the seeded capability-matrix rows (their
+// scores cascade, so the matrix AND the grid empty together) — matched by the
+// exact titles/domains the seed uses (keep the lists in sync with the step
+// literals above). Deliberately NOT touched: the product & GTM records and
+// their fields (the user authors those), competitors (real rivals),
+// agents/skills/workflows (configuration, not intel). Usage-domain signals
+// and accounts are removed wholesale: no live
+// analytics/CRM connector exists yet, so every one of them is seed by
+// definition. RLS scopes all deletes to the caller's org.
+// ============================================================================
+// deno-lint-ignore-file
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+export async function clearDemoIntel(supabase: any): Promise<{ message: string }> {
+  const SIGNAL_TITLES = [
+    // competitive
+    "Crayon ships Sparks AI: auto-SWOT + talk tracks",
+    "Productboard's Spark adds agentic competitive research",
+    "Klue expanding into win/loss analytics",
+    // gtm record
+    "Prospects bounce on the pricing page after the demo",
+    "“Is it just an AI wrapper?” keeps surfacing",
+    "Founders resonate with “living system of record”",
+    "Demo-to-trial drop-off on mobile",
+    // market
+    "Analysts reframing “AI copilots” as “AI operating layers”",
+    "CI teams adopting AI daily (Crayon 2025 report)",
+    "Buyers now expect human-in-the-loop governance",
+    // frontier capabilities
+    "Claude tool orchestration", "Claude long-term memory", "Claude computer use",
+    "OpenAI Realtime API", "OpenAI structured outputs", "Google Gemini long context",
+    "Meta Llama on-prem", "xAI Grok live search",
+  ];
+  const THEME_TITLES = [
+    "Buyers expect built-in agent orchestration",
+    "Pricing & “AI wrapper” objections create demo-to-trial friction",
+    "Frontier capabilities reset table stakes each quarter",
+    "Human-in-the-loop governance is becoming a buying criterion",
+    "Mobile is an underserved surface",
+    "“Operating layer” category language is forming",
+    "Standalone roadmapping as a wedge",
+    "Win/loss cites unclear pricing as top stall",
+  ];
+  const CARD_TITLES = [
+    "We unify product AND GTM in one ratified record", "They own roadmapping depth",
+    "“Doesn't Spark already do competitive AI?”", "HITL governance is auditable",
+    "A living record, not a CI feed", "Breadth of CI sources",
+    "Ask: who owns acting on the intel?", "Beyond sales enablement",
+    "“We already have battlecards in Klue.”", "Gong is a signal source; we're the system of record",
+  ];
+  const BUNDLE_TITLE = "Ship agent orchestration as a demoable capability";
+  const MATRIX_ROWS = [
+    "Unified product + GTM record", "Competitive intelligence", "Agent orchestration",
+    "Roadmapping & delivery", "Signal synthesis", "Human-in-the-loop governance", "Frontier-capability leverage",
+  ];
+
+  const counts: string[] = [];
+  const del = async (label: string, q: Promise<{ count?: number | null; error: { message: string } | null }>) => {
+    const { count, error } = await q;
+    if (error) throw new Error(`${label}: ${error.message}`);
+    counts.push(`${label} −${count ?? 0}`);
+  };
+
+  // Themes first (theme_signals/theme_events cascade with them), then signals.
+  await del("themes", supabase.from("signal_themes").delete({ count: "exact" }).in("title", THEME_TITLES));
+  await del("signals", supabase.from("signals").delete({ count: "exact" }).in("title", SIGNAL_TITLES));
+  await del("usage signals", supabase.from("signals").delete({ count: "exact" }).eq("metadata->>domain", "usage"));
+  await del("battle cards", supabase.from("battlecard_items").delete({ count: "exact" }).in("title", CARD_TITLES));
+  // seeded matrix rows — their capability_scores cascade, so matrix + grid clear together
+  await del("matrix rows", supabase.from("capabilities").delete({ count: "exact" }).in("name", MATRIX_ROWS));
+  await del("accounts", supabase.from("accounts").delete({ count: "exact" }).gte("created_at", "1970-01-01"));
+  // outcomes, then their bundle
+  const { data: bundle } = await supabase.from("strategy_bundles").select("id").eq("title", BUNDLE_TITLE).maybeSingle();
+  if (bundle?.id) {
+    await del("outcomes", supabase.from("expected_outcomes").delete({ count: "exact" }).eq("bundle_id", bundle.id));
+    await del("bundle", supabase.from("strategy_bundles").delete({ count: "exact" }).eq("id", bundle.id));
+  }
+
+  return { message: `Demo intel cleared — ${counts.join(" · ")}. Kept: your product & GTM records, competitors, agents/skills/workflows. The matrix and grid are empty until evidence fills them — run the guided setup to design your own rows.` };
+}
