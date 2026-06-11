@@ -483,23 +483,45 @@ export default function CompetitiveSetup({ onDone, productId }: { onDone: () => 
               updates as the company evolves — the chat's session score is only a
               conversation aid. */}
           <ProfileReadiness nonce={chat.length + (picture ? 1 : 0)} />
-          {/* ONE context card — read from the records (product, modules, GTM), no
-              re-typing, no redundant fields. ✎ Edit opens the popup where every
-              line can be adjusted, added to, or eliminated. */}
-          <div className="card card-pad" style={{ background: "var(--panel-2)" }}>
-            <div className="row-between" style={{ marginBottom: 8 }}>
-              <span className="t-label" style={{ color: "var(--tm)" }}>Market context — read from your records</span>
+          {/* The profile as WINDOWS — sideways-scrolling pages instead of a sea of
+              text. Each window is one facet; swipe/scroll right for the next.
+              ✎ Edit opens the popup where every line can be adjusted, added to,
+              or eliminated. */}
+          <div>
+            <div className="row-between" style={{ marginBottom: 6 }}>
+              <span className="t-label" style={{ color: "var(--tm)" }}>Your profile — scroll sideways for more →</span>
               <button className="btn btn-secondary btn-sm" onClick={() => setEditCtx(true)}>✎ Edit</button>
             </div>
-            {marketCtx ? (
-              <div className="stack-2">
-                {([["Product", ctx.product], ["Features / modules", ctx.features], ["Personas", ctx.who], ["Industries", ctx.industries], ["Positioning", ctx.positioning], ["Known competitors", ctx.competitors], ["Also", ctx.more]] as const).map(([label, v]) => v.trim() && (
-                  <div key={label} style={{ fontSize: 12.5, lineHeight: 1.5 }}><b style={{ color: "var(--tm)", fontWeight: 640 }}>{label}:</b> <span className="t-sub">{v}</span></div>
+            {marketCtx || picture ? (
+              <div style={{ display: "flex", gap: "var(--sp-3)", overflowX: "auto", scrollSnapType: "x mandatory", paddingBottom: 8, WebkitOverflowScrolling: "touch" }}>
+                {picture && (
+                  <div className="card card-pad" style={{ flex: "0 0 380px", scrollSnapAlign: "start", borderTop: "3px solid var(--ac)", maxHeight: 230, overflowY: "auto" }}>
+                    <div className="t-label" style={{ color: "var(--ac-text, var(--ac))", marginBottom: 6 }}>✦ The full picture</div>
+                    <div className="t-sub" style={{ fontSize: 12.5, lineHeight: 1.6, whiteSpace: "pre-wrap" }}>{picture}</div>
+                    {profileNote && <div className="t-mono-xs" style={{ marginTop: 6, color: "var(--gn-text, #15803d)" }}>✓ {profileNote}</div>}
+                  </div>
+                )}
+                {([
+                  ["Product", "What it is", ctx.product, "Add what the product is and the problem it solves."],
+                  ["Features", "Modules & capabilities", ctx.features, "What it actually does — drives capability-overlap matching."],
+                  ["Personas", "Who you sell to", ctx.who, "The people who decide deals."],
+                  ["Industries", "Verticals", ctx.industries, "Key for who actually competes for your buyer — worth filling."],
+                  ["Positioning", "Against what", ctx.positioning, "The category you claim and what you replace."],
+                  ["Competitors", "Known rivals", ctx.competitors, "Name them — they anchor the whole search."],
+                  ["Notes", "Anything else", ctx.more, ""],
+                ] as const).map(([title, sub, v, hint]) => (v.trim() || hint) && (
+                  <div key={title} className="card card-pad" style={{ flex: "0 0 250px", scrollSnapAlign: "start", maxHeight: 230, overflowY: "auto", opacity: v.trim() ? 1 : 0.75, borderTop: v.trim() ? "3px solid var(--border-strong, var(--border))" : "3px dashed var(--border)", cursor: "pointer" }}
+                    onClick={() => setEditCtx(true)} title="Click to edit">
+                    <div className="t-label" style={{ color: "var(--tm)" }}>{title}</div>
+                    <div className="t-mono-xs t-muted" style={{ marginBottom: 6 }}>{sub}</div>
+                    {v.trim()
+                      ? <div className="t-sub" style={{ fontSize: 12.5, lineHeight: 1.55 }}>{v}</div>
+                      : <div className="t-sub t-muted" style={{ fontSize: 12 }}>{hint} <span style={{ color: "var(--ac-text, var(--ac))", fontWeight: 600 }}>✎ Add</span></div>}
+                  </div>
                 ))}
-                {!ctx.industries.trim() && <div className="t-sub t-muted" style={{ fontSize: 12 }}>No industries yet — worth adding (✎ Edit): verticals decide who actually competes for your buyer.</div>}
               </div>
             ) : (
-              <div className="t-sub t-muted" style={{ fontSize: 12.5 }}>
+              <div className="card card-pad t-sub t-muted" style={{ fontSize: 12.5 }}>
                 Nothing to read yet — {!prod && <><a href="/products">create the product record</a> and </>}{!gtm && <><a href="/gtm">the GTM record</a>, or </>}use ✎ Edit to write the context by hand.
               </div>
             )}
@@ -525,14 +547,6 @@ export default function CompetitiveSetup({ onDone, productId }: { onDone: () => 
               <div className="row gap-2"><button className="btn btn-sm" onClick={() => setEditCtx(false)}>Done</button></div>
             </div>
           </Modal>
-          {picture && (
-            <div className="card card-pad" style={{ borderLeft: "3px solid var(--ac)" }}>
-              <div className="t-label" style={{ color: "var(--tm)", marginBottom: 6 }}>The full picture — confirm before the search runs</div>
-              <div className="t-sub" style={{ fontSize: 13, lineHeight: 1.6, whiteSpace: "pre-wrap" }}>{picture}</div>
-              <div className="t-mono-xs t-muted" style={{ marginTop: 6 }}>Synthesized from your records + the interview. ✎ Edit adjusts the distilled fields; ✦ Drill down continues the conversation.</div>
-              {profileNote && <div className="t-mono-xs" style={{ marginTop: 4, color: "var(--gn-text, #15803d)" }}>✓ {profileNote}</div>}
-            </div>
-          )}
           {searchPhase ? (
             <div className="card card-pad" style={{ borderLeft: "3px solid var(--ac)" }}>
               <div className="row-between" style={{ alignItems: "baseline" }}>
