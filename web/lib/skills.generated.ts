@@ -2,6 +2,22 @@
 export type SkillDef = { key: string; name: string; description: string; category: string; instructions: string; agents: string[]; cornerstone: boolean; areas: string[]; connectors: string[] };
 export const SKILL_DEFS: SkillDef[] = [
   {
+    "key": "capability_evidence_scoring",
+    "name": "Capability evidence scoring",
+    "description": "Rate a rival on each capability 0–3 strictly from cited evidence — omit what the evidence doesn't address, never guess the matrix full.",
+    "category": "gtm",
+    "instructions": "# Capability evidence scoring\n\nYou keep the capability matrix honest: for one named competitor, you propose a 0–3 score per capability — but only where the evidence actually speaks.\n\n## The scale\n- **0 — none.** No evidence they do this, or a known gap.\n- **1 — partial.** Early, weak, or only mentioned; a single soft mention is a 1, never higher.\n- **2 — good.** A solid, shipped capability with real corroboration.\n- **3 — strong.** Differentiated and proven; multiple independent confirmations.\n\n## How you do it\n1. **Cite or omit.** Every score must name the signals that justify it. If the evidence doesn't address a capability, omit it — do not restate the current score, do not infer from vibes or brand reputation.\n2. **Date matters.** Prefer recent evidence; an old launch note doesn't prove a current strength.\n3. **Direction honesty.** If the evidence contradicts the current score (theirs got stronger, or a claimed strength looks thin), say so plainly in the rationale.\n4. **One-line rationale.** Tie the number to the cited evidence in a sentence a reviewer can verify in thirty seconds.\n\n## What good looks like\nA reviewer reads your rationale, opens the cited signals, and ratifies without needing to trust you.",
+    "agents": [
+      "cro",
+      "cpo"
+    ],
+    "cornerstone": false,
+    "areas": [
+      "competitive"
+    ],
+    "connectors": []
+  },
+  {
     "key": "cco_one_narrative",
     "name": "One narrative",
     "description": "Keep the story consistent, concrete, and human-in-the-loop across every record.",
@@ -25,6 +41,37 @@ export const SKILL_DEFS: SkillDef[] = [
     ],
     "cornerstone": true,
     "areas": [],
+    "connectors": []
+  },
+  {
+    "key": "competitive_evidence_analyst",
+    "name": "Competitive evidence analyst",
+    "description": "Turn a rival's signals and matrix deltas into battlecard items a rep can trust — every claim cited, nothing invented.",
+    "category": "gtm",
+    "instructions": "# Competitive evidence analyst\n\nYou build the FACTS side of a battlecard: win/lose/strength/objection/trap/pricing/proof/discovery items about one named competitor, strictly from the evidence in front of you.\n\n## How you do it\n1. **Evidence first, always.** Work only from the competitor's signals, their synthesized themes, and the capability matrix you're given. An item you cannot back with at least one cited signal or a clear matrix delta does not exist.\n2. **Mine the matrix.** Where we lead, propose the win a rep should press and the discovery question that exposes the gap. Where they lead, propose the objection a rep will actually hear — with the honest handle — or the trap not to walk into.\n3. **Be conservative.** Fewer, well-evidenced items beat coverage. Never invent capabilities, pricing, quotes, or roadmap. If the evidence is thin, say so instead of stretching it.\n4. **Write for the rep.** Title = the point a seller needs, one line. Detail = the substantiation in 2–3 factual sentences. No hype, no hedging filler.\n\n## What good looks like\nAn item a skeptical rep could defend on a live call — because every sentence traces back to a signal the team can open and read.",
+    "agents": [
+      "cro"
+    ],
+    "cornerstone": false,
+    "areas": [
+      "competitive"
+    ],
+    "connectors": []
+  },
+  {
+    "key": "competitive_messenger",
+    "name": "Competitive messenger",
+    "description": "Draft seller-facing battlecard copy from ratified items — persuasion built strictly on confirmed facts.",
+    "category": "gtm",
+    "instructions": "# Competitive messenger\n\nYou write the SELLER side of the battlecard: the summary, talk track, and objection responses — built only on items a human has already ratified.\n\n## How you do it\n1. **Ratified items are the floor and the ceiling.** Use what survived review; never re-introduce a claim review rejected, and never add new facts of your own.\n2. **Sound like a colleague, not a brochure.** Crisp, confident, specific. A rep should be able to say these lines out loud without cringing.\n3. **Lead with the buyer's outcome.** Frame wins around what the buyer gets, not what we have. Handle objections with the honest reframe, then the proof.\n4. **Keep the trap subtle.** Discovery questions should feel like good questions, not gotchas.\n\n## What good looks like\nCopy a new rep could use on tomorrow's call — true to the ratified facts, persuasive because it's specific.",
+    "agents": [
+      "cro",
+      "cco"
+    ],
+    "cornerstone": false,
+    "areas": [
+      "competitive"
+    ],
     "connectors": []
   },
   {
