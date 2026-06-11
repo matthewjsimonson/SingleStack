@@ -6,7 +6,7 @@ export default async function SellPage() {
   const supabase = await createClient();
   const { data: { user } } = await supabase.auth.getUser();
   return (
-    <Shell email={user?.email} crumbs={[{ label: "Sell desk" }]}>
+    <Shell email={user?.email} crumbs={[{ label: "Desk" }]}>
       <SellDesk />
     </Shell>
   );

@@ -47,6 +47,16 @@ export default function SellDesk() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [talk, setTalk] = useState<Record<string, string>>({}); // competitor_id -> drafted talk track
+  // ROLE BOARDS — the Desk is each role's command center. The board tailors
+  // which assets lead; agents/chat (talk tracks today) stay available on all.
+  type Role = "sales" | "solutions" | "bdr" | "cs" | "exec";
+  const ROLES: { key: Role; label: string }[] = [
+    { key: "sales", label: "Sales" }, { key: "solutions", label: "Solutions consulting" },
+    { key: "bdr", label: "BDR" }, { key: "cs", label: "Customer success" }, { key: "exec", label: "Executive" },
+  ];
+  const [role, setRole] = useState<Role>("sales");
+  useEffect(() => { const r = localStorage.getItem("desk_role") as Role | null; if (r) setRole(r); }, []);
+  const pickRole = (r: Role) => { setRole(r); localStorage.setItem("desk_role", r); };
   const [drafting, setDrafting] = useState<string | null>(null);
 
   const load = useCallback(async () => {
@@ -94,8 +104,13 @@ export default function SellDesk() {
   return (
     <div>
       <div style={{ marginBottom: "var(--sp-3)" }}>
-        <h1 className="t-page">Sell desk</h1>
-        <div className="t-sub t-muted" style={{ fontSize: 12.5 }}>What to say — ready to use. Battle cards and messaging, packaged for the field. (Who to sell to lives in <a href="/pql" style={{ color: "var(--ac-text)", fontWeight: 600 }}>Qualified leads</a>.)</div>
+        <h1 className="t-page">Desk</h1>
+        <div className="t-sub t-muted" style={{ fontSize: 12.5 }}>Your command center — messaging, battle cards, and talk tracks tailored to your role, with your agents on hand. (Who to sell to lives in <a href="/pql" style={{ color: "var(--ac-text)", fontWeight: 600 }}>Qualified leads</a>.)</div>
+        <div className="row" style={{ gap: 4, marginTop: 10, flexWrap: "wrap" }}>
+          {ROLES.map((r) => (
+            <button key={r.key} onClick={() => pickRole(r.key)} className="chip" style={{ cursor: "pointer", background: role === r.key ? "var(--ac)" : "var(--fill)", color: role === r.key ? "#fff" : "var(--ts)", border: "none", fontWeight: 600 }}>{r.label}</button>
+          ))}
+        </div>
       </div>
       <Banner>{error}</Banner>
 

@@ -277,6 +277,11 @@ Deno.serve(async (req: Request) => {
       source_id: source.id,
       category: s.category === "gtm" || s.category === "both" ? s.category : "product",
       origin: "external" as const,
+      // A competitor-scoped source's harvest IS competitor intel: stamp the
+      // first-class link (drives battlecard review, per-competitor synthesis,
+      // update alerts) and the competitive domain for the feeds/profiles.
+      competitor_id: source.competitor_id ?? null,
+      metadata: source.competitor_id ? { domain: "competitive", competitor_id: source.competitor_id, channel: source.label } : null,
     }));
     let firstSignalId: string | null = null;
     if (rows.length) {

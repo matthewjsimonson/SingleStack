@@ -136,6 +136,24 @@ export default function BattlecardItemDrawer({ item, competitorName, workflowId,
                   }} title="internal = raw truth for GTM/product; field = the massaged version sellers see">
                     {item.audience === "field" ? "Make internal" : "Publish to field"}
                   </button>
+                  {item.audience !== "field" && (
+                    <button className="btn btn-secondary btn-sm" disabled={busy === "save"} onClick={async () => {
+                      // Field version = a SEPARATE card the human massages: the raw
+                      // truth stays internal, the copy ships to sellers once edited.
+                      const { data: { user } } = await supabase.auth.getUser();
+                      const { data: m } = await supabase.from("memberships").select("org_id").eq("user_id", user?.id ?? "").limit(1).maybeSingle();
+                      if (!m) { setError("Could not resolve your organization."); return; }
+                      const { error } = await supabase.from("battlecard_items").insert({
+                        org_id: m.org_id, competitor_id: item.competitor_id, kind: item.kind,
+                        title: item.title, detail: item.detail, signal_ids: item.signal_ids ?? [],
+                        audience: "field", proposed_by: null,
+                      });
+                      if (error) setError(error.message);
+                      else { setNote("Field version created — massage the wording on the new card, sellers see it in the Desk."); onChanged(); }
+                    }} title="Duplicate as a field card to massage for sellers — the raw card stays internal">
+                      Create field version
+                    </button>
+                  )}
                   <button className="btn btn-secondary btn-sm" disabled={!workflowId || busy === "refresh"} onClick={reexamine}
                     title={workflowId ? "Step 1 of your workflow re-examines this card against fresh evidence — changes go through review" : "Attach a workflow (agent × analyst skill) first"}>
                     {busy === "refresh" ? "Re-examining…" : "✦ Re-examine with analyst"}
