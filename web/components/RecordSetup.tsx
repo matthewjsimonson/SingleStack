@@ -17,7 +17,7 @@ import { useEffect, useState } from "react";
 import { createClient } from "@/lib/supabase/client";
 import { getOrgId } from "@/lib/org";
 import { Chip, Banner } from "@/components/ui";
-import { useAgentRun, AgentProgress } from "@/components/AgentProgress";
+import { useAgentRun, AgentStepList } from "@/components/AgentProgress";
 import { PRODUCT_TEMPLATE, GTM_TEMPLATE } from "@/lib/templates";
 
 type Material = { label: string; text: string; kind: "paste" | "url" | "pdf" };
@@ -274,7 +274,10 @@ export default function RecordSetup({ onDone, mode = "both" }: { onDone: (produc
             {chatDone ? "Interview complete — draft the records when ready." : "The drill-down is open in the side panel. It asks only what your materials don't answer."}
           </div>
           {draftRun.active ? (
-            <div className="card card-pad" style={{ borderLeft: "3px solid var(--ac)" }}><AgentProgress run={draftRun} /></div>
+            <div className="card card-pad" style={{ borderLeft: "3px solid var(--ac)" }}>
+              <div className="t-label" style={{ color: "var(--tm)", marginBottom: 8 }}>Drafting your records</div>
+              <AgentStepList run={draftRun} />
+            </div>
           ) : (
             <div className="row gap-2">
               {!chatOpen && <button className="btn btn-secondary btn-sm" onClick={() => setChatOpen(true)}>✦ Re-open the drill-down</button>}

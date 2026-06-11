@@ -19,10 +19,24 @@ export const AGENT_STAGES: Record<string, string[]> = {
     "Drafting the GTM record",
     "Leaving honest gaps empty",
   ],
+  // setup-competitive · interview turn
+  setupAsk: [
+    "Reading everything you've given it",
+    "Spotting the most decisive gap",
+    "Re-grading search readiness",
+  ],
+  // setup-competitive · paint the picture
+  setupPicture: [
+    "Folding records and answers together",
+    "Writing the full picture",
+    "Distilling the profile fields",
+    "Queueing record updates for review",
+  ],
   // setup-competitive · capabilities
   setupCaps: [
-    "Reading product, market, and rivals",
-    "Finding the vectors that decide deals",
+    "Reading your profile and confirmed rivals",
+    "Finding the vectors that decide deals in your market",
+    "Balancing product vs GTM dimensions",
     "Trimming to a usable matrix",
   ],
   // agent-propose (an officer reviews a record and drafts a change)

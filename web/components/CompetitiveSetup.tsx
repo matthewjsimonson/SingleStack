@@ -12,7 +12,7 @@ import { useEffect, useState } from "react";
 import { createClient } from "@/lib/supabase/client";
 import { getOrgId } from "@/lib/org";
 import { Chip, Banner, Modal } from "@/components/ui";
-import { useAgentRun, AgentProgress } from "@/components/AgentProgress";
+import { useAgentRun, AgentProgress, AgentStepList } from "@/components/AgentProgress";
 import ProfileReadiness from "@/components/ProfileReadiness";
 import { CATALOG_BY_KIND } from "@/lib/sources";
 import { SKILL_DEFS } from "@/lib/skills.generated";
@@ -31,18 +31,15 @@ export default function CompetitiveSetup({ onDone, productId }: { onDone: () => 
   // Staged progress for the capability proposal; the SEARCH gets REAL phase
   // status (phase + elapsed seconds + token usage) instead of a guessed cadence.
   const capsRun = useAgentRun("setupCaps");
+  const askRun = useAgentRun("setupAsk");
+  const pictureRun = useAgentRun("setupPicture");
   // The living search checklist: short, controlled steps that complete on REAL
   // transitions (request fired / phase resolved) — spinner on the active step,
   // ✓ as each one lands. No fake progress between events.
   const [searchStep, setSearchStep] = useState<number | null>(null); // index into SEARCH_STEPS; null = not searching
   const [searchSecs, setSearchSecs] = useState(0);
   const [searchUsage, setSearchUsage] = useState<{ input: number; output: number } | null>(null);
-  const SEARCH_STEPS = [
-    "Reading your profile",
-    ctx.competitors.trim() ? `Verifying ${ctx.competitors.split(",").filter((x) => x.trim()).length} named rival${ctx.competitors.includes(",") ? "s" : ""}, searching beyond` : "Searching the live landscape",
-    "Scoring overlap — buyer · industry · capability · positioning",
-    "Ranking by match",
-  ];
+
   const [error, setError] = useState<string | null>(null);
 
   // step 1 — anchor: the market context comes FROM the records the user already
@@ -54,6 +51,12 @@ export default function CompetitiveSetup({ onDone, productId }: { onDone: () => 
   // never locked. Personas and industries are first-class: they decide which
   // rivals actually compete for the same buyer.
   const [ctx, setCtx] = useState({ product: "", features: "", who: "", industries: "", positioning: "", more: "", competitors: "" });
+  const SEARCH_STEPS = [
+    "Reading your profile",
+    ctx.competitors.trim() ? `Verifying ${ctx.competitors.split(",").filter((x) => x.trim()).length} named rival${ctx.competitors.includes(",") ? "s" : ""}, searching beyond` : "Searching the live landscape",
+    "Scoring overlap — buyer · industry · capability · positioning",
+    "Ranking by match",
+  ];
   const ctxSet = (k: keyof typeof ctx) => (e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement>) => setCtx((c) => ({ ...c, [k]: e.target.value }));
   const [editCtx, setEditCtx] = useState(false);
   // The FULL records dump (every product + GTM field + modules) — what the
@@ -264,7 +267,7 @@ export default function CompetitiveSetup({ onDone, productId }: { onDone: () => 
   async function nextQuestion(history: { role: "q" | "a"; text: string }[]) {
     setChatBusy(true); setError(null);
     try {
-      const data = await invoke({ step: "interview", records: recordsDump, transcript: history });
+      const data = await askRun.go(() => invoke({ step: "interview", records: recordsDump, transcript: history }));
       const r = Math.min(100, Math.max(0, Math.round(Number(data.readiness) || 0)));
       setReady((prev) => { setReadyDelta(prev !== null ? r - prev : null); return r; });
       setGaps((data.gaps as string) || "");
@@ -297,7 +300,7 @@ export default function CompetitiveSetup({ onDone, productId }: { onDone: () => 
   async function paintPicture(history: { role: "q" | "a"; text: string }[]) {
     setChatBusy(true); setError(null);
     try {
-      const data = await invoke({ step: "picture", records: recordsDump, transcript: history });
+      const data = await pictureRun.go(() => invoke({ step: "picture", records: recordsDump, transcript: history }));
       setPicture(data.picture || "");
       setCtx({ product: data.product || "", features: data.features || "", who: data.who || "", industries: data.industries || "", positioning: data.positioning || "", more: data.more || "", competitors: data.known_competitors || "" });
       setChatDone(true);
@@ -631,7 +634,8 @@ export default function CompetitiveSetup({ onDone, productId }: { onDone: () => 
                     </div>
                   ))}
                   {chatWhy && !chatDone && <div className="t-mono-xs t-muted">Why this question: {chatWhy}</div>}
-                  {chatBusy && <div className="t-sub t-muted" style={{ fontSize: 12.5 }}>{chatDone || chat.length === 0 ? "Thinking…" : chat[chat.length - 1]?.role === "a" ? "Reading your answer…" : "Painting the full picture…"}</div>}
+                  {askRun.active && <div className="card card-pad" style={{ background: "var(--panel-2)", marginRight: 32 }}><AgentStepList run={askRun} /></div>}
+                  {pictureRun.active && <div className="card card-pad" style={{ background: "var(--panel-2)", marginRight: 32 }}><AgentStepList run={pictureRun} /></div>}
                   {chatDone && !chatBusy && (
                     <div className="card card-pad" style={{ borderLeft: "3px solid var(--gn-text, #15803d)", fontSize: 12.5 }}>
                       Got what it needs — the full picture is on the setup screen. Review it, ✎ Edit anything (including any answer above), then ✦ Find my competitors.
@@ -681,7 +685,7 @@ export default function CompetitiveSetup({ onDone, productId }: { onDone: () => 
           <div className="row gap-2">
             <button className="btn btn-sm" disabled={busy === "save-comps"} onClick={confirmCompetitors}>{busy === "save-comps" ? "Saving…" : `Confirm ${comps.filter((c) => c.keep && c.name.trim()).length} competitor${comps.filter((c) => c.keep && c.name.trim()).length === 1 ? "" : "s"} →`}</button>
             {searchStep !== null ? <span className="row gap-2 t-mono-xs t-muted" style={{ alignItems: "center" }}><span className="agent-progress-dot" aria-hidden />{SEARCH_STEPS[searchStep]}… · {searchSecs}s</span> : <button className="btn btn-secondary btn-sm" onClick={findCompetitors}>↻ Search again</button>}
-            {searchUsage && !searchPhase && <span className="t-mono-xs t-muted" title="Exact token cost of this search (input + output across both phases)">{((searchUsage.input + searchUsage.output) / 1000).toFixed(1)}k tokens</span>}
+            {searchUsage && searchStep === null && <span className="t-mono-xs t-muted" title="Exact token cost of this search (input + output across both phases)">{((searchUsage.input + searchUsage.output) / 1000).toFixed(1)}k tokens</span>}
           </div>
         </div>
       )}
@@ -689,7 +693,10 @@ export default function CompetitiveSetup({ onDone, productId }: { onDone: () => 
       {step === 3 && (
         <div className="stack-3">
           <div className="t-sub t-muted" style={{ fontSize: 12.5 }}>The functionality vectors to compare on — proposed from your product, market, and rivals. These become the matrix rows; scores then come from <b>evidence</b>, ratified by you, never hand-typed guesses.</div>
-          {capsRun.active && caps.length === 0 ? <div className="card card-pad" style={{ borderLeft: "3px solid var(--ac)" }}><AgentProgress run={capsRun} /></div> : caps.map((c, i) => (
+          {capsRun.active && caps.length === 0 ? <div className="card card-pad" style={{ borderLeft: "3px solid var(--ac)" }}>
+            <div className="row-between" style={{ marginBottom: 8 }}><span className="t-label" style={{ color: "var(--tm)" }}>Designing your matrix</span></div>
+            <AgentStepList run={capsRun} />
+          </div> : caps.map((c, i) => (
             <div key={i} className="card card-pad row gap-2" style={{ alignItems: "flex-start", opacity: c.keep ? 1 : 0.45 }}>
               <input type="checkbox" checked={c.keep} onChange={() => setCaps(caps.map((x, j) => j === i ? { ...x, keep: !x.keep } : x))} style={{ marginTop: 5 }} />
               <div style={{ flex: 1, minWidth: 0 }}>

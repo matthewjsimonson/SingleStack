@@ -54,6 +54,32 @@ export function useAgentRun(kind: keyof typeof AGENT_STAGES | string): AgentRun 
   return { active, stages, index, go };
 }
 
+// The "living intel brain" renderer: the run's stages as a step LIST — green ✓
+// for completed stages, spinner on the active one, dimmed ○ for what's ahead.
+// Same honesty contract as AgentProgress: early stages walk on a believable
+// cadence and the list PARKS one shy of done until the real result returns.
+export function AgentStepList({ run, note }: { run: AgentRun; note?: string }) {
+  if (!run.active) return null;
+  return (
+    <div>
+      <div className="stack-2">
+        {run.stages.map((label, i) => {
+          const state = i < run.index ? "done" : i === run.index ? "active" : "pending";
+          return (
+            <div key={i} className="row gap-2" style={{ alignItems: "center", opacity: state === "pending" ? 0.45 : 1 }}>
+              {state === "done" && <span style={{ width: 16, textAlign: "center", color: "var(--gn-text, #15803d)", fontWeight: 700, fontSize: 12 }}>✓</span>}
+              {state === "active" && <span style={{ width: 16, display: "inline-flex", justifyContent: "center" }}><span className="agent-progress-dot" aria-hidden /></span>}
+              {state === "pending" && <span style={{ width: 16, textAlign: "center", color: "var(--tm)", fontSize: 11 }}>○</span>}
+              <span style={{ fontSize: 12.5, fontWeight: state === "active" ? 650 : 500, color: state === "active" ? "var(--tp)" : "var(--ts)" }}>{label}{state === "active" ? "…" : ""}</span>
+            </div>
+          );
+        })}
+      </div>
+      {note && <div className="t-mono-xs t-muted" style={{ marginTop: 8 }}>{note}</div>}
+    </div>
+  );
+}
+
 export function AgentProgress({ run, compact = false }: { run: AgentRun; compact?: boolean }) {
   if (!run.active) return null;
   const label = run.stages[Math.min(run.index, run.stages.length - 1)];
