@@ -37,9 +37,11 @@ const COMPETITORS_SCHEMA = {
           name: { type: "string" },
           website: { type: "string" },         // homepage URL, or "" when unknown
           relationship: { type: "string", enum: ["direct", "adjacent"] },
+          match: { type: "integer" },          // 0..100 — honest competitive-overlap score
           why: { type: "string" },             // one line: why they're a rival
+          overlap: { type: "string" },         // the dimensions: buyer / industry / capability / positioning — which overlap, which don't
         },
-        required: ["name", "website", "relationship", "why"],
+        required: ["name", "website", "relationship", "match", "why", "overlap"],
       },
     },
   },
@@ -120,7 +122,7 @@ Deno.serve(async (req: Request) => {
 
       const briefing = await searchBriefing(
         key,
-        "You are a competitive-landscape researcher. Use web search to identify the REAL competitors in the user's market — companies a buyer would actually evaluate against them. For each: the company name, homepage URL, whether they compete head-on (direct) or overlap partially / from an adjacent category (adjacent), and the one-line reason they matter. Concrete and current — cite what you find. 6–10 rivals, the ones that genuinely matter, not a directory dump.",
+        "You are a competitive-landscape researcher. Use web search to identify the REAL competitors in the user's market — companies a buyer would actually evaluate against them. Assess every candidate on FOUR dimensions: (1) buyer overlap — do they sell to the same personas? (2) industry overlap — same verticals? (3) capability overlap — which of the user's features/modules do they also offer? (4) positioning collision — do they claim the same category or replace the same thing? For each rival report: company name, homepage URL, head-on (direct) vs partial/adjacent, and the per-dimension read with what you found. Concrete and current — cite what you find. 6–10 rivals that genuinely matter, not a directory dump.",
         [
           product.name ? `OUR PRODUCT: ${product.name}` : "",
           product.value_prop ? `VALUE PROP: ${product.value_prop}` : "",
@@ -133,16 +135,18 @@ Deno.serve(async (req: Request) => {
       const resp = (await anthropic.messages.create({
         model: MODEL, max_tokens: 2500,
         output_config: { effort: "medium", format: { type: "json_schema", schema: COMPETITORS_SCHEMA } },
-        system: "Extract the competitors from the research briefing into the schema. Keep only real, named companies with a clear competitive rationale. website = their homepage URL from the briefing ('' if absent). Do not invent companies not in the briefing.",
+        system: "Extract the competitors from the research briefing into the schema. Keep only real, named companies with a clear competitive rationale. website = their homepage URL from the briefing ('' if absent). match = an HONEST 0..100 competitive-overlap score derived from the four dimensions in the briefing (buyer, industry, capability, positioning): head-on across all four ≈ 80-95; strong on two-three ≈ 50-75; adjacent/partial ≈ 25-50. Never inflate; if the briefing is thin on a dimension, score conservatively. overlap = one line naming which dimensions overlap and which don't (e.g. 'same buyer (PMM) + capability (battlecards); different industry focus, no unified record'). Do not invent companies not in the briefing.",
         messages: [{ role: "user", content: briefing }],
         // deno-lint-ignore no-explicit-any
       } as any)) as Anthropic.Message;
       const text = resp.content.filter((b) => b.type === "text").map((b) => (b as { text: string }).text).join("");
-      const out = JSON.parse(text) as { competitors: { name: string; website: string; relationship: string; why: string }[] };
+      const out = JSON.parse(text) as { competitors: { name: string; website: string; relationship: string; match: number; why: string; overlap: string }[] };
       const knownLower = new Set(known.map((n) => n.toLowerCase()));
       const competitors = (out.competitors ?? [])
         .filter((c) => c.name?.trim() && !knownLower.has(c.name.trim().toLowerCase()))
-        .map((c) => ({ ...c, name: c.name.trim(), relationship: c.relationship === "adjacent" ? "adjacent" : "direct" }));
+        .map((c) => ({ ...c, name: c.name.trim(), relationship: c.relationship === "adjacent" ? "adjacent" : "direct",
+          match: Math.min(100, Math.max(0, Math.round(Number((c as { match?: number }).match) || 0))) }))
+        .sort((a, b) => b.match - a.match);
       return json({ competitors, briefing });
     }
 

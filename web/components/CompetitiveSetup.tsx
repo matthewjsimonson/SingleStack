@@ -11,12 +11,12 @@
 import { useEffect, useState } from "react";
 import { createClient } from "@/lib/supabase/client";
 import { getOrgId } from "@/lib/org";
-import { Chip, Banner } from "@/components/ui";
+import { Chip, Banner, Modal } from "@/components/ui";
 import { CATALOG_BY_KIND } from "@/lib/sources";
 import { SKILL_DEFS } from "@/lib/skills.generated";
 
 type Step = 1 | 2 | 3 | 4 | 5;
-type CompCand = { name: string; website: string; relationship: string; why: string; keep: boolean };
+type CompCand = { name: string; website: string; relationship: string; match: number; why: string; overlap: string; keep: boolean };
 type CapCand = { name: string; category: string; why: string; keep: boolean };
 const MONITOR_KINDS = [
   ["website", "Website"], ["press", "Press & news"], ["linkedin_jobs", "LinkedIn jobs"], ["linkedin_posts", "LinkedIn posts"],
@@ -36,8 +36,9 @@ export default function CompetitiveSetup({ onDone, productId }: { onDone: () => 
   // Structured, ALWAYS-editable market context — pre-filled from the records,
   // never locked. Personas and industries are first-class: they decide which
   // rivals actually compete for the same buyer.
-  const [ctx, setCtx] = useState({ product: "", who: "", industries: "", positioning: "", more: "" });
+  const [ctx, setCtx] = useState({ product: "", features: "", who: "", industries: "", positioning: "", more: "" });
   const ctxSet = (k: keyof typeof ctx) => (e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement>) => setCtx((c) => ({ ...c, [k]: e.target.value }));
+  const [editCtx, setEditCtx] = useState(false);
   // step 2 — competitors
   const [comps, setComps] = useState<CompCand[]>([]);
   const [savedComps, setSavedComps] = useState<{ id: string; name: string; website: string | null }[]>([]);
@@ -123,16 +124,25 @@ export default function CompetitiveSetup({ onDone, productId }: { onDone: () => 
       // Product record: the REAL template keys (what_it_is / who_its_for /
       // problem / category), with the legacy seed keys (overview / value_prop)
       // as fallback — not just value_prop, which products don't carry.
+      let featLine = "";
       const { data: p } = await supabase.from("product_records").select("id, name").order("created_at").limit(1).maybeSingle();
       if (p) {
-        const { data: fs } = await supabase.from("record_fields").select("field_key, value").eq("product_id", p.id)
-          .in("field_key", ["what_it_is", "who_its_for", "problem", "category", "value_prop", "overview"]);
+        const [{ data: fs }, { data: mods }] = await Promise.all([
+          supabase.from("record_fields").select("field_key, value").eq("product_id", p.id)
+            .in("field_key", ["what_it_is", "who_its_for", "problem", "category", "value_prop", "overview", "core_capabilities", "differentiated_capabilities"]),
+          supabase.from("modules").select("name, description").eq("product_id", p.id).order("created_at").limit(12),
+        ]);
         const f = (k: string) => fs?.find((x) => x.field_key === k)?.value ?? null;
         const what = f("what_it_is") ?? f("value_prop") ?? f("overview");
         setProd({ name: p.name, value_prop: what });
-        prodLine = `Our product: ${p.name}${what ? ` — ${what}` : ""}${f("category") ? ` (category: ${f("category")})` : ""}`;
-        if (f("who_its_for")) whoLine = `Who it's for: ${f("who_its_for")}`;
+        prodLine = `${p.name}${what ? ` — ${what}` : ""}${f("category") ? ` (category: ${f("category")})` : ""}`;
+        if (f("who_its_for")) whoLine = f("who_its_for") as string;
         if (f("problem")) problemLine = `Problem it solves: ${f("problem")}`;
+        // Features/modules: what the product actually DOES — the strongest
+        // signal for capability overlap when matching competitors.
+        const modBits = (mods ?? []).map((m) => m.description ? `${m.name} (${m.description})` : m.name);
+        const capBits = [f("core_capabilities"), f("differentiated_capabilities")].filter(Boolean) as string[];
+        featLine = [...modBits, ...capBits].join("; ");
       } else setProd(null);
       // GTM record: personas/icp (who we sell to) + positioning (against what).
       const { data: g } = await supabase.from("gtm_records").select("id, name").order("created_at").limit(1).maybeSingle();
@@ -143,16 +153,17 @@ export default function CompetitiveSetup({ onDone, productId }: { onDone: () => 
         const personas = f("personas") ?? f("primary_persona") ?? f("icp");
         const positioning = f("positioning") ?? f("category_pov");
         setGtm({ name: g.name, personas, positioning });
-        if (personas && !whoLine) whoLine = `Who we sell to: ${personas}`;
-        if (positioning) posLine = `How we position: ${positioning}`;
+        if (personas && !whoLine) whoLine = personas;
+        if (positioning) posLine = positioning;
       } else setGtm(null);
       // Pre-fill the EDITABLE fields from the records — the human can adjust,
       // add, or rewrite everything before anything runs. Never overwrite typing.
       setCtx((cur) => ({
         product: cur.product.trim() ? cur.product : [prodLine, problemLine].filter(Boolean).join(" "),
-        who: cur.who.trim() ? cur.who : whoLine.replace(/^Who (it's for|we sell to): /, ""),
+        features: cur.features.trim() ? cur.features : featLine,
+        who: cur.who.trim() ? cur.who : whoLine,
         industries: cur.industries, // no canonical record field yet — the human owns this one
-        positioning: cur.positioning.trim() ? cur.positioning : posLine.replace(/^How we position: /, ""),
+        positioning: cur.positioning.trim() ? cur.positioning : posLine,
         more: cur.more,
       }));
     })();
@@ -162,6 +173,7 @@ export default function CompetitiveSetup({ onDone, productId }: { onDone: () => 
   // What the agent searches from = exactly what's in the editable fields.
   const marketCtx = [
     ctx.product.trim() ? `Our product: ${ctx.product.trim()}` : "",
+    ctx.features.trim() ? `Key features / modules (for capability overlap): ${ctx.features.trim()}` : "",
     ctx.who.trim() ? `Who we sell to (personas): ${ctx.who.trim()}` : "",
     ctx.industries.trim() ? `Industries / verticals: ${ctx.industries.trim()}` : "",
     ctx.positioning.trim() ? `How we position / against what: ${ctx.positioning.trim()}` : "",
@@ -199,7 +211,9 @@ export default function CompetitiveSetup({ onDone, productId }: { onDone: () => 
       const orgId = await getOrgId(); if (!orgId) throw new Error("Could not resolve your organization.");
       const { data, error } = await supabase.from("competitors").insert(keep.map((c, i) => ({
         org_id: orgId, name: c.name.trim(), relationship: c.relationship === "adjacent" ? "adjacent" : "direct",
-        website: c.website.trim() || null, notes: c.why || null, position: i, product_id: productId ?? null,
+        website: c.website.trim() || null,
+        notes: [c.why, c.overlap ? `Overlap: ${c.overlap}` : "", c.match < 100 ? `Match at setup: ${c.match}%` : ""].filter(Boolean).join(" · ") || null,
+        position: i, product_id: productId ?? null,
       }))).select("id, name, website");
       if (error) throw error;
       setSavedComps(data ?? []);
@@ -313,37 +327,46 @@ export default function CompetitiveSetup({ onDone, productId }: { onDone: () => 
 
       {step === 1 && (
         <div className="stack-3">
-          <div className="t-sub t-muted" style={{ fontSize: 12.5 }}>Your market, read from the records you already authored — nothing to re-type.</div>
-          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "var(--sp-3)" }}>
-            <div className="card card-pad" style={{ background: "var(--panel-2)" }}>
-              <div className="t-label" style={{ color: "var(--tm)", marginBottom: 4 }}>Product record</div>
-              {prod ? (<><div style={{ fontSize: 14, fontWeight: 640 }}>{prod.name}</div>
-                {prod.value_prop ? <div className="t-sub t-muted" style={{ fontSize: 12.5, marginTop: 3 }}>{prod.value_prop}</div>
-                  : <div className="t-sub t-muted" style={{ fontSize: 12.5, marginTop: 3 }}>No &ldquo;what it is&rdquo; field yet — add it on the record, or write it into the context below.</div>}</>)
-                : <div className="t-sub t-muted" style={{ fontSize: 12.5 }}>No product record yet — <a href="/products">create it first</a>; the search leans on it.</div>}
+          {/* ONE context card — read from the records (product, modules, GTM), no
+              re-typing, no redundant fields. ✎ Edit opens the popup where every
+              line can be adjusted, added to, or eliminated. */}
+          <div className="card card-pad" style={{ background: "var(--panel-2)" }}>
+            <div className="row-between" style={{ marginBottom: 8 }}>
+              <span className="t-label" style={{ color: "var(--tm)" }}>Market context — read from your records</span>
+              <button className="btn btn-secondary btn-sm" onClick={() => setEditCtx(true)}>✎ Edit</button>
             </div>
-            <div className="card card-pad" style={{ background: "var(--panel-2)" }}>
-              <div className="t-label" style={{ color: "var(--tm)", marginBottom: 4 }}>GTM record · {gtm?.name ?? "—"}</div>
-              {gtm ? (<>
-                {gtm.personas && <div className="t-sub" style={{ fontSize: 12.5 }}><b>Who:</b> {gtm.personas}</div>}
-                {gtm.positioning && <div className="t-sub" style={{ fontSize: 12.5, marginTop: 3 }}><b>Positioning:</b> {gtm.positioning}</div>}
-                {!gtm.personas && !gtm.positioning && <div className="t-sub t-muted" style={{ fontSize: 12.5 }}>No personas/positioning fields yet — add them on the GTM record, or refine below.</div>}
-              </>) : <div className="t-sub t-muted" style={{ fontSize: 12.5 }}>No GTM record yet — <a href="/gtm">create it first</a>, or refine below.</div>}
+            {marketCtx ? (
+              <div className="stack-2">
+                {([["Product", ctx.product], ["Features / modules", ctx.features], ["Personas", ctx.who], ["Industries", ctx.industries], ["Positioning", ctx.positioning], ["Also", ctx.more]] as const).map(([label, v]) => v.trim() && (
+                  <div key={label} style={{ fontSize: 12.5, lineHeight: 1.5 }}><b style={{ color: "var(--tm)", fontWeight: 640 }}>{label}:</b> <span className="t-sub">{v}</span></div>
+                ))}
+                {!ctx.industries.trim() && <div className="t-sub t-muted" style={{ fontSize: 12 }}>No industries yet — worth adding (✎ Edit): verticals decide who actually competes for your buyer.</div>}
+              </div>
+            ) : (
+              <div className="t-sub t-muted" style={{ fontSize: 12.5 }}>
+                Nothing to read yet — {!prod && <><a href="/products">create the product record</a> and </>}{!gtm && <><a href="/gtm">the GTM record</a>, or </>}use ✎ Edit to write the context by hand.
+              </div>
+            )}
+          </div>
+          <Modal open={editCtx} onClose={() => setEditCtx(false)} title="Edit market context" width={620}>
+            <div className="stack-3">
+              <label className="field"><span className="t-label">Product — what it is</span>
+                <textarea className="textarea" rows={2} value={ctx.product} onChange={ctxSet("product")} placeholder="What the product is and the problem it solves" /></label>
+              <label className="field"><span className="t-label">Features / modules <span className="t-muted" style={{ fontWeight: 400, textTransform: "none", letterSpacing: 0 }}>— drives capability-overlap matching</span></span>
+                <textarea className="textarea" rows={2} value={ctx.features} onChange={ctxSet("features")} placeholder="e.g. battlecards; signal synthesis; capability matrix; agent workflows" /></label>
+              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "var(--sp-3)" }}>
+                <label className="field"><span className="t-label">Who you sell to — personas</span>
+                  <input className="input" value={ctx.who} onChange={ctxSet("who")} placeholder="e.g. Heads of Product, PMMs" /></label>
+                <label className="field"><span className="t-label">Industries / verticals</span>
+                  <input className="input" value={ctx.industries} onChange={ctxSet("industries")} placeholder="e.g. B2B SaaS, fintech" /></label>
+              </div>
+              <label className="field"><span className="t-label">How you position — against what</span>
+                <input className="input" value={ctx.positioning} onChange={ctxSet("positioning")} placeholder="The category you claim and what you replace" /></label>
+              <label className="field"><span className="t-label">Anything else</span>
+                <input className="input" value={ctx.more} onChange={ctxSet("more")} placeholder="e.g. also watch the open-source alternatives" /></label>
+              <div className="row gap-2"><button className="btn btn-sm" onClick={() => setEditCtx(false)}>Done</button></div>
             </div>
-          </div>
-          <div className="t-sub t-muted" style={{ fontSize: 12, marginTop: 4 }}>Everything below is pre-filled from the records where they speak — and always yours to adjust, add to, or rewrite.</div>
-          <label className="field"><span className="t-label">Product — what it is</span>
-            <input className="input" value={ctx.product} onChange={ctxSet("product")} placeholder="What the product is and the problem it solves" /></label>
-          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "var(--sp-3)" }}>
-            <label className="field"><span className="t-label">Who you sell to — personas</span>
-              <input className="input" value={ctx.who} onChange={ctxSet("who")} placeholder="e.g. Heads of Product, PMMs, RevOps leads" /></label>
-            <label className="field"><span className="t-label">Industries / verticals <span className="t-muted" style={{ fontWeight: 400, textTransform: "none", letterSpacing: 0 }}>— key for who you actually compete with</span></span>
-              <input className="input" value={ctx.industries} onChange={ctxSet("industries")} placeholder="e.g. B2B SaaS, fintech, healthcare IT" /></label>
-          </div>
-          <label className="field"><span className="t-label">How you position — against what</span>
-            <input className="input" value={ctx.positioning} onChange={ctxSet("positioning")} placeholder="The category you claim and what you replace" /></label>
-          <label className="field"><span className="t-label">Anything else <span className="t-muted" style={{ fontWeight: 400, textTransform: "none", letterSpacing: 0 }}>— optional</span></span>
-            <input className="input" value={ctx.more} onChange={ctxSet("more")} placeholder="e.g. also watch the open-source alternatives" /></label>
+          </Modal>
           <div className="row gap-2">
             <button className="btn btn-sm" disabled={busy === "comps" || !marketCtx} onClick={findCompetitors}>{busy === "comps" ? "Searching the landscape…" : "✦ Find my competitors"}</button>
             <button className="btn btn-secondary btn-sm" onClick={onDone}>Skip — set up by hand</button>
@@ -366,10 +389,12 @@ export default function CompetitiveSetup({ onDone, productId }: { onDone: () => 
                   <input className="input" value={c.website} onChange={(e) => setComps(comps.map((x, j) => j === i ? { ...x, website: e.target.value } : x))} placeholder="https://…" style={{ flex: 1, minWidth: 140 }} />
                 </div>
                 <div className="t-sub t-muted" style={{ fontSize: 12 }}>{c.why}</div>
+                {c.overlap && <div className="t-mono-xs" style={{ marginTop: 3 }}>{c.overlap}</div>}
               </div>
+              <Chip tone={c.match >= 70 ? "accent" : c.match >= 45 ? "violet" : "default"}>{c.match}% match</Chip>
             </div>
           ))}
-          <button className="btn btn-secondary btn-sm" onClick={() => setComps([...comps, { name: "", website: "", relationship: "direct", why: "Added by you.", keep: true }])}>+ Add one they missed</button>
+          <button className="btn btn-secondary btn-sm" onClick={() => setComps([...comps, { name: "", website: "", relationship: "direct", match: 100, why: "Added by you.", overlap: "", keep: true }])}>+ Add one they missed</button>
           <div className="row gap-2">
             <button className="btn btn-sm" disabled={busy === "save-comps"} onClick={confirmCompetitors}>{busy === "save-comps" ? "Saving…" : `Confirm ${comps.filter((c) => c.keep && c.name.trim()).length} competitor${comps.filter((c) => c.keep && c.name.trim()).length === 1 ? "" : "s"} →`}</button>
             <button className="btn btn-secondary btn-sm" disabled={busy === "comps"} onClick={findCompetitors}>↻ Search again</button>
