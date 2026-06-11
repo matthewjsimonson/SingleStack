@@ -21,7 +21,11 @@ type Competitor = { id: string; name: string; relationship: string; website: str
 type Capability = { id: string; name: string; category: string | null };
 type Score = { id: string; capability_id: string; competitor_id: string | null; score: number };
 type Card = { id: string; competitor_id: string | null; kind: string; title: string; detail: string | null };
-type Signal = { id: string; title: string; why: string | null; conf_label: string | null; conf_level: number | null; observed_at: string | null; origin: string | null; metadata: { domain?: string; competitor_id?: string; channel?: string } | null; source_id: string | null };
+type Signal = { id: string; title: string; why: string | null; conf_label: string | null; conf_level: number | null; observed_at: string | null; origin: string | null; competitor_id: string | null; metadata: { domain?: string; competitor_id?: string; channel?: string } | null; source_id: string | null };
+type Theme = { id: string; title: string; summary: string | null; recommendation: string | null; category: string; competitor_id: string | null; conf_level: number | null; state: string };
+// The competitor a signal is about — first-class column, with a fallback to the
+// legacy metadata link for any pre-Phase-4 rows the backfill couldn't resolve.
+const sigComp = (s: Signal) => s.competitor_id ?? s.metadata?.competitor_id ?? null;
 
 type Tab = "dashboard" | "profile" | "competitors" | "feed";
 
@@ -34,19 +38,21 @@ export default function CompetitiveView() {
   const [scores, setScores] = useState<Score[]>([]);
   const [cards, setCards] = useState<Card[]>([]);
   const [signals, setSignals] = useState<Signal[]>([]);
+  const [themes, setThemes] = useState<Theme[]>([]);
   const [overview, setOverview] = useState<{ name: string; overview: string | null; valueProp: string | null } | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
   const load = useCallback(async () => {
-    const [{ data: comp }, { data: caps }, { data: scs }, { data: cds }, { data: sigs }] = await Promise.all([
+    const [{ data: comp }, { data: caps }, { data: scs }, { data: cds }, { data: sigs }, { data: ths }] = await Promise.all([
       supabase.from("competitors").select("id, name, relationship, website, notes, product_id").order("position").order("created_at"),
       supabase.from("capabilities").select("id, name, category").order("position").order("created_at"),
       supabase.from("capability_scores").select("id, capability_id, competitor_id, score"),
       supabase.from("battlecard_items").select("id, competitor_id, kind, title, detail").order("position").order("created_at"),
-      supabase.from("signals").select("id, title, why, conf_label, conf_level, observed_at, origin, metadata, source_id").order("observed_at", { ascending: false, nullsFirst: false }),
+      supabase.from("signals").select("id, title, why, conf_label, conf_level, observed_at, origin, competitor_id, metadata, source_id").order("observed_at", { ascending: false, nullsFirst: false }),
+      supabase.from("signal_themes").select("id, title, summary, recommendation, category, competitor_id, conf_level, state").not("competitor_id", "is", null).order("last_evidence_at", { ascending: false, nullsFirst: false }),
     ]);
-    setCompetitors(comp ?? []); setCapabilities(caps ?? []); setScores(scs ?? []); setCards(cds ?? []); setSignals(sigs ?? []);
+    setCompetitors(comp ?? []); setCapabilities(caps ?? []); setScores(scs ?? []); setCards(cds ?? []); setSignals(sigs ?? []); setThemes(ths ?? []);
     // Our product overview — anchors the "us vs them" framing on battlecards.
     const { data: prod } = await supabase.from("product_records").select("id, name").order("created_at").limit(1).maybeSingle();
     if (prod) {
@@ -73,7 +79,7 @@ export default function CompetitiveView() {
       {loading ? <div className="t-sub t-muted">Loading…</div>
         : tab === "dashboard" ? <Dashboard competitors={scopedCompetitors} capabilities={capabilities} scores={scores} compSignals={compSignals} overview={overview} reload={load} setError={setError} />
         : tab === "profile" ? <SignalProfile scope="landscape" />
-        : tab === "competitors" ? <Competitors competitors={scopedCompetitors} cards={cards} overview={overview} capabilities={capabilities} scores={scores} compSignals={compSignals} newProductId={scopedProductId} reload={load} setError={setError} />
+        : tab === "competitors" ? <Competitors competitors={scopedCompetitors} cards={cards} overview={overview} capabilities={capabilities} scores={scores} compSignals={compSignals} themes={themes} newProductId={scopedProductId} reload={load} setError={setError} />
         : <Feed signals={signals} competitors={scopedCompetitors} reload={load} />}
     </div>
   );
@@ -239,7 +245,7 @@ function Dashboard({ competitors, capabilities, scores, compSignals, overview, r
 }
 
 // ---------- Battlecards ----------
-type CdTab = "overview" | "profile" | "gtm" | "product" | "signals";
+type CdTab = "overview" | "profile" | "themes" | "gtm" | "product" | "signals";
 
 // Best-practice battlecard sections — the set is the suggestion; fill the ones
 // that help a rep win against each competitor.
@@ -254,9 +260,9 @@ const KINDS: [string, string, string][] = [
   ["discovery", "Discovery questions", "bd"],
 ];
 const TONE_BORDER: Record<string, string> = { gn: "var(--gn)", am: "var(--am-text)", vl: "var(--vl)", bd: "var(--border-strong)" };
-function Competitors({ competitors, cards, overview, capabilities, scores, compSignals, newProductId, reload, setError }: {
+function Competitors({ competitors, cards, overview, capabilities, scores, compSignals, themes, newProductId, reload, setError }: {
   competitors: Competitor[]; cards: Card[]; overview: { name: string; overview: string | null; valueProp: string | null } | null;
-  capabilities: Capability[]; scores: Score[]; compSignals: Signal[]; newProductId: string | null; reload: () => void; setError: (s: string | null) => void;
+  capabilities: Capability[]; scores: Score[]; compSignals: Signal[]; themes: Theme[]; newProductId: string | null; reload: () => void; setError: (s: string | null) => void;
 }) {
   const supabase = createClient();
   const [scope, setScope] = useState<string | null>(null); // selected competitor id; null = tile grid
@@ -292,8 +298,9 @@ function Competitors({ competitors, cards, overview, capabilities, scores, compS
   const scoreOf = (capId: string, compId: string | null) => scores.find((s) => s.capability_id === capId && s.competitor_id === compId)?.score ?? 0;
   const heat = (s: number) => ["var(--fill)", "#FCE4C7", "#CDEBD6", "#9FD9B4"][s] || "var(--fill)";
   const heatText = (s: number) => ["—", "Partial", "Good", "Strong"][s] || "—";
-  // Real competitor↔signal link (metadata.competitor_id), not a name match.
-  const sigsFor = (compId: string | null) => (compId ? compSignals.filter((s) => s.metadata?.competitor_id === compId) : []);
+  // Real competitor↔signal link (first-class column, legacy metadata fallback).
+  const sigsFor = (compId: string | null) => (compId ? compSignals.filter((s) => sigComp(s) === compId) : []);
+  const themesFor = (compId: string | null, cat: string) => (compId ? themes.filter((t) => t.competitor_id === compId && t.category === cat) : []);
   const edge = (compId: string) => capabilities.reduce((a, c) => { const u = scoreOf(c.id, null), t = scoreOf(c.id, compId); return { we: a.we + (u > t ? 1 : 0), they: a.they + (t > u ? 1 : 0) }; }, { we: 0, they: 0 });
   async function saveNotes() { if (!scope) return; setError(null); await supabase.from("competitors").update({ notes: notes.trim() || null }).eq("id", scope); setEditNotes(false); reload(); }
 
@@ -370,7 +377,7 @@ function Competitors({ competitors, cards, overview, capabilities, scores, compS
 
       <div className="card" style={{ overflow: "hidden" }}>
         <div className="row" style={{ gap: 4, padding: "8px 8px 0", borderBottom: "1px solid var(--border)", flexWrap: "wrap" }}>
-          {([["overview", "Overview"], ["profile", "Signal profile"], ["gtm", "GTM battlecard"], ["product", "Product board"], ["signals", `Signals${sigsFor(scope).length ? ` · ${sigsFor(scope).length}` : ""}`]] as [CdTab, string][]).map(([k, label]) => {
+          {([["overview", "Overview"], ["profile", "Signal profile"], ["themes", `Themes${scope && themes.filter((t) => t.competitor_id === scope).length ? ` · ${themes.filter((t) => t.competitor_id === scope).length}` : ""}`], ["gtm", "GTM battlecard"], ["product", "Product board"], ["signals", `Signals${sigsFor(scope).length ? ` · ${sigsFor(scope).length}` : ""}`]] as [CdTab, string][]).map(([k, label]) => {
             const on = cdTab === k;
             return <button key={k} onClick={() => setCdTab(k)} style={{ background: "none", border: "none", borderBottom: on ? "2px solid var(--ac)" : "2px solid transparent", color: on ? "var(--tp)" : "var(--ts)", fontWeight: on ? 680 : 600, fontSize: 13, padding: "8px 14px", cursor: "pointer", marginBottom: -1 }}>{label}</button>;
           })}
@@ -483,6 +490,38 @@ function Competitors({ competitors, cards, overview, capabilities, scores, compS
         </Section>
       ) : cdTab === "profile" ? (
         <SignalProfile scope="competitor" competitorId={scope} competitorName={selected?.name} />
+      ) : cdTab === "themes" ? (
+        <div className="stack-3">
+          <div className="t-sub t-muted" style={{ fontSize: 12.5 }}>
+            Synthesized from {selected?.name}&rsquo;s signals — grouped by lens. <b>Product</b> moves inform the capability matrix and our technical foundation; <b>GTM</b> moves inform battlecards and our messaging. Run synthesis in the Signal feed to refresh.
+          </div>
+          {(["product", "gtm"] as const).map((cat) => {
+            const list = themesFor(scope, cat);
+            return (
+              <Section key={cat} label={cat === "product" ? "Product moves" : "GTM moves"}>
+                {list.length === 0 ? (
+                  <div className="t-sub t-muted" style={{ fontSize: 12.5 }}>No {cat === "product" ? "product" : "GTM"} themes yet for {selected?.name}. Log {cat === "product" ? "capability/roadmap" : "pricing/messaging"} signals and run synthesis.</div>
+                ) : (
+                  <div className="stack-3">
+                    {list.map((t) => (
+                      <div key={t.id} className="card card-pad" style={{ borderLeft: `3px solid ${cat === "product" ? "var(--ac)" : "var(--vl)"}` }}>
+                        <div className="row-between" style={{ gap: 12, alignItems: "flex-start", marginBottom: 4 }}>
+                          <span style={{ fontSize: 14, fontWeight: 620 }}>{t.title}</span>
+                          <div className="row gap-2" style={{ flexShrink: 0, alignItems: "center" }}>
+                            {t.state && <Chip tone={cat === "product" ? "accent" : "violet"}>{t.state}</Chip>}
+                            <Confidence label={null} level={t.conf_level} />
+                          </div>
+                        </div>
+                        {t.summary && <div className="t-sub t-muted" style={{ fontSize: 12.5, lineHeight: 1.45 }}>{t.summary}</div>}
+                        {t.recommendation && <div className="t-sub" style={{ fontSize: 12.5, marginTop: 6 }}><b>Recommendation:</b> {t.recommendation}</div>}
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </Section>
+            );
+          })}
+        </div>
       ) : (
         <Section label={`Signals on ${selected?.name}`}>
           {sigsFor(scope).length === 0 ? <div className="t-sub t-muted" style={{ fontSize: 12.5 }}>No signals tagged to {selected?.name} yet. Log competitive intel in the Signal feed and tag it to them.</div> : (
@@ -523,7 +562,7 @@ function Feed({ signals, competitors, reload }: { signals: Signal[]; competitors
   const compName = (id?: string) => competitors.find((c) => c.id === id)?.name;
   const all = signals.filter((s) => signalDomain(s) === SIGNAL_DOMAIN.competitive);
   const feed = all.filter((s) => (originTab === "internal" ? s.origin === "internal" : s.origin !== "internal"))
-    .filter((s) => compFilter === "all" || s.metadata?.competitor_id === compFilter);
+    .filter((s) => compFilter === "all" || sigComp(s) === compFilter);
   const counts = { internal: all.filter((s) => s.origin === "internal").length, external: all.filter((s) => s.origin !== "internal").length };
   const CHANNELS = form.origin === "internal" ? ["Gong call", "Salesforce opp", "Win/loss", "Support", "Field note"] : ["Website", "Pricing page", "G2 / reviews", "Launch / release", "Job posting", "News"];
 
@@ -537,6 +576,9 @@ function Feed({ signals, competitors, reload }: { signals: Signal[]; competitors
         org_id: orgId, scope: "org", title: form.title.trim(), why: form.why.trim() || null,
         conf_level: isNaN(lvl) ? null : lvl, conf_label: isNaN(lvl) ? null : lvl >= 0.75 ? "High" : lvl >= 0.5 ? "Medium" : "Low",
         observed_at: new Date().toISOString(), origin: form.origin,
+        // First-class link drives synthesis; metadata stays mirrored for the
+        // legacy readers (capability cell drawer, synthesize-profile).
+        competitor_id: form.competitor_id || null,
         metadata: { domain: "competitive", competitor_id: form.competitor_id || undefined, channel: form.channel || undefined },
       });
       if (error) throw error;
@@ -603,7 +645,7 @@ function Feed({ signals, competitors, reload }: { signals: Signal[]; competitors
                 {s.why && <p className="t-sub" style={{ lineHeight: 1.5 }}>{s.why}</p>}
                 <div className="row gap-2" style={{ marginTop: 6, flexWrap: "wrap", alignItems: "center" }}>
                   <Chip tone={s.origin === "internal" ? "accent" : "violet"}>{s.origin === "internal" ? "internal" : "external"}</Chip>
-                  {s.metadata?.competitor_id && <Chip>{compName(s.metadata.competitor_id) ?? "competitor"}</Chip>}
+                  {sigComp(s) && <Chip>{compName(sigComp(s) ?? undefined) ?? "competitor"}</Chip>}
                   {s.metadata?.channel && <span className="t-mono-xs t-muted">{s.metadata.channel}</span>}
                 </div>
               </div>

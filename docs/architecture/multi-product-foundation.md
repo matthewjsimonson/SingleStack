@@ -9,10 +9,15 @@ Status: **partially implemented** (see status below) · Owner: SingleStack
   carry a nullable `product_id` (migrations `20260530210000_multi_product` +
   `20260530280000_cross_product_scope`), with delete-demotion to company-wide
   instead of cascading destruction.
-- **Competitor intel — partially done:** sources can be competitor-scoped
-  (`sources.competitor_id`) and per-competitor signal profiles exist
-  (`20260608000001_signal_profiles`). Still open: per-competitor **themes**
-  (`signal_themes.competitor_id`) and the grouping proposed below.
+- **Competitor intel — DONE (Phase 4, `20260610000004_competitor_intel`).**
+  `signals.competitor_id` promotes the former `metadata->>'competitor_id'` JSON
+  link to a first-class FK (backfilled; the Feed dual-writes metadata for legacy
+  readers); `signal_themes.competitor_id` enables per-competitor synthesis.
+  `synthesize-signals` stamps a theme's competitor when its evidence unanimously
+  points at one, grouped by the existing `category` axis (product | gtm). UI:
+  each competitor gains a Themes tab splitting Product moves from GTM moves.
+  Sources can also be competitor-scoped (`sources.competitor_id`) and
+  per-competitor signal profiles exist (`20260608000001_signal_profiles`).
 - **Technical layer — DONE (Phase 3, `20260610000003_technical_foundation`).**
   `record_fields.module_id` (the third parent) gives each module its own
   technical fields; `signals.module_id` attaches tech-shift intel to the module

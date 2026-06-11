@@ -168,7 +168,7 @@ Deno.serve(async (req: Request) => {
     // Candidate signals to reconcile = those not yet attached to any theme.
     const { data: allSignals } = await supabase
       .from("signals")
-      .select("id, title, why, conf_level, scope, category, origin, observed_at, product_id, sources(label, origin)")
+      .select("id, title, why, conf_level, scope, category, origin, observed_at, product_id, competitor_id, sources(label, origin)")
       .order("observed_at", { ascending: false, nullsFirst: false })
       .limit(200);
     // Cap candidates so the prompt's signal half stays bounded (newest first).
@@ -304,10 +304,21 @@ Deno.serve(async (req: Request) => {
     //   two lines becomes a first-class cross-product theme rather than a muddled
     //   company-wide NULL (docs/architecture/cross-sell-and-scope.md).
     const productOfSignal = new Map<string, string | null>(candidates.map((s) => [s.id, (s as { product_id?: string | null }).product_id ?? null]));
+    // A theme is per-competitor only when its evidence UNANIMOUSLY points at one
+    // competitor (every supporting signal carries the same non-null competitor_id).
+    // Mixed or general evidence → NULL (an org-wide market theme). Mirrors how
+    // product scope is inferred from the evidence, not guessed by the model.
+    const competitorOfSignal = new Map<string, string | null>(candidates.map((s) => [s.id, (s as { competitor_id?: string | null }).competitor_id ?? null]));
+    const inferCompetitor = (ids: string[]): string | null => {
+      const cs = ids.map((id) => competitorOfSignal.get(id) ?? null);
+      if (cs.length === 0 || cs.some((c) => !c)) return null;
+      return cs.every((c) => c === cs[0]) ? cs[0] : null;
+    };
     let autoCreated = 0;
     for (const t of diff.new_themes ?? []) {
       const sigIds = (t.signal_indices ?? []).map(sigIdAt).filter(Boolean);
       const sc = inferScope(sigIds, productOfSignal);
+      const competitorId = inferCompetitor(sigIds);
       const xLines = sc.co_product_ids.length;
       const category = t.category === "gtm" ? "gtm" : "product";
       const conf = Math.min(1, Math.max(0, Number(t.conf_level) || 0));
@@ -316,12 +327,12 @@ Deno.serve(async (req: Request) => {
         const { data: created } = await supabase.from("signal_themes").insert({
           org_id: orgId, category, title: t.title, summary: t.summary, recommendation: t.recommendation,
           conf_level: conf, state: "active", merged_by: "synthesis",
-          product_id: sc.product_id, co_product_ids: sc.co_product_ids, signal_ids: sigIds, last_evidence_at: now,
+          product_id: sc.product_id, co_product_ids: sc.co_product_ids, competitor_id: competitorId, signal_ids: sigIds, last_evidence_at: now,
         }).select("id").single();
         if (created) { await attachSignals(created.id, sigIds); await ev(created.id, "created", { auto: true, policy: "autonomous" }, orgId); autoCreated++; }
       } else {
         queued.push({ org_id: orgId, kind: "new_theme", theme_id: null,
-          payload: { category, title: t.title, summary: t.summary, recommendation: t.recommendation, conf_level: conf, signal_ids: sigIds, product_id: sc.product_id, co_product_ids: sc.co_product_ids },
+          payload: { category, title: t.title, summary: t.summary, recommendation: t.recommendation, conf_level: conf, signal_ids: sigIds, product_id: sc.product_id, co_product_ids: sc.co_product_ids, competitor_id: competitorId },
           summary: `New ${t.category}${xLines ? " cross-product" : ""} theme: "${t.title}" (${sigIds.length} signal${sigIds.length === 1 ? "" : "s"}${xLines ? `, spans ${xLines + 1} lines` : ""})` });
       }
     }
