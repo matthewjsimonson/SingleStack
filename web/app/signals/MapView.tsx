@@ -4,13 +4,13 @@
 // curated View maps each theme's attributes to a labelled position. No freeform
 // axis-picker — you pick a View, each answering one question. (Action Matrix
 // first; more Views as dimensions populate.) Signals collapse into their theme
-// here; bridges draw as edges; contradiction shows as a marker. Click a node to
+// here; contradiction shows as a marker. Click a node to
 // drill in. Battle-tested to stay legible from a handful to ~50 themes.
 import { useEffect, useMemo, useRef, useState, useCallback } from "react";
 import { useRouter } from "next/navigation";
 import { createClient } from "@/lib/supabase/client";
 import { Banner, Spinner } from "@/components/ui";
-import { projectActionMatrix, VIEWS, type ViewKey, type PTheme, type PBridgeEdge } from "@/lib/projections";
+import { projectActionMatrix, VIEWS, type ViewKey, type PTheme } from "@/lib/projections";
 
 const W = 1000, H = 600, PAD = 56;
 
@@ -25,7 +25,6 @@ export default function MapView({ productFilter = "all", onOpenTheme }: { produc
   const supabase = createClient();
   const router = useRouter();
   const [themes, setThemes] = useState<PTheme[]>([]);
-  const [bridges, setBridges] = useState<PBridgeEdge[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [view, setView] = useState<ViewKey>("action");
@@ -33,12 +32,11 @@ export default function MapView({ productFilter = "all", onOpenTheme }: { produc
 
   const load = useCallback(async () => {
     setError(null);
-    const [{ data: ths }, { data: strength }, { data: tsig }, { data: misses }, { data: brs }] = await Promise.all([
+    const [{ data: ths }, { data: strength }, { data: tsig }, { data: misses }] = await Promise.all([
       supabase.from("signal_themes").select("id, title, category, state, momentum, horizon, owner_team, product_id, conf_level").neq("state", "dormant"),
       supabase.from("theme_evidence_strength").select("theme_id, honest_conf, contra_signals"),
       supabase.from("theme_signals").select("theme_id, stance"),
       supabase.from("theme_misses").select("theme_id"),
-      supabase.from("bridge_strength").select("product_theme_id, gtm_theme_id, bridge_conf, state"),
     ]);
     const confBy: Record<string, number> = {}, contraBy: Record<string, number> = {};
     for (const s of strength ?? []) { confBy[s.theme_id] = s.honest_conf ?? 0; contraBy[s.theme_id] = s.contra_signals ?? 0; }
@@ -56,7 +54,6 @@ export default function MapView({ productFilter = "all", onOpenTheme }: { produc
       href: `/signals/themes/${t.id}`,
     }));
     setThemes(list);
-    setBridges((brs ?? []).filter((b) => b.state !== "dismissed").map((b) => ({ source: b.product_theme_id, target: b.gtm_theme_id, conf: b.bridge_conf ?? 0 })));
     setLoading(false);
   }, [supabase, productFilter]);
   useEffect(() => { load(); }, [load]);
@@ -139,13 +136,6 @@ export default function MapView({ productFilter = "all", onOpenTheme }: { produc
               <text key={`c${i}`} x={c.x} y={H - 16} fontSize={11} fontWeight={600} fill="#8B8E97" textAnchor="middle" letterSpacing="0.04em">{c.label.toUpperCase()}</text>
             ))}
             <text x={W / 2} y={H - 3} fontSize={10} fill="#A6A9B2" textAnchor="middle">{projection.xAxisLabel}</text>
-
-            {/* bridges */}
-            {bridges.map((b, i) => {
-              const a = posById.get(b.source), c = posById.get(b.target);
-              if (!a || !c) return null;
-              return <line key={i} x1={a.x} y1={a.y} x2={c.x} y2={c.y} stroke="#A78BFA" strokeWidth={1.2} opacity={0.5} />;
-            })}
 
             {/* theme nodes */}
             {projection.nodes.map((n) => {

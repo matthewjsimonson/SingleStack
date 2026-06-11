@@ -20,7 +20,6 @@ import PageBar from "@/components/PageBar";
 import TrackingTopics from "@/components/TrackingTopics";
 import SourceManager from "@/components/SourceManager";
 import IntelReview from "./IntelReview";
-import Bridges from "./Bridges";
 import MapView from "./MapView";
 import SignalDrawer, { type DrawerSignal } from "@/components/SignalDrawer";
 import ThemeDrawer from "@/components/ThemeDrawer";
@@ -303,8 +302,6 @@ function Home({ signals, themes, productThemes, gtmThemes, highSignals, unsorted
           {/* Review queue + learning — the HITL feedback loop */}
           <IntelReview onApplied={reload} productFilter={productFilter} />
 
-          {/* Bridges — cross-lens Product↔GTM insight (the differentiated brief) */}
-          <Bridges onChange={reload} productFilter={productFilter} />
 
           {/* Callouts: synthesized themes as product/gtm intelligence briefs */}
           {themes.length > 0 && (

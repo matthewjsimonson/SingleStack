@@ -10,7 +10,6 @@ export type PTheme = {
   horizon?: string | null; owner?: string | null;
   signalCount: number; contraCount: number; flag?: string | null; href: string;
 };
-export type PBridgeEdge = { source: string; target: string; conf: number };
 
 export type Positioned = PTheme & { x: number; y: number; r: number };
 export type Lane = { y0: number; y1: number; label: string; tone?: "hot" | "warm" | "cool" };
