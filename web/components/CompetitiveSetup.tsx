@@ -29,11 +29,15 @@ export default function CompetitiveSetup({ onDone, productId }: { onDone: () => 
   const [error, setError] = useState<string | null>(null);
 
   // step 1 — anchor: the market context comes FROM the records the user already
-  // authored (product + GTM), not from a blank textarea. `market` is only an
-  // optional refinement on top.
+  // authored (product + GTM); the structured fields below pre-fill from them
+  // and stay fully editable.
   const [prod, setProd] = useState<{ name: string; value_prop: string | null } | null>(null);
   const [gtm, setGtm] = useState<{ name: string; personas: string | null; positioning: string | null } | null>(null);
-  const [market, setMarket] = useState("");
+  // Structured, ALWAYS-editable market context — pre-filled from the records,
+  // never locked. Personas and industries are first-class: they decide which
+  // rivals actually compete for the same buyer.
+  const [ctx, setCtx] = useState({ product: "", who: "", industries: "", positioning: "", more: "" });
+  const ctxSet = (k: keyof typeof ctx) => (e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement>) => setCtx((c) => ({ ...c, [k]: e.target.value }));
   // step 2 — competitors
   const [comps, setComps] = useState<CompCand[]>([]);
   const [savedComps, setSavedComps] = useState<{ id: string; name: string; website: string | null }[]>([]);
@@ -115,28 +119,53 @@ export default function CompetitiveSetup({ onDone, productId }: { onDone: () => 
 
   useEffect(() => {
     (async () => {
+      let prodLine = "", whoLine = "", posLine = "", problemLine = "";
+      // Product record: the REAL template keys (what_it_is / who_its_for /
+      // problem / category), with the legacy seed keys (overview / value_prop)
+      // as fallback — not just value_prop, which products don't carry.
       const { data: p } = await supabase.from("product_records").select("id, name").order("created_at").limit(1).maybeSingle();
       if (p) {
-        const { data: vp } = await supabase.from("record_fields").select("value").eq("product_id", p.id).eq("field_key", "value_prop").maybeSingle();
-        setProd({ name: p.name, value_prop: vp?.value ?? null });
+        const { data: fs } = await supabase.from("record_fields").select("field_key, value").eq("product_id", p.id)
+          .in("field_key", ["what_it_is", "who_its_for", "problem", "category", "value_prop", "overview"]);
+        const f = (k: string) => fs?.find((x) => x.field_key === k)?.value ?? null;
+        const what = f("what_it_is") ?? f("value_prop") ?? f("overview");
+        setProd({ name: p.name, value_prop: what });
+        prodLine = `Our product: ${p.name}${what ? ` — ${what}` : ""}${f("category") ? ` (category: ${f("category")})` : ""}`;
+        if (f("who_its_for")) whoLine = `Who it's for: ${f("who_its_for")}`;
+        if (f("problem")) problemLine = `Problem it solves: ${f("problem")}`;
       } else setProd(null);
-      // GTM record: personas (who we sell to) + positioning (against what) — the
-      // exact answer to "describe your market", already authored by the user.
+      // GTM record: personas/icp (who we sell to) + positioning (against what).
       const { data: g } = await supabase.from("gtm_records").select("id, name").order("created_at").limit(1).maybeSingle();
       if (g) {
-        const { data: fs } = await supabase.from("record_fields").select("field_key, value").eq("gtm_record_id", g.id).in("field_key", ["personas", "positioning"]);
-        setGtm({ name: g.name, personas: fs?.find((f) => f.field_key === "personas")?.value ?? null, positioning: fs?.find((f) => f.field_key === "positioning")?.value ?? null });
+        const { data: fs } = await supabase.from("record_fields").select("field_key, value").eq("gtm_record_id", g.id)
+          .in("field_key", ["personas", "primary_persona", "icp", "positioning", "category_pov", "differentiation"]);
+        const f = (k: string) => fs?.find((x) => x.field_key === k)?.value ?? null;
+        const personas = f("personas") ?? f("primary_persona") ?? f("icp");
+        const positioning = f("positioning") ?? f("category_pov");
+        setGtm({ name: g.name, personas, positioning });
+        if (personas && !whoLine) whoLine = `Who we sell to: ${personas}`;
+        if (positioning) posLine = `How we position: ${positioning}`;
       } else setGtm(null);
+      // Pre-fill the EDITABLE fields from the records — the human can adjust,
+      // add, or rewrite everything before anything runs. Never overwrite typing.
+      setCtx((cur) => ({
+        product: cur.product.trim() ? cur.product : [prodLine, problemLine].filter(Boolean).join(" "),
+        who: cur.who.trim() ? cur.who : whoLine.replace(/^Who (it's for|we sell to): /, ""),
+        industries: cur.industries, // no canonical record field yet — the human owns this one
+        positioning: cur.positioning.trim() ? cur.positioning : posLine.replace(/^How we position: /, ""),
+        more: cur.more,
+      }));
     })();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  // The composed market context the agent searches from: records first, the
-  // optional refinement appended.
+  // What the agent searches from = exactly what's in the editable fields.
   const marketCtx = [
-    gtm?.personas ? `Who we sell to: ${gtm.personas}` : "",
-    gtm?.positioning ? `How we position: ${gtm.positioning}` : "",
-    market.trim() ? `Refinement from the user: ${market.trim()}` : "",
+    ctx.product.trim() ? `Our product: ${ctx.product.trim()}` : "",
+    ctx.who.trim() ? `Who we sell to (personas): ${ctx.who.trim()}` : "",
+    ctx.industries.trim() ? `Industries / verticals: ${ctx.industries.trim()}` : "",
+    ctx.positioning.trim() ? `How we position / against what: ${ctx.positioning.trim()}` : "",
+    ctx.more.trim() ? `Also: ${ctx.more.trim()}` : "",
   ].filter(Boolean).join("\n");
 
   const invoke = async (body: Record<string, unknown>) => {
@@ -289,7 +318,8 @@ export default function CompetitiveSetup({ onDone, productId }: { onDone: () => 
             <div className="card card-pad" style={{ background: "var(--panel-2)" }}>
               <div className="t-label" style={{ color: "var(--tm)", marginBottom: 4 }}>Product record</div>
               {prod ? (<><div style={{ fontSize: 14, fontWeight: 640 }}>{prod.name}</div>
-                {prod.value_prop && <div className="t-sub t-muted" style={{ fontSize: 12.5, marginTop: 3 }}>{prod.value_prop}</div>}</>)
+                {prod.value_prop ? <div className="t-sub t-muted" style={{ fontSize: 12.5, marginTop: 3 }}>{prod.value_prop}</div>
+                  : <div className="t-sub t-muted" style={{ fontSize: 12.5, marginTop: 3 }}>No &ldquo;what it is&rdquo; field yet — add it on the record, or write it into the context below.</div>}</>)
                 : <div className="t-sub t-muted" style={{ fontSize: 12.5 }}>No product record yet — <a href="/products">create it first</a>; the search leans on it.</div>}
             </div>
             <div className="card card-pad" style={{ background: "var(--panel-2)" }}>
@@ -301,11 +331,21 @@ export default function CompetitiveSetup({ onDone, productId }: { onDone: () => 
               </>) : <div className="t-sub t-muted" style={{ fontSize: 12.5 }}>No GTM record yet — <a href="/gtm">create it first</a>, or refine below.</div>}
             </div>
           </div>
-          <label className="field"><span className="t-label">Anything the records don&rsquo;t say? <span className="t-muted" style={{ fontWeight: 400, textTransform: "none", letterSpacing: 0 }}>— optional</span></span>
-            <input className="input" value={market} onChange={(e) => setMarket(e.target.value)}
-              placeholder="e.g. also watch the open-source alternatives" /></label>
+          <div className="t-sub t-muted" style={{ fontSize: 12, marginTop: 4 }}>Everything below is pre-filled from the records where they speak — and always yours to adjust, add to, or rewrite.</div>
+          <label className="field"><span className="t-label">Product — what it is</span>
+            <input className="input" value={ctx.product} onChange={ctxSet("product")} placeholder="What the product is and the problem it solves" /></label>
+          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "var(--sp-3)" }}>
+            <label className="field"><span className="t-label">Who you sell to — personas</span>
+              <input className="input" value={ctx.who} onChange={ctxSet("who")} placeholder="e.g. Heads of Product, PMMs, RevOps leads" /></label>
+            <label className="field"><span className="t-label">Industries / verticals <span className="t-muted" style={{ fontWeight: 400, textTransform: "none", letterSpacing: 0 }}>— key for who you actually compete with</span></span>
+              <input className="input" value={ctx.industries} onChange={ctxSet("industries")} placeholder="e.g. B2B SaaS, fintech, healthcare IT" /></label>
+          </div>
+          <label className="field"><span className="t-label">How you position — against what</span>
+            <input className="input" value={ctx.positioning} onChange={ctxSet("positioning")} placeholder="The category you claim and what you replace" /></label>
+          <label className="field"><span className="t-label">Anything else <span className="t-muted" style={{ fontWeight: 400, textTransform: "none", letterSpacing: 0 }}>— optional</span></span>
+            <input className="input" value={ctx.more} onChange={ctxSet("more")} placeholder="e.g. also watch the open-source alternatives" /></label>
           <div className="row gap-2">
-            <button className="btn btn-sm" disabled={busy === "comps" || (!marketCtx && !prod)} onClick={findCompetitors}>{busy === "comps" ? "Searching the landscape…" : "✦ Find my competitors"}</button>
+            <button className="btn btn-sm" disabled={busy === "comps" || !marketCtx} onClick={findCompetitors}>{busy === "comps" ? "Searching the landscape…" : "✦ Find my competitors"}</button>
             <button className="btn btn-secondary btn-sm" onClick={onDone}>Skip — set up by hand</button>
           </div>
         </div>
