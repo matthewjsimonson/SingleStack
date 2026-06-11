@@ -13,7 +13,7 @@
 //   3. Refine & create — the drafted product + GTM records, field by field, in
 //      roomy editors pre-filled with the agent's proposition. Edit, clear, or
 //      fill anything; only then does Create write the rows (as you, RLS).
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { createClient } from "@/lib/supabase/client";
 import { getOrgId } from "@/lib/org";
 import { Chip, Banner } from "@/components/ui";
@@ -31,7 +31,7 @@ const TEMPLATE_FIELDS: DraftField[] = [
   ...GTM_TEMPLATE.filter((s) => s.section !== "Battlecard").flatMap((s) => s.fields.map((f) => ({ record: "gtm" as const, key: f.key, label: f.label, section: s.section, value: "" }))),
 ];
 
-export default function RecordSetup({ onDone }: { onDone: (productId?: string) => void }) {
+export default function RecordSetup({ onDone, mode = "both" }: { onDone: (productId?: string) => void; mode?: "both" | "gtm" }) {
   const supabase = createClient();
   const [step, setStep] = useState<1 | 2 | 3>(1);
   const [error, setError] = useState<string | null>(null);
@@ -55,7 +55,18 @@ export default function RecordSetup({ onDone }: { onDone: (productId?: string) =
   const [gaps, setGaps] = useState("");
 
   // step 3 — the draft, refined by hand
-  const [fields, setFields] = useState<DraftField[]>(TEMPLATE_FIELDS);
+  const allFields = mode === "gtm" ? TEMPLATE_FIELDS.filter((f) => f.record === "gtm") : TEMPLATE_FIELDS;
+  const [fields, setFields] = useState<DraftField[]>(allFields);
+  // gtm mode: the new GTM record needs its parent product.
+  const [parentProducts, setParentProducts] = useState<{ id: string; name: string }[]>([]);
+  const [parentId, setParentId] = useState("");
+  useEffect(() => {
+    if (mode !== "gtm") return;
+    supabase.from("product_records").select("id, name").order("created_at").then(({ data }) => {
+      setParentProducts(data ?? []); setParentId((cur) => cur || data?.[0]?.id || "");
+    });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [mode]);
   const [prodName, setProdName] = useState("");
   const [gtmName, setGtmName] = useState("");
   const [creating, setCreating] = useState(false);
@@ -78,7 +89,7 @@ export default function RecordSetup({ onDone }: { onDone: (productId?: string) =
     if (data?.error) throw new Error(data.error);
     return data;
   };
-  const templatePayload = TEMPLATE_FIELDS.map((f) => ({ record: f.record, key: f.key, label: f.label, section: f.section }));
+  const templatePayload = allFields.map((f) => ({ record: f.record, key: f.key, label: f.label, section: f.section }));
 
   // ---- step 1: materials ------------------------------------------------------
   function addPaste() {
@@ -152,7 +163,7 @@ export default function RecordSetup({ onDone }: { onDone: (productId?: string) =
         const data = await invoke({ step: "draft", materials, transcript: chat, template: templatePayload });
         const byKey: Record<string, string> = {};
         for (const f of (data.fields ?? []) as { record: string; key: string; value: string }[]) byKey[`${f.record}:${f.key}`] = f.value ?? "";
-        setFields(TEMPLATE_FIELDS.map((f) => ({ ...f, value: byKey[`${f.record}:${f.key}`] ?? "" })));
+        setFields(allFields.map((f) => ({ ...f, value: byKey[`${f.record}:${f.key}`] ?? "" })));
         setProdName((data.product_name as string) || "");
         setGtmName((data.gtm_name as string) || "");
         setStep(3);
@@ -162,6 +173,23 @@ export default function RecordSetup({ onDone }: { onDone: (productId?: string) =
   const setField = (i: number, v: string) => setFields(fields.map((f, j) => (j === i ? { ...f, value: v } : f)));
 
   async function create() {
+    if (mode === "gtm") {
+      if (!parentId) { setError("Pick the parent product."); return; }
+      setCreating(true); setError(null);
+      try {
+        const orgId = await getOrgId(); if (!orgId) throw new Error("Could not resolve your organization.");
+        const { data: g, error: gErr } = await supabase.from("gtm_records").insert({ org_id: orgId, product_id: parentId, name: gtmName.trim() || "Core GTM" }).select("id").single();
+        if (gErr || !g) throw gErr ?? new Error("Could not create the GTM record.");
+        const gf = fields.filter((f) => f.record === "gtm" && f.value.trim());
+        if (gf.length) {
+          const { error } = await supabase.from("record_fields").insert(gf.map((f, i) => ({ org_id: orgId, gtm_record_id: g.id, field_key: f.key, label: f.label, value: f.value.trim(), section: f.section, position: i })));
+          if (error) throw error;
+        }
+        onDone(parentId);
+      } catch (e) { setError(e instanceof Error ? e.message : "Could not create the record."); }
+      finally { setCreating(false); }
+      return;
+    }
     if (!prodName.trim()) { setError("Name the product."); return; }
     setCreating(true); setError(null);
     try {
@@ -265,7 +293,13 @@ export default function RecordSetup({ onDone }: { onDone: (productId?: string) =
           <div className="card card-pad" style={{ background: "var(--panel-2)", fontSize: 12.5 }}>
             The agent&rsquo;s draft, in your hands — <b>{filled}</b> of {fields.length} fields grounded in what you gave it. Edit anything, clear what&rsquo;s wrong, fill what it left honestly empty. Nothing is written until you create.
           </div>
-          {([["product", "Product record", prodName, setProdName], ["gtm", "GTM record", gtmName, setGtmName]] as const).map(([rec, title, nameVal, setName]) => (
+          {mode === "gtm" && (
+            <label className="field" style={{ maxWidth: 360 }}><span className="t-label">Parent product</span>
+              <select className="select" value={parentId} onChange={(e) => setParentId(e.target.value)}>
+                {parentProducts.map((pp) => <option key={pp.id} value={pp.id}>{pp.name}</option>)}
+              </select></label>
+          )}
+          {([["product", "Product record", prodName, setProdName], ["gtm", "GTM record", gtmName, setGtmName]] as const).filter(([rec]) => mode !== "gtm" || rec === "gtm").map(([rec, title, nameVal, setName]) => (
             <div key={rec} className="card card-pad">
               <div className="row gap-2" style={{ alignItems: "center", marginBottom: 10 }}>
                 <span className="t-label" style={{ color: "var(--tm)" }}>{title}</span>
@@ -287,7 +321,7 @@ export default function RecordSetup({ onDone }: { onDone: (productId?: string) =
             </div>
           ))}
           <div className="row gap-2">
-            <button className="btn btn-sm" disabled={creating} onClick={create}>{creating ? "Creating…" : "Create both records"}</button>
+            <button className="btn btn-sm" disabled={creating} onClick={create}>{creating ? "Creating…" : mode === "gtm" ? "Create the GTM record" : "Create both records"}</button>
             <button className="btn btn-secondary btn-sm" onClick={() => setStep(2)}>‹ Back</button>
           </div>
         </div>

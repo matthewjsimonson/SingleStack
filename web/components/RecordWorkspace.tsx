@@ -18,6 +18,8 @@ type Proposal = {
 
 const fkCol = (t: Target) => (t.kind === "product" ? "product_id" : "gtm_record_id");
 
+import RecordRefine from "@/components/RecordRefine";
+
 export default function RecordWorkspace({ target, recordName }: { target: Target; recordName?: string }) {
   const supabase = createClient();
   const fk = fkCol(target);
@@ -32,6 +34,9 @@ export default function RecordWorkspace({ target, recordName }: { target: Target
   const [src, setSrc] = useState({ mode: "paste" as "paste" | "url", content: "", url: "", guidance: "" });
   const [importing, setImporting] = useState(false);
   const [impNote, setImpNote] = useState<string | null>(null);
+  // Refine with AI — the HITL chat: marketplace + company-grounded refinements,
+  // each an editable proposition through the proposals trail.
+  const [refining, setRefining] = useState(false);
 
   const load = useCallback(async () => {
     const [{ data: ags }, { data: props }] = await Promise.all([
@@ -85,8 +90,14 @@ export default function RecordWorkspace({ target, recordName }: { target: Target
           <div style={{ fontWeight: 640, fontSize: 13.5 }}>Set up with AI</div>
           <div className="t-sub t-muted" style={{ fontSize: 12.5, marginTop: 2 }}>Already have this written down? Import a doc or a public URL — AI drafts fields into your review queue; you accept what&rsquo;s right.</div>
         </div>
-        <button className="btn btn-sm" onClick={() => { setImpNote(null); setImp(true); }} style={{ background: "var(--ac)", color: "#fff", flexShrink: 0 }}>Set up with AI</button>
+        <span className="row gap-2" style={{ flexShrink: 0 }}>
+          <button className="btn btn-sm" onClick={() => { setImpNote(null); setImp(true); }} style={{ background: "var(--ac)", color: "#fff" }}>Set up with AI</button>
+          <button className="btn btn-secondary btn-sm" onClick={() => setRefining(true)}
+            title="A chat that reads this record plus your marketplace + company signals, and proposes refinements you edit before they land">✦ Refine with AI</button>
+        </span>
       </div>
+
+      {refining && <RecordRefine target={target} recordName={recordName} onApplied={refresh} onClose={() => setRefining(false)} />}
 
       <Modal open={imp} onClose={() => setImp(false)} title="Set up this record with AI" width={620}>
         <div className="t-sub t-muted" style={{ fontSize: 12.5, marginBottom: 12 }}>Paste content you already have (a brief, a doc, your website/positioning copy) or point at a public URL. AI proposes fields into your <strong>review queue</strong> — nothing is applied until you accept it. Imported content is treated as untrusted and screened.</div>

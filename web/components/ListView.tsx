@@ -75,8 +75,9 @@ export default function ListView({ kind }: { kind: "product" | "gtm" }) {
         title={title}
         actions={!creating && !aiSetup ? (
           <span className="row gap-2">
-            {kind === "product" && <button className="btn" onClick={() => setAiSetup(true)} title="Bring your materials (paste, URLs, PDFs), answer a short interview, refine the drafted records — then they're created.">✦ Set up with AI</button>}
-            <button className={kind === "product" ? "btn btn-secondary" : "btn"} onClick={start} disabled={kind === "gtm" && products.length === 0}
+            <button className="btn" onClick={() => setAiSetup(true)} disabled={kind === "gtm" && products.length === 0}
+              title={kind === "gtm" && products.length === 0 ? "Create a product first" : "Bring your materials (paste, URLs, PDFs), answer a short interview, refine the draft — then it's created."}>✦ Set up with AI</button>
+            <button className="btn btn-secondary" onClick={start} disabled={kind === "gtm" && products.length === 0}
               title={kind === "gtm" && products.length === 0 ? "Create a product first" : undefined}>
               + New {kind === "product" ? "product" : "GTM record"}
             </button>
@@ -86,7 +87,7 @@ export default function ListView({ kind }: { kind: "product" | "gtm" }) {
 
       {aiSetup && (
         <div style={{ marginBottom: "var(--sp-6)" }}>
-          <RecordSetup onDone={(productId) => { setAiSetup(false); if (productId) router.push(`/records/${productId}`); else load(); }} />
+          <RecordSetup mode={kind === "gtm" ? "gtm" : "both"} onDone={(productId) => { setAiSetup(false); if (productId && kind === "product") router.push(`/records/${productId}`); else load(); }} />
         </div>
       )}
 
@@ -109,7 +110,7 @@ export default function ListView({ kind }: { kind: "product" | "gtm" }) {
             hint={kind === "product" ? "Start with AI: your materials + a short interview draft both records — you refine every field before they're created." : "GTM records are the go-to-market branches beneath a product."}
             action={kind === "product"
               ? <span className="row gap-2"><button className="btn" onClick={() => setAiSetup(true)}>✦ Set up with AI</button><button className="btn btn-secondary" onClick={start}>+ By hand</button></span>
-              : <button className="btn" onClick={start} disabled={products.length === 0}>+ New GTM record</button>} />
+              : <span className="row gap-2"><button className="btn" onClick={() => setAiSetup(true)} disabled={products.length === 0}>✦ Set up with AI</button><button className="btn btn-secondary" onClick={start} disabled={products.length === 0}>+ By hand</button></span>} />
         ) : (
           <div className="grid-cards">
             {kind === "product" && products.map((p) => (
