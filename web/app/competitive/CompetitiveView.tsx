@@ -21,7 +21,7 @@ import { useProductScope } from "@/lib/ProductContext";
 type Competitor = { id: string; name: string; relationship: string; website: string | null; notes: string | null; product_id: string | null };
 type Capability = { id: string; name: string; category: string | null };
 type Score = { id: string; capability_id: string; competitor_id: string | null; score: number };
-type Card = { id: string; competitor_id: string | null; kind: string; title: string; detail: string | null; proposed_by: string | null; signal_ids: string[] | null; updated_at: string | null };
+type Card = { id: string; competitor_id: string | null; kind: string; title: string; detail: string | null; proposed_by: string | null; signal_ids: string[] | null; updated_at: string | null; audience: string | null };
 type Signal = { id: string; title: string; why: string | null; conf_label: string | null; conf_level: number | null; observed_at: string | null; origin: string | null; competitor_id: string | null; metadata: { domain?: string; competitor_id?: string; channel?: string } | null; source_id: string | null };
 type Theme = { id: string; title: string; summary: string | null; recommendation: string | null; category: string; competitor_id: string | null; conf_level: number | null; state: string };
 // The competitor a signal is about — first-class column, with a fallback to the
@@ -49,7 +49,7 @@ export default function CompetitiveView() {
       supabase.from("competitors").select("id, name, relationship, website, notes, product_id").order("position").order("created_at"),
       supabase.from("capabilities").select("id, name, category").order("position").order("created_at"),
       supabase.from("capability_scores").select("id, capability_id, competitor_id, score"),
-      supabase.from("battlecard_items").select("id, competitor_id, kind, title, detail, proposed_by, signal_ids, updated_at").order("position").order("created_at"),
+      supabase.from("battlecard_items").select("id, competitor_id, kind, title, detail, proposed_by, signal_ids, updated_at, audience").order("position").order("created_at"),
       supabase.from("signals").select("id, title, why, conf_label, conf_level, observed_at, origin, competitor_id, metadata, source_id").order("observed_at", { ascending: false, nullsFirst: false }),
       supabase.from("signal_themes").select("id, title, summary, recommendation, category, competitor_id, conf_level, state").not("competitor_id", "is", null).order("last_evidence_at", { ascending: false, nullsFirst: false }),
     ]);
@@ -532,6 +532,7 @@ function Competitors({ competitors, cards, overview, capabilities, scores, compS
                         <span className="row gap-2" style={{ alignItems: "center", minWidth: 0 }}>
                           <span style={{ fontSize: 13.5, fontWeight: 620 }}>{c.title}</span>
                           {c.proposed_by && <Chip tone="violet">✦ {c.proposed_by}</Chip>}
+                          {c.audience !== "field" && <Chip tone="amber">internal</Chip>}
                         </span>
                         <button className="t-muted" onClick={(ev) => { ev.stopPropagation(); remove(c.id); }} style={{ background: "none", border: "none", cursor: "pointer", fontSize: 15 }} aria-label="Remove">×</button>
                       </div>

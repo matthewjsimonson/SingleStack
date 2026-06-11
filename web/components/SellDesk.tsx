@@ -53,7 +53,7 @@ export default function SellDesk() {
     const [{ data: g }, { data: cs }, { data: bc }] = await Promise.all([
       supabase.from("gtm_records").select("id, name").order("created_at"),
       supabase.from("competitors").select("id, name, relationship, notes").order("position").order("created_at"),
-      supabase.from("battlecard_items").select("id, competitor_id, kind, title, detail").order("position"),
+      supabase.from("battlecard_items").select("id, competitor_id, kind, title, detail").eq("audience", "field").order("position"),
     ]);
     setGtms((g ?? []) as Gtm[]); setCompetitors((cs ?? []) as Competitor[]); setCards((bc ?? []) as Card[]);
     if (!gtmId && g?.length) setGtmId(g[0].id);

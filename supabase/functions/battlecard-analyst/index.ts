@@ -209,8 +209,10 @@ Deno.serve(async (req: Request) => {
     const items = (out.items ?? []).filter((it) => KINDS.includes(it.kind) && it.title?.trim());
 
     // ---- persist per the autonomy dial ---------------------------------------
-    const { data: polRow } = await supabase.from("review_policies").select("mode").eq("org_id", orgId).eq("surface", "intelligence").maybeSingle();
-    const autonomous = polRow?.mode === "autonomous";
+    // HITL is ABSOLUTE for battlecards: signals and proposals are living, the
+    // card is not — every change is human-ratified, regardless of the autonomy
+    // dial. (Direct human edits remain available in the card panel.)
+    const autonomous = false;
 
     const sigIdAt = (i: number) => sigList[i]?.id;
     const themeIdAt = (i: number) => (i >= 0 ? themeList[i]?.id ?? null : null);

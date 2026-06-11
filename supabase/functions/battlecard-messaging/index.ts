@@ -199,14 +199,9 @@ Deno.serve(async (req: Request) => {
       await supabase.from("proposal_signals").insert(evidence.map((sid) => ({ org_id: orgId, proposal_id: prop.id, signal_id: sid })));
     }
 
-    // Autonomy dial for the 'records' surface: autonomous → apply immediately
-    // (ratified as the agent, full revision + ratification trail).
-    const { data: polRow } = await supabase.from("review_policies").select("mode").eq("org_id", orgId).eq("surface", "records").maybeSingle();
-    let autoAccepted = false;
-    if (polRow?.mode === "autonomous") {
-      const { error: accErr } = await supabase.rpc("accept_proposal", { p_proposal: prop.id, p_ratifier: agent.name });
-      autoAccepted = !accErr;
-    }
+    // HITL is ABSOLUTE for battlecard messaging: always a pending proposal,
+    // never auto-accepted — the human ratifies what sellers will say.
+    const autoAccepted = false;
 
     const usage = { input_tokens: resp.usage?.input_tokens ?? 0, output_tokens: resp.usage?.output_tokens ?? 0 };
     const price = PRICING[model];

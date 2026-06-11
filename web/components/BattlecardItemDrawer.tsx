@@ -9,7 +9,7 @@ import { useEffect, useState } from "react";
 import { createClient } from "@/lib/supabase/client";
 import { Chip, Banner, Confidence } from "@/components/ui";
 
-export type CardItem = { id: string; competitor_id: string | null; kind: string; title: string; detail: string | null; proposed_by: string | null; signal_ids?: string[] | null; updated_at?: string | null };
+export type CardItem = { id: string; competitor_id: string | null; kind: string; title: string; detail: string | null; proposed_by: string | null; signal_ids?: string[] | null; updated_at?: string | null; audience?: string | null };
 type Sig = { id: string; title: string; why: string | null; conf_label: string | null; conf_level: number | null };
 type Agent = { id: string; key: string; name: string };
 type Msg = { role: "user" | "assistant"; content: string };
@@ -127,8 +127,15 @@ export default function BattlecardItemDrawer({ item, competitorName, workflowId,
                   {item.proposed_by && <Chip tone="violet">✦ {item.proposed_by}</Chip>}
                   {item.updated_at && <span className="t-mono-xs t-muted">updated {new Date(item.updated_at).toLocaleDateString()}</span>}
                 </div>
-                <div className="row gap-2" style={{ marginTop: 10 }}>
+                <div className="row gap-2" style={{ marginTop: 10, flexWrap: "wrap" }}>
                   <button className="btn btn-secondary btn-sm" onClick={() => { setDraft({ title: item.title, detail: item.detail ?? "" }); setEditing(true); }}>Edit by hand</button>
+                  <button className="btn btn-secondary btn-sm" disabled={busy === "save"} onClick={async () => {
+                    const to = item.audience === "field" ? "internal" : "field";
+                    const { error } = await supabase.from("battlecard_items").update({ audience: to }).eq("id", item.id);
+                    if (error) setError(error.message); else { setNote(to === "field" ? "Published — sellers now see this card in the Sell desk." : "Made internal — raw truth only (GTM/product)."); onChanged(); }
+                  }} title="internal = raw truth for GTM/product; field = the massaged version sellers see">
+                    {item.audience === "field" ? "Make internal" : "Publish to field"}
+                  </button>
                   <button className="btn btn-secondary btn-sm" disabled={!workflowId || busy === "refresh"} onClick={reexamine}
                     title={workflowId ? "Step 1 of your workflow re-examines this card against fresh evidence — changes go through review" : "Attach a workflow (agent × analyst skill) first"}>
                     {busy === "refresh" ? "Re-examining…" : "✦ Re-examine with analyst"}
