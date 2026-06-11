@@ -7,6 +7,7 @@ import { useRouter } from "next/navigation";
 import { createClient } from "@/lib/supabase/client";
 import { getOrgId } from "@/lib/org";
 import { PageHeader, Chip, Banner, Empty } from "@/components/ui";
+import RecordSetup from "@/components/RecordSetup";
 
 type Product = { id: string; name: string; created_at: string };
 type Gtm = { id: string; name: string; product_id: string; created_at: string };
@@ -23,6 +24,8 @@ export default function ListView({ kind }: { kind: "product" | "gtm" }) {
   const [parentId, setParentId] = useState("");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  // Purchase-day path: materials + interview -> drafted records you refine.
+  const [aiSetup, setAiSetup] = useState(false);
 
   const load = useCallback(async () => {
     if (kind === "product") {
@@ -70,13 +73,22 @@ export default function ListView({ kind }: { kind: "product" | "gtm" }) {
     <div>
       <PageHeader
         title={title}
-        actions={!creating ? (
-          <button className="btn" onClick={start} disabled={kind === "gtm" && products.length === 0}
-            title={kind === "gtm" && products.length === 0 ? "Create a product first" : undefined}>
-            + New {kind === "product" ? "product" : "GTM record"}
-          </button>
+        actions={!creating && !aiSetup ? (
+          <span className="row gap-2">
+            {kind === "product" && <button className="btn" onClick={() => setAiSetup(true)} title="Bring your materials (paste, URLs, PDFs), answer a short interview, refine the drafted records — then they're created.">✦ Set up with AI</button>}
+            <button className={kind === "product" ? "btn btn-secondary" : "btn"} onClick={start} disabled={kind === "gtm" && products.length === 0}
+              title={kind === "gtm" && products.length === 0 ? "Create a product first" : undefined}>
+              + New {kind === "product" ? "product" : "GTM record"}
+            </button>
+          </span>
         ) : undefined}
       />
+
+      {aiSetup && (
+        <div style={{ marginBottom: "var(--sp-6)" }}>
+          <RecordSetup onDone={(productId) => { setAiSetup(false); if (productId) router.push(`/records/${productId}`); else load(); }} />
+        </div>
+      )}
 
       {creating && (
         <form onSubmit={create} className="card card-pad" style={{ marginBottom: "var(--sp-6)" }}>
@@ -92,10 +104,12 @@ export default function ListView({ kind }: { kind: "product" | "gtm" }) {
       )}
 
       {loading ? <div className="t-sub t-muted">Loading…</div>
-        : empty && !creating ? (
+        : empty && !creating && !aiSetup ? (
           <Empty title={`No ${kind === "product" ? "product" : "GTM"} records yet`}
-            hint={kind === "product" ? "Products are the hubs of your Foundation." : "GTM records are the go-to-market branches beneath a product."}
-            action={<button className="btn" onClick={start} disabled={kind === "gtm" && products.length === 0}>+ New {kind === "product" ? "product" : "GTM record"}</button>} />
+            hint={kind === "product" ? "Start with AI: your materials + a short interview draft both records — you refine every field before they're created." : "GTM records are the go-to-market branches beneath a product."}
+            action={kind === "product"
+              ? <span className="row gap-2"><button className="btn" onClick={() => setAiSetup(true)}>✦ Set up with AI</button><button className="btn btn-secondary" onClick={start}>+ By hand</button></span>
+              : <button className="btn" onClick={start} disabled={products.length === 0}>+ New GTM record</button>} />
         ) : (
           <div className="grid-cards">
             {kind === "product" && products.map((p) => (

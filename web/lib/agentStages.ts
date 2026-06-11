@@ -11,6 +11,14 @@ export const AGENT_STAGES: Record<string, string[]> = {
     "Checking capability collisions",
     "Scoring honest match levels",
   ],
+  // setup-records · draft both records
+  draftRecords: [
+    "Reading your materials",
+    "Folding in the interview",
+    "Drafting the product record",
+    "Drafting the GTM record",
+    "Leaving honest gaps empty",
+  ],
   // setup-competitive · capabilities
   setupCaps: [
     "Reading product, market, and rivals",
