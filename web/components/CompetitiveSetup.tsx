@@ -28,8 +28,11 @@ export default function CompetitiveSetup({ onDone, productId }: { onDone: () => 
   const [busy, setBusy] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
 
-  // step 1 — anchor
+  // step 1 — anchor: the market context comes FROM the records the user already
+  // authored (product + GTM), not from a blank textarea. `market` is only an
+  // optional refinement on top.
   const [prod, setProd] = useState<{ name: string; value_prop: string | null } | null>(null);
+  const [gtm, setGtm] = useState<{ name: string; personas: string | null; positioning: string | null } | null>(null);
   const [market, setMarket] = useState("");
   // step 2 — competitors
   const [comps, setComps] = useState<CompCand[]>([]);
@@ -113,12 +116,28 @@ export default function CompetitiveSetup({ onDone, productId }: { onDone: () => 
   useEffect(() => {
     (async () => {
       const { data: p } = await supabase.from("product_records").select("id, name").order("created_at").limit(1).maybeSingle();
-      if (!p) { setProd(null); return; }
-      const { data: vp } = await supabase.from("record_fields").select("value").eq("product_id", p.id).eq("field_key", "value_prop").maybeSingle();
-      setProd({ name: p.name, value_prop: vp?.value ?? null });
+      if (p) {
+        const { data: vp } = await supabase.from("record_fields").select("value").eq("product_id", p.id).eq("field_key", "value_prop").maybeSingle();
+        setProd({ name: p.name, value_prop: vp?.value ?? null });
+      } else setProd(null);
+      // GTM record: personas (who we sell to) + positioning (against what) — the
+      // exact answer to "describe your market", already authored by the user.
+      const { data: g } = await supabase.from("gtm_records").select("id, name").order("created_at").limit(1).maybeSingle();
+      if (g) {
+        const { data: fs } = await supabase.from("record_fields").select("field_key, value").eq("gtm_record_id", g.id).in("field_key", ["personas", "positioning"]);
+        setGtm({ name: g.name, personas: fs?.find((f) => f.field_key === "personas")?.value ?? null, positioning: fs?.find((f) => f.field_key === "positioning")?.value ?? null });
+      } else setGtm(null);
     })();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+
+  // The composed market context the agent searches from: records first, the
+  // optional refinement appended.
+  const marketCtx = [
+    gtm?.personas ? `Who we sell to: ${gtm.personas}` : "",
+    gtm?.positioning ? `How we position: ${gtm.positioning}` : "",
+    market.trim() ? `Refinement from the user: ${market.trim()}` : "",
+  ].filter(Boolean).join("\n");
 
   const invoke = async (body: Record<string, unknown>) => {
     const { data: s } = await supabase.auth.getSession();
@@ -135,7 +154,7 @@ export default function CompetitiveSetup({ onDone, productId }: { onDone: () => 
   async function findCompetitors() {
     setBusy("comps"); setError(null);
     try {
-      const data = await invoke({ step: "competitors", market, product: { name: prod?.name, value_prop: prod?.value_prop } });
+      const data = await invoke({ step: "competitors", market: marketCtx, product: { name: prod?.name, value_prop: prod?.value_prop } });
       const list = (data.competitors ?? []) as Omit<CompCand, "keep">[];
       if (!list.length) throw new Error("No rivals found — try describing the market more specifically.");
       setComps(list.map((c) => ({ ...c, keep: true })));
@@ -170,7 +189,7 @@ export default function CompetitiveSetup({ onDone, productId }: { onDone: () => 
   async function proposeCapabilities(rivals: string[]) {
     setBusy("caps"); setError(null);
     try {
-      const data = await invoke({ step: "capabilities", market, product: { name: prod?.name, value_prop: prod?.value_prop }, competitors: rivals });
+      const data = await invoke({ step: "capabilities", market: marketCtx, product: { name: prod?.name, value_prop: prod?.value_prop }, competitors: rivals });
       setCaps(((data.capabilities ?? []) as Omit<CapCand, "keep">[]).map((c) => ({ ...c, keep: true })));
     } catch (e) { setError(e instanceof Error ? e.message : "Could not propose capabilities."); }
     finally { setBusy(null); }
@@ -265,17 +284,28 @@ export default function CompetitiveSetup({ onDone, productId }: { onDone: () => 
 
       {step === 1 && (
         <div className="stack-3">
-          <div className="card card-pad" style={{ background: "var(--panel-2)" }}>
-            <div className="t-label" style={{ color: "var(--tm)", marginBottom: 4 }}>Your product</div>
-            {prod ? (<><div style={{ fontSize: 14, fontWeight: 640 }}>{prod.name}</div>
-              {prod.value_prop && <div className="t-sub t-muted" style={{ fontSize: 12.5, marginTop: 3 }}>{prod.value_prop}</div>}</>)
-              : <div className="t-sub t-muted" style={{ fontSize: 12.5 }}>No product record yet — the search will lean on your market description below.</div>}
+          <div className="t-sub t-muted" style={{ fontSize: 12.5 }}>Your market, read from the records you already authored — nothing to re-type.</div>
+          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "var(--sp-3)" }}>
+            <div className="card card-pad" style={{ background: "var(--panel-2)" }}>
+              <div className="t-label" style={{ color: "var(--tm)", marginBottom: 4 }}>Product record</div>
+              {prod ? (<><div style={{ fontSize: 14, fontWeight: 640 }}>{prod.name}</div>
+                {prod.value_prop && <div className="t-sub t-muted" style={{ fontSize: 12.5, marginTop: 3 }}>{prod.value_prop}</div>}</>)
+                : <div className="t-sub t-muted" style={{ fontSize: 12.5 }}>No product record yet — <a href="/products">create it first</a>; the search leans on it.</div>}
+            </div>
+            <div className="card card-pad" style={{ background: "var(--panel-2)" }}>
+              <div className="t-label" style={{ color: "var(--tm)", marginBottom: 4 }}>GTM record · {gtm?.name ?? "—"}</div>
+              {gtm ? (<>
+                {gtm.personas && <div className="t-sub" style={{ fontSize: 12.5 }}><b>Who:</b> {gtm.personas}</div>}
+                {gtm.positioning && <div className="t-sub" style={{ fontSize: 12.5, marginTop: 3 }}><b>Positioning:</b> {gtm.positioning}</div>}
+                {!gtm.personas && !gtm.positioning && <div className="t-sub t-muted" style={{ fontSize: 12.5 }}>No personas/positioning fields yet — add them on the GTM record, or refine below.</div>}
+              </>) : <div className="t-sub t-muted" style={{ fontSize: 12.5 }}>No GTM record yet — <a href="/gtm">create it first</a>, or refine below.</div>}
+            </div>
           </div>
-          <label className="field"><span className="t-label">Describe your market — who you sell to, and against what</span>
-            <textarea className="textarea" rows={3} autoFocus value={market} onChange={(e) => setMarket(e.target.value)}
-              placeholder="e.g. AI-native product-marketing platform for B2B SaaS teams — competing with PMM tools, battlecard products, and competitive-intel platforms" /></label>
+          <label className="field"><span className="t-label">Anything the records don&rsquo;t say? <span className="t-muted" style={{ fontWeight: 400, textTransform: "none", letterSpacing: 0 }}>— optional</span></span>
+            <input className="input" value={market} onChange={(e) => setMarket(e.target.value)}
+              placeholder="e.g. also watch the open-source alternatives" /></label>
           <div className="row gap-2">
-            <button className="btn btn-sm" disabled={busy === "comps" || (!market.trim() && !prod)} onClick={findCompetitors}>{busy === "comps" ? "Searching the landscape…" : "✦ Find my competitors"}</button>
+            <button className="btn btn-sm" disabled={busy === "comps" || (!marketCtx && !prod)} onClick={findCompetitors}>{busy === "comps" ? "Searching the landscape…" : "✦ Find my competitors"}</button>
             <button className="btn btn-secondary btn-sm" onClick={onDone}>Skip — set up by hand</button>
           </div>
         </div>

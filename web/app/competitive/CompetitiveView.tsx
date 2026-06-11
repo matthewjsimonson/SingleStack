@@ -15,7 +15,6 @@ import CapabilityCellDrawer, { type Cell } from "@/components/CapabilityCellDraw
 import CompetitiveGrid from "@/components/CompetitiveGrid";
 import SignalProfile from "@/components/SignalProfile";
 import CompetitiveSetup from "@/components/CompetitiveSetup";
-import MarketAnalysis from "@/components/MarketAnalysis";
 import BattlecardItemDrawer, { type CardItem } from "@/components/BattlecardItemDrawer";
 import { signalDomain, SIGNAL_DOMAIN } from "@/lib/signals";
 import { useProductScope } from "@/lib/ProductContext";
@@ -74,21 +73,14 @@ export default function CompetitiveView() {
   return (
     <div>
       <SubTabs<Tab>
-        tabs={[{ key: "dashboard", label: "Dashboard" }, { key: "profile", label: "Market analysis" }, { key: "competitors", label: "Competitors" }, { key: "feed", label: "Signal feed" }]}
+        tabs={[{ key: "dashboard", label: "Dashboard" }, { key: "profile", label: "Signal profile" }, { key: "competitors", label: "Competitors" }, { key: "feed", label: "Signal feed" }]}
         active={tab} onChange={setTab}
       />
       <Banner>{error}</Banner>
 
       {loading ? <div className="t-sub t-muted">Loading…</div>
-        : tab === "dashboard" ? <Dashboard competitors={scopedCompetitors} capabilities={capabilities} scores={scores} compSignals={compSignals} overview={overview} reload={load} setError={setError} newProductId={scopedProductId} />
-        : tab === "profile" ? (
-          <div style={{ display: "grid", gap: "var(--sp-5)" }}>
-            {/* The quadrant — computed live from the evidence loop; click a player for its work. */}
-            <MarketAnalysis competitors={scopedCompetitors} capabilities={capabilities} scores={scores} compSignals={compSignals} themes={themes} />
-            {/* The narrative half: the landscape signal profile (AI-drafted, human-owned). */}
-            <SignalProfile scope="landscape" />
-          </div>
-        )
+        : tab === "dashboard" ? <Dashboard competitors={scopedCompetitors} capabilities={capabilities} scores={scores} compSignals={compSignals} themes={themes} overview={overview} reload={load} setError={setError} newProductId={scopedProductId} />
+        : tab === "profile" ? <SignalProfile scope="landscape" />
         : tab === "competitors" ? <Competitors competitors={scopedCompetitors} cards={cards} overview={overview} capabilities={capabilities} scores={scores} compSignals={compSignals} themes={themes} newProductId={scopedProductId} reload={load} setError={setError} />
         : <Feed signals={signals} competitors={scopedCompetitors} reload={load} />}
     </div>
@@ -96,8 +88,8 @@ export default function CompetitiveView() {
 }
 
 // ---------- Dashboard: capability heat-map + metrics ----------
-function Dashboard({ competitors, capabilities, scores, compSignals, overview, reload, setError, newProductId }: {
-  competitors: Competitor[]; capabilities: Capability[]; scores: Score[]; compSignals: Signal[]; overview: { name: string; overview: string | null; valueProp: string | null } | null; reload: () => void; setError: (s: string | null) => void; newProductId?: string | null;
+function Dashboard({ competitors, capabilities, scores, compSignals, themes, overview, reload, setError, newProductId }: {
+  competitors: Competitor[]; capabilities: Capability[]; scores: Score[]; compSignals: Signal[]; themes: Theme[]; overview: { name: string; overview: string | null; valueProp: string | null } | null; reload: () => void; setError: (s: string | null) => void; newProductId?: string | null;
 }) {
   const supabase = createClient();
   const [addingCap, setAddingCap] = useState(false);
@@ -111,6 +103,10 @@ function Dashboard({ competitors, capabilities, scores, compSignals, overview, r
   const empty = competitors.length === 0 && capabilities.length === 0;
   const [setupOpen, setSetupOpen] = useState(empty);
   useEffect(() => { if (empty) setSetupOpen(true); }, [empty]);
+
+  // Evidence drawer: click a player on the grid → the work behind its position
+  // (per-cell provenance, GTM themes, recent signals) in a side panel.
+  const [openComp, setOpenComp] = useState<string | null>(null);
 
   // Purge the unevidenced: deletes every score that was NOT derived from
   // evidence through the gate (hand-set + demo seed). Evidence-scored cells
@@ -193,7 +189,7 @@ function Dashboard({ competitors, capabilities, scores, compSignals, overview, r
         <div className="t-sub t-muted" style={{ fontSize: 12.5, marginBottom: 12 }}>{matrixView === "matrix" ? "Functionality vectors × competitors (you vs each). Click any cell for the agent's read — reasons, sources, implications — then set the rating yourself." : "Coverage × momentum quadrant — where each player sits, you vs them (G2-style). Top-right leads."}</div>
         {matrixView === "grid" ? (
           capabilities.length === 0 ? <div className="t-sub t-muted">Add capabilities to plot the grid.</div>
-          : <CompetitiveGrid competitors={competitors} capabilities={capabilities} scores={scores} compSignals={compSignals} />
+          : <CompetitiveGrid competitors={competitors} capabilities={capabilities} scores={scores} compSignals={compSignals} onOpenCompetitor={setOpenComp} />
         ) : (<>
         {addingCap && (
           <form onSubmit={addCapability} className="card card-pad" style={{ marginBottom: "var(--sp-3)" }}>
@@ -295,6 +291,67 @@ function Dashboard({ competitors, capabilities, scores, compSignals, overview, r
           managed on the Competitors tab. */}
       <SourceManager title="Competitive sources (all competitors)" />
 
+      {openComp && (() => {
+        const c = competitors.find((x) => x.id === openComp);
+        if (!c) return null;
+        const cells = scores.filter((sc) => sc.competitor_id === c.id && (sc.score > 0 || sc.scored_by));
+        const evidenced = cells.filter((sc) => sc.scored_by).length;
+        const gtmThemes = themes.filter((t) => t.competitor_id === c.id && t.category === "gtm" && t.state !== "fading");
+        const recent = compSignals.filter((sg) => sigComp(sg) === c.id).slice(0, 5);
+        const capName = (id: string) => capabilities.find((k) => k.id === id)?.name ?? "Capability";
+        const LV = ["—", "Partial", "Good", "Strong"];
+        return (
+          <>
+            <div onClick={() => setOpenComp(null)} style={{ position: "fixed", inset: 0, background: "rgba(11,12,14,0.32)", zIndex: 40 }} />
+            <aside style={{ position: "fixed", top: 0, right: 0, height: "100vh", width: 460, maxWidth: "94vw", background: "var(--panel)", borderLeft: "1px solid var(--border)", boxShadow: "var(--shadow-md)", zIndex: 41, display: "flex", flexDirection: "column" }}>
+              <div style={{ padding: "16px 20px", borderBottom: "1px solid var(--border)" }} className="row-between">
+                <span className="t-h2" style={{ fontSize: 15 }}>{c.name} — the work behind the position</span>
+                <button className="btn btn-secondary btn-sm" onClick={() => setOpenComp(null)}>Close</button>
+              </div>
+              <div style={{ flex: 1, overflowY: "auto", padding: "16px 20px" }} className="stack-3">
+                <div>
+                  <div className="t-label" style={{ marginBottom: 6 }}>Capabilities <span className="t-sub t-muted" style={{ textTransform: "none", letterSpacing: 0 }}>— {evidenced} of {cells.length || 0} rated cells evidence-scored</span></div>
+                  <div className="stack-2">
+                    {cells.map((sc, i) => (
+                      <div key={i} className="card card-pad" style={{ background: "var(--panel-2)", padding: "8px 10px" }}>
+                        <div className="row-between" style={{ gap: 8 }}>
+                          <span style={{ fontSize: 12.5, fontWeight: 620 }}>{capName(sc.capability_id)}</span>
+                          <Chip tone={sc.scored_by ? "accent" : "default"}>{LV[sc.score]}{sc.scored_by ? " ✦" : ""}</Chip>
+                        </div>
+                        <div className="t-mono-xs t-muted" style={{ marginTop: 2 }}>{sc.scored_by ? `✦ ${sc.scored_by}${sc.evidence_at ? ` · ${new Date(sc.evidence_at).toLocaleDateString()}` : ""}` : "set by hand — ✦ Score from evidence to substantiate"}</div>
+                      </div>
+                    ))}
+                    {cells.length === 0 && <div className="t-sub t-muted" style={{ fontSize: 12 }}>No rated cells yet — pull their sources, then ✦ Score from evidence on their Product board.</div>}
+                  </div>
+                </div>
+                <div>
+                  <div className="t-label" style={{ marginBottom: 6 }}>GTM themes · {gtmThemes.length}</div>
+                  <div className="stack-2">
+                    {gtmThemes.map((t) => (
+                      <div key={t.id} className="card card-pad" style={{ background: "var(--panel-2)", padding: "8px 10px" }}>
+                        <div className="row-between" style={{ gap: 8 }}>
+                          <span style={{ fontSize: 12.5, fontWeight: 620 }}>{t.title}</span>
+                          <Confidence label={null} level={t.conf_level} />
+                        </div>
+                      </div>
+                    ))}
+                    {gtmThemes.length === 0 && <div className="t-sub t-muted" style={{ fontSize: 12 }}>No GTM themes yet — their press/LinkedIn monitors feed this.</div>}
+                  </div>
+                </div>
+                <div>
+                  <div className="t-label" style={{ marginBottom: 6 }}>Recent signals</div>
+                  <div className="stack-2">
+                    {recent.map((sg) => (
+                      <div key={sg.id} className="card card-pad" style={{ background: "var(--panel-2)", padding: "8px 10px", borderLeft: "2px solid var(--vl)", fontSize: 12 }}>{sg.title}</div>
+                    ))}
+                    {recent.length === 0 && <div className="t-sub t-muted" style={{ fontSize: 12 }}>None yet.</div>}
+                  </div>
+                </div>
+              </div>
+            </aside>
+          </>
+        );
+      })()}
       <CapabilityCellDrawer key={openCell ? `${openCell.capabilityId}:${openCell.competitorId}` : "none"} cell={openCell} onClose={() => setOpenCell(null)} onChanged={reload} />
     </div>
   );

@@ -12,8 +12,8 @@ type Sig = { title: string; why: string | null };
 
 const W = 720, H = 460, PAD = 54;
 
-export default function CompetitiveGrid({ competitors, capabilities, scores, compSignals }: {
-  competitors: Competitor[]; capabilities: Capability[]; scores: Score[]; compSignals: Sig[];
+export default function CompetitiveGrid({ competitors, capabilities, scores, compSignals, onOpenCompetitor }: {
+  competitors: Competitor[]; capabilities: Capability[]; scores: Score[]; compSignals: Sig[]; onOpenCompetitor?: (id: string) => void;
 }) {
   const scoreOf = (capId: string, compId: string | null) => scores.find((s) => s.capability_id === capId && s.competitor_id === compId)?.score ?? 0;
   const coverage = (compId: string | null) => capabilities.length ? capabilities.reduce((a, c) => a + scoreOf(c.id, compId), 0) / (capabilities.length * 3) : 0;
@@ -50,7 +50,8 @@ export default function CompetitiveGrid({ competitors, capabilities, scores, com
         {pts.map((p) => {
           const x = px(p.cov), y = py(p.mom), r = p.kind === "us" ? 11 : 9;
           return (
-            <g key={p.id}>
+            <g key={p.id} style={p.kind !== "us" && onOpenCompetitor ? { cursor: "pointer" } : undefined}
+               onClick={() => { if (p.kind !== "us" && onOpenCompetitor) onOpenCompetitor(p.id); }}>
               <circle cx={x} cy={y} r={r + 3} fill="#fff" opacity={0.92} />
               <circle cx={x} cy={y} r={r} fill={fill(p.kind)} opacity={p.kind === "adjacent" ? 0.8 : 1} stroke={p.kind === "us" ? "#312E81" : "#fff"} strokeWidth={p.kind === "us" ? 2 : 1.5} />
               <text x={x} y={y + r + 13} fontSize={p.kind === "us" ? 12 : 11} fontWeight={p.kind === "us" ? 700 : 560} fill={p.kind === "us" ? "#312E81" : "#5A5E68"} textAnchor="middle">{p.name}</text>
