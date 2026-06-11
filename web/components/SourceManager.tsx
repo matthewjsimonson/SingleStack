@@ -24,7 +24,7 @@ type Source = {
   targets: { type?: string; ref: string; label?: string }[] | null; guidance: string | null;
 };
 
-const LIVE_PULL_KINDS = new Set(["website", "youtube", "web_search"]); // run for real today (no creds)
+const LIVE_PULL_KINDS = new Set(["website", "youtube", "web_search", "mcp"]); // run for real today (mcp pulls via its connection)
 
 type Scope = { competitorId?: string; marketLens?: string };
 
@@ -38,7 +38,7 @@ export default function SourceManager({ scope = {}, title = "Sources" }: { scope
   const [open, setOpen] = useState(false);
   // connect flow: pick a type, then configure it
   const [picked, setPicked] = useState<SourceDef | null>(null);
-  const [cfg, setCfg] = useState({ label: "", url: "", focus: "" as "" | "product" | "gtm" | "both", include: "", exclude: "", maxPerPull: "", cadence: "manual", targets: "", guidance: "" });
+  const [cfg, setCfg] = useState({ label: "", url: "", focus: "" as "" | "product" | "gtm" | "both", include: "", exclude: "", maxPerPull: "", cadence: "manual", targets: "", guidance: "", mcpUrl: "", mcpToken: "", mcpOrigin: "external" as "internal" | "external" });
   // per-source pull state: id -> running | result message
   const [pulling, setPulling] = useState<Record<string, boolean>>({});
   const [pullMsg, setPullMsg] = useState<Record<string, string>>({});
@@ -60,7 +60,7 @@ export default function SourceManager({ scope = {}, title = "Sources" }: { scope
 
   function pick(def: SourceDef) {
     setPicked(def); setRecipeNote(null);
-    setCfg({ label: def.label, url: "", focus: def.defaultFocus ?? "", include: "", exclude: "", maxPerPull: String(def.defaultMaxPerPull), cadence: "manual", targets: "", guidance: "" });
+    setCfg({ label: def.label, url: "", focus: def.defaultFocus ?? "", include: "", exclude: "", maxPerPull: String(def.defaultMaxPerPull), cadence: "manual", targets: "", guidance: "", mcpUrl: "", mcpToken: "", mcpOrigin: def.origin });
   }
 
   // Parse the "what to look at" textarea — one URL/ref per line — into the
@@ -86,6 +86,7 @@ export default function SourceManager({ scope = {}, title = "Sources" }: { scope
         include: d.recipe.include_terms ?? "", exclude: d.recipe.exclude_terms ?? "",
         maxPerPull: String(d.recipe.max_per_pull ?? def.defaultMaxPerPull), cadence: d.recipe.cadence ?? "manual",
         targets: (d.recipe.targets ?? []).map((t) => t.ref).join("\n"), guidance: d.recipe.guidance ?? "",
+        mcpUrl: "", mcpToken: "", mcpOrigin: def.origin,
       });
       setRecipeNote(`${d.rationale}${d.followup ? ` — ${d.followup}` : d.runs_now ? " · pulls today" : " · pulls once its connector lands"}`);
       setDescribe("");
@@ -115,9 +116,28 @@ export default function SourceManager({ scope = {}, title = "Sources" }: { scope
       const orgId = await getOrgId(); if (!orgId) throw new Error("Could not resolve your organization.");
       if (picked.needsUrl && !cfg.url.trim()) throw new Error("This source needs a URL or handle.");
       const max = parseInt(cfg.maxPerPull, 10);
+      // MCP sources need a connection (server URL + a vault-stored token) the
+      // runner reaches. Create it first, store the secret via the org-checked
+      // RPC (never in config), then attach the source to it.
+      let connectionId: string | null = null;
+      if (picked.authMode === "mcp") {
+        if (!cfg.mcpUrl.trim()) throw new Error("An MCP source needs the server URL.");
+        const { data: conn, error: connErr } = await supabase.from("connections").insert({
+          org_id: orgId, agent_id: null, kind: "mcp", label: cfg.label.trim() || picked.label,
+          mcp_url: cfg.mcpUrl.trim(), status: "connected",
+          targets: parseTargets(cfg.targets), guidance: cfg.guidance.trim() || null,
+        }).select("id").single();
+        if (connErr || !conn) throw connErr ?? new Error("Could not create the MCP connection.");
+        connectionId = conn.id;
+        if (cfg.mcpToken.trim()) {
+          const { error: secErr } = await supabase.rpc("set_connection_secret", { p_connection: conn.id, p_token: cfg.mcpToken.trim() });
+          if (secErr) { await supabase.from("connections").delete().eq("id", conn.id); throw secErr; }
+        }
+      }
+      const origin = picked.authMode === "mcp" ? cfg.mcpOrigin : picked.origin;
       const { error } = await supabase.from("sources").insert({
         org_id: orgId, label: cfg.label.trim() || picked.label, icon: picked.icon,
-        origin: picked.origin, kind: picked.kind,
+        origin, kind: picked.kind,
         status: picked.live ? "connected" : "manual",
         auth_mode: picked.authMode, access_scope: picked.accessScope,
         focus: cfg.focus || null, include_terms: cfg.include.trim() || null, exclude_terms: cfg.exclude.trim() || null,
@@ -125,9 +145,10 @@ export default function SourceManager({ scope = {}, title = "Sources" }: { scope
         cadence: cfg.cadence,
         targets: parseTargets(cfg.targets), guidance: cfg.guidance.trim() || null,  // pointing context: where to look
         config: cfg.url.trim() ? { url: cfg.url.trim() } : null,   // never secrets — only the public locator
+        connection_id: connectionId,
         competitor_id: scope.competitorId ?? null, market_lens: scope.marketLens ?? null,
       });
-      if (error) throw error;
+      if (error) { if (connectionId) await supabase.from("connections").delete().eq("id", connectionId); throw error; }
       setPicked(null); await load();
     } catch (e) { setError(e instanceof Error ? e.message : "Could not connect source."); }
   }
@@ -169,6 +190,22 @@ export default function SourceManager({ scope = {}, title = "Sources" }: { scope
             {picked.needsUrl && (
               <label className="field"><span className="t-label">URL / handle</span>
                 <input className="input" value={cfg.url} placeholder={picked.urlHint} onChange={(e) => setCfg({ ...cfg, url: e.target.value })} /></label>
+            )}
+
+            {picked.authMode === "mcp" && (
+              <div className="card" style={{ padding: "10px 12px", background: "var(--panel-2)", display: "grid", gap: 8 }}>
+                <div className="t-label">MCP connection</div>
+                <label className="field"><span className="t-label">Server URL</span>
+                  <input className="input" value={cfg.mcpUrl} placeholder="https://mcp.yourvendor.com" onChange={(e) => setCfg({ ...cfg, mcpUrl: e.target.value })} /></label>
+                <label className="field"><span className="t-label">Token <span className="t-muted" style={{ fontWeight: 400 }}>— stored encrypted in the vault, never in config</span></span>
+                  <input className="input" type="password" value={cfg.mcpToken} placeholder="Bearer token (optional for public servers)" onChange={(e) => setCfg({ ...cfg, mcpToken: e.target.value })} /></label>
+                <label className="field"><span className="t-label">This system is</span>
+                  <select className="select" value={cfg.mcpOrigin} onChange={(e) => setCfg({ ...cfg, mcpOrigin: e.target.value as "internal" | "external" })}>
+                    <option value="internal">Internal (our own system — CRM, support, analytics)</option>
+                    <option value="external">External (market/competitive — reviews, research)</option>
+                  </select></label>
+                <div className="t-sub t-muted" style={{ fontSize: 11.5 }}>Point it at specifics below (Targets) — e.g. a CRM opportunity list & the account/opp data to read. The aim is what makes the pull useful, not a firehose.</div>
+              </div>
             )}
 
             {/* Tailoring — keep it on-target, control bias */}

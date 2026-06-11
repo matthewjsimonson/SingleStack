@@ -93,6 +93,47 @@ async function fetchViaWebSearch(key: string, source: any): Promise<{ label: str
   return { label: `Web search · ${source.label}`, url: "web_search", text: text.trim().slice(0, MAX_CHARS_TO_MODEL) };
 }
 
+// MCP ingestion — pull a source's data through its attached MCP connection.
+// Mirrors the agent-run mechanism: the server is passed as mcp_servers (+ the
+// beta header and an mcp_toolset opt-in); Anthropic executes the tool calls
+// server-side. We aim it with the source's targets/guidance and ask for a
+// FACTUAL briefing only — which the caller then injection-screens (MCP results
+// are third-party, untrusted) before distilling into signals. One briefing doc,
+// same downstream pipeline as web_search.
+// deno-lint-ignore no-explicit-any
+async function fetchViaMcp(key: string, source: any, conn: { mcp_url: string; label: string }, token: string | null): Promise<{ label: string; url: string; text: string }> {
+  const name = String(conn.label || "mcp").toLowerCase().replace(/[^a-z0-9_]+/g, "_").replace(/^_|_$/g, "") || "mcp";
+  const targets = (Array.isArray(source.targets) ? source.targets : []).map((t: { ref?: string }) => t?.ref).filter(Boolean);
+  const aim = [
+    source.guidance ? `Where to look / what matters: ${source.guidance}` : "",
+    targets.length ? `Specific records/lists/objects to consult: ${targets.join("; ")}` : "",
+    source.include_terms ? `Only gather things about: ${source.include_terms}.` : "",
+    source.exclude_terms ? `Ignore anything about: ${source.exclude_terms}.` : "",
+    source.focus ? `This feeds the ${source.focus} lens.` : "",
+  ].filter(Boolean).join("\n");
+  const sys = "You are SingleStack's MCP connector. Use the attached MCP server's tools to RETRIEVE concrete, recent, decision-useful data for a product & GTM team, then report exactly what you retrieved as a tight factual briefing — the specific records, fields, dates, and numbers, each attributed to where it came from. Do NOT analyze, recommend, or speculate; report only what the tools returned. If the tools surface nothing relevant to the aim, say so plainly.";
+  const mcpServers = [{ type: "url", name, url: conn.mcp_url, ...(token ? { authorization_token: token } : {}) }];
+  const anthropic = new Anthropic({ apiKey: key });
+  // deno-lint-ignore no-explicit-any
+  let messages: any[] = [{ role: "user", content: `Pull current data from the "${conn.label}" connector for the source "${source.label}".\n${aim || "Gather what's most decision-useful."}` }];
+  let text = "";
+  for (let i = 0; i < 5; i++) {
+    const resp = (await anthropic.messages.create({
+      model: MODEL,
+      max_tokens: 4000,
+      tools: [{ type: "mcp_toolset", mcp_server_name: name }],
+      mcp_servers: mcpServers,
+      system: [{ type: "text", text: sys }],
+      messages,
+      // deno-lint-ignore no-explicit-any
+    } as any, { headers: { "anthropic-beta": "mcp-client-2025-11-20" } })) as Anthropic.Message;
+    for (const b of resp.content) if (b.type === "text") text += b.text + "\n";
+    if (resp.stop_reason === "pause_turn") { messages = [...messages, { role: "assistant", content: resp.content }]; continue; }
+    break;
+  }
+  return { label: `MCP · ${conn.label}`, url: conn.mcp_url, text: text.trim().slice(0, MAX_CHARS_TO_MODEL) };
+}
+
 // Distillation schema — the model returns candidate signals WITH a relevance
 // score we gate on. Relevance is the model's honest read against the tailoring;
 // we drop low-relevance items and cap to the budget.
@@ -145,12 +186,36 @@ Deno.serve(async (req: Request) => {
     // authoritative). This is what lets scheduled pulls run without a user.
     const { data: source, error: sErr } = await supabase
       .from("sources")
-      .select("id, org_id, label, kind, origin, status, focus, include_terms, exclude_terms, max_per_pull, min_relevance, config, targets, guidance, competitor_id, market_lens")
+      .select("id, org_id, label, kind, origin, status, auth_mode, focus, include_terms, exclude_terms, max_per_pull, min_relevance, config, targets, guidance, competitor_id, market_lens, connection_id")
       .eq("id", source_id).single();
     if (sErr || !source) return json({ error: "source not found" }, 404);
     const orgId = source.org_id as string;
 
-    if (!liveKind(source.kind)) {
+    // MCP sources pull through an attached, connected MCP connection. Resolve it
+    // up front so the live-gate can admit them and the fetch step can reach it.
+    const isMcp = source.auth_mode === "mcp" || source.kind === "mcp";
+    // deno-lint-ignore no-explicit-any
+    let mcpConn: { mcp_url: string; label: string } | null = null;
+    let mcpToken: string | null = null;
+    if (isMcp) {
+      if (!source.connection_id) {
+        return json({ error: "This MCP source has no connection attached. Connect an MCP server (server URL + token), then point this source at it.", needsAuth: true }, 422);
+      }
+      const { data: conn } = await supabase.from("connections").select("id, label, mcp_url, status").eq("id", source.connection_id).maybeSingle();
+      if (!conn?.mcp_url || conn.status === "disconnected") {
+        return json({ error: "The MCP connection for this source isn't connected. Reconnect it (server URL + token) to pull.", needsAuth: true }, 422);
+      }
+      // Token lives in the RLS-locked vault; only the service-role RPC decrypts it.
+      const serviceKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY");
+      if (serviceKey) {
+        const admin = createClient(Deno.env.get("SUPABASE_URL")!, serviceKey);
+        const { data: tok } = await admin.rpc("mcp_connection_token", { p_connection: conn.id });
+        mcpToken = (tok as string | null) ?? null;
+      }
+      mcpConn = { mcp_url: conn.mcp_url as string, label: conn.label as string };
+    }
+
+    if (!isMcp && !liveKind(source.kind)) {
       return json({ error: `'${source.kind}' needs a connected credential to pull. It's ready to connect — live pulling lights up with the secret store. (website & youtube run today.)`, needsAuth: true }, 422);
     }
 
@@ -180,7 +245,14 @@ Deno.serve(async (req: Request) => {
       fetched.push({ label, url, text });
     };
 
-    if (source.kind === "web_search") {
+    if (isMcp && mcpConn) {
+      // Pull through the attached MCP server (server-side tool use), aimed by the
+      // source's targets/guidance. The briefing is screened as UNTRUSTED below.
+      try {
+        const doc = await fetchViaMcp(key, source, mcpConn, mcpToken);
+        screenAndKeep(doc.label, doc.url, doc.text);
+      } catch (e) { fetchErrors.push(`mcp: ${e instanceof Error ? e.message : String(e)}`); }
+    } else if (source.kind === "web_search") {
       // Live web search via Anthropic's server-side tool — aimed by the source's
       // guidance/terms/targets. Still screened before distilling.
       try {

@@ -48,11 +48,15 @@ Zero integration risk; the floor.
 agent later) reaches a source it can access — G2 over MCP, the web, a public
 repo — and drafts signals the human ratifies. This is the bridge until Tier 2.
 
-**Tier 2 — MCP connectors (the primary bet, to build).** The user adds an MCP
-server URL (+ auth) as a `connection`. SingleStack lists its tools, the user
-picks what to pull and writes a `tracking_topic`, and a server-side runner calls
-the MCP tools on a schedule, normalizes results into signals. "Integrate vendor
-X" becomes "paste vendor X's MCP URL."
+**Tier 2 — MCP connectors (the primary bet).** ✅ *Ingestion built
+(`20260611000003`).* The user adds an MCP server (URL + vault-stored token) and
+points a `source` at it (targets/guidance — e.g. a CRM opportunity list + the
+account/opp data to read). The connector-runner reaches the server via the
+Messages API `mcp_servers` (server-side tool use, same mechanism `agent-run`
+uses for the agent loop), retrieves a factual briefing, injection-screens it as
+UNTRUSTED, and distills → signals through the existing gate/audit. "Integrate
+vendor X" becomes "paste vendor X's MCP URL." Next: a tool-listing picker so the
+user selects tools/resources visually rather than describing them in guidance.
 
 **Tier 3 — Native ingestion for the few sources without MCP.** A thin set of
 first-party connectors (webhook intake, email-in, CSV/API) for high-value
