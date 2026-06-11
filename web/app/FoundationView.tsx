@@ -14,6 +14,7 @@ import ExecutiveRow from "@/components/ExecutiveRow";
 import InitiativeLifecycleBoard from "@/components/InitiativeLifecycleBoard";
 import ReviewDrawer from "@/components/ReviewDrawer";
 import PortfolioRollup from "@/components/PortfolioRollup";
+import UpdateAlerts from "@/components/UpdateAlerts";
 
 type Run = { id: string; status: string; started_at: string; cost_usd: number | null };
 
@@ -135,6 +136,10 @@ export default function FoundationView() {
 
           {/* executive team */}
           <ExecutiveRow />
+
+          {/* Update alerts — user-set watches with live triggered state; click
+              one to review + act in the side panel (the command-center loop). */}
+          <UpdateAlerts />
 
           {/* Portfolio roll-up — per-line cards when viewing All products on a
               multi-line org; clicking a card switches the app-wide context. */}

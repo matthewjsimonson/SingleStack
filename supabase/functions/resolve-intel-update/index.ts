@@ -77,6 +77,20 @@ Deno.serve(async (req: Request) => {
           if (bcErr) throw new Error(`could not create battlecard item: ${bcErr.message}`);
           break;
         }
+        case "battlecard_update": {
+          // Analyst-proposed refresh of an existing card, accepted (possibly
+          // edited): apply to the row and stamp updated_at (resets staleness).
+          if (p.item_id) {
+            const { error: upErr } = await supabase.from("battlecard_items").update({
+              title: p.title, detail: (p.detail as string | null) ?? null,
+              signal_ids: (p.signal_ids as string[] | undefined) ?? [],
+              proposed_by: (p.proposed_by as string | null) ?? "agent",
+              updated_at: now,
+            }).eq("id", p.item_id);
+            if (upErr) throw new Error(`could not update battlecard item: ${upErr.message}`);
+          }
+          break;
+        }
         case "new_theme": {
           const sigIds = (p.signal_ids as string[] | undefined) ?? [];
           const { data: row, error: insErr } = await supabase.from("signal_themes").insert({

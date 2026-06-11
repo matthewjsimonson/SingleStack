@@ -14,13 +14,14 @@ import SourceManager from "@/components/SourceManager";
 import CapabilityCellDrawer, { type Cell } from "@/components/CapabilityCellDrawer";
 import CompetitiveGrid from "@/components/CompetitiveGrid";
 import SignalProfile from "@/components/SignalProfile";
+import BattlecardItemDrawer, { type CardItem } from "@/components/BattlecardItemDrawer";
 import { signalDomain, SIGNAL_DOMAIN } from "@/lib/signals";
 import { useProductScope } from "@/lib/ProductContext";
 
 type Competitor = { id: string; name: string; relationship: string; website: string | null; notes: string | null; product_id: string | null };
 type Capability = { id: string; name: string; category: string | null };
 type Score = { id: string; capability_id: string; competitor_id: string | null; score: number };
-type Card = { id: string; competitor_id: string | null; kind: string; title: string; detail: string | null; proposed_by: string | null };
+type Card = { id: string; competitor_id: string | null; kind: string; title: string; detail: string | null; proposed_by: string | null; signal_ids: string[] | null; updated_at: string | null };
 type Signal = { id: string; title: string; why: string | null; conf_label: string | null; conf_level: number | null; observed_at: string | null; origin: string | null; competitor_id: string | null; metadata: { domain?: string; competitor_id?: string; channel?: string } | null; source_id: string | null };
 type Theme = { id: string; title: string; summary: string | null; recommendation: string | null; category: string; competitor_id: string | null; conf_level: number | null; state: string };
 // The competitor a signal is about — first-class column, with a fallback to the
@@ -48,7 +49,7 @@ export default function CompetitiveView() {
       supabase.from("competitors").select("id, name, relationship, website, notes, product_id").order("position").order("created_at"),
       supabase.from("capabilities").select("id, name, category").order("position").order("created_at"),
       supabase.from("capability_scores").select("id, capability_id, competitor_id, score"),
-      supabase.from("battlecard_items").select("id, competitor_id, kind, title, detail, proposed_by").order("position").order("created_at"),
+      supabase.from("battlecard_items").select("id, competitor_id, kind, title, detail, proposed_by, signal_ids, updated_at").order("position").order("created_at"),
       supabase.from("signals").select("id, title, why, conf_label, conf_level, observed_at, origin, competitor_id, metadata, source_id").order("observed_at", { ascending: false, nullsFirst: false }),
       supabase.from("signal_themes").select("id, title, summary, recommendation, category, competitor_id, conf_level, state").not("competitor_id", "is", null).order("last_evidence_at", { ascending: false, nullsFirst: false }),
     ]);
@@ -324,6 +325,27 @@ function Competitors({ competitors, cards, overview, capabilities, scores, compS
   const [wfId, setWfId] = useState<string>("");
   const [agentBusy, setAgentBusy] = useState<"analyst" | "messaging" | null>(null);
   const [agentNote, setAgentNote] = useState<string | null>(null);
+  const [openCard, setOpenCard] = useState<CardItem | null>(null);
+  // Update alert: a watch on this competitor's battlecard evidence, surfaced on
+  // the homepage command center.
+  const [watching, setWatching] = useState(false);
+  useEffect(() => {
+    if (!scope) return;
+    supabase.from("update_alerts").select("id").eq("kind", "battlecard_refresh").eq("competitor_id", scope).eq("is_active", true).maybeSingle()
+      .then(({ data }) => setWatching(!!data));
+  }, [supabase, scope]);
+  async function toggleWatch() {
+    if (!scope) return;
+    setError(null);
+    if (watching) {
+      const { error } = await supabase.from("update_alerts").delete().eq("kind", "battlecard_refresh").eq("competitor_id", scope);
+      if (error) setError(error.message); else setWatching(false);
+    } else {
+      const orgId = await getOrgId(); if (!orgId) return;
+      const { error } = await supabase.from("update_alerts").insert({ org_id: orgId, kind: "battlecard_refresh", competitor_id: scope });
+      if (error) setError(error.message); else setWatching(true);
+    }
+  }
   useEffect(() => {
     supabase.from("workflows").select("id, name, steps").eq("is_active", true).order("created_at").then(({ data }) => {
       const ws = ((data ?? []) as Wf[]).filter((w) => Array.isArray(w.steps) && w.steps.length > 0);
@@ -476,6 +498,10 @@ function Competitors({ competitors, cards, overview, capabilities, scores, compS
                 title={stepReady(0) ? "Step 1 (your agent × analyst skill): proposes items from this competitor's themes + matrix, citing signals" : "Needs a workflow with step 1 = agent × analyst skill"}>
                 {agentBusy === "analyst" ? "Analyzing…" : "✦ Run analyst step"}
               </button>
+              <button className="btn btn-secondary btn-sm" onClick={toggleWatch}
+                title={watching ? "Stop alerting when new evidence lands for this battlecard" : "Alert me on the homepage when new evidence lands for this battlecard"}>
+                {watching ? "🔔 Watching" : "🔕 Watch updates"}
+              </button>
               <button className="btn btn-secondary btn-sm" disabled={!!agentBusy || !stepReady(1)} onClick={() => runAgent("messaging")}
                 title={stepReady(1) ? "Step 2 (your agent × messenger skill): drafts the GTM Battlecard section from the ratified items" : "Needs a workflow with step 2 = agent × messenger skill"}>
                 {agentBusy === "messaging" ? "Drafting…" : "✦ Run messenger step"}
@@ -500,13 +526,14 @@ function Competitors({ competitors, cards, overview, capabilities, scores, compS
                 )}
                 <div className="stack-3">
                   {cardsFor(kind).map((c) => (
-                    <div key={c.id} className="card card-pad" style={{ borderLeft: `2px solid ${TONE_BORDER[tone] ?? "var(--border-strong)"}` }}>
+                    <div key={c.id} className="card card-pad card-link" onClick={() => setOpenCard(c)} title="Open card — detail, evidence, edit, re-examine, chat"
+                      style={{ borderLeft: `2px solid ${TONE_BORDER[tone] ?? "var(--border-strong)"}`, cursor: "pointer" }}>
                       <div className="row-between">
                         <span className="row gap-2" style={{ alignItems: "center", minWidth: 0 }}>
                           <span style={{ fontSize: 13.5, fontWeight: 620 }}>{c.title}</span>
                           {c.proposed_by && <Chip tone="violet">✦ {c.proposed_by}</Chip>}
                         </span>
-                        <button className="t-muted" onClick={() => remove(c.id)} style={{ background: "none", border: "none", cursor: "pointer", fontSize: 15 }} aria-label="Remove">×</button>
+                        <button className="t-muted" onClick={(ev) => { ev.stopPropagation(); remove(c.id); }} style={{ background: "none", border: "none", cursor: "pointer", fontSize: 15 }} aria-label="Remove">×</button>
                       </div>
                       {c.detail && <div className="t-sub" style={{ fontSize: 12.5, marginTop: 3 }}>{c.detail}</div>}
                     </div>
@@ -605,6 +632,8 @@ function Competitors({ competitors, cards, overview, capabilities, scores, compS
         </div>
       </div>
       <CapabilityCellDrawer key={openCell ? `${openCell.capabilityId}:${openCell.competitorId}` : "none"} cell={openCell} onClose={() => setOpenCell(null)} onChanged={reload} />
+      <BattlecardItemDrawer item={openCard} competitorName={selected?.name ?? "Competitor"} workflowId={wfId || null}
+        onClose={() => setOpenCard(null)} onChanged={() => { setOpenCard(null); reload(); }} />
     </div>
   );
 }
