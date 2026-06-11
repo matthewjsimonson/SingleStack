@@ -85,9 +85,19 @@ export default function CompetitiveSetup({ onDone, productId }: { onDone: () => 
   // step 4 — monitoring: per competitor, which kinds + cadence
   const [monitor, setMonitor] = useState<Record<string, Set<string>>>({});
   const [cadence, setCadence] = useState("daily");
+  // "How you want it" — per-source-type instructions, editable before anything
+  // is created. These land on each source's guidance and aim every pull.
+  const [kindGuide, setKindGuide] = useState<Record<string, string>>({
+    website: "Track changes to positioning, pricing, packaging, and what they ship.",
+    press: "Launches, funding, partnerships, exec moves, pricing changes — with dates. Flag anything that corroborates their job postings or product direction.",
+    linkedin_jobs: "New postings, and what the DESCRIPTIONS imply — teams, technologies, segments, new bets — not just titles. Flag postings that corroborate product releases or GTM shifts.",
+    linkedin_posts: "Announcements, launches, hiring pushes, narrative shifts — note where a post cross-validates other moves.",
+  });
   const [createdSources, setCreatedSources] = useState<{ id: string; label: string }[]>([]);
-  // step 5 — ignite
-  const [pullLog, setPullLog] = useState<string[]>([]);
+  // step 5 — ignite: each pull is the VERIFICATION — reachable or exact error,
+  // and a preview of the actual signals harvested so you see what it pulls
+  // before daily monitoring runs on it.
+  const [pullLog, setPullLog] = useState<{ text: string; ok?: boolean; signals?: { title: string; relevance: number }[] }[]>([]);
   // The agent side: the ✦ buttons (score / analyst / messenger) need a workflow
   // whose steps carry agent × SKILL. Detect whether one exists; offer to stand
   // up the pair (skills from the canonical templates → attached to your agent →
@@ -437,7 +447,7 @@ export default function CompetitiveSetup({ onDone, productId }: { onDone: () => 
             origin: def.origin, kind, status: "connected", auth_mode: def.authMode, access_scope: def.accessScope,
             focus: def.defaultFocus ?? "both", max_per_pull: def.defaultMaxPerPull, cadence,
             config: kind === "website" && c.website ? { url: c.website } : null,
-            guidance: kind === "website" ? "Track changes to positioning, pricing, and what they ship." : null,
+            guidance: kindGuide[kind]?.trim() || null,
             competitor_id: c.id,
           });
         }
@@ -457,16 +467,19 @@ export default function CompetitiveSetup({ onDone, productId }: { onDone: () => 
     const { data: s } = await supabase.auth.getSession();
     const token = s.session?.access_token;
     for (const src of createdSources.slice(0, 12)) {
-      setPullLog((l) => [...l, `Pulling ${src.label}…`]);
+      setPullLog((l) => [...l, { text: `Pulling ${src.label}…` }]);
       try {
         const { data, error } = await supabase.functions.invoke("connector-runner", {
           body: { source_id: src.id }, headers: token ? { Authorization: `Bearer ${token}` } : undefined,
         });
         if (error) throw error;
         if (data?.error) throw new Error(data.error);
-        setPullLog((l) => [...l.slice(0, -1), `✓ ${src.label} — ${data.created ?? 0} signal${(data.created ?? 0) === 1 ? "" : "s"}`]);
+        setPullLog((l) => [...l.slice(0, -1), {
+          text: `${src.label} — ${data.created ?? 0} signal${(data.created ?? 0) === 1 ? "" : "s"}`, ok: true,
+          signals: (data.signals ?? []) as { title: string; relevance: number }[],
+        }]);
       } catch (e) {
-        setPullLog((l) => [...l.slice(0, -1), `✗ ${src.label} — ${e instanceof Error ? e.message : "failed"}`]);
+        setPullLog((l) => [...l.slice(0, -1), { text: `${src.label} — ${e instanceof Error ? e.message : "failed"}`, ok: false }]);
       }
     }
     setBusy(null);
@@ -745,6 +758,15 @@ export default function CompetitiveSetup({ onDone, productId }: { onDone: () => 
               </tbody>
             </table>
           </div>
+          <div className="card card-pad" style={{ background: "var(--panel-2)" }}>
+            <div className="t-label" style={{ color: "var(--tm)", marginBottom: 6 }}>How you want each source — instructions aim every pull <span className="t-sub t-muted" style={{ textTransform: "none", letterSpacing: 0 }}>(editable later per source)</span></div>
+            <div className="stack-2">
+              {MONITOR_KINDS.map(([k, label]) => (
+                <label key={k} className="field"><span className="t-label">{label}</span>
+                  <textarea className="textarea" rows={2} value={kindGuide[k] ?? ""} onChange={(e) => setKindGuide({ ...kindGuide, [k]: e.target.value })} /></label>
+              ))}
+            </div>
+          </div>
           <div className="row gap-2">
             <button className="btn btn-sm" disabled={busy === "save-mon"} onClick={confirmMonitoring}>{busy === "save-mon" ? "Creating monitors…" : "Confirm monitoring →"}</button>
             <button className="btn btn-secondary btn-sm" onClick={() => setStep(5)}>Skip monitoring</button>
@@ -774,7 +796,26 @@ export default function CompetitiveSetup({ onDone, productId }: { onDone: () => 
           {createdSources.length > 0 && (
             <>
               <button className="btn btn-sm" disabled={busy === "ignite"} onClick={igniteAll}>{busy === "ignite" ? "Pulling…" : `⚡ Run the first pulls now (${Math.min(createdSources.length, 12)})`}</button>
-              {pullLog.length > 0 && <div className="card card-pad" style={{ background: "var(--panel-2)" }}>{pullLog.map((l, i) => <div key={i} className="t-mono-xs" style={{ padding: "2px 0" }}>{l}</div>)}</div>}
+              {pullLog.length > 0 && (
+                <div className="card card-pad" style={{ background: "var(--panel-2)" }}>
+                  <div className="t-mono-xs t-muted" style={{ marginBottom: 6 }}>The first pull is the verification — what each source actually returned. Wrong link or wrong content? Fix it on the competitor&rsquo;s Signals tab before the daily cadence runs.</div>
+                  {pullLog.map((l, i) => (
+                    <div key={i} style={{ padding: "3px 0" }}>
+                      <div className="t-mono-xs" style={{ fontWeight: 640, color: l.ok === false ? "var(--rd-text, #B91C1C)" : l.ok ? "var(--gn-text, #15803d)" : "var(--ts)" }}>
+                        {l.ok === false ? "✗ " : l.ok ? "✓ " : ""}{l.text}
+                      </div>
+                      {l.signals && l.signals.length > 0 && (
+                        <div style={{ marginLeft: 18, marginTop: 2 }}>
+                          {l.signals.slice(0, 4).map((sg, j) => (
+                            <div key={j} className="t-mono-xs t-muted" style={{ padding: "1px 0" }}>· {sg.title} <span style={{ opacity: 0.7 }}>({Math.round(sg.relevance * 100)}% relevant)</span></div>
+                          ))}
+                          {l.signals.length > 4 && <div className="t-mono-xs t-muted" style={{ opacity: 0.7 }}>+{l.signals.length - 4} more in the feed</div>}
+                        </div>
+                      )}
+                    </div>
+                  ))}
+                </div>
+              )}
             </>
           )}
           <button className="btn btn-secondary btn-sm" onClick={onDone}>Open the dashboard →</button>
