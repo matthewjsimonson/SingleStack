@@ -19,6 +19,7 @@ import ProfileReadiness from "@/components/ProfileReadiness";
 import BattlecardItemDrawer, { type CardItem } from "@/components/BattlecardItemDrawer";
 import { signalDomain, SIGNAL_DOMAIN } from "@/lib/signals";
 import { useProductScope } from "@/lib/ProductContext";
+import { standUpCompetitiveAgents } from "@/lib/standUpCompetitive";
 
 type Competitor = { id: string; name: string; relationship: string; website: string | null; notes: string | null; product_id: string | null };
 type Capability = { id: string; name: string; category: string | null };
@@ -488,6 +489,38 @@ function Competitors({ competitors, cards, overview, capabilities, scores, compS
   const [logOpen, setLogOpen] = useState(false);
   const [logForm, setLogForm] = useState({ origin: "internal", channel: "", title: "", why: "", conf: "0.7" });
   const [logBusy, setLogBusy] = useState(false);
+  // Manage signals HERE, on the competitor — edit or remove without a detour
+  // through the full feed/workflow.
+  const [sigEdit, setSigEdit] = useState<{ id: string; title: string; why: string; conf: string } | null>(null);
+  async function saveSignal() {
+    if (!sigEdit?.title.trim()) return;
+    setError(null);
+    const lvl = parseFloat(sigEdit.conf);
+    const { error } = await supabase.from("signals").update({
+      title: sigEdit.title.trim(), why: sigEdit.why.trim() || null,
+      conf_level: isNaN(lvl) ? null : lvl, conf_label: isNaN(lvl) ? null : lvl >= 0.75 ? "High" : lvl >= 0.5 ? "Medium" : "Low",
+    }).eq("id", sigEdit.id);
+    if (error) setError(error.message); else { setSigEdit(null); reload(); }
+  }
+  async function removeSignal(id: string) {
+    setError(null);
+    const { error } = await supabase.from("signals").delete().eq("id", id);
+    if (error) setError(error.message); else reload();
+  }
+  // Stand up the analyst+messenger+scorer chain from right here.
+  const [standBusy, setStandBusy] = useState(false);
+  async function standUpHere() {
+    setStandBusy(true); setError(null);
+    try {
+      const res = await standUpCompetitiveAgents(supabase);
+      if (!res.ok) throw new Error(res.message);
+      setAgentNote(res.message);
+      const { data } = await supabase.from("workflows").select("id, name, steps").eq("is_active", true).order("created_at");
+      const ws = ((data ?? []) as Wf[]).filter((w) => Array.isArray(w.steps) && w.steps.length > 0);
+      setWorkflows(ws); setWfId((cur) => cur || ws.find((w) => w.name === "Competitive battlecard pair")?.id || ws[0]?.id || "");
+    } catch (e) { setError(e instanceof Error ? e.message : "Could not stand up the agents."); }
+    finally { setStandBusy(false); }
+  }
   async function logSignal(e: React.FormEvent) {
     e.preventDefault(); if (!logForm.title.trim() || !scope) return;
     setLogBusy(true); setError(null);
@@ -740,7 +773,10 @@ function Competitors({ competitors, cards, overview, capabilities, scores, compS
           </div>
           {(!wf || !stepReady(0)) && (
             <div className="card card-pad" style={{ marginBottom: 12, background: "var(--panel-2)", fontSize: 12.5 }}>
-              The battlecard pair runs <b>your</b> agents and skills. Build them on the Agents page (cornerstone + child skills), then create a workflow — e.g. &ldquo;Competitive analysis &amp; messaging&rdquo; — with <b>step 1</b> = agent × analyst skill (proposes battlecard items, every item citing signals) and <b>step 2</b> = agent × messenger skill (drafts the GTM Battlecard section from ratified items).
+              The battlecard pair runs <b>your</b> agents and skills — cornerstone identity + the analyst and messenger play skills, chained in a workflow. One click stands the whole chain up; everything it ever produces still goes through your review.
+              <div style={{ marginTop: 8 }}>
+                <button className="btn btn-sm" disabled={standBusy} onClick={standUpHere}>{standBusy ? "Standing up…" : "✦ Stand up analysis + messaging"}</button>
+              </div>
             </div>
           )}
           {agentNote && <div className="card card-pad" style={{ marginBottom: 12, background: "var(--panel-2)", fontSize: 12.5 }}>{agentNote}</div>}
@@ -796,7 +832,10 @@ function Competitors({ competitors, cards, overview, capabilities, scores, compS
           {scoreNote && <div className="card card-pad" style={{ marginBottom: 12, background: "var(--panel-2)", fontSize: 12.5 }}>{scoreNote}</div>}
           {(!wf || !stepReady(0)) && (
             <div className="card card-pad" style={{ marginBottom: 12, background: "var(--panel-2)", fontSize: 12.5 }}>
-              Scoring runs <b>your</b> agent and skill. Build them on the Agents page, then attach a workflow whose <b>step 1</b> = agent × a scoring skill. The agent rates {selected?.name ?? "the competitor"} on each capability strictly from their signals — every score cites evidence and is yours to accept, adjust, or reject in <b>Signals → Review</b>.
+              Scoring runs <b>your</b> agent × the evidence-scoring play skill via a workflow. One click stands it up; every score still cites its evidence and lands in <b>Signals → Review</b> for your verdict.
+              <div style={{ marginTop: 8 }}>
+                <button className="btn btn-sm" disabled={standBusy} onClick={standUpHere}>{standBusy ? "Standing up…" : "✦ Stand up the scoring workflow"}</button>
+              </div>
             </div>
           )}
           {capabilities.length === 0 ? <div className="t-sub t-muted" style={{ fontSize: 12.5 }}>No capabilities defined yet. Add them on the Dashboard matrix.</div> : (
@@ -909,11 +948,31 @@ function Competitors({ competitors, cards, overview, capabilities, scores, compS
           )}
           {sigsFor(scope).length === 0 && !logOpen ? <div className="t-sub t-muted" style={{ fontSize: 12.5 }}>No signals on {selected?.name} yet. Log one above, or add monitored links — daily/weekly pulls land here automatically.</div> : (
             <div className="stack-3">
-              {sigsFor(scope).map((s) => (
+              {sigsFor(scope).map((s) => sigEdit?.id === s.id ? (
+                <div key={s.id} className="card card-pad" style={{ borderLeft: "3px solid var(--ac)" }}>
+                  <label className="field"><span className="t-label">What happened</span>
+                    <input className="input" autoFocus value={sigEdit.title} onChange={(e) => setSigEdit({ ...sigEdit, title: e.target.value })} /></label>
+                  <label className="field"><span className="t-label">Why it matters</span>
+                    <input className="input" value={sigEdit.why} onChange={(e) => setSigEdit({ ...sigEdit, why: e.target.value })} /></label>
+                  <div className="row gap-2" style={{ alignItems: "center" }}>
+                    <select className="select" value={sigEdit.conf} onChange={(e) => setSigEdit({ ...sigEdit, conf: e.target.value })} style={{ width: 130 }}>
+                      <option value="0.9">High</option><option value="0.7">Medium</option><option value="0.4">Low</option>
+                    </select>
+                    <button className="btn btn-sm" onClick={saveSignal}>Save</button>
+                    <button className="btn btn-secondary btn-sm" onClick={() => setSigEdit(null)}>Cancel</button>
+                  </div>
+                </div>
+              ) : (
                 <div key={s.id} className="card card-pad signal-card" style={{ borderLeft: "3px solid var(--vl)" }}>
                   <div className="row-between" style={{ gap: 12, alignItems: "flex-start", marginBottom: 4 }}>
                     <span style={{ fontSize: 14, fontWeight: 620 }}>{s.title}</span>
-                    <Confidence label={s.conf_label} level={s.conf_level} />
+                    <span className="row gap-2" style={{ alignItems: "center", flexShrink: 0 }}>
+                      <Confidence label={s.conf_label} level={s.conf_level} />
+                      <button className="t-mono-xs" onClick={() => setSigEdit({ id: s.id, title: s.title, why: s.why ?? "", conf: String(s.conf_level ?? 0.7) })}
+                        title="Edit this signal" style={{ background: "none", border: "none", cursor: "pointer", color: "var(--ac-text, var(--ac))", fontWeight: 600, padding: 0 }}>✎</button>
+                      <button className="t-muted" onClick={() => removeSignal(s.id)} title="Remove this signal"
+                        style={{ background: "none", border: "none", cursor: "pointer", fontSize: 14, padding: 0 }}>×</button>
+                    </span>
                   </div>
                   {s.why && <div className="t-sub t-muted" style={{ fontSize: 12.5, lineHeight: 1.45 }}>{s.why}</div>}
                 </div>

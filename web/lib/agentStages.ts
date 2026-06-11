@@ -19,6 +19,14 @@ export const AGENT_STAGES: Record<string, string[]> = {
     "Drafting the GTM record",
     "Leaving honest gaps empty",
   ],
+  // connector-runner · one pull, the pipeline made visible
+  pullSource: [
+    "Fetching the source",
+    "Screening for prompt injection",
+    "Distilling into candidate signals",
+    "Gating on relevance & budget",
+    "Landing tagged signals",
+  ],
   // setup-competitive · interview turn
   setupAsk: [
     "Reading everything you've given it",

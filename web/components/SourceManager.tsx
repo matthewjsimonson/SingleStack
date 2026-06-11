@@ -12,6 +12,7 @@
 // and light up when their credential connector lands.
 import { useEffect, useState, useCallback } from "react";
 import { createClient } from "@/lib/supabase/client";
+import { useAgentRun, AgentStepList } from "@/components/AgentProgress";
 import { getOrgId } from "@/lib/org";
 import { Chip, Modal } from "@/components/ui";
 import { SOURCE_CATALOG, type SourceDef } from "@/lib/sources";
@@ -42,6 +43,10 @@ export default function SourceManager({ scope = {}, title = "Sources" }: { scope
   const [cfg, setCfg] = useState({ label: "", url: "", focus: "" as "" | "product" | "gtm" | "both", include: "", exclude: "", maxPerPull: "", cadence: "manual", targets: "", guidance: "", mcpUrl: "", mcpToken: "", mcpOrigin: "external" as "internal" | "external" });
   // per-source pull state: id -> running | result message
   const [pulling, setPulling] = useState<Record<string, boolean>>({});
+  // The brain at work during a pull: the pipeline stages walk while the runner
+  // fetches→screens→distills→gates, and the result shows the REAL numbers.
+  const pullRun = useAgentRun("pullSource");
+  const [pullingId, setPullingId] = useState<string | null>(null);
   const [pullMsg, setPullMsg] = useState<Record<string, string>>({});
   // Source Recipe Builder — describe a signal in plain English, Claude drafts it.
   const [describe, setDescribe] = useState("");
@@ -97,17 +102,40 @@ export default function SourceManager({ scope = {}, title = "Sources" }: { scope
 
   // Pull now — invoke the connector runner for a live-kind source, show result.
   async function pullNow(s: Source) {
-    setPulling((p) => ({ ...p, [s.id]: true }));
+    setPulling((p) => ({ ...p, [s.id]: true })); setPullingId(s.id);
     setPullMsg((m) => ({ ...m, [s.id]: "" }));
     try {
-      const { data, error } = await supabase.functions.invoke("connector-runner", { body: { source_id: s.id } });
-      if (error) throw new Error((data as { error?: string })?.error || error.message);
-      const d = data as { created: number; fetched: number; dropped: number };
-      setPullMsg((m) => ({ ...m, [s.id]: `Pulled ${d.fetched} page${d.fetched === 1 ? "" : "s"} → ${d.created} signal${d.created === 1 ? "" : "s"}${d.dropped ? ` (${d.dropped} below the bar)` : ""}.` }));
+      await pullRun.go(async () => {
+        const { data, error } = await supabase.functions.invoke("connector-runner", { body: { source_id: s.id } });
+        if (error) throw new Error((data as { error?: string })?.error || error.message);
+        const d = data as { created: number; fetched: number; dropped: number; quarantined?: number; floor?: number };
+        // The pipeline, with its real numbers — exactly what happened to the bytes.
+        setPullMsg((m) => ({ ...m, [s.id]: [
+          `fetched ${d.fetched} doc${d.fetched === 1 ? "" : "s"}`,
+          d.quarantined ? `⚠ ${d.quarantined} quarantined (injection screen)` : "screened clean",
+          `${(d.created ?? 0) + (d.dropped ?? 0)} candidates distilled`,
+          d.dropped ? `${d.dropped} dropped below ${Math.round((d.floor ?? 0.55) * 100)}% relevance` : null,
+          `→ ${d.created} signal${d.created === 1 ? "" : "s"} landed, tagged & feeding synthesis`,
+        ].filter(Boolean).join(" · ") }));
+      });
       await load();
     } catch (e) {
       setPullMsg((m) => ({ ...m, [s.id]: e instanceof Error ? e.message : "Pull failed." }));
-    } finally { setPulling((p) => ({ ...p, [s.id]: false })); }
+    } finally { setPulling((p) => ({ ...p, [s.id]: false })); setPullingId(null); }
+  }
+
+  // Pull control: cadence editable in place; pause stops scheduled pulls
+  // without losing the source (the scheduler only pulls status='connected').
+  async function setCadence(s: Source, cadence: string) {
+    setError(null);
+    const { error } = await supabase.from("sources").update({ cadence }).eq("id", s.id);
+    if (error) setError(error.message); else await load();
+  }
+  async function togglePause(s: Source) {
+    setError(null);
+    const next = s.status === "paused" ? "connected" : "paused";
+    const { error } = await supabase.from("sources").update({ status: next }).eq("id", s.id);
+    if (error) setError(error.message); else await load();
   }
 
   async function connect() {
@@ -256,10 +284,22 @@ export default function SourceManager({ scope = {}, title = "Sources" }: { scope
                           <div className="row-between">
                             <div className="row gap-2" style={{ flexWrap: "wrap" }}>
                               <span>{s.icon}</span><span style={{ fontSize: 13.5, fontWeight: 600 }}>{s.label}</span>
-                              <Chip tone={s.status === "connected" ? "green" : "default"}>{s.status === "connected" ? "live" : "manual"}</Chip>
+                              <Chip tone={s.status === "connected" ? "green" : s.status === "paused" ? "amber" : "default"}>{s.status === "connected" ? "live" : s.status === "paused" ? "paused" : "manual"}</Chip>
                               {s.focus && <Chip tone={s.focus === "gtm" ? "violet" : "accent"}>{s.focus}</Chip>}
                             </div>
-                            <div className="row gap-2">
+                            <div className="row gap-2" style={{ alignItems: "center" }}>
+                              {LIVE_PULL_KINDS.has(s.kind) && (
+                                <select className="select" value={s.cadence} onChange={(e) => setCadence(s, e.target.value)} title="Pull cadence — manual = only when you press Pull now"
+                                  style={{ padding: "2px 6px", fontSize: 11.5, height: "auto", width: "auto" }}>
+                                  <option value="manual">manual</option><option value="daily">daily</option><option value="weekly">weekly</option>
+                                </select>
+                              )}
+                              {LIVE_PULL_KINDS.has(s.kind) && s.cadence !== "manual" && (
+                                <button className="btn btn-secondary btn-sm" onClick={() => togglePause(s)} style={{ padding: "2px 8px", fontSize: 11.5 }}
+                                  title={s.status === "paused" ? "Resume scheduled pulls" : "Pause scheduled pulls — the source and its signals stay"}>
+                                  {s.status === "paused" ? "▶ Resume" : "⏸ Pause"}
+                                </button>
+                              )}
                               {LIVE_PULL_KINDS.has(s.kind) && (
                                 <button className="btn btn-sm" disabled={pulling[s.id]} onClick={() => pullNow(s)} style={{ padding: "2px 10px", fontSize: 12 }}>
                                   {pulling[s.id] ? "Pulling…" : "Pull now"}
@@ -279,6 +319,9 @@ export default function SourceManager({ scope = {}, title = "Sources" }: { scope
                               {(s.targets?.length ?? 0) > 0 ? `${s.include_terms || s.exclude_terms ? " · " : ""}${s.targets!.length} target${s.targets!.length === 1 ? "" : "s"}` : ""}
                               {s.guidance ? ` · “${s.guidance}”` : ""}
                             </div>
+                          )}
+                          {pullingId === s.id && pullRun.active && (
+                            <div className="card card-pad" style={{ marginTop: 6, background: "var(--panel-2)", padding: "8px 10px" }}><AgentStepList run={pullRun} /></div>
                           )}
                           {pullMsg[s.id] && <div className="t-sub" style={{ fontSize: 11.5, marginTop: 4, color: "var(--accent)" }}>{pullMsg[s.id]}</div>}
                         </div>

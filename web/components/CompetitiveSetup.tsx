@@ -15,7 +15,7 @@ import { Chip, Banner, Modal } from "@/components/ui";
 import { useAgentRun, AgentProgress, AgentStepList } from "@/components/AgentProgress";
 import ProfileReadiness from "@/components/ProfileReadiness";
 import { CATALOG_BY_KIND } from "@/lib/sources";
-import { SKILL_DEFS } from "@/lib/skills.generated";
+import { standUpCompetitiveAgents } from "@/lib/standUpCompetitive";
 
 type Step = 1 | 2 | 3 | 4 | 5;
 type CompCand = { name: string; website: string; relationship: string; match: number; why: string; overlap: string; keep: boolean };
@@ -32,6 +32,7 @@ export default function CompetitiveSetup({ onDone, productId }: { onDone: () => 
   // status (phase + elapsed seconds + token usage) instead of a guessed cadence.
   const capsRun = useAgentRun("setupCaps");
   const askRun = useAgentRun("setupAsk");
+  const pullRun = useAgentRun("pullSource");
   const pictureRun = useAgentRun("setupPicture");
   // The living search checklist: short, controlled steps that complete on REAL
   // transitions (request fired / phase resolved) — spinner on the active step,
@@ -116,54 +117,13 @@ export default function CompetitiveSetup({ onDone, productId }: { onDone: () => 
   async function standUpAgents() {
     setBusy("wf"); setError(null); setWfNote(null);
     try {
-      const orgId = await getOrgId(); if (!orgId) throw new Error("Could not resolve your organization.");
-      // 1. the agent that runs the playbooks: prefer the CRO, else any active agent
-      const { data: agents } = await supabase.from("agents").select("id, key, name").eq("is_active", true).order("created_at");
-      const agent = (agents ?? []).find((a) => a.key === "cro") ?? (agents ?? [])[0];
-      if (!agent) throw new Error("No active agent yet — create one on the Agents page first, then re-run this step.");
-      // 2. the three competitive skills, from the canonical templates (insert if missing)
-      const KEYS = ["competitive_evidence_analyst", "competitive_messenger", "capability_evidence_scoring"];
-      const skillId: Record<string, string> = {};
-      for (const key of KEYS) {
-        const def = SKILL_DEFS.find((d) => d.key === key); if (!def) continue;
-        const { data: ex } = await supabase.from("skills").select("id").eq("key", key).maybeSingle();
-        if (ex?.id) skillId[key] = ex.id;
-        else {
-          const { data: created, error } = await supabase.from("skills").insert({
-            org_id: orgId, key, name: def.name, description: def.description, category: def.category,
-            instructions: def.instructions, source: "template", areas: def.areas, connectors: def.connectors,
-          }).select("id").single();
-          if (error || !created) throw error ?? new Error(`could not create skill ${key}`);
-          skillId[key] = created.id;
-        }
-        await supabase.from("agent_skills").upsert({ org_id: orgId, agent_id: agent.id, skill_id: skillId[key], is_cornerstone: false }, { onConflict: "agent_id,skill_id", ignoreDuplicates: true });
-      }
-      // 3. the two workflows, steps carrying agent × skill (what the ✦ buttons need)
-      const uid = () => crypto.randomUUID();
-      const { data: have } = await supabase.from("workflows").select("name");
-      const names = new Set((have ?? []).map((w) => w.name));
-      const defs = [
-        { name: "Competitive battlecard pair", description: "Step 1: the analyst proposes evidence-cited battlecard items (through review). Step 2: the messenger drafts seller copy from the ratified items (through proposals).",
-          steps: [
-            { id: uid(), agent_id: agent.id, skill_id: skillId["competitive_evidence_analyst"], signals: "both", instruction: "Work one named competitor at a time. Propose only what the evidence supports." },
-            { id: uid(), agent_id: agent.id, skill_id: skillId["competitive_messenger"], signals: "none", instruction: "Draft from ratified items only — never re-introduce rejected claims." },
-          ] },
-        { name: "Score the capability matrix", description: "Step 1: rate a rival on each capability 0–3 strictly from cited evidence — proposals land in Signals → Review.",
-          steps: [
-            { id: uid(), agent_id: agent.id, skill_id: skillId["capability_evidence_scoring"], signals: "both", instruction: "Omit capabilities the evidence doesn't address. A single soft mention is a 1, never higher." },
-          ] },
-      ];
-      let made = 0;
-      for (const d of defs) {
-        if (names.has(d.name)) continue;
-        const { error } = await supabase.from("workflows").insert({ org_id: orgId, agent_id: agent.id, name: d.name, description: d.description, trigger: "manual", target_type: "none", steps: d.steps, is_active: true });
-        if (error) throw error; made++;
-      }
-      setWfReady(true);
-      setWfNote(`Ready — ${agent.name} carries the three competitive playbooks${made ? `, ${made} workflow${made === 1 ? "" : "s"} created` : ""}. Pick them in the workflow selector next to each ✦ button.`);
+      const res = await standUpCompetitiveAgents(supabase);
+      if (!res.ok) throw new Error(res.message);
+      setWfReady(true); setWfNote(res.message);
     } catch (e) { setError(e instanceof Error ? e.message : "Could not stand up the agent side."); }
     finally { setBusy(null); }
   }
+
 
   useEffect(() => {
     (async () => {
@@ -467,17 +427,20 @@ export default function CompetitiveSetup({ onDone, productId }: { onDone: () => 
     const { data: s } = await supabase.auth.getSession();
     const token = s.session?.access_token;
     for (const src of createdSources.slice(0, 12)) {
-      setPullLog((l) => [...l, { text: `Pulling ${src.label}…` }]);
+      setPullLog((l) => [...l, { text: `${src.label}` }]);
       try {
-        const { data, error } = await supabase.functions.invoke("connector-runner", {
-          body: { source_id: src.id }, headers: token ? { Authorization: `Bearer ${token}` } : undefined,
+        await pullRun.go(async () => {
+          const { data, error } = await supabase.functions.invoke("connector-runner", {
+            body: { source_id: src.id }, headers: token ? { Authorization: `Bearer ${token}` } : undefined,
+          });
+          if (error) throw error;
+          if (data?.error) throw new Error(data.error);
+          const candidates = (data.created ?? 0) + (data.dropped ?? 0);
+          setPullLog((l) => [...l.slice(0, -1), {
+            text: `${src.label} — fetched ${data.fetched ?? 0} · ${data.quarantined ? `⚠ ${data.quarantined} quarantined · ` : ""}${candidates} distilled · ${data.dropped ?? 0} below the bar → ${data.created ?? 0} landed`, ok: true,
+            signals: (data.signals ?? []) as { title: string; relevance: number }[],
+          }]);
         });
-        if (error) throw error;
-        if (data?.error) throw new Error(data.error);
-        setPullLog((l) => [...l.slice(0, -1), {
-          text: `${src.label} — ${data.created ?? 0} signal${(data.created ?? 0) === 1 ? "" : "s"}`, ok: true,
-          signals: (data.signals ?? []) as { title: string; relevance: number }[],
-        }]);
       } catch (e) {
         setPullLog((l) => [...l.slice(0, -1), { text: `${src.label} — ${e instanceof Error ? e.message : "failed"}`, ok: false }]);
       }
@@ -796,6 +759,9 @@ export default function CompetitiveSetup({ onDone, productId }: { onDone: () => 
           {createdSources.length > 0 && (
             <>
               <button className="btn btn-sm" disabled={busy === "ignite"} onClick={igniteAll}>{busy === "ignite" ? "Pulling…" : `⚡ Run the first pulls now (${Math.min(createdSources.length, 12)})`}</button>
+              {pullRun.active && (
+                <div className="card card-pad" style={{ borderLeft: "3px solid var(--ac)" }}><AgentStepList run={pullRun} /></div>
+              )}
               {pullLog.length > 0 && (
                 <div className="card card-pad" style={{ background: "var(--panel-2)" }}>
                   <div className="t-mono-xs t-muted" style={{ marginBottom: 6 }}>The first pull is the verification — what each source actually returned. Wrong link or wrong content? Fix it on the competitor&rsquo;s Signals tab before the daily cadence runs.</div>

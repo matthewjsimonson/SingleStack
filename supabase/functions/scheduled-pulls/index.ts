@@ -51,6 +51,7 @@ Deno.serve(async (req: Request) => {
       .from("sources")
       .select("id, org_id, label, kind, cadence, last_pull_at")
       .neq("cadence", "manual")
+      .eq("status", "connected")   // paused sources stay paused — user-controlled
       .order("last_pull_at", { ascending: true, nullsFirst: true })
       .limit(200);
     if (error) throw error;
