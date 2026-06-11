@@ -31,9 +31,18 @@ export default function CompetitiveSetup({ onDone, productId }: { onDone: () => 
   // Staged progress for the capability proposal; the SEARCH gets REAL phase
   // status (phase + elapsed seconds + token usage) instead of a guessed cadence.
   const capsRun = useAgentRun("setupCaps");
-  const [searchPhase, setSearchPhase] = useState<string | null>(null);
+  // The living search checklist: short, controlled steps that complete on REAL
+  // transitions (request fired / phase resolved) — spinner on the active step,
+  // ✓ as each one lands. No fake progress between events.
+  const [searchStep, setSearchStep] = useState<number | null>(null); // index into SEARCH_STEPS; null = not searching
   const [searchSecs, setSearchSecs] = useState(0);
   const [searchUsage, setSearchUsage] = useState<{ input: number; output: number } | null>(null);
+  const SEARCH_STEPS = [
+    "Reading your profile",
+    ctx.competitors.trim() ? `Verifying ${ctx.competitors.split(",").filter((x) => x.trim()).length} named rival${ctx.competitors.includes(",") ? "s" : ""}, searching beyond` : "Searching the live landscape",
+    "Scoring overlap — buyer · industry · capability · positioning",
+    "Ranking by match",
+  ];
   const [error, setError] = useState<string | null>(null);
 
   // step 1 — anchor: the market context comes FROM the records the user already
@@ -337,21 +346,22 @@ export default function CompetitiveSetup({ onDone, productId }: { onDone: () => 
     const t0 = Date.now();
     const tick = setInterval(() => setSearchSecs(Math.round((Date.now() - t0) / 1000)), 1000);
     try {
-      // Two phases, retried independently — and the status is REAL: it changes
-      // when the work actually changes, with elapsed time and token cost shown.
-      setSearchPhase(ctx.competitors.trim() ? `Phase 1/2 · verifying ${ctx.competitors.split(",").length} named rival${ctx.competitors.includes(",") ? "s" : ""} + searching beyond them` : "Phase 1/2 · live web search across the landscape (≤3 searches, budgeted)");
+      // Each advance below is a REAL transition: profile composed → live search
+      // in flight → resolved → scoring in flight → resolved → ranked.
+      setSearchStep(1); // profile (step 0) is composed at fire time — ✓ immediately, search in flight
       const land = await invokeRetry({ step: "landscape", market: marketCtx, product: { name: prod?.name, value_prop: prod?.value_prop } });
       const u1 = (land.usage ?? { input: 0, output: 0 }) as { input: number; output: number };
-      setSearchPhase("Phase 2/2 · scoring match levels across the four overlap dimensions");
+      setSearchStep(2); // briefing in hand — scoring in flight
       const data = await invokeRetry({ step: "competitors", market: marketCtx, briefing: land.briefing, product: { name: prod?.name, value_prop: prod?.value_prop } });
       const u2 = (data.usage ?? { input: 0, output: 0 }) as { input: number; output: number };
       setSearchUsage({ input: u1.input + u2.input, output: u1.output + u2.output });
+      setSearchStep(3); // ranking (client-side, instant)
       const list = (data.competitors ?? []) as Omit<CompCand, "keep">[];
       if (!list.length) throw new Error("No rivals found — try describing the market more specifically.");
       setComps(list.map((c) => ({ ...c, keep: true })));
       setStep(2);
     } catch (e) { setError(e instanceof Error ? e.message : "The landscape search failed."); }
-    finally { clearInterval(tick); setSearchPhase(null); setBusy(null); }
+    finally { clearInterval(tick); setSearchStep(null); setBusy(null); }
   }
   async function confirmCompetitors() {
     const keep = comps.filter((c) => c.keep && c.name.trim());
@@ -547,13 +557,26 @@ export default function CompetitiveSetup({ onDone, productId }: { onDone: () => 
               <div className="row gap-2"><button className="btn btn-sm" onClick={() => setEditCtx(false)}>Done</button></div>
             </div>
           </Modal>
-          {searchPhase ? (
+          {searchStep !== null ? (
             <div className="card card-pad" style={{ borderLeft: "3px solid var(--ac)" }}>
-              <div className="row-between" style={{ alignItems: "baseline" }}>
-                <span style={{ fontSize: 13, fontWeight: 640 }}><span className="agent-progress-dot" aria-hidden style={{ marginRight: 8 }} />{searchPhase}</span>
+              <div className="row-between" style={{ alignItems: "baseline", marginBottom: 8 }}>
+                <span className="t-label" style={{ color: "var(--tm)" }}>Finding your competitors</span>
                 <span className="t-mono-xs t-muted">{searchSecs}s</span>
               </div>
-              <div className="t-mono-xs t-muted" style={{ marginTop: 6 }}>Hard-budgeted: ≤3 web searches, capped tokens. Typically 20–40s total; each candidate returns with a match % and its overlap explained.</div>
+              <div className="stack-2">
+                {SEARCH_STEPS.map((label, i) => {
+                  const state = i < searchStep ? "done" : i === searchStep ? "active" : "pending";
+                  return (
+                    <div key={i} className="row gap-2" style={{ alignItems: "center", opacity: state === "pending" ? 0.45 : 1 }}>
+                      {state === "done" && <span style={{ width: 16, textAlign: "center", color: "var(--gn-text, #15803d)", fontWeight: 700, fontSize: 12 }}>✓</span>}
+                      {state === "active" && <span style={{ width: 16, display: "inline-flex", justifyContent: "center" }}><span className="agent-progress-dot" aria-hidden /></span>}
+                      {state === "pending" && <span style={{ width: 16, textAlign: "center", color: "var(--tm)", fontSize: 11 }}>○</span>}
+                      <span style={{ fontSize: 12.5, fontWeight: state === "active" ? 650 : 500, color: state === "active" ? "var(--tp)" : "var(--ts)" }}>{label}{state === "active" ? "…" : ""}</span>
+                    </div>
+                  );
+                })}
+              </div>
+              <div className="t-mono-xs t-muted" style={{ marginTop: 8 }}>≤3 web searches, capped tokens · typically 20–40s</div>
             </div>
           ) : (
             <div className="row gap-2">
@@ -657,7 +680,7 @@ export default function CompetitiveSetup({ onDone, productId }: { onDone: () => 
           <button className="btn btn-secondary btn-sm" onClick={() => setComps([...comps, { name: "", website: "", relationship: "direct", match: 100, why: "Added by you.", overlap: "", keep: true }])}>+ Add one they missed</button>
           <div className="row gap-2">
             <button className="btn btn-sm" disabled={busy === "save-comps"} onClick={confirmCompetitors}>{busy === "save-comps" ? "Saving…" : `Confirm ${comps.filter((c) => c.keep && c.name.trim()).length} competitor${comps.filter((c) => c.keep && c.name.trim()).length === 1 ? "" : "s"} →`}</button>
-            {searchPhase ? <span className="t-mono-xs t-muted">{searchPhase} · {searchSecs}s</span> : <button className="btn btn-secondary btn-sm" onClick={findCompetitors}>↻ Search again</button>}
+            {searchStep !== null ? <span className="row gap-2 t-mono-xs t-muted" style={{ alignItems: "center" }}><span className="agent-progress-dot" aria-hidden />{SEARCH_STEPS[searchStep]}… · {searchSecs}s</span> : <button className="btn btn-secondary btn-sm" onClick={findCompetitors}>↻ Search again</button>}
             {searchUsage && !searchPhase && <span className="t-mono-xs t-muted" title="Exact token cost of this search (input + output across both phases)">{((searchUsage.input + searchUsage.output) / 1000).toFixed(1)}k tokens</span>}
           </div>
         </div>
