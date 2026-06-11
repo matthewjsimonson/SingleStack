@@ -27,8 +27,9 @@ const TAG_LABEL: Record<string, string> = {
   tone: "tone/wording", duplicate: "duplicate", other: "other",
 };
 const KIND_TONE: Record<string, "default" | "accent" | "violet" | "amber" | "green"> = {
-  new_theme: "accent", escalate: "amber", merge: "violet", decay: "default", restate: "default", battlecard_item: "green",
+  new_theme: "accent", escalate: "amber", merge: "violet", decay: "default", restate: "default", battlecard_item: "green", capability_score: "accent",
 };
+const SCORE_LEVELS = [["—", 0], ["Partial", 1], ["Good", 2], ["Strong", 3]] as const;
 
 // Map a human-chosen set of product lines → the scope shape the data model uses
 // (matches inferScope + the co_products CHECK invariant): none → company-wide;
@@ -52,7 +53,7 @@ export default function IntelReview({ onApplied, productFilter = "all" }: { onAp
   const [acceptRate, setAcceptRate] = useState<{ rate: number; n: number } | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [openId, setOpenId] = useState<string | null>(null);
-  const [draft, setDraft] = useState<{ rationale: string; tags: string[]; edit: string; lines: string[] }>({ rationale: "", tags: [], edit: "", lines: [] });
+  const [draft, setDraft] = useState<{ rationale: string; tags: string[]; edit: string; lines: string[]; score: number | null }>({ rationale: "", tags: [], edit: "", lines: [], score: null });
   const [busy, setBusy] = useState(false);
   const distillRun = useAgentRun("distill");
   const [misses, setMisses] = useState<Miss[]>([]);
@@ -82,7 +83,7 @@ export default function IntelReview({ onApplied, productFilter = "all" }: { onAp
     setOpenId(u.id);
     // Seed the line attribution from the proposal so the human can confirm or
     // correct WHICH lines a (possibly cross-sell) new theme spans.
-    setDraft({ rationale: "", tags: [], edit: typeof u.payload?.recommendation === "string" ? (u.payload.recommendation as string) : "", lines: linesOf(u.payload ?? {}) });
+    setDraft({ rationale: "", tags: [], edit: typeof u.payload?.recommendation === "string" ? (u.payload.recommendation as string) : "", lines: linesOf(u.payload ?? {}), score: typeof u.payload?.score === "number" ? (u.payload.score as number) : null });
   }
   const toggleTag = (t: string) => setDraft((d) => ({ ...d, tags: d.tags.includes(t) ? d.tags.filter((x) => x !== t) : [...d.tags, t] }));
   // Toggle a product line in the attribution; first selected stays the primary.
@@ -101,6 +102,8 @@ export default function IntelReview({ onApplied, productFilter = "all" }: { onAp
       if (draft.edit.trim() && draft.edit.trim() !== (u.payload?.recommendation ?? "")) edited.recommendation = draft.edit.trim();
       const linesChanged = u.kind === "new_theme" && !sameSet(draft.lines, linesOf(u.payload ?? {}));
       if (linesChanged) Object.assign(edited, scopeFromLines(draft.lines));
+      // Capability score: a human override of the proposed rating is a teaching edit.
+      if (u.kind === "capability_score" && draft.score !== null && draft.score !== (u.payload?.score ?? null)) edited.score = draft.score;
       const hasEdit = Object.keys(edited).length > 0;
       const effectiveVerdict = verdict === "accept" && hasEdit ? "edit" : verdict;
       const { data, error } = await supabase.functions.invoke("resolve-intel-update", {
@@ -109,7 +112,7 @@ export default function IntelReview({ onApplied, productFilter = "all" }: { onAp
       });
       if (error) throw error;
       if (data?.error) throw new Error(data.error);
-      setOpenId(null); setDraft({ rationale: "", tags: [], edit: "", lines: [] });
+      setOpenId(null); setDraft({ rationale: "", tags: [], edit: "", lines: [], score: null });
       await load(); onApplied?.();
     } catch (e) { setError(e instanceof Error ? e.message : "Could not resolve."); }
     finally { setBusy(false); }
@@ -222,6 +225,28 @@ export default function IntelReview({ onApplied, productFilter = "all" }: { onAp
                         <span className="t-mono-xs" style={{ marginTop: 4 }}>
                           {draft.lines.length === 0 ? "company-wide (applies to all)" : draft.lines.length === 1 ? `${lineName(draft.lines[0])} only` : `cross-sell: ${draft.lines.map(lineName).join(" + ")}`}
                         </span>
+                      </div>
+                    )}
+                    {/* Capability score: the rationale + evidence behind the rating,
+                        and a score override (the human owns the final number). */}
+                    {u.kind === "capability_score" && (
+                      <div className="card card-pad" style={{ background: "var(--panel-2)" }}>
+                        {typeof u.payload?.rationale === "string" && u.payload.rationale && <div className="t-sub" style={{ fontSize: 12.5, lineHeight: 1.5, marginBottom: 8 }}>{u.payload.rationale as string}</div>}
+                        <span className="t-label" style={{ display: "block", marginBottom: 6 }}>Score <span className="t-sub t-muted" style={{ textTransform: "none", letterSpacing: 0 }}>— agent proposes, you decide</span></span>
+                        <div className="row gap-2" style={{ flexWrap: "wrap" }}>
+                          {SCORE_LEVELS.map(([label, val]) => {
+                            const on = (draft.score ?? u.payload?.score) === val;
+                            return (
+                              <button key={val} type="button" onClick={() => setDraft({ ...draft, score: val })}
+                                className="chip" style={{ cursor: "pointer", padding: "6px 12px", background: on ? "var(--ac)" : "var(--fill)", color: on ? "#fff" : "var(--ts)", fontWeight: 600 }}>
+                                {label}
+                              </button>
+                            );
+                          })}
+                        </div>
+                        {typeof u.payload?.prev_score === "number" && (
+                          <div className="t-mono-xs" style={{ marginTop: 6 }}>currently {String(u.payload.prev_score)}/3 in the matrix · {(u.payload?.signal_ids as string[] | undefined)?.length ?? 0} signal{((u.payload?.signal_ids as string[] | undefined)?.length ?? 0) === 1 ? "" : "s"} cited</div>
+                        )}
                       </div>
                     )}
                     {/* Battlecard item: show the analyst's substantiation + why it proposed it. */}

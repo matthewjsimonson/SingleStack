@@ -92,6 +92,26 @@ Deno.serve(async (req: Request) => {
           }
           break;
         }
+        case "capability_score": {
+          // Scorer-proposed capability rating, accepted (possibly edited): upsert
+          // the matrix cell for this competitor, carrying its evidence trail. The
+          // human may have changed the score in edited_payload — p already merges
+          // it. competitor_id is never null here (we score THEM, not us).
+          const capId = p.capability_id as string | undefined;
+          const compId = p.competitor_id as string | undefined;
+          const score = Math.min(3, Math.max(0, Math.round(Number(p.score) || 0)));
+          if (capId && compId) {
+            const { error: csErr } = await supabase.from("capability_scores").upsert({
+              org_id: orgId, capability_id: capId, competitor_id: compId, score,
+              scored_by: (p.scored_by as string | null) ?? "agent",
+              rationale: (p.rationale as string | null) ?? null,
+              signal_ids: (p.signal_ids as string[] | undefined) ?? [],
+              evidence_at: (p.evidence_at as string | null) ?? now,
+            }, { onConflict: "capability_id,competitor_id" });
+            if (csErr) throw new Error(`could not apply capability score: ${csErr.message}`);
+          }
+          break;
+        }
         case "new_theme": {
           const sigIds = (p.signal_ids as string[] | undefined) ?? [];
           const { data: row, error: insErr } = await supabase.from("signal_themes").insert({

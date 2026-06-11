@@ -28,6 +28,9 @@ export default function CapabilityCellDrawer({ cell, onClose, onChanged }: { cel
   const [error, setError] = useState<string | null>(null);
   type Ev = { id: string; title: string; why: string | null; origin: string | null; conf_label: string | null; conf_level: number | null; metadata: { channel?: string } | null };
   const [evidence, setEvidence] = useState<Ev[]>([]);
+  // Provenance of the current rating: when an agent scored it from evidence, the
+  // drawer shows its work (who, why, how many signals) — the loop made visible.
+  const [prov, setProv] = useState<{ scored_by: string | null; rationale: string | null; signal_ids: string[] | null; evidence_at: string | null } | null>(null);
 
   // Evidence: the competitive signals (internal + external) tied to this rival —
   // the raw intel behind the rating. Makes the drill-down a real read, not a guess.
@@ -43,6 +46,20 @@ export default function CapabilityCellDrawer({ cell, onClose, onChanged }: { cel
     return () => { active = false; };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [cell?.competitorId]);
+
+  // The provenance of THIS cell's rating (us = null competitor, else the rival).
+  useEffect(() => {
+    let active = true;
+    (async () => {
+      if (!cell) { setProv(null); return; }
+      let q = supabase.from("capability_scores").select("scored_by, rationale, signal_ids, evidence_at").eq("capability_id", cell.capabilityId);
+      q = cell.competitorId === null ? q.is("competitor_id", null) : q.eq("competitor_id", cell.competitorId);
+      const { data } = await q.maybeSingle();
+      if (active) setProv((data as typeof prov) ?? null);
+    })();
+    return () => { active = false; };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [cell?.capabilityId, cell?.competitorId]);
 
   if (!cell) return null;
   const current = selected ?? cell.score;
@@ -101,6 +118,14 @@ export default function CapabilityCellDrawer({ cell, onClose, onChanged }: { cel
             <button className="btn btn-sm" onClick={ask} disabled={thinking} style={{ background: "var(--ac)", color: "#fff" }}>{thinking ? "CRO is assessing…" : "Ask the CRO: reasons, sources, implications"}</button>
             {take && <div className="card card-pad" style={{ marginTop: 10, background: "var(--panel)" }}><Markdown className="t-sub" style={{ fontSize: 13, lineHeight: 1.55 }} text={take} /></div>}
           </div>
+
+          {prov?.scored_by && (
+            <div className="card card-pad" style={{ background: "var(--panel-2)", borderLeft: "3px solid var(--ac)" }}>
+              <div className="t-label" style={{ color: "var(--tm)", marginBottom: 6 }}>How this was scored</div>
+              {prov.rationale && <div className="t-sub" style={{ fontSize: 12.5, lineHeight: 1.5 }}>{prov.rationale}</div>}
+              <div className="t-mono-xs" style={{ marginTop: 6 }}>✦ {prov.scored_by} · from {prov.signal_ids?.length ?? 0} signal{(prov.signal_ids?.length ?? 0) === 1 ? "" : "s"}{prov.evidence_at ? ` · ${new Date(prov.evidence_at).toLocaleDateString()}` : ""} · ratified by you</div>
+            </div>
+          )}
 
           <div className="card card-pad">
             <div className="t-label" style={{ color: "var(--tm)", marginBottom: 8 }}>Your rating <span className="t-sub t-muted" style={{ textTransform: "none", letterSpacing: 0 }}>— agent informs, you decide</span></div>

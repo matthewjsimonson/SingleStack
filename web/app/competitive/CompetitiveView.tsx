@@ -350,6 +350,8 @@ function Competitors({ competitors, cards, overview, capabilities, scores, compS
 
   const [agentBusy, setAgentBusy] = useState<"analyst" | "messaging" | null>(null);
   const [agentNote, setAgentNote] = useState<string | null>(null);
+  const [scoreBusy, setScoreBusy] = useState(false);
+  const [scoreNote, setScoreNote] = useState<string | null>(null);
   const [openCard, setOpenCard] = useState<CardItem | null>(null);
   // Update alert: a watch on this competitor's battlecard evidence, surfaced on
   // the homepage command center.
@@ -391,6 +393,18 @@ function Competitors({ competitors, cards, overview, capabilities, scores, compS
       reload();
     } catch (e) { setError(e instanceof Error ? e.message : `The ${which} step failed.`); }
     finally { setAgentBusy(null); }
+  }
+  // Evidence-derived scoring: the agent proposes matrix scores for this rival
+  // from its signals/themes; each lands in the review gate (Signals → Review).
+  async function runScore() {
+    if (!scope || !wfId || scoreBusy) return;
+    setScoreBusy(true); setScoreNote(null); setError(null);
+    try {
+      const { data, error } = await supabase.functions.invoke("score-capabilities", { body: { competitor_id: scope, workflow_id: wfId } });
+      if (error) throw error;
+      setScoreNote((data as { message?: string })?.message ?? "Done.");
+    } catch (e) { setError(e instanceof Error ? e.message : "Scoring failed."); }
+    finally { setScoreBusy(false); }
   }
 
 
@@ -571,7 +585,25 @@ function Competitors({ competitors, cards, overview, capabilities, scores, compS
           </div>
         </>
       ) : cdTab === "product" ? (
-        <Section label="Product board — capability by capability, us vs them">
+        <Section label="Product board — capability by capability, us vs them" action={
+          <div className="row gap-2" style={{ alignItems: "center", flexShrink: 0 }}>
+            {workflows.length > 0 && (
+              <select className="select" value={wfId} onChange={(e) => setWfId(e.target.value)} style={{ maxWidth: 200 }} title="The workflow whose step 1 (agent × skill) does the scoring">
+                {workflows.map((w) => <option key={w.id} value={w.id}>{w.name}</option>)}
+              </select>
+            )}
+            <button className="btn btn-secondary btn-sm" disabled={scoreBusy || !stepReady(0) || capabilities.length === 0} onClick={runScore}
+              title={stepReady(0) ? `Step 1 (your agent × skill) scores ${selected?.name ?? "them"} on each capability from their signals — each score cites its evidence and lands in Signals → Review` : "Needs a workflow with step 1 = agent × skill"}>
+              {scoreBusy ? "Scoring…" : "✦ Score from evidence"}
+            </button>
+          </div>
+        }>
+          {scoreNote && <div className="card card-pad" style={{ marginBottom: 12, background: "var(--panel-2)", fontSize: 12.5 }}>{scoreNote}</div>}
+          {(!wf || !stepReady(0)) && (
+            <div className="card card-pad" style={{ marginBottom: 12, background: "var(--panel-2)", fontSize: 12.5 }}>
+              Scoring runs <b>your</b> agent and skill. Build them on the Agents page, then attach a workflow whose <b>step 1</b> = agent × a scoring skill. The agent rates {selected?.name ?? "the competitor"} on each capability strictly from their signals — every score cites evidence and is yours to accept, adjust, or reject in <b>Signals → Review</b>.
+            </div>
+          )}
           {capabilities.length === 0 ? <div className="t-sub t-muted" style={{ fontSize: 12.5 }}>No capabilities defined yet. Add them on the Dashboard matrix.</div> : (
             <div className="card" style={{ overflowX: "auto" }}>
               <table style={{ borderCollapse: "collapse", width: "100%", fontSize: 13 }}>
