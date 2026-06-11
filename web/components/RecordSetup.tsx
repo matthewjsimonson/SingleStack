@@ -66,7 +66,15 @@ export default function RecordSetup({ onDone }: { onDone: (productId?: string) =
     const { data, error } = await supabase.functions.invoke("setup-records", {
       body, headers: token ? { Authorization: `Bearer ${token}` } : undefined,
     });
-    if (error) throw error;
+    if (error) {
+      const resp = (error as { context?: Response }).context;
+      if (resp && typeof resp.json === "function") {
+        const body = await resp.clone().json().catch(() => null) as { error?: string } | null;
+        if (body?.error) throw new Error(body.error);
+        if (resp.status === 546 || resp.status === 504) throw new Error("That ran past the server time limit — try again; it usually completes on a retry.");
+      }
+      throw error;
+    }
     if (data?.error) throw new Error(data.error);
     return data;
   };

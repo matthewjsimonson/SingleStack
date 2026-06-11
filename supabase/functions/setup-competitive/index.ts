@@ -104,12 +104,12 @@ async function searchBriefing(key: string, sys: string, user: string): Promise<s
   // deno-lint-ignore no-explicit-any
   let messages: any[] = [{ role: "user", content: user }];
   let text = "";
-  for (let i = 0; i < 5; i++) {
+  for (let i = 0; i < 3; i++) {
     const resp = (await anthropic.messages.create({
       model: MODEL,
       max_tokens: 4000,
       thinking: { type: "adaptive" },
-      tools: [{ type: "web_search_20260209", name: "web_search", max_uses: 8 }],
+      tools: [{ type: "web_search_20260209", name: "web_search", max_uses: 5 }],
       system: [{ type: "text", text: sys }],
       messages,
       // deno-lint-ignore no-explicit-any
@@ -180,13 +180,37 @@ Deno.serve(async (req: Request) => {
       return json(JSON.parse(text));
     }
 
+    // landscape: the LONG half (live web search) as its own request, so no
+    // single call flirts with the function wall-clock; the client then sends
+    // the briefing to 'competitors' for extraction (short), retrying each
+    // phase independently.
+    if (step === "landscape") {
+      if (!market && !product.name) return json({ error: "Describe your market (or name your product) so the search has an aim." }, 400);
+      const { data: existing } = await supabase.from("competitors").select("name");
+      const known = (existing ?? []).map((c) => c.name);
+      const briefing = await searchBriefing(
+        key,
+        "You are a competitive-landscape researcher. Use web search to identify the REAL competitors in the user's market — companies a buyer would actually evaluate against them. Assess every candidate on FOUR dimensions: (1) buyer overlap — do they sell to the same personas? (2) industry overlap — same verticals? (3) capability overlap — which of the user's features/modules do they also offer? (4) positioning collision — do they claim the same category or replace the same thing? For each rival report: company name, homepage URL, head-on (direct) vs partial/adjacent, and the per-dimension read with what you found. Concrete and current — cite what you find. 6–10 rivals that genuinely matter, not a directory dump.",
+        [
+          product.name ? `OUR PRODUCT: ${product.name}` : "",
+          product.value_prop ? `VALUE PROP: ${product.value_prop}` : "",
+          market ? `OUR MARKET (user's words): ${market}` : "",
+          known.length ? `ALREADY TRACKED (skip these): ${known.join(", ")}` : "",
+        ].filter(Boolean).join("\n"),
+      );
+      if (!briefing) return json({ error: "The landscape search returned nothing — try describing the market more specifically." }, 502);
+      return json({ briefing });
+    }
+
     if (step === "competitors") {
       if (!market && !product.name) return json({ error: "Describe your market (or name your product) so the search has an aim." }, 400);
       // Don't re-propose rivals the org already tracks.
       const { data: existing } = await supabase.from("competitors").select("name");
       const known = (existing ?? []).map((c) => c.name);
 
-      const briefing = await searchBriefing(
+      // Two-phase path: the client passes the landscape briefing; only when
+      // absent do we search inline (backward-compatible single-call mode).
+      const briefing = (body.briefing as string | undefined)?.trim() || await searchBriefing(
         key,
         "You are a competitive-landscape researcher. Use web search to identify the REAL competitors in the user's market — companies a buyer would actually evaluate against them. Assess every candidate on FOUR dimensions: (1) buyer overlap — do they sell to the same personas? (2) industry overlap — same verticals? (3) capability overlap — which of the user's features/modules do they also offer? (4) positioning collision — do they claim the same category or replace the same thing? For each rival report: company name, homepage URL, head-on (direct) vs partial/adjacent, and the per-dimension read with what you found. Concrete and current — cite what you find. 6–10 rivals that genuinely matter, not a directory dump.",
         [
@@ -237,7 +261,7 @@ Deno.serve(async (req: Request) => {
       return json({ capabilities });
     }
 
-    return json({ error: "step must be one of: interview, picture, competitors, capabilities" }, 400);
+    return json({ error: "step must be one of: interview, picture, landscape, competitors, capabilities" }, 400);
   } catch (e) {
     return json({ error: e instanceof Error ? e.message : String(e) }, 500);
   }

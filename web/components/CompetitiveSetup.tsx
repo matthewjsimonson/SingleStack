@@ -218,15 +218,31 @@ export default function CompetitiveSetup({ onDone, productId }: { onDone: () => 
     ctx.more.trim() ? `Also: ${ctx.more.trim()}` : "",
   ].filter(Boolean).join("\n");
 
+  // invoke with REAL errors: a non-2xx from the function carries its message in
+  // the response body — surface that, never the generic "non-2xx status code".
   const invoke = async (body: Record<string, unknown>) => {
     const { data: s } = await supabase.auth.getSession();
     const token = s.session?.access_token;
     const { data, error } = await supabase.functions.invoke("setup-competitive", {
       body, headers: token ? { Authorization: `Bearer ${token}` } : undefined,
     });
-    if (error) throw error;
+    if (error) {
+      const resp = (error as { context?: Response }).context;
+      if (resp && typeof resp.json === "function") {
+        const body = await resp.clone().json().catch(() => null) as { error?: string } | null;
+        if (body?.error) throw new Error(body.error);
+        if (resp.status === 546 || resp.status === 504) throw new Error("The search ran past the server time limit — try again; it usually completes on a retry.");
+      }
+      throw error;
+    }
     if (data?.error) throw new Error(data.error);
     return data;
+  };
+  // One automatic retry for the long phases — transient timeouts shouldn't
+  // cost the user their flow.
+  const invokeRetry = async (body: Record<string, unknown>) => {
+    try { return await invoke(body); }
+    catch { return await invoke(body); }
   };
 
   // ---- chat drill-down: ask → answer → ask … → paint the full picture --------
@@ -279,7 +295,11 @@ export default function CompetitiveSetup({ onDone, productId }: { onDone: () => 
     setBusy("comps"); setError(null);
     try {
       await compsRun.go(async () => {
-        const data = await invoke({ step: "competitors", market: marketCtx, product: { name: prod?.name, value_prop: prod?.value_prop } });
+        // Two phases, retried independently: the live search (long) returns a
+        // briefing; extraction (short) turns it into scored candidates. No
+        // single request flirts with the function's wall clock.
+        const land = await invokeRetry({ step: "landscape", market: marketCtx, product: { name: prod?.name, value_prop: prod?.value_prop } });
+        const data = await invokeRetry({ step: "competitors", market: marketCtx, briefing: land.briefing, product: { name: prod?.name, value_prop: prod?.value_prop } });
         const list = (data.competitors ?? []) as Omit<CompCand, "keep">[];
         if (!list.length) throw new Error("No rivals found — try describing the market more specifically.");
         setComps(list.map((c) => ({ ...c, keep: true })));
