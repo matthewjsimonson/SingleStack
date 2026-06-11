@@ -2,8 +2,8 @@
 
 // Workflows — author agentic TASKS: multi-step processes that run in a specific
 // order. Each STEP is one officer applying one of its play skills, drawing on
-// internal and/or external signals; its output feeds the next step. Authoring only
-// for now — running a workflow (and launching it from the chat pop-out) comes next.
+// internal and/or external signals; its output feeds the next step. Author here,
+// run from the Run button (WorkflowRunDrawer) or let on_signal triggers queue runs.
 // Steps persist on workflows.steps (jsonb); workflows span agents, so they live here
 // at the roster level rather than on a single agent.
 import { useCallback, useEffect, useState } from "react";

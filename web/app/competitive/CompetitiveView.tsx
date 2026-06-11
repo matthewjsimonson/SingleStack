@@ -15,6 +15,7 @@ import CapabilityCellDrawer, { type Cell } from "@/components/CapabilityCellDraw
 import CompetitiveGrid from "@/components/CompetitiveGrid";
 import SignalProfile from "@/components/SignalProfile";
 import CompetitiveSetup from "@/components/CompetitiveSetup";
+import MarketAnalysis from "@/components/MarketAnalysis";
 import BattlecardItemDrawer, { type CardItem } from "@/components/BattlecardItemDrawer";
 import { signalDomain, SIGNAL_DOMAIN } from "@/lib/signals";
 import { useProductScope } from "@/lib/ProductContext";
@@ -73,14 +74,21 @@ export default function CompetitiveView() {
   return (
     <div>
       <SubTabs<Tab>
-        tabs={[{ key: "dashboard", label: "Dashboard" }, { key: "profile", label: "Signal profile" }, { key: "competitors", label: "Competitors" }, { key: "feed", label: "Signal feed" }]}
+        tabs={[{ key: "dashboard", label: "Dashboard" }, { key: "profile", label: "Market analysis" }, { key: "competitors", label: "Competitors" }, { key: "feed", label: "Signal feed" }]}
         active={tab} onChange={setTab}
       />
       <Banner>{error}</Banner>
 
       {loading ? <div className="t-sub t-muted">Loading…</div>
         : tab === "dashboard" ? <Dashboard competitors={scopedCompetitors} capabilities={capabilities} scores={scores} compSignals={compSignals} overview={overview} reload={load} setError={setError} newProductId={scopedProductId} />
-        : tab === "profile" ? <SignalProfile scope="landscape" />
+        : tab === "profile" ? (
+          <div style={{ display: "grid", gap: "var(--sp-5)" }}>
+            {/* The quadrant — computed live from the evidence loop; click a player for its work. */}
+            <MarketAnalysis competitors={scopedCompetitors} capabilities={capabilities} scores={scores} compSignals={compSignals} themes={themes} />
+            {/* The narrative half: the landscape signal profile (AI-drafted, human-owned). */}
+            <SignalProfile scope="landscape" />
+          </div>
+        )
         : tab === "competitors" ? <Competitors competitors={scopedCompetitors} cards={cards} overview={overview} capabilities={capabilities} scores={scores} compSignals={compSignals} themes={themes} newProductId={scopedProductId} reload={load} setError={setError} />
         : <Feed signals={signals} competitors={scopedCompetitors} reload={load} />}
     </div>

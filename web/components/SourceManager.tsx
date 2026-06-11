@@ -7,8 +7,9 @@
 //     terms + a per-pull BUDGET, so it yields a focused trickle, not a firehose.
 //   • Security is visible — each source shows exactly what it can access
 //     (read-only scope) and how it authenticates; secrets never touch the DB.
-// Manual today (register + log here); live connectors pull automatically when
-// the connector runtime ships — no schema/UI change needed to flip them on.
+// Live kinds (website, youtube, web_search, mcp, linkedin, press, reviews,
+// social, github) pull for real — now and on cadence; the rest register here
+// and light up when their credential connector lands.
 import { useEffect, useState, useCallback } from "react";
 import { createClient } from "@/lib/supabase/client";
 import { getOrgId } from "@/lib/org";

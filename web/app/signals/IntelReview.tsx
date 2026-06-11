@@ -134,6 +134,22 @@ export default function IntelReview({ onApplied, productFilter = "all" }: { onAp
     } catch (e) { setError(e instanceof Error ? e.message : "Could not distill lessons."); }
   }
 
+  // Teach directly: a human-stated preference becomes an active lesson the
+  // synthesis engine carries from the next run on (source='human').
+  const [teach, setTeach] = useState("");
+  const [teaching, setTeaching] = useState(false);
+  async function teachLesson(e: React.FormEvent) {
+    e.preventDefault(); if (!teach.trim()) return;
+    setTeaching(true); setError(null);
+    try {
+      const orgId = await getOrgId(); if (!orgId) throw new Error("No org.");
+      const { error } = await supabase.from("agent_lessons").insert({ org_id: orgId, scope: "synthesis", lesson: teach.trim(), status: "active", source: "human" });
+      if (error) throw error;
+      setTeach(""); await load();
+    } catch (e) { setError(e instanceof Error ? e.message : "Could not save the lesson."); }
+    finally { setTeaching(false); }
+  }
+
   async function dismissLesson(id: string) {
     setError(null);
     await supabase.from("agent_lessons").update({ status: "dismissed" }).eq("id", id);
@@ -299,8 +315,13 @@ export default function IntelReview({ onApplied, productFilter = "all" }: { onAp
           <div className="t-sub t-muted" style={{ marginBottom: "var(--sp-3)" }}>
             {acceptRate ? `${acceptRate.rate}% of proposals accepted · ${acceptRate.n} reviewed.` : "No reviewed proposals yet."} What the engine has learned from your feedback:
           </div>
+          {/* Teach it directly — no need to wait for distillation. */}
+          <form onSubmit={teachLesson} className="row gap-2" style={{ marginBottom: "var(--sp-3)" }}>
+            <input className="input" value={teach} onChange={(e) => setTeach(e.target.value)} placeholder='Teach a rule directly — e.g. "never open a theme from a single Reddit thread"' style={{ flex: 1 }} />
+            <button className="btn btn-sm" type="submit" disabled={teaching || !teach.trim()}>{teaching ? "Saving…" : "Teach"}</button>
+          </form>
           {lessons.length === 0 ? (
-            <p className="t-muted" style={{ margin: 0 }}>No lessons yet. Review a few updates with context, then “Distill lessons”.</p>
+            <p className="t-muted" style={{ margin: 0 }}>No lessons yet. Teach one above, or review a few updates with context, then “Distill lessons”.</p>
           ) : (
             <div className="stack-3">
               {lessons.map((l) => (

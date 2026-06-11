@@ -7,9 +7,11 @@
 //       → signals, capped by the source's per-pull BUDGET and relevance floor
 //         → audited in connector_runs, last_pull_* updated.
 //
-// Tiers that run for real TODAY (no credentials needed): `website`, `youtube`.
-// Auth/MCP tiers (crm, reviews/G2, linkedin…) return a clear "connect first"
-// — schema + UI are ready; their fetchers light up when the secret store lands.
+// Tiers that run for real TODAY (no credentials needed): website, youtube,
+// web_search, and the search-backed kinds (linkedin_posts/jobs, press, reviews,
+// social, github). MCP pulls through a connected server. Credentialed internal
+// tiers (crm, calls, support…) return a clear "connect first" until their
+// connectors land.
 //
 // SECURITY (CONNECTIVITY.md, non-negotiable):
 //   • Runs as the caller (JWT forwarded) → RLS scopes everything to their org.
