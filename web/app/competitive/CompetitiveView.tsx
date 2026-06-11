@@ -323,6 +323,31 @@ function Competitors({ competitors, cards, overview, capabilities, scores, compS
   type Wf = { id: string; name: string; steps: { agent_id?: string; skill_id?: string | null }[] };
   const [workflows, setWorkflows] = useState<Wf[]>([]);
   const [wfId, setWfId] = useState<string>("");
+  // Per-competitor signal logging — the form lives ON the competitor (the Feed
+  // form stays for cross-competitor logging). Inserts carry the first-class
+  // competitor_id + the metadata mirror, exactly like the Feed.
+  const [logOpen, setLogOpen] = useState(false);
+  const [logForm, setLogForm] = useState({ origin: "internal", channel: "", title: "", why: "", conf: "0.7" });
+  const [logBusy, setLogBusy] = useState(false);
+  async function logSignal(e: React.FormEvent) {
+    e.preventDefault(); if (!logForm.title.trim() || !scope) return;
+    setLogBusy(true); setError(null);
+    try {
+      const orgId = await getOrgId(); if (!orgId) throw new Error("Could not resolve your organization.");
+      const lvl = parseFloat(logForm.conf);
+      const { error } = await supabase.from("signals").insert({
+        org_id: orgId, scope: "org", title: logForm.title.trim(), why: logForm.why.trim() || null,
+        conf_level: isNaN(lvl) ? null : lvl, conf_label: isNaN(lvl) ? null : lvl >= 0.75 ? "High" : lvl >= 0.5 ? "Medium" : "Low",
+        observed_at: new Date().toISOString(), origin: logForm.origin,
+        competitor_id: scope,
+        metadata: { domain: "competitive", competitor_id: scope, channel: logForm.channel || undefined },
+      });
+      if (error) throw error;
+      setLogOpen(false); setLogForm({ origin: logForm.origin, channel: "", title: "", why: "", conf: "0.7" }); reload();
+    } catch (e) { setError(e instanceof Error ? e.message : "Could not log the signal."); }
+    finally { setLogBusy(false); }
+  }
+
   const [agentBusy, setAgentBusy] = useState<"analyst" | "messaging" | null>(null);
   const [agentNote, setAgentNote] = useState<string | null>(null);
   const [openCard, setOpenCard] = useState<CardItem | null>(null);
@@ -614,8 +639,40 @@ function Competitors({ competitors, cards, overview, capabilities, scores, compS
           })}
         </div>
       ) : (
-        <Section label={`Signals on ${selected?.name}`}>
-          {sigsFor(scope).length === 0 ? <div className="t-sub t-muted" style={{ fontSize: 12.5 }}>No signals tagged to {selected?.name} yet. Log competitive intel in the Signal feed and tag it to them.</div> : (
+        <div>
+          {/* Monitored links — several per competitor, each with instructions
+              (guidance), include/exclude, a daily/weekly cadence, and Pull now.
+              Harvested signals carry competitor_id → they land in the org feed
+              AND right here. */}
+          <SourceManager title={`Monitored links — ${selected?.name ?? "competitor"}`} scope={{ competitorId: scope ?? undefined }} />
+
+          <Section label={`Signals on ${selected?.name}`} action={
+            <button className="btn btn-sm" onClick={() => setLogOpen((v) => !v)} style={{ background: "var(--ac)", color: "#fff" }}>{logOpen ? "Close" : "+ Log signal"}</button>
+          }>
+          {logOpen && (
+            <form onSubmit={logSignal} className="card card-pad" style={{ marginBottom: "var(--sp-3)", background: "var(--panel-2)" }}>
+              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: "var(--sp-3)" }}>
+                <label className="field"><span className="t-label">Origin</span>
+                  <select className="select" value={logForm.origin} onChange={(e) => setLogForm({ ...logForm, origin: e.target.value, channel: "" })}>
+                    <option value="internal">Internal — what we hear</option>
+                    <option value="external">External — public</option>
+                  </select></label>
+                <label className="field"><span className="t-label">Channel</span>
+                  <select className="select" value={logForm.channel} onChange={(e) => setLogForm({ ...logForm, channel: e.target.value })}>
+                    <option value="">— where from —</option>
+                    {(logForm.origin === "internal" ? ["Gong call", "Salesforce opp", "Win/loss", "Support", "Field note"] : ["Website", "Pricing page", "G2 / reviews", "Launch / release", "Job posting", "News"]).map((c) => <option key={c} value={c}>{c}</option>)}
+                  </select></label>
+                <label className="field"><span className="t-label">Confidence</span>
+                  <select className="select" value={logForm.conf} onChange={(e) => setLogForm({ ...logForm, conf: e.target.value })}>
+                    <option value="0.9">High</option><option value="0.7">Medium</option><option value="0.4">Low</option>
+                  </select></label>
+              </div>
+              <label className="field"><span className="t-label">What happened</span><input className="input" autoFocus value={logForm.title} onChange={(e) => setLogForm({ ...logForm, title: e.target.value })} placeholder={`e.g. ${selected?.name ?? "They"} shipped SSO on the Team plan`} /></label>
+              <label className="field"><span className="t-label">Why it matters <span className="t-muted" style={{ fontWeight: 400 }}>— optional</span></span><input className="input" value={logForm.why} onChange={(e) => setLogForm({ ...logForm, why: e.target.value })} placeholder="So what for our positioning / battlecard?" /></label>
+              <div className="row gap-2"><button className="btn btn-sm" type="submit" disabled={logBusy}>{logBusy ? "Logging…" : "Log signal"}</button><button className="btn btn-secondary btn-sm" type="button" onClick={() => setLogOpen(false)}>Cancel</button></div>
+            </form>
+          )}
+          {sigsFor(scope).length === 0 && !logOpen ? <div className="t-sub t-muted" style={{ fontSize: 12.5 }}>No signals on {selected?.name} yet. Log one above, or add monitored links — daily/weekly pulls land here automatically.</div> : (
             <div className="stack-3">
               {sigsFor(scope).map((s) => (
                 <div key={s.id} className="card card-pad signal-card" style={{ borderLeft: "3px solid var(--vl)" }}>
@@ -628,7 +685,8 @@ function Competitors({ competitors, cards, overview, capabilities, scores, compS
               ))}
             </div>
           )}
-        </Section>
+          </Section>
+        </div>
       )}
         </div>
       </div>
