@@ -39,6 +39,18 @@ export default function CompetitiveSetup({ onDone, productId }: { onDone: () => 
   const [ctx, setCtx] = useState({ product: "", features: "", who: "", industries: "", positioning: "", more: "" });
   const ctxSet = (k: keyof typeof ctx) => (e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement>) => setCtx((c) => ({ ...c, [k]: e.target.value }));
   const [editCtx, setEditCtx] = useState(false);
+  // The FULL records dump (every product + GTM field + modules) — what the
+  // interviewer reads so it never asks what the records already answer.
+  const [recordsDump, setRecordsDump] = useState("");
+  // Chat drill-down (side pop-out): the AI asks, the user answers in a roomy
+  // box, and when it's specific enough we paint the full picture.
+  const [chatOpen, setChatOpen] = useState(false);
+  const [chat, setChat] = useState<{ role: "q" | "a"; text: string }[]>([]);
+  const [chatWhy, setChatWhy] = useState<string | null>(null);
+  const [answer, setAnswer] = useState("");
+  const [chatBusy, setChatBusy] = useState(false);
+  const [chatDone, setChatDone] = useState(false);
+  const [picture, setPicture] = useState("");
   // step 2 — competitors
   const [comps, setComps] = useState<CompCand[]>([]);
   const [savedComps, setSavedComps] = useState<{ id: string; name: string; website: string | null }[]>([]);
@@ -156,6 +168,22 @@ export default function CompetitiveSetup({ onDone, productId }: { onDone: () => 
         if (personas && !whoLine) whoLine = personas;
         if (positioning) posLine = positioning;
       } else setGtm(null);
+      // The full dump: EVERY field on both records + every module, labeled —
+      // the complete picture the records can paint on their own.
+      const dump: string[] = [];
+      if (p) {
+        dump.push(`PRODUCT RECORD: ${p.name}`);
+        const { data: allPf } = await supabase.from("record_fields").select("label, value").eq("product_id", p.id).order("position");
+        for (const f of allPf ?? []) if (f.value?.trim()) dump.push(`${f.label}: ${f.value}`);
+        const { data: allMods } = await supabase.from("modules").select("name, description").eq("product_id", p.id).order("created_at");
+        if (allMods?.length) dump.push(`MODULES/FEATURES: ${allMods.map((m) => m.description ? `${m.name} — ${m.description}` : m.name).join("; ")}`);
+      }
+      if (g) {
+        dump.push(`\nGTM RECORD: ${g.name}`);
+        const { data: allGf } = await supabase.from("record_fields").select("label, value").eq("gtm_record_id", g.id).order("position");
+        for (const f of allGf ?? []) if (f.value?.trim()) dump.push(`${f.label}: ${f.value}`);
+      }
+      setRecordsDump(dump.join("\n"));
       // Pre-fill the EDITABLE fields from the records — the human can adjust,
       // add, or rewrite everything before anything runs. Never overwrite typing.
       setCtx((cur) => ({
@@ -172,6 +200,7 @@ export default function CompetitiveSetup({ onDone, productId }: { onDone: () => 
 
   // What the agent searches from = exactly what's in the editable fields.
   const marketCtx = [
+    picture.trim() ? `FULL PICTURE:\n${picture.trim()}` : "",
     ctx.product.trim() ? `Our product: ${ctx.product.trim()}` : "",
     ctx.features.trim() ? `Key features / modules (for capability overlap): ${ctx.features.trim()}` : "",
     ctx.who.trim() ? `Who we sell to (personas): ${ctx.who.trim()}` : "",
@@ -190,6 +219,37 @@ export default function CompetitiveSetup({ onDone, productId }: { onDone: () => 
     if (data?.error) throw new Error(data.error);
     return data;
   };
+
+  // ---- chat drill-down: ask → answer → ask … → paint the full picture --------
+  async function nextQuestion(history: { role: "q" | "a"; text: string }[]) {
+    setChatBusy(true); setError(null);
+    try {
+      const data = await invoke({ step: "interview", records: recordsDump, transcript: history });
+      if (data.done || !data.question) { setChatDone(true); setChatWhy(null); await paintPicture(history); }
+      else { setChat([...history, { role: "q", text: data.question }]); setChatWhy(data.why || null); }
+    } catch (e) { setError(e instanceof Error ? e.message : "The interviewer stalled."); }
+    finally { setChatBusy(false); }
+  }
+  function openChat() {
+    setChatOpen(true);
+    if (chat.length === 0 && !chatBusy) void nextQuestion([]);
+  }
+  async function sendAnswer(e: React.FormEvent) {
+    e.preventDefault(); if (!answer.trim() || chatBusy) return;
+    const history = [...chat, { role: "a" as const, text: answer.trim() }];
+    setChat(history); setAnswer("");
+    await nextQuestion(history);
+  }
+  async function paintPicture(history: { role: "q" | "a"; text: string }[]) {
+    setChatBusy(true); setError(null);
+    try {
+      const data = await invoke({ step: "picture", records: recordsDump, transcript: history });
+      setPicture(data.picture || "");
+      setCtx({ product: data.product || "", features: data.features || "", who: data.who || "", industries: data.industries || "", positioning: data.positioning || "", more: data.more || "" });
+      setChatDone(true);
+    } catch (e) { setError(e instanceof Error ? e.message : "Could not paint the picture."); }
+    finally { setChatBusy(false); }
+  }
 
   // ---- step 2: propose rivals (web search), confirm, insert ------------------
   async function findCompetitors() {
@@ -367,10 +427,62 @@ export default function CompetitiveSetup({ onDone, productId }: { onDone: () => 
               <div className="row gap-2"><button className="btn btn-sm" onClick={() => setEditCtx(false)}>Done</button></div>
             </div>
           </Modal>
+          {picture && (
+            <div className="card card-pad" style={{ borderLeft: "3px solid var(--ac)" }}>
+              <div className="t-label" style={{ color: "var(--tm)", marginBottom: 6 }}>The full picture — confirm before the search runs</div>
+              <div className="t-sub" style={{ fontSize: 13, lineHeight: 1.6, whiteSpace: "pre-wrap" }}>{picture}</div>
+              <div className="t-mono-xs t-muted" style={{ marginTop: 6 }}>Synthesized from your records + the interview. ✎ Edit adjusts the distilled fields; ✦ Drill down continues the conversation.</div>
+            </div>
+          )}
           <div className="row gap-2">
-            <button className="btn btn-sm" disabled={busy === "comps" || !marketCtx} onClick={findCompetitors}>{busy === "comps" ? "Searching the landscape…" : "✦ Find my competitors"}</button>
+            <button className="btn btn-secondary btn-sm" onClick={openChat}>{chat.length ? "✦ Continue the drill-down" : "✦ Drill down with AI"}</button>
+            <button className="btn btn-sm" disabled={busy === "comps" || !marketCtx} onClick={findCompetitors}
+              title={picture ? "Search from the confirmed full picture" : "You can search now, or drill down first for a sharper match"}>
+              {busy === "comps" ? "Searching the landscape…" : "✦ Find my competitors"}
+            </button>
             <button className="btn btn-secondary btn-sm" onClick={onDone}>Skip — set up by hand</button>
           </div>
+
+          {/* The drill-down — a side pop-out chat. The AI asks one discriminating
+              question at a time (never re-asking what the records answer); the
+              answer box is full-width and tall — you see everything you type. */}
+          {chatOpen && (
+            <>
+              <div onClick={() => setChatOpen(false)} style={{ position: "fixed", inset: 0, background: "rgba(11,12,14,0.32)", zIndex: 40 }} />
+              <aside style={{ position: "fixed", top: 0, right: 0, height: "100vh", width: 520, maxWidth: "94vw", background: "var(--panel)", borderLeft: "1px solid var(--border)", boxShadow: "var(--shadow-md)", zIndex: 41, display: "flex", flexDirection: "column" }}>
+                <div style={{ padding: "16px 20px", borderBottom: "1px solid var(--border)" }} className="row-between">
+                  <span className="t-h2" style={{ fontSize: 15 }}>Drill down — so the search gets specific</span>
+                  <button className="btn btn-secondary btn-sm" onClick={() => setChatOpen(false)}>Close</button>
+                </div>
+                <div style={{ flex: 1, overflowY: "auto", padding: "16px 20px" }} className="stack-3">
+                  {chat.map((m, i) => (
+                    <div key={i} className="card card-pad" style={{ background: m.role === "q" ? "var(--panel-2)" : "var(--ac-fill, var(--fill))", marginLeft: m.role === "a" ? 32 : 0, marginRight: m.role === "q" ? 32 : 0 }}>
+                      <div className="t-mono-xs t-muted" style={{ marginBottom: 3 }}>{m.role === "q" ? "✦ AI" : "You"}</div>
+                      <div style={{ fontSize: 13, lineHeight: 1.55, whiteSpace: "pre-wrap" }}>{m.text}</div>
+                    </div>
+                  ))}
+                  {chatWhy && !chatDone && <div className="t-mono-xs t-muted">Why this question: {chatWhy}</div>}
+                  {chatBusy && <div className="t-sub t-muted" style={{ fontSize: 12.5 }}>{chatDone || chat.length === 0 ? "Thinking…" : chat[chat.length - 1]?.role === "a" ? "Reading your answer…" : "Painting the full picture…"}</div>}
+                  {chatDone && !chatBusy && (
+                    <div className="card card-pad" style={{ borderLeft: "3px solid var(--gn-text, #15803d)", fontSize: 12.5 }}>
+                      Got what it needs — the full picture is on the setup screen. Review it, ✎ Edit anything, then ✦ Find my competitors.
+                    </div>
+                  )}
+                </div>
+                {!chatDone && (
+                  <form onSubmit={sendAnswer} style={{ padding: "12px 20px", borderTop: "1px solid var(--border)" }} className="stack-2">
+                    <textarea className="textarea" rows={3} autoFocus value={answer} onChange={(e) => setAnswer(e.target.value)} placeholder="Answer in your own words — detail helps; you can see everything you type."
+                      onKeyDown={(e) => { if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) sendAnswer(e); }} />
+                    <div className="row gap-2">
+                      <button className="btn btn-sm" type="submit" disabled={chatBusy || !answer.trim()}>{chatBusy ? "…" : "Send"}</button>
+                      <button className="btn btn-secondary btn-sm" type="button" disabled={chatBusy || chat.length < 2} onClick={() => paintPicture(chat)}
+                        title="Stop here and synthesize the picture from what's answered so far">Enough — paint the picture</button>
+                    </div>
+                  </form>
+                )}
+              </aside>
+            </>
+          )}
         </div>
       )}
 

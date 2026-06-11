@@ -2,10 +2,14 @@
 // setup-competitive — the AI half of the guided competitive-intel setup.
 //
 // Plain English: the setup wizard asks this function for PROPOSALS, never
-// writes. Two steps:
-//   • competitors  — web-searches the user's market (product + value prop +
-//     the market they describe) and proposes real rivals: name, website,
-//     direct/adjacent, and why they matter. Citation-grounded, not guessed.
+// writes. Four steps:
+//   • interview    — reads EVERYTHING the records already say (all product +
+//     GTM fields + modules) and asks the single most discriminating question
+//     the records DON'T answer — chat-like, one at a time, done when specific.
+//   • picture      — synthesizes records + interview answers into the full
+//     picture of the product/market the human approves before search runs.
+//   • competitors  — web-searches the market and proposes real rivals with an
+//     honest match % across four overlap dimensions. Citation-grounded.
 //   • capabilities — proposes the matrix rows (the functionality vectors worth
 //     comparing on) from the product, the market, and the confirmed rivals.
 //
@@ -46,6 +50,30 @@ const COMPETITORS_SCHEMA = {
     },
   },
   required: ["competitors"],
+};
+
+const INTERVIEW_SCHEMA = {
+  type: "object", additionalProperties: false,
+  properties: {
+    done: { type: "boolean" },      // true = enough specificity; stop asking
+    question: { type: "string" },   // the next question ("" when done)
+    why: { type: "string" },        // one line: why this question sharpens the competitor search
+  },
+  required: ["done", "question", "why"],
+};
+
+const PICTURE_SCHEMA = {
+  type: "object", additionalProperties: false,
+  properties: {
+    picture: { type: "string" },      // the full narrative picture (markdown, 1-2 tight paragraphs)
+    product: { type: "string" },      // what it is, one line
+    features: { type: "string" },     // key features/modules, semicolon list
+    who: { type: "string" },          // personas
+    industries: { type: "string" },   // verticals
+    positioning: { type: "string" },  // category claim / what it replaces
+    more: { type: "string" },         // anything else competitive-relevant ("" if none)
+  },
+  required: ["picture", "product", "features", "who", "industries", "positioning", "more"],
 };
 
 const CAPABILITIES_SCHEMA = {
@@ -114,6 +142,42 @@ Deno.serve(async (req: Request) => {
     const market = (body.market as string | undefined)?.trim() || "";
     const anthropic = new Anthropic({ apiKey: key });
 
+    const records = (body.records as string | undefined)?.trim() || "";
+    const transcript = (Array.isArray(body.transcript) ? body.transcript : []) as { role: string; text: string }[];
+    const transcriptText = transcript.map((t) => `${t.role === "q" ? "AI asked" : "User answered"}: ${t.text}`).join("\n");
+
+    if (step === "interview") {
+      const resp = (await anthropic.messages.create({
+        model: MODEL, max_tokens: 1200,
+        thinking: { type: "adaptive" },
+        output_config: { effort: "medium", format: { type: "json_schema", schema: INTERVIEW_SCHEMA } },
+        system: "You are doing competitive-intelligence intake. You have everything the user's records already say, plus the interview so far. Ask the SINGLE most discriminating question the records do NOT answer — the one whose answer most changes WHO their real competitors are. High-value angles when missing: deal-deciding personas, industries/verticals served, segment (SMB/mid/enterprise), deployment model, price band, geography, who they actually lose deals to today, and which feature wins deals. Rules: never ask anything the records or transcript already answer; one question at a time, conversational and concrete; set done=true (question='') once you have enough specificity for a precise competitor search — typically after 3-5 good answers, or immediately if the records already cover it all.",
+        messages: [{ role: "user", content: [
+          records ? `THE RECORDS (everything already known):\n${records}` : "THE RECORDS: (none yet)",
+          transcriptText ? `INTERVIEW SO FAR:\n${transcriptText}` : "INTERVIEW SO FAR: (not started)",
+        ].join("\n\n") }],
+        // deno-lint-ignore no-explicit-any
+      } as any)) as Anthropic.Message;
+      const text = resp.content.filter((b) => b.type === "text").map((b) => (b as { text: string }).text).join("");
+      return json(JSON.parse(text));
+    }
+
+    if (step === "picture") {
+      const resp = (await anthropic.messages.create({
+        model: MODEL, max_tokens: 2000,
+        thinking: { type: "adaptive" },
+        output_config: { effort: "high", format: { type: "json_schema", schema: PICTURE_SCHEMA } },
+        system: "Synthesize the records + interview into the FULL PICTURE of this product and its market — the brief a competitive researcher needs to find exactly the right rivals. picture = 1-2 tight paragraphs: what it is, who buys it (personas + industries + segment), how it positions and what it replaces, the features that win deals, and any deal-loss/competitor hints from the interview. The structured fields = the same content, distilled. Ground every claim in the records/transcript — no embellishment.",
+        messages: [{ role: "user", content: [
+          records ? `THE RECORDS:\n${records}` : "THE RECORDS: (none)",
+          transcriptText ? `THE INTERVIEW:\n${transcriptText}` : "",
+        ].filter(Boolean).join("\n\n") }],
+        // deno-lint-ignore no-explicit-any
+      } as any)) as Anthropic.Message;
+      const text = resp.content.filter((b) => b.type === "text").map((b) => (b as { text: string }).text).join("");
+      return json(JSON.parse(text));
+    }
+
     if (step === "competitors") {
       if (!market && !product.name) return json({ error: "Describe your market (or name your product) so the search has an aim." }, 400);
       // Don't re-propose rivals the org already tracks.
@@ -171,7 +235,7 @@ Deno.serve(async (req: Request) => {
       return json({ capabilities });
     }
 
-    return json({ error: "step must be 'competitors' or 'capabilities'" }, 400);
+    return json({ error: "step must be one of: interview, picture, competitors, capabilities" }, 400);
   } catch (e) {
     return json({ error: e instanceof Error ? e.message : String(e) }, 500);
   }
