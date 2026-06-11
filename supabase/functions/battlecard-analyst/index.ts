@@ -149,6 +149,16 @@ Deno.serve(async (req: Request) => {
     ]);
     if (!comp) return await fail(`no competitor with id '${competitorId}'`, 404);
 
+    // The competitor's ratified Signal Profile — the RAW BATTLECARD. Human-saved
+    // fields are strong evidence: the analyst refines them into items.
+    let profileText = "";
+    const { data: profRow } = await supabase.from("signal_profiles").select("id, headline").eq("scope", "competitor").eq("competitor_id", competitorId).maybeSingle();
+    if (profRow) {
+      const { data: pf } = await supabase.from("signal_profile_fields").select("label, value").eq("profile_id", profRow.id).order("position");
+      const bits = (pf ?? []).filter((f) => f.value?.trim()).map((f) => `## ${f.label}\n${f.value}`);
+      if (profRow.headline || bits.length) profileText = [profRow.headline ? `HEADLINE: ${profRow.headline}` : "", ...bits].filter(Boolean).join("\n");
+    }
+
     let valueProp: string | null = null;
     if (prod) {
       const { data: vp } = await supabase.from("record_fields").select("value").eq("product_id", prod.id).eq("field_key", "value_prop").maybeSingle();
@@ -175,6 +185,7 @@ Deno.serve(async (req: Request) => {
       `COMPETITOR: ${comp.name} (${comp.relationship})${comp.notes ? `\nOverview: ${comp.notes}` : ""}`,
       valueProp ? `OUR VALUE PROP: ${valueProp}` : "",
       matrix.length ? `CAPABILITY MATRIX (0=none..3=strong):\n${matrix.join("\n")}` : "",
+      profileText ? `THEIR RATIFIED SIGNAL PROFILE (the raw battlecard — human-saved, strong evidence):\n${profileText}` : "",
       themeList.length ? `THEIR THEMES (synthesized intelligence):\n${themeList.map((t, i) => `{T${i}} [${t.category}/${t.state}] ${t.title} — ${t.summary ?? ""}`).join("\n")}` : "",
       sigList.length ? `THEIR SIGNALS (raw evidence):\n${sigList.map((s, i) => `[${i}] (${s.origin ?? "?"} · ${s.conf_label ?? "?"}) ${s.title}${s.why ? " — " + s.why : ""}`).join("\n")}` : "",
       (existing ?? []).length ? `EXISTING BATTLECARD ITEMS (do not duplicate):\n${(existing ?? []).map((e) => `- [${e.kind}] ${e.title}`).join("\n")}` : "",

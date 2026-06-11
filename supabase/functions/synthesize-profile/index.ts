@@ -62,12 +62,12 @@ Deno.serve(async (req: Request) => {
     // ---- gather evidence: competitive signals (internal + external) ----------
     const { data: rawSigs } = await supabase
       .from("signals")
-      .select("title, why, origin, conf_label, observed_at, metadata")
+      .select("title, why, origin, conf_label, observed_at, metadata, competitor_id")
       .order("observed_at", { ascending: false, nullsFirst: false })
       .limit(120);
     // deno-lint-ignore no-explicit-any
-    let comp = ((rawSigs ?? []) as any[]).filter((s) => s.metadata?.domain === "competitive");
-    if (scope === "competitor") comp = comp.filter((s) => s.metadata?.competitor_id === input.competitor_id);
+    let comp = ((rawSigs ?? []) as any[]).filter((s) => s.metadata?.domain === "competitive" || s.competitor_id);
+    if (scope === "competitor") comp = comp.filter((s) => (s.competitor_id ?? s.metadata?.competitor_id) === input.competitor_id);
 
     const fmt = (s: { title: string; why: string | null; origin: string; conf_label: string | null }) =>
       `• [${s.origin === "internal" ? "INTERNAL" : "EXTERNAL"}${s.conf_label ? `/${s.conf_label}` : ""}] ${s.title}${s.why ? ` — ${s.why}` : ""}`;
@@ -75,12 +75,36 @@ Deno.serve(async (req: Request) => {
     const external = comp.filter((s) => s.origin !== "internal").map(fmt).join("\n");
 
     // ---- context: our product, and (competitor) their matrix standing --------
+    // OUR side of the dossier: the product record (what we ARE) + the GTM
+    // record (how we SELL) — the real template keys, so the profile contrasts
+    // them against us, not against a blank.
     let context = "";
     const { data: prod } = await supabase.from("product_records").select("id, name").order("created_at").limit(1).maybeSingle();
     if (prod) {
-      const { data: fs } = await supabase.from("record_fields").select("field_key, value").eq("product_id", prod.id).in("field_key", ["overview", "value_prop", "positioning"]);
+      const { data: fs } = await supabase.from("record_fields").select("field_key, value").eq("product_id", prod.id)
+        .in("field_key", ["what_it_is", "value_prop", "overview", "core_capabilities", "differentiated_capabilities", "category"]);
       const get = (k: string) => fs?.find((f) => f.field_key === k)?.value;
-      context = [`Our product: ${prod.name}`, get("value_prop") && `Our value prop: ${get("value_prop")}`, get("positioning") && `Our positioning: ${get("positioning")}`].filter(Boolean).join("\n");
+      context = [
+        `Our product: ${prod.name}${get("category") ? ` (${get("category")})` : ""}`,
+        (get("what_it_is") ?? get("value_prop") ?? get("overview")) && `What we are: ${get("what_it_is") ?? get("value_prop") ?? get("overview")}`,
+        get("core_capabilities") && `Our core capabilities: ${get("core_capabilities")}`,
+        get("differentiated_capabilities") && `Our differentiation (product): ${get("differentiated_capabilities")}`,
+      ].filter(Boolean).join("\n");
+    }
+    const { data: gtmRec } = await supabase.from("gtm_records").select("id").order("created_at").limit(1).maybeSingle();
+    if (gtmRec) {
+      const { data: gf } = await supabase.from("record_fields").select("field_key, value").eq("gtm_record_id", gtmRec.id)
+        .in("field_key", ["positioning", "differentiation", "value_prop", "icp", "win_themes", "pricing_model"]);
+      const g = (k: string) => gf?.find((f) => f.field_key === k)?.value;
+      const gtmBits = [
+        g("positioning") && `How we position: ${g("positioning")}`,
+        g("differentiation") && `Why we win (GTM): ${g("differentiation")}`,
+        g("value_prop") && `Our promise: ${g("value_prop")}`,
+        g("icp") && `Our ICP: ${g("icp")}`,
+        g("win_themes") && `Our win themes: ${g("win_themes")}`,
+        g("pricing_model") && `Our pricing model: ${g("pricing_model")}`,
+      ].filter(Boolean).join("\n");
+      if (gtmBits) context += `\n${gtmBits}`;
     }
 
     let target = "the overall competitive landscape and our place in it";
@@ -89,22 +113,32 @@ Deno.serve(async (req: Request) => {
       const { data: c } = await supabase.from("competitors").select("name, relationship, notes").eq("id", input.competitor_id!).maybeSingle();
       target = `our standing vs ${c?.name ?? "this competitor"}${c?.relationship ? ` (${c.relationship})` : ""}`;
       if (c?.notes) context += `\nWhat we know about them: ${c.notes}`;
-      // Matrix standing
+      // The ANALYSIS: matrix standing WITH the ratified rationales, plus this
+      // competitor's synthesized themes — the profile builds on the analysis,
+      // not beside it.
       const { data: caps } = await supabase.from("capabilities").select("id, name");
-      const { data: scores } = await supabase.from("capability_scores").select("capability_id, competitor_id, score");
+      const { data: scores } = await supabase.from("capability_scores").select("capability_id, competitor_id, score, scored_by, rationale");
       if (caps && scores) {
         const lines = caps.map((cap) => {
-          const us = scores.find((s) => s.capability_id === cap.id && s.competitor_id === null)?.score ?? 0;
-          const them = scores.find((s) => s.capability_id === cap.id && s.competitor_id === input.competitor_id)?.score ?? 0;
-          return `${cap.name}: us ${us} / them ${them}`;
-        }).join("; ");
-        if (lines) context += `\nCapability matrix (0-3): ${lines}`;
+          const us = scores.find((sc) => sc.capability_id === cap.id && sc.competitor_id === null)?.score ?? 0;
+          const themRow = scores.find((sc) => sc.capability_id === cap.id && sc.competitor_id === input.competitor_id);
+          const them = themRow?.score ?? 0;
+          return `${cap.name}: us ${us} / them ${them}${themRow?.rationale ? ` — ${themRow.rationale}` : ""}${themRow?.scored_by ? " [evidence-scored]" : ""}`;
+        }).join("\n");
+        if (lines) context += `\nCAPABILITY MATRIX (0-3, with ratified rationales):\n${lines}`;
       }
-      suggestedSections = "positioning, their_strengths, their_weaknesses, how_we_win, how_we_lose, momentum, what_to_watch, strategic_implications";
+      const { data: compThemes } = await supabase.from("signal_themes").select("title, summary, recommendation, category, state, conf_level")
+        .eq("competitor_id", input.competitor_id!).neq("state", "fading").order("last_evidence_at", { ascending: false, nullsFirst: false }).limit(10);
+      if (compThemes?.length) {
+        context += `\nTHEIR SYNTHESIZED THEMES:\n${compThemes.map((t) => `[${t.category}/${t.state} · conf ${(t.conf_level ?? 0).toFixed(2)}] ${t.title} — ${t.summary ?? ""}`).join("\n")}`;
+      }
+      // Battlecard-shaped sections: the profile IS the raw battlecard — facts a
+      // rep's card gets refined from.
+      suggestedSections = "who_they_are, positioning, their_strengths, their_weaknesses, how_we_win, how_we_lose, objections_they_create, pricing_posture, momentum, what_to_watch, strategic_implications";
     }
 
     const system = [
-      `You maintain a HITL "Signal Profile" — a sharp, evidence-grounded record of ${target}. It is meant to DICTATE product and GTM strategy, so be decisive and specific, never generic.`,
+      `You maintain a HITL "Signal Profile" — a sharp, evidence-grounded record of ${target}. For a competitor, this profile is the RAW BATTLECARD: the complete, honest dossier of who they are vs us, which the analyst refines into battlecard items and the messenger turns into seller copy. It is meant to DICTATE product and GTM strategy, so be decisive and specific, never generic.`,
       "Synthesize the INTERNAL and EXTERNAL signals below into a headline + sections. INTERNAL signals (what our own teams hear — deals, calls) and EXTERNAL signals (public: reviews, launches, pricing) are both evidence; weigh corroboration across them and note where they disagree.",
       `Use these section keys where supported (snake_case): ${suggestedSections}. Always include a 'strategic_implications' section spelling out what this means for product strategy and for GTM strategy. Only assert what the evidence supports; if thin, say so and keep it short.`,
       input.current?.length ? "REFRESH the existing profile (provided): keep what still holds, update what changed, don't discard human edits wholesale." : "",
