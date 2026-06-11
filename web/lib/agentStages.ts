@@ -18,13 +18,6 @@ export const AGENT_STAGES: Record<string, string[]> = {
     "Reconciling against existing themes",
     "Scoring honest confidence",
   ],
-  // propose-bridges
-  bridges: [
-    "Reading product themes",
-    "Reading go-to-market themes",
-    "Looking for where two fronts are one",
-    "Weighing each side's evidence",
-  ],
   // draft-how (build architect)
   draftHow: [
     "Reading the build item",

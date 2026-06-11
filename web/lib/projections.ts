@@ -1,7 +1,7 @@
 // Curated projection engine. Position is MEANING: each named View is a fixed,
 // opinionated mapping from a theme's attributes to (x,y) on a labelled surface.
 // No freeform axis-picker — a few deliberate Views, each answering one question.
-// Signals are collapsed into their theme at this altitude; bridges render as
+// Signals are collapsed into their theme at this altitude; contradiction shows as
 // edges between theme positions; contradiction shows as a node marker.
 
 export type PTheme = {
