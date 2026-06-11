@@ -197,7 +197,7 @@ Deno.serve(async (req: Request) => {
       const known = (existing ?? []).map((c) => c.name);
       const { text: briefing, usage } = await searchBriefing(
         key,
-        "You are a competitive-landscape researcher. If the user NAMES known competitors in the market context, verify those FIRST (site, current positioning), then search beyond them. Use web search to identify the REAL competitors in the user's market — companies a buyer would actually evaluate against them. Assess every candidate on FOUR dimensions: (1) buyer overlap — do they sell to the same personas? (2) industry overlap — same verticals? (3) capability overlap — which of the user's features/modules do they also offer? (4) positioning collision — do they claim the same category or replace the same thing? For each rival report: company name, homepage URL, head-on (direct) vs partial/adjacent, and the per-dimension read with what you found. Concrete and current — cite what you find. 6–10 rivals that genuinely matter, not a directory dump.",
+        "You are a competitive-landscape researcher. If the user NAMES known competitors in the market context, verify those FIRST (site, current positioning), then search beyond them. Use web search to identify the REAL competitors in the user's market — companies a buyer would actually evaluate against them. Assess every candidate on FOUR dimensions: (1) buyer overlap — do they sell to the same personas? (2) industry overlap — same verticals? (3) capability overlap — which of the user's features/modules do they also offer? (4) positioning collision — do they claim the same category or replace the same thing? For each rival report: company name, homepage URL, head-on (direct) vs partial/adjacent, and the per-dimension read with what you found. For each rival also report their LinkedIn company page URL (linkedin.com/company/...) and a 2-3 sentence factual overview (who they are, what they sell, to whom) — URLs only from what you actually found, never constructed. Concrete and current. Return the 5–10 rivals that genuinely matter MOST — not a directory dump; fewer high-overlap rivals beat a long thin list.",
         [
           product.name ? `OUR PRODUCT: ${product.name}` : "",
           product.value_prop ? `VALUE PROP: ${product.value_prop}` : "",
@@ -219,7 +219,7 @@ Deno.serve(async (req: Request) => {
       // absent do we search inline (backward-compatible single-call mode).
       const briefing = (body.briefing as string | undefined)?.trim() || (await searchBriefing(
         key,
-        "You are a competitive-landscape researcher. Use web search to identify the REAL competitors in the user's market — companies a buyer would actually evaluate against them. Assess every candidate on FOUR dimensions: (1) buyer overlap — do they sell to the same personas? (2) industry overlap — same verticals? (3) capability overlap — which of the user's features/modules do they also offer? (4) positioning collision — do they claim the same category or replace the same thing? For each rival report: company name, homepage URL, head-on (direct) vs partial/adjacent, and the per-dimension read with what you found. Concrete and current — cite what you find. 6–10 rivals that genuinely matter, not a directory dump.",
+        "You are a competitive-landscape researcher. Use web search to identify the REAL competitors in the user's market — companies a buyer would actually evaluate against them. Assess every candidate on FOUR dimensions: (1) buyer overlap — do they sell to the same personas? (2) industry overlap — same verticals? (3) capability overlap — which of the user's features/modules do they also offer? (4) positioning collision — do they claim the same category or replace the same thing? For each rival report: company name, homepage URL, head-on (direct) vs partial/adjacent, and the per-dimension read with what you found. For each rival also report their LinkedIn company page URL (linkedin.com/company/...) and a 2-3 sentence factual overview (who they are, what they sell, to whom) — URLs only from what you actually found, never constructed. Concrete and current. Return the 5–10 rivals that genuinely matter MOST — not a directory dump; fewer high-overlap rivals beat a long thin list.",
         [
           product.name ? `OUR PRODUCT: ${product.name}` : "",
           product.value_prop ? `VALUE PROP: ${product.value_prop}` : "",
@@ -243,7 +243,8 @@ Deno.serve(async (req: Request) => {
         .filter((c) => c.name?.trim() && !knownLower.has(c.name.trim().toLowerCase()))
         .map((c) => ({ ...c, name: c.name.trim(), relationship: c.relationship === "adjacent" ? "adjacent" : "direct",
           match: Math.min(100, Math.max(0, Math.round(Number((c as { match?: number }).match) || 0))) }))
-        .sort((a, b) => b.match - a.match);
+        .sort((a, b) => b.match - a.match)
+        .slice(0, 10);   // hard cap per run — 5-10 matters more than coverage
       return json({ competitors, usage: { input: resp.usage?.input_tokens ?? 0, output: resp.usage?.output_tokens ?? 0 } });
     }
 

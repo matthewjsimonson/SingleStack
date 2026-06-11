@@ -78,7 +78,12 @@ export default function CompetitiveSetup({ onDone, productId }: { onDone: () => 
   const [readyDelta, setReadyDelta] = useState<number | null>(null);
   const [gaps, setGaps] = useState("");
   // step 2 — competitors
+  // Resume: matches found in a previous run are stashed in localStorage so
+  // leaving the wizard and coming back lets you pick them up instead of
+  // re-searching. Keyed per product line.
+  const MATCH_KEY = `ss_comp_matches_${productId ?? "all"}`;
   const [comps, setComps] = useState<CompCand[]>([]);
+  const [savedRun, setSavedRun] = useState<{ comps: CompCand[]; at: number } | null>(null);
   const [savedComps, setSavedComps] = useState<{ id: string; name: string; website: string | null; linkedin: string | null }[]>([]);
   // step 3 — capabilities
   const [caps, setCaps] = useState<CapCand[]>([]);
@@ -131,6 +136,13 @@ export default function CompetitiveSetup({ onDone, productId }: { onDone: () => 
   }
 
 
+  useEffect(() => {
+    try {
+      const raw = typeof window !== "undefined" ? window.localStorage.getItem(MATCH_KEY) : null;
+      if (raw) { const parsed = JSON.parse(raw); if (Array.isArray(parsed?.comps) && parsed.comps.length) setSavedRun(parsed); }
+    } catch { /* ignore */ }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
   useEffect(() => {
     (async () => {
       let prodLine = "", whoLine = "", posLine = "", problemLine = "";
@@ -337,11 +349,28 @@ export default function CompetitiveSetup({ onDone, productId }: { onDone: () => 
       setSearchStep(3); // ranking (client-side, instant)
       const list = (data.competitors ?? []) as Omit<CompCand, "keep">[];
       if (!list.length) throw new Error("No rivals found — try describing the market more specifically.");
-      setComps(list.map((c) => ({ ...c, keep: true })));
-      setStep(2);
+      const found = list.map((c) => ({ ...c, keep: true }));
+      setComps(found); setStep(2);
+      try { window.localStorage.setItem(MATCH_KEY, JSON.stringify({ comps: found, at: Date.now() })); setSavedRun({ comps: found, at: Date.now() }); } catch { /* ignore */ }
     } catch (e) { setError(e instanceof Error ? e.message : "The landscape search failed."); }
     finally { clearInterval(tick); setSearchStep(null); setBusy(null); }
   }
+  // Keep the stash in sync with edits made while reviewing (so leaving mid-
+  // review is also resumable). Only while on the candidate step.
+  useEffect(() => {
+    if (step !== 2 || comps.length === 0) return;
+    try { window.localStorage.setItem(MATCH_KEY, JSON.stringify({ comps, at: Date.now() })); } catch { /* ignore */ }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [comps, step]);
+  function resumeMatches() {
+    if (!savedRun?.comps?.length) return;
+    setComps(savedRun.comps); setStep(2);
+  }
+  function clearSavedRun() {
+    try { window.localStorage.removeItem(MATCH_KEY); } catch { /* ignore */ }
+    setSavedRun(null);
+  }
+
   async function confirmCompetitors() {
     const keep = comps.filter((c) => c.keep && c.name.trim());
     if (!keep.length) { setError("Keep at least one competitor (or add your own)."); return; }
@@ -359,6 +388,7 @@ export default function CompetitiveSetup({ onDone, productId }: { onDone: () => 
       // carry the confirmed LinkedIn URLs (not a competitors column — they live on the sources)
       const withLi = (data ?? []).map((d) => ({ ...d, linkedin: keep.find((k) => k.name.trim() === d.name)?.linkedin.trim() || null }));
       setSavedComps(withLi);
+      clearSavedRun();
       // LEGIT monitoring only: a kind is on ONLY when its confirmed link exists —
       // website needs the site URL; jobs/posts need the LinkedIn page. Press is
       // name-anchored search (no link needed).
@@ -596,16 +626,27 @@ export default function CompetitiveSetup({ onDone, productId }: { onDone: () => 
               </div>
               <div className="t-mono-xs t-muted" style={{ marginTop: 8 }}>≤3 web searches, capped tokens · typically 20–40s</div>
             </div>
-          ) : (
+          ) : (<>
+            {savedRun?.comps?.length && step === 1 ? (
+              <div className="card card-pad" style={{ background: "var(--panel-2)", borderLeft: "3px solid var(--ac)" }}>
+                <div className="row-between" style={{ gap: 8, flexWrap: "wrap", alignItems: "center" }}>
+                  <span className="t-sub" style={{ fontSize: 12.5 }}><b>{savedRun.comps.length} matches</b> from your last run ({new Date(savedRun.at).toLocaleString()}) — pick up where you left off.</span>
+                  <span className="row gap-2">
+                    <button className="btn btn-sm" onClick={resumeMatches}>↩ Resume matches</button>
+                    <button className="btn btn-secondary btn-sm" onClick={clearSavedRun}>Discard</button>
+                  </span>
+                </div>
+              </div>
+            ) : null}
             <div className="row gap-2">
               <button className="btn btn-secondary btn-sm" onClick={openChat}>{chat.length ? "✦ Continue the drill-down" : "✦ Drill down with AI"}</button>
               <button className="btn btn-sm" disabled={!marketCtx} onClick={findCompetitors}
                 title={picture ? "Search from the confirmed full picture" : "You can search now, or drill down first for a sharper match"}>
-                ✦ Find my competitors
+                {savedRun?.comps?.length ? "✦ New search (5–10 matches)" : "✦ Find my competitors"}
               </button>
               <button className="btn btn-secondary btn-sm" onClick={onDone}>Skip — set up by hand</button>
             </div>
-          )}
+          </>)}
 
           {/* The drill-down — a side pop-out chat. The AI asks one discriminating
               question at a time (never re-asking what the records answer); the
