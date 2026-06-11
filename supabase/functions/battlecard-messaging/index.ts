@@ -1,0 +1,209 @@
+// ============================================================================
+// battlecard-messaging — the CREATIVE half of the battlecard agent pair.
+//
+// Plain English: reads the RATIFIED battlecard items for a competitor (the
+// analyst's facts, already human-approved) plus the GTM record's positioning,
+// messaging, and buyer fields, and drafts the seller-facing Battlecard section
+// — summary, talk track, objection responses — in the org's voice. Generative
+// by design: its job is PERSUASION, but built strictly on the analyst's facts.
+// It introduces no new claims; if a point isn't in the ratified items or the
+// GTM record, it doesn't get said.
+//
+// Output flows through the EXISTING field gate: a proposal + proposal_changes
+// targeting the GTM record (add_field under the "Battlecard" section, or
+// update_field when the field exists), with proposal_signals carrying the
+// items' cited evidence forward. Honors the 'records' autonomy dial:
+// autonomous → accept_proposal() applies it immediately (ratified as the agent).
+//
+// Input (POST): { competitor_id }
+// Runs as caller (JWT) → RLS fences everything to the org. Secret: ANTHROPIC_API_KEY.
+// ============================================================================
+
+import Anthropic from "npm:@anthropic-ai/sdk@0.69.0";
+import { createClient, type SupabaseClient } from "npm:@supabase/supabase-js@2";
+
+const MODEL = "claude-opus-4-8";
+const PRICING: Record<string, { input: number; output: number }> = {
+  "claude-opus-4-8": { input: 5, output: 25 },
+};
+const CORS = {
+  "Access-Control-Allow-Origin": "*",
+  "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type, x-supabase-api-version",
+  "Access-Control-Allow-Methods": "POST, OPTIONS",
+};
+const json = (b: unknown, s = 200) => new Response(JSON.stringify(b), { status: s, headers: { ...CORS, "content-type": "application/json" } });
+
+const AGENT_KEY = "battlecard_messaging";
+const AGENT_NAME = "Messaging agent";
+const SECTION = "Battlecard";
+// The seller-facing fields this agent owns on the GTM record.
+const FIELDS: { key: string; label: string }[] = [
+  { key: "battlecard_summary", label: "Battlecard summary" },
+  { key: "talk_track", label: "Talk track" },
+  { key: "objection_responses", label: "Objection responses" },
+];
+
+const SCHEMA = {
+  type: "object",
+  additionalProperties: false,
+  properties: {
+    rationale: { type: "string" },
+    conf_level: { type: "number" },
+    fields: {
+      type: "array",
+      items: {
+        type: "object",
+        additionalProperties: false,
+        properties: {
+          field_key: { type: "string", enum: FIELDS.map((f) => f.key) },
+          value: { type: "string" },
+        },
+        required: ["field_key", "value"],
+      },
+    },
+  },
+  required: ["rationale", "conf_level", "fields"],
+};
+
+Deno.serve(async (req: Request) => {
+  if (req.method === "OPTIONS") return new Response("ok", { headers: CORS });
+  if (req.method !== "POST") return json({ error: "POST only" }, 405);
+  const authHeader = req.headers.get("Authorization");
+  if (!authHeader) return json({ error: "missing Authorization header" }, 401);
+  const key = Deno.env.get("ANTHROPIC_API_KEY");
+  if (!key) return json({ error: "server missing ANTHROPIC_API_KEY" }, 500);
+
+  const supabase: SupabaseClient = createClient(
+    Deno.env.get("SUPABASE_URL")!,
+    Deno.env.get("SUPABASE_ANON_KEY")!,
+    { global: { headers: { Authorization: authHeader } } },
+  );
+
+  const body = await req.json().catch(() => ({}));
+  const competitorId = body.competitor_id as string | undefined;
+  if (!competitorId) return json({ error: "competitor_id required" }, 400);
+
+  const { data: orgId } = await supabase.rpc("current_org_id");
+  if (!orgId) return json({ error: "could not resolve org" }, 401);
+
+  let { data: agent } = await supabase.from("agents").select("id, name, model, system_prompt").eq("key", AGENT_KEY).maybeSingle();
+  if (!agent) {
+    const { data: created } = await supabase.from("agents").insert({
+      org_id: orgId, key: AGENT_KEY, name: AGENT_NAME, model: MODEL,
+      role: "Drafts the GTM record's seller-facing Battlecard section — talk tracks and objection responses — from RATIFIED battlecard items. Persuasive in the org's voice; introduces no claims beyond the analyst's facts.",
+    }).select("id, name, model, system_prompt").single();
+    agent = created;
+  }
+  if (!agent) return json({ error: "could not resolve the messaging agent" }, 500);
+  const model = agent.model || MODEL;
+
+  const { data: run } = await supabase.from("agent_runs")
+    .insert({ org_id: orgId, agent_id: agent.id, status: "running", input: { competitor_id: competitorId }, model })
+    .select("id").single();
+  const runId = run?.id;
+  const fail = async (msg: string, status = 500) => {
+    if (runId) await supabase.from("agent_runs").update({ status: "failed", error: msg, finished_at: new Date().toISOString() }).eq("id", runId);
+    return json({ error: msg }, status);
+  };
+
+  try {
+    // ---- the facts: competitor + its RATIFIED battlecard items --------------
+    const [{ data: comp }, { data: items }] = await Promise.all([
+      supabase.from("competitors").select("id, name, relationship, product_id").eq("id", competitorId).maybeSingle(),
+      supabase.from("battlecard_items").select("kind, title, detail, signal_ids").eq("competitor_id", competitorId).order("position").order("created_at"),
+    ]);
+    if (!comp) return await fail(`no competitor with id '${competitorId}'`, 404);
+    if (!items?.length) {
+      if (runId) await supabase.from("agent_runs").update({ status: "succeeded", output: "no ratified items", finished_at: new Date().toISOString() }).eq("id", runId);
+      return json({ proposal_id: null, message: `No ratified battlecard items for ${comp.name} yet — run the analyst (and review its proposals) first.` });
+    }
+
+    // ---- the voice: the GTM record this battlecard sells for ----------------
+    // Prefer the GTM record of the competitor's product line; fall back to the
+    // org's first GTM record (single-product orgs).
+    let gtmQ = supabase.from("gtm_records").select("id, name").order("created_at").limit(1);
+    if (comp.product_id) gtmQ = gtmQ.eq("product_id", comp.product_id);
+    let { data: gtm } = await gtmQ.maybeSingle();
+    if (!gtm && comp.product_id) {
+      ({ data: gtm } = await supabase.from("gtm_records").select("id, name").order("created_at").limit(1).maybeSingle());
+    }
+    if (!gtm) return await fail("no GTM record found — create one before drafting battlecard messaging", 404);
+
+    const { data: gtmFields } = await supabase.from("record_fields")
+      .select("id, field_key, label, value, section").eq("gtm_record_id", gtm.id);
+    const voice = (gtmFields ?? []).filter((f) => f.value && ["Positioning", "Messaging", "Buyer"].includes(f.section ?? ""));
+
+    // ---- ask Claude (structured output) --------------------------------------
+    const anthropic = new Anthropic({ apiKey: key });
+    const prompt = [
+      `COMPETITOR: ${comp.name} (${comp.relationship})`,
+      `RATIFIED BATTLECARD ITEMS (your only source of claims):\n${items.map((i) => `- [${i.kind}] ${i.title}${i.detail ? " — " + i.detail : ""}`).join("\n")}`,
+      voice.length ? `GTM RECORD (our voice — positioning, messaging, buyer):\n${voice.map((f) => `${f.label}: ${f.value}`).join("\n")}` : "",
+      `Draft these seller-facing fields: ${FIELDS.map((f) => `${f.key} (${f.label})`).join("; ")}. Frame for ${comp.name} specifically.`,
+    ].filter(Boolean).join("\n\n");
+
+    const resp = await anthropic.messages.create({
+      model, max_tokens: 2500,
+      system: agent.system_prompt || [
+        `You are the ${AGENT_NAME}: the creative half of a battlecard agent pair. You turn RATIFIED battlecard items into seller-facing copy — a battlecard summary, a talk track, and objection responses — in the org's voice (mirror the GTM record's tone and personas).`,
+        "Rules: every claim must trace to a ratified item or the GTM record — introduce nothing new. Objection responses address the [objection] items directly. Write for a rep mid-call: tight, confident, usable verbatim. rationale = one paragraph on how you used the facts; conf_level 0..1.",
+      ].join("\n"),
+      messages: [{ role: "user", content: prompt }],
+      output_config: { effort: "high", format: { type: "json_schema", schema: SCHEMA } },
+      // deno-lint-ignore no-explicit-any
+    } as any);
+
+    const text = resp.content.filter((b: { type: string }) => b.type === "text").map((b: { text: string }) => b.text).join("");
+    const out = JSON.parse(text) as { rationale: string; conf_level: number; fields: { field_key: string; value: string }[] };
+    const drafts = (out.fields ?? []).filter((f) => f.value?.trim());
+    if (!drafts.length) return await fail("the model returned no field drafts");
+
+    // ---- persist through the existing proposals gate --------------------------
+    const conf = Math.min(1, Math.max(0, Number(out.conf_level) || 0));
+    const { data: prop, error: propErr } = await supabase.from("proposals").insert({
+      org_id: orgId, gtm_record_id: gtm.id,
+      title: `Battlecard messaging · ${comp.name}`,
+      rationale: out.rationale, conf_level: conf,
+      conf_label: conf >= 0.75 ? "High" : conf >= 0.5 ? "Medium" : "Low",
+      proposed_by: AGENT_NAME,
+    }).select("id").single();
+    if (propErr || !prop) throw new Error(`could not create proposal: ${propErr?.message ?? "no row"}`);
+
+    const byKey = new Map((gtmFields ?? []).map((f) => [f.field_key, f]));
+    const rows = drafts.map((d) => {
+      const ex = byKey.get(d.field_key);
+      const label = FIELDS.find((f) => f.key === d.field_key)?.label ?? d.field_key;
+      return ex
+        ? { org_id: orgId, proposal_id: prop.id, change_kind: "update_field", record_field_id: ex.id, old_value: ex.value ?? null, field_key: null, label: null, section: null, proposed_value: d.value.trim() }
+        : { org_id: orgId, proposal_id: prop.id, change_kind: "add_field", record_field_id: null, old_value: null, field_key: d.field_key, label, section: SECTION, proposed_value: d.value.trim() };
+    });
+    const { error: chErr } = await supabase.from("proposal_changes").insert(rows);
+    if (chErr) { await supabase.from("proposals").delete().eq("id", prop.id); throw new Error(`could not save changes: ${chErr.message}`); }
+
+    // Carry the analyst's evidence forward: the union of the items' signals.
+    const evidence = [...new Set(items.flatMap((i) => i.signal_ids ?? []))];
+    if (evidence.length) {
+      await supabase.from("proposal_signals").insert(evidence.map((sid) => ({ org_id: orgId, proposal_id: prop.id, signal_id: sid })));
+    }
+
+    // Autonomy dial for the 'records' surface: autonomous → apply immediately
+    // (ratified as the agent, full revision + ratification trail).
+    const { data: polRow } = await supabase.from("review_policies").select("mode").eq("org_id", orgId).eq("surface", "records").maybeSingle();
+    let autoAccepted = false;
+    if (polRow?.mode === "autonomous") {
+      const { error: accErr } = await supabase.rpc("accept_proposal", { p_proposal: prop.id, p_ratifier: AGENT_NAME });
+      autoAccepted = !accErr;
+    }
+
+    const usage = { input_tokens: resp.usage?.input_tokens ?? 0, output_tokens: resp.usage?.output_tokens ?? 0 };
+    const price = PRICING[model];
+    const cost = price ? (usage.input_tokens * price.input + usage.output_tokens * price.output) / 1_000_000 : null;
+    if (runId) await supabase.from("agent_runs").update({ status: "succeeded", output: JSON.stringify(out), input_tokens: usage.input_tokens, output_tokens: usage.output_tokens, cost_usd: cost, finished_at: new Date().toISOString() }).eq("id", runId);
+
+    return json({ proposal_id: prop.id, auto_accepted: autoAccepted, fields: drafts.length, message: autoAccepted
+      ? `Battlecard messaging for ${comp.name} applied to "${gtm.name}" (autonomous policy).`
+      : `Battlecard messaging for ${comp.name} proposed on "${gtm.name}" — review it on the GTM record.` });
+  } catch (e) {
+    return await fail(e instanceof Error ? e.message : "messaging run failed");
+  }
+});

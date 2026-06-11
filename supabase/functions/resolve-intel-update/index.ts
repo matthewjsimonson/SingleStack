@@ -62,6 +62,21 @@ Deno.serve(async (req: Request) => {
 
     if (verdict !== "reject") {
       switch (upd.kind) {
+        case "battlecard_item": {
+          // Analyst-proposed battlecard item, accepted (possibly edited): becomes
+          // a real battlecard_items row carrying its evidence (signal_ids/theme_id).
+          const { error: bcErr } = await supabase.from("battlecard_items").insert({
+            org_id: orgId,
+            competitor_id: (p.competitor_id as string | null) ?? null,
+            kind: (p.kind as string) || "note",
+            title: p.title, detail: (p.detail as string | null) ?? null,
+            signal_ids: (p.signal_ids as string[] | undefined) ?? [],
+            theme_id: (p.theme_id as string | null) ?? null,
+            proposed_by: "Competitive analyst",
+          });
+          if (bcErr) throw new Error(`could not create battlecard item: ${bcErr.message}`);
+          break;
+        }
         case "new_theme": {
           const sigIds = (p.signal_ids as string[] | undefined) ?? [];
           const { data: row, error: insErr } = await supabase.from("signal_themes").insert({

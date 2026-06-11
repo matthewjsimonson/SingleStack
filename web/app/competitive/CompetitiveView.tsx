@@ -20,7 +20,7 @@ import { useProductScope } from "@/lib/ProductContext";
 type Competitor = { id: string; name: string; relationship: string; website: string | null; notes: string | null; product_id: string | null };
 type Capability = { id: string; name: string; category: string | null };
 type Score = { id: string; capability_id: string; competitor_id: string | null; score: number };
-type Card = { id: string; competitor_id: string | null; kind: string; title: string; detail: string | null };
+type Card = { id: string; competitor_id: string | null; kind: string; title: string; detail: string | null; proposed_by: string | null };
 type Signal = { id: string; title: string; why: string | null; conf_label: string | null; conf_level: number | null; observed_at: string | null; origin: string | null; competitor_id: string | null; metadata: { domain?: string; competitor_id?: string; channel?: string } | null; source_id: string | null };
 type Theme = { id: string; title: string; summary: string | null; recommendation: string | null; category: string; competitor_id: string | null; conf_level: number | null; state: string };
 // The competitor a signal is about — first-class column, with a fallback to the
@@ -48,7 +48,7 @@ export default function CompetitiveView() {
       supabase.from("competitors").select("id, name, relationship, website, notes, product_id").order("position").order("created_at"),
       supabase.from("capabilities").select("id, name, category").order("position").order("created_at"),
       supabase.from("capability_scores").select("id, capability_id, competitor_id, score"),
-      supabase.from("battlecard_items").select("id, competitor_id, kind, title, detail").order("position").order("created_at"),
+      supabase.from("battlecard_items").select("id, competitor_id, kind, title, detail, proposed_by").order("position").order("created_at"),
       supabase.from("signals").select("id, title, why, conf_label, conf_level, observed_at, origin, competitor_id, metadata, source_id").order("observed_at", { ascending: false, nullsFirst: false }),
       supabase.from("signal_themes").select("id, title, summary, recommendation, category, competitor_id, conf_level, state").not("competitor_id", "is", null).order("last_evidence_at", { ascending: false, nullsFirst: false }),
     ]);
@@ -312,6 +312,26 @@ function Competitors({ competitors, cards, overview, capabilities, scores, compS
   }
   async function remove(id: string) { setError(null); await supabase.from("battlecard_items").delete().eq("id", id); reload(); }
 
+  // The battlecard agent pair. Analyst (grounded): proposes items from this
+  // competitor's themes + matrix, every item citing signals — lands in the
+  // intelligence review queue (or directly, when the policy is autonomous).
+  // Messaging (creative): turns the RATIFIED items into the GTM record's
+  // Battlecard section via the normal proposal gate.
+  const [agentBusy, setAgentBusy] = useState<"analyst" | "messaging" | null>(null);
+  const [agentNote, setAgentNote] = useState<string | null>(null);
+  async function runAgent(which: "analyst" | "messaging") {
+    if (!scope || agentBusy) return;
+    setAgentBusy(which); setAgentNote(null); setError(null);
+    try {
+      const fn = which === "analyst" ? "battlecard-analyst" : "battlecard-messaging";
+      const { data, error } = await supabase.functions.invoke(fn, { body: { competitor_id: scope } });
+      if (error) throw error;
+      setAgentNote((data as { message?: string })?.message ?? "Done.");
+      reload();
+    } catch (e) { setError(e instanceof Error ? e.message : `The ${which} agent run failed.`); }
+    finally { setAgentBusy(null); }
+  }
+
 
   // Tile grid — pick a competitor to drill in. Add / remove competitors here.
   if (!scope) {
@@ -430,7 +450,18 @@ function Competitors({ competitors, cards, overview, capabilities, scores, compS
         );
       })() : cdTab === "gtm" ? (
         <>
-          <div className="t-sub t-muted" style={{ fontSize: 12.5, marginBottom: 12 }}>Best-practice sections — fill the ones that help a rep win against {selected?.name}.</div>
+          <div className="row-between" style={{ marginBottom: 12, gap: 10, flexWrap: "wrap" }}>
+            <div className="t-sub t-muted" style={{ fontSize: 12.5 }}>Best-practice sections — fill the ones that help a rep win against {selected?.name}.</div>
+            <div className="row gap-2" style={{ flexShrink: 0 }}>
+              <button className="btn btn-secondary btn-sm" disabled={!!agentBusy} onClick={() => runAgent("analyst")} title="Grounded: proposes items from this competitor's themes + matrix, citing signals">
+                {agentBusy === "analyst" ? "Analyzing…" : "✦ Run analyst"}
+              </button>
+              <button className="btn btn-secondary btn-sm" disabled={!!agentBusy} onClick={() => runAgent("messaging")} title="Creative: drafts the GTM Battlecard section from the ratified items">
+                {agentBusy === "messaging" ? "Drafting…" : "✦ Draft messaging"}
+              </button>
+            </div>
+          </div>
+          {agentNote && <div className="card card-pad" style={{ marginBottom: 12, background: "var(--panel-2)", fontSize: 12.5 }}>{agentNote}</div>}
           <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "var(--sp-4)" }}>
             {KINDS.map(([kind, label, tone]) => (
               <Section key={kind} label={label} action={adding !== kind ? <button className="btn btn-secondary btn-sm" onClick={() => { setAdding(kind); setForm({ title: "", detail: "" }); }}>+ Add</button> : undefined}>
@@ -444,7 +475,13 @@ function Competitors({ competitors, cards, overview, capabilities, scores, compS
                 <div className="stack-3">
                   {cardsFor(kind).map((c) => (
                     <div key={c.id} className="card card-pad" style={{ borderLeft: `2px solid ${TONE_BORDER[tone] ?? "var(--border-strong)"}` }}>
-                      <div className="row-between"><span style={{ fontSize: 13.5, fontWeight: 620 }}>{c.title}</span><button className="t-muted" onClick={() => remove(c.id)} style={{ background: "none", border: "none", cursor: "pointer", fontSize: 15 }} aria-label="Remove">×</button></div>
+                      <div className="row-between">
+                        <span className="row gap-2" style={{ alignItems: "center", minWidth: 0 }}>
+                          <span style={{ fontSize: 13.5, fontWeight: 620 }}>{c.title}</span>
+                          {c.proposed_by && <Chip tone="violet">✦ {c.proposed_by}</Chip>}
+                        </span>
+                        <button className="t-muted" onClick={() => remove(c.id)} style={{ background: "none", border: "none", cursor: "pointer", fontSize: 15 }} aria-label="Remove">×</button>
+                      </div>
                       {c.detail && <div className="t-sub" style={{ fontSize: 12.5, marginTop: 3 }}>{c.detail}</div>}
                     </div>
                   ))}

@@ -97,6 +97,18 @@ export const GTM_TEMPLATE: TemplateSection[] = [
       { key: "pricing_model", label: "Pricing model", placeholder: "How it's packaged and priced — and how that shapes the motion." },
     ],
   },
+  {
+    // Seller-facing copy DERIVED from ratified battlecard items (Competitive
+    // module). The messaging agent drafts these; the items are the facts, this
+    // is what we SAY. Human-editable like any field.
+    section: "Battlecard",
+    blurb: "What sellers say against competitors — built on the ratified battlecard facts.",
+    fields: [
+      { key: "battlecard_summary", label: "Battlecard summary", placeholder: "The one-paragraph competitive story a rep leads with." },
+      { key: "talk_track", label: "Talk track", placeholder: "The flow of a competitive conversation — openers, proof, close." },
+      { key: "objection_responses", label: "Objection responses", placeholder: "Verbatim-usable responses to the objections we hear." },
+    ],
+  },
 ];
 
 // ---- BUILD ITEM: the Product Scope of an initiative ------------------------

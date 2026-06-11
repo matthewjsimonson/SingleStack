@@ -27,7 +27,7 @@ const TAG_LABEL: Record<string, string> = {
   tone: "tone/wording", duplicate: "duplicate", other: "other",
 };
 const KIND_TONE: Record<string, "default" | "accent" | "violet" | "amber" | "green"> = {
-  new_theme: "accent", escalate: "amber", merge: "violet", decay: "default", restate: "default",
+  new_theme: "accent", escalate: "amber", merge: "violet", decay: "default", restate: "default", battlecard_item: "green",
 };
 
 // Map a human-chosen set of product lines → the scope shape the data model uses
@@ -222,6 +222,13 @@ export default function IntelReview({ onApplied, productFilter = "all" }: { onAp
                         <span className="t-mono-xs" style={{ marginTop: 4 }}>
                           {draft.lines.length === 0 ? "company-wide (applies to all)" : draft.lines.length === 1 ? `${lineName(draft.lines[0])} only` : `cross-sell: ${draft.lines.map(lineName).join(" + ")}`}
                         </span>
+                      </div>
+                    )}
+                    {/* Battlecard item: show the analyst's substantiation + why it proposed it. */}
+                    {u.kind === "battlecard_item" && (
+                      <div className="card card-pad" style={{ background: "var(--panel-2)" }}>
+                        {typeof u.payload?.detail === "string" && u.payload.detail && <div className="t-sub" style={{ fontSize: 12.5, lineHeight: 1.5 }}>{u.payload.detail as string}</div>}
+                        {typeof u.payload?.rationale === "string" && u.payload.rationale && <div className="t-sub t-muted" style={{ fontSize: 12, marginTop: 6 }}>Analyst: {u.payload.rationale as string}</div>}
                       </div>
                     )}
                     {typeof u.payload?.recommendation === "string" && (
