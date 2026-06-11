@@ -191,6 +191,7 @@ Deno.serve(async (req: Request) => {
       `\nTHE SKILL FOR THIS TASK — apply it:\n## ${childSkill.name}\n${childSkill.instructions ?? ""}`,
       step.instruction ? `\nSTEP INSTRUCTION: ${step.instruction}` : "",
       `\nGATE CONTRACT (non-negotiable output rules): you are proposing STRUCTURED battlecard items (kinds: ${KINDS.join(", ")}) about this competitor, strictly from the evidence provided. Every item MUST cite the signal indices that back it (signal_indices) — an item you cannot back with at least one listed signal or a clear matrix delta must not be proposed. Set theme_index to the {T#} that motivated the item, or -1. Never invent capabilities, pricing, or quotes. Prefer fewer, well-evidenced items over coverage. Do not duplicate existing items. title = the point a seller needs (one line); detail = the substantiation (2-3 sentences, factual tone).`,
+      `\nMINE THE CAPABILITY MATRIX: the deltas are first-class battlecard fuel. Where WE lead (us > them on a capability) → propose a 'win' or 'strength' a rep should press, and a 'discovery' question that exposes the gap. Where THEY lead (them > us) → propose the 'objection' a rep will hear and how to handle it honestly, or a 'trap' to avoid walking into. Name the capability and the delta in detail, and cite the signals that established their side of it (the score's evidence). A delta with no signal evidence behind it is a weak basis — prefer the ones your signals corroborate.`,
     ].filter(Boolean).join("\n");
 
     const resp = await anthropic.messages.create({

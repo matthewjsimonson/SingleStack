@@ -95,12 +95,17 @@ Deno.serve(async (req: Request) => {
     const out = JSON.parse(block.text) as { product_themes: { title: string; summary: string; recommendation: string; conf_level: number }[]; gtm_themes: typeof out.product_themes };
 
     const now = new Date().toISOString();
+    // A competitor-scoped profile's themes inherit that competitor_id — this is
+    // what makes them visible to the capability scorer and the battlecard analyst
+    // (both read themes WHERE competitor_id = X). Without it the profile was a
+    // dead-end: it produced themes nothing downstream could pick up.
+    const competitorId = profile.scope === "competitor" ? (profile.competitor_id ?? null) : null;
     // deno-lint-ignore no-explicit-any
     const mk = (t: any, category: "product" | "gtm") => ({
       org_id: orgId, category, domain: "competitive", title: String(t.title).slice(0, 280),
       summary: (t.summary ?? "").slice(0, 1000) || null, recommendation: (t.recommendation ?? "").slice(0, 1000) || null,
       conf_level: Math.min(1, Math.max(0, Number(t.conf_level) || 0.6)), state: "active", momentum: "steady",
-      merged_by: "synthesis", last_evidence_at: now,
+      merged_by: "synthesis", last_evidence_at: now, competitor_id: competitorId,
     });
     const rows = [
       ...(out.product_themes ?? []).map((t) => mk(t, "product")),
