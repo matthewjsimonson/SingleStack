@@ -348,35 +348,51 @@ export default function CompetitiveSetup({ onDone, productId }: { onDone: () => 
     finally { setChatBusy(false); }
   }
   const [profileNote, setProfileNote] = useState<string | null>(null);
-  async function persistInterview(d: { who?: string; industries?: string; positioning?: string }) {
+  // Round out BOTH records from what the drill-down surfaced. Each field is
+  // routed to its rightful record (product = what it IS; gtm = how it's SOLD),
+  // and only proposed when it ADDS to or differs from what the record holds.
+  // Everything lands as a pending proposal — HITL, accepted in the record's
+  // drawer — never written silently.
+  async function persistInterview(d: { product?: string; features?: string; who?: string; industries?: string; positioning?: string }) {
     try {
       const orgId = await getOrgId(); if (!orgId) return;
-      const { data: g } = await supabase.from("gtm_records").select("id").order("created_at").limit(1).maybeSingle();
-      if (!g) return;
-      const { data: gf } = await supabase.from("record_fields").select("id, field_key, value").eq("gtm_record_id", g.id);
-      const want: [string, string, string | undefined][] = [
+      const [{ data: prodRec }, { data: g }] = await Promise.all([
+        supabase.from("product_records").select("id").order("created_at").limit(1).maybeSingle(),
+        supabase.from("gtm_records").select("id").order("created_at").limit(1).maybeSingle(),
+      ]);
+      let queued = 0;
+      const queue = async (recordCol: "product_id" | "gtm_record_id", recordId: string, title: string, want: [string, string, string | undefined][]) => {
+        const { data: rf } = await supabase.from("record_fields").select("id, field_key, value").eq(recordCol, recordId);
+        const changes = want.filter(([k, , v]) => v?.trim() && v.trim() !== (rf?.find((f) => f.field_key === k)?.value ?? "").trim());
+        if (!changes.length) return;
+        const { data: prop, error: pErr } = await supabase.from("proposals").insert({
+          org_id: orgId, [recordCol]: recordId, title,
+          rationale: "The competitive-setup drill-down surfaced detail beyond what the record carried. Accepting keeps the record current — and future setups start from it.",
+          proposed_by: "Setup interview", status: "pending",
+        }).select("id").single();
+        if (pErr || !prop) return;
+        await supabase.from("proposal_changes").insert(changes.map(([k, label, v]) => {
+          const ex = rf?.find((f) => f.field_key === k);
+          return {
+            org_id: orgId, proposal_id: prop.id,
+            change_kind: ex ? "update_field" : "add_field",
+            record_field_id: ex?.id ?? null, old_value: ex?.value ?? null,
+            field_key: ex ? null : k, label: ex ? null : label,
+            proposed_value: v!.trim(),
+          };
+        }));
+        queued += changes.length;
+      };
+      // Product record — what it IS.
+      if (prodRec) await queue("product_id", prodRec.id, "Setup learnings → product record", [
+        ["what_it_is", "What it is", d.product], ["core_capabilities", "Core capabilities", d.features],
+      ]);
+      // GTM record — how it's SOLD.
+      if (g) await queue("gtm_record_id", g.id, "Setup learnings → GTM record", [
         ["personas", "Personas", d.who], ["industries", "Industries / verticals", d.industries], ["positioning", "Positioning", d.positioning],
-      ];
-      const changes = want.filter(([k, , v]) => v?.trim() && v.trim() !== (gf?.find((f) => f.field_key === k)?.value ?? "").trim());
-      if (!changes.length) return;
-      const { data: prop, error: pErr } = await supabase.from("proposals").insert({
-        org_id: orgId, gtm_record_id: g.id, title: "Interview learnings → GTM record",
-        rationale: "The competitive-setup drill-down surfaced sharper buyer/positioning detail than the record carries. Accepting keeps the profile current — and future setups start from it.",
-        proposed_by: "Setup interview", status: "pending",
-      }).select("id").single();
-      if (pErr || !prop) return;
-      await supabase.from("proposal_changes").insert(changes.map(([k, label, v]) => {
-        const ex = gf?.find((f) => f.field_key === k);
-        return {
-          org_id: orgId, proposal_id: prop.id,
-          change_kind: ex ? "update_field" : "add_field",
-          record_field_id: ex?.id ?? null, old_value: ex?.value ?? null,
-          field_key: ex ? null : k, label: ex ? null : label,
-          proposed_value: v!.trim(),
-        };
-      }));
-      setProfileNote(`Queued ${changes.length} GTM-record update${changes.length === 1 ? "" : "s"} from your answers (personas / industries / positioning) — review in the record's proposal drawer.`);
-    } catch { /* best-effort: the wizard flow never fails on profile persistence */ }
+      ]);
+      if (queued) setProfileNote(`Queued ${queued} record update${queued === 1 ? "" : "s"} from your answers (product + GTM) — review and accept in each record's proposal drawer. Nothing is written until you do.`);
+    } catch { /* best-effort: the wizard flow never fails on record persistence */ }
   }
 
   // ---- step 2: propose rivals (web search), confirm, insert ------------------
