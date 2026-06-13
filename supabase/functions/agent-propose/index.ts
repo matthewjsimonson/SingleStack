@@ -305,8 +305,12 @@ Deno.serve(async (req: Request) => {
     async function maybeAutoAccept(pid: string) {
       const { data: pol } = await supabase.from("review_policies").select("mode").eq("org_id", orgId).eq("surface", "records").maybeSingle();
       if (pol?.mode === "autonomous") {
-        const { error } = await supabase.rpc("accept_proposal", { p_proposal: pid, p_ratifier: `${agent.name} (autonomous policy)` });
-        if (!error) autoAccepted = true;
+        // Conflict-aware: accept_proposal returns 'accepted' | 'conflicted'. Only
+        // a clean apply counts as auto-accepted; a 'conflicted' result means the
+        // record moved since drafting — it stays flagged for human re-review,
+        // never silently applied (optimistic concurrency holds even autonomously).
+        const { data: result, error } = await supabase.rpc("accept_proposal", { p_proposal: pid, p_ratifier: `${agent.name} (autonomous policy)` });
+        if (!error && result === "accepted") autoAccepted = true;
       }
     }
 

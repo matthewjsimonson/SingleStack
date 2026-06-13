@@ -28,6 +28,7 @@ export default function ReviewDrawer({
   const [loading, setLoading] = useState(true);
   const [acceptingId, setAcceptingId] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [notice, setNotice] = useState<string | null>(null);
 
   const load = useCallback(async () => {
     const [{ data: props }, { data: prods }, { data: gtms }] = await Promise.all([
@@ -46,10 +47,11 @@ export default function ReviewDrawer({
   useEffect(() => { if (open) { setLoading(true); load(); } }, [open, load]);
 
   async function accept(id: string) {
-    setAcceptingId(id); setError(null);
+    setAcceptingId(id); setError(null); setNotice(null);
     try {
-      const { error } = await supabase.rpc("accept_proposal", { p_proposal: id, p_ratifier: "web" });
+      const { data: result, error } = await supabase.rpc("accept_proposal", { p_proposal: id, p_ratifier: "web" });
       if (error) throw error;
+      if (result === "conflicted") setNotice("The record changed since this was proposed, so nothing was applied — it's flagged as conflicted. Open the record to see the current value, then have it re-proposed against the latest.");
       await load();
       onChanged?.();
     } catch (e) { setError(e instanceof Error ? e.message : "Accept failed."); }
@@ -78,6 +80,7 @@ export default function ReviewDrawer({
 
         <div style={{ flex: 1, overflowY: "auto", padding: "16px 18px" }}>
           {error && <div className="banner banner-error" style={{ marginBottom: 12 }}>{error}</div>}
+          {notice && <div className="banner" style={{ background: "var(--am-fill)", color: "var(--am-text)", marginBottom: 12 }}>{notice}</div>}
           {loading ? <div className="t-sub t-muted">Loading…</div>
             : items.length === 0 ? <div className="t-sub t-muted" style={{ textAlign: "center", padding: "24px 0" }}>Nothing pending. You&apos;re all caught up.</div>
             : (

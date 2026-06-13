@@ -32,6 +32,7 @@ export default function ProposeDrawer({ open, onClose, mode, target, advisors, o
   const [pending, setPending] = useState<Pending[]>([]);
   const [loaded, setLoaded] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [notice, setNotice] = useState<string | null>(null);
   const [acting, setActing] = useState<string | null>(null);
   const [freshIds, setFreshIds] = useState<Set<string>>(new Set()); // proposals drafted in THIS session (run mode shows only these)
   const traceRef = useRef<HTMLDivElement>(null);
@@ -78,9 +79,10 @@ export default function ProposeDrawer({ open, onClose, mode, target, advisors, o
   useEffect(() => { traceRef.current?.scrollTo({ top: traceRef.current.scrollHeight }); }, [thinking]);
 
   async function accept(id: string) {
-    setActing(id); setError(null);
-    const { error } = await supabase.rpc("accept_proposal", { p_proposal: id, p_ratifier: "web" });
+    setActing(id); setError(null); setNotice(null);
+    const { data: result, error } = await supabase.rpc("accept_proposal", { p_proposal: id, p_ratifier: "web" });
     if (error) { setError(error.message); setActing(null); return; }
+    if (result === "conflicted") setNotice("The record changed since this was drafted, so nothing was applied — it's flagged as conflicted. Re-run against the current value.");
     await loadPending(); onDone(); setActing(null);
   }
   async function reject(id: string) {
@@ -120,6 +122,7 @@ export default function ProposeDrawer({ open, onClose, mode, target, advisors, o
 
         <div style={{ flex: 1, overflowY: "auto", padding: 20 }}>
           {error && <div className="banner banner-error" style={{ marginBottom: 12 }}>{error}</div>}
+          {notice && <div className="banner" style={{ background: "var(--am-fill)", color: "var(--am-text)", marginBottom: 12 }}>{notice}</div>}
 
           {/* live reasoning while a new proposal is drafted */}
           {(busy || (mode === "run" && thinking)) && (

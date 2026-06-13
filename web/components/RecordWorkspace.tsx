@@ -129,7 +129,7 @@ export default function RecordWorkspace({ target, recordName }: { target: Target
               <div key={p.id} className="card" style={{ padding: "12px 16px" }}>
                 <div className="row-between">
                   <span className="t-body">{p.title}</span>
-                  <Chip tone={p.status === "accepted" ? "green" : "default"}>{p.status}</Chip>
+                  <Chip tone={p.status === "accepted" ? "green" : p.status === "conflicted" ? "amber" : "default"}>{p.status}</Chip>
                 </div>
               </div>
             ))}
