@@ -67,7 +67,7 @@ export default function ProfileReadiness({ compact = false, nonce = 0 }: { compa
       // Updating an existing value goes through the human edit channel (the
       // write-gate blocks raw value updates); a first-time insert is additive.
       if (ex?.id) await supabase.rpc("human_set_field_value", { p_field: ex.id, p_value: st });
-      else await supabase.from("record_fields").insert({ org_id: orgId, gtm_record_id: gtmId, field_key: "maturity_stage", label: "Company maturity", value: st, section: "Motion" });
+      else await supabase.rpc("human_add_fields", { p_rows: [{ org_id: orgId, gtm_record_id: gtmId, field_key: "maturity_stage", label: "Company maturity", value: st, section: "Motion" }] });
     } catch { /* best-effort */ }
   }
 

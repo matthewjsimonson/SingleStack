@@ -67,13 +67,13 @@ export async function loadDemoData(supabase: SupabaseClient, orgId: string): Pro
   // ---- Product fields ----
   await step("product fields", async () => {
     if (await count("record_fields", "product_id", pid)) return "exist";
-    const { error } = await supabase.from("record_fields").insert([
+    const { error } = await supabase.rpc("human_add_fields", { p_rows: [
       ["overview", "Overview", "SingleStack is an AI operating layer for product & go-to-market teams: a single, living system of record where executive agents keep your product and messaging current as the market moves — and nothing changes without a human ratifying it.", 0],
       ["target_market", "Target market", "Series A–C B2B software companies (20–200 people) where product and GTM drift apart and no one owns keeping them aligned.", 1],
       ["value_prop", "Value proposition", "Your strategy stays current automatically. Agents watch signals, propose sharp updates, and you ratify — so the record and messaging never go stale, and you can leverage new frontier-model capabilities as they ship.", 2],
       ["positioning", "Positioning", "Not a roadmapping tool (Aha!), not a competitive-intel feed (Crayon/Klue), not call analytics (Gong) — a living system of record that unifies product + GTM and proposes change, human-in-the-loop.", 3],
       ["key_metrics", "Key metrics", "Design partners: 6 · Weekly active operators: 41 · Proposals ratified/wk: 28", 4],
-    ].map(([field_key, label, value, position]) => ({ org_id: orgId, product_id: pid, field_key, label, value, position })));
+    ].map(([field_key, label, value, position]) => ({ org_id: orgId, product_id: pid, field_key, label, value, position })) });
     if (error) throw error; return "created";
   });
 
@@ -190,7 +190,7 @@ export async function loadDemoData(supabase: SupabaseClient, orgId: string): Pro
   // ---- GTM fields ----
   if (gtmId) await step("gtm fields", async () => {
     if (await count("record_fields", "gtm_record_id", gtmId!)) return "exist";
-    const { error } = await supabase.from("record_fields").insert([
+    const { error } = await supabase.rpc("human_add_fields", { p_rows: [
       ["hero", "Hero", "Your strategy, kept current by agents you control.", 0],
       ["personas", "Personas", "Heads of Product, founders, and RevOps leads at scaling B2B software companies.", 1],
       ["positioning", "Positioning", "A living system of record — not a doc, not a dashboard. It proposes change; you ratify.", 2],
@@ -198,7 +198,7 @@ export async function loadDemoData(supabase: SupabaseClient, orgId: string): Pro
       ["value_prop", "Value proposition", "Your product & GTM strategy stays current automatically — agents propose sharp updates from live signals, and you ratify. The record and the messaging never go stale.", 4],
       ["pillars", "Message pillars", "1) Living system of record (not a doc/dashboard). 2) Human-in-the-loop governance — nothing moves unratified. 3) Unifies product + GTM in one record. 4) Leverages new frontier-model capability as it ships.", 5],
       ["proof_points", "Proof points", "6 design partners · 41 weekly active operators · 28 proposals ratified/week · every change carries an auditable trail.", 6],
-    ].map(([field_key, label, value, position]) => ({ org_id: orgId, gtm_record_id: gtmId, field_key, label, value, position })));
+    ].map(([field_key, label, value, position]) => ({ org_id: orgId, gtm_record_id: gtmId, field_key, label, value, position })) });
     if (error) throw error; return "created";
   });
 

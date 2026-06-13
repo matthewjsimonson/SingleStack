@@ -182,7 +182,7 @@ export default function RecordSetup({ onDone, mode = "both" }: { onDone: (produc
         if (gErr || !g) throw gErr ?? new Error("Could not create the GTM record.");
         const gf = fields.filter((f) => f.record === "gtm" && f.value.trim());
         if (gf.length) {
-          const { error } = await supabase.from("record_fields").insert(gf.map((f, i) => ({ org_id: orgId, gtm_record_id: g.id, field_key: f.key, label: f.label, value: f.value.trim(), section: f.section, position: i })));
+          const { error } = await supabase.rpc("human_add_fields", { p_rows: gf.map((f, i) => ({ org_id: orgId, gtm_record_id: g.id, field_key: f.key, label: f.label, value: f.value.trim(), section: f.section, position: i })) });
           if (error) throw error;
         }
         onDone(parentId);
@@ -198,14 +198,14 @@ export default function RecordSetup({ onDone, mode = "both" }: { onDone: (produc
       if (pErr || !p) throw pErr ?? new Error("Could not create the product record.");
       const pf = fields.filter((f) => f.record === "product" && f.value.trim());
       if (pf.length) {
-        const { error } = await supabase.from("record_fields").insert(pf.map((f, i) => ({ org_id: orgId, product_id: p.id, field_key: f.key, label: f.label, value: f.value.trim(), section: f.section, position: i })));
+        const { error } = await supabase.rpc("human_add_fields", { p_rows: pf.map((f, i) => ({ org_id: orgId, product_id: p.id, field_key: f.key, label: f.label, value: f.value.trim(), section: f.section, position: i })) });
         if (error) throw error;
       }
       const { data: g, error: gErr } = await supabase.from("gtm_records").insert({ org_id: orgId, product_id: p.id, name: gtmName.trim() || `${prodName.trim()} — Core GTM` }).select("id").single();
       if (gErr || !g) throw gErr ?? new Error("Could not create the GTM record.");
       const gf = fields.filter((f) => f.record === "gtm" && f.value.trim());
       if (gf.length) {
-        const { error } = await supabase.from("record_fields").insert(gf.map((f, i) => ({ org_id: orgId, gtm_record_id: g.id, field_key: f.key, label: f.label, value: f.value.trim(), section: f.section, position: i })));
+        const { error } = await supabase.rpc("human_add_fields", { p_rows: gf.map((f, i) => ({ org_id: orgId, gtm_record_id: g.id, field_key: f.key, label: f.label, value: f.value.trim(), section: f.section, position: i })) });
         if (error) throw error;
       }
       onDone(p.id);

@@ -109,9 +109,10 @@ export default function SectionedFields({ target }: { target: Target }) {
           else inserts.push({ org_id: orgId, [fk(target)]: target.id, field_key: f.key, label: f.label, section: s.section, value: v, position: pos++ });
         }
       }
-      if (inserts.length) { const { error } = await supabase.from("record_fields").insert(inserts); if (error) throw error; }
-      // Updates go through the human edit channel (the write-gate blocks raw value
-      // updates); brand-new field inserts are additive and not gated.
+      // Both go through the human channels — the write-gate blocks raw value
+      // writes: human_add_fields for new (populated) fields, human_set_field_value
+      // for edits.
+      if (inserts.length) { const { error } = await supabase.rpc("human_add_fields", { p_rows: inserts }); if (error) throw error; }
       for (const u of updates) { const { error } = await supabase.rpc("human_set_field_value", { p_field: u.id, p_value: u.value }); if (error) throw error; }
       // If the panel was open with drafts but nothing was written, say so plainly
       // instead of silently closing — surfaces a client-state bug as a real message.
@@ -144,7 +145,7 @@ export default function SectionedFields({ target }: { target: Target }) {
         .select("field_key").eq(fk(target), target.id);
       const taken = new Set((live ?? []).map((f) => f.field_key));
       if (taken.has(key)) key = `${key}_${Date.now().toString(36)}`;
-      const { error } = await supabase.from("record_fields").insert({
+      const { error } = await supabase.rpc("human_add_fields", { p_rows: [{
         org_id: orgId, [fk(target)]: target.id, field_key: key, label,
         section: sectionName === UNGROUPED ? null : sectionName,
         field_kind: newKind,
@@ -152,7 +153,7 @@ export default function SectionedFields({ target }: { target: Target }) {
         // a metric field carries no prose value — its data lives in record_metrics
         value: newKind === "metric" ? null : (newVal.trim() || null),
         position: (live ?? []).length,
-      });
+      }] });
       if (error) throw error;
       setAddingIn(null); setNewLabel(""); setNewVal(""); setNewKind("narrative"); setNewUnit("");
       await load();
