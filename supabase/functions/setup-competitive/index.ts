@@ -189,13 +189,12 @@ Deno.serve(async (req: Request) => {
       const budget = Math.max(0, Math.min(8, Math.round(Number((body as { max_questions?: number }).max_questions) || 4)));
       const asked = transcript.filter((t) => t.role === "q").length;
       const resp = (await anthropic.messages.create({
-        model: MODEL, max_tokens: 1600,
-        thinking: { type: "adaptive" },
-        output_config: { effort: "medium", format: { type: "json_schema", schema: INTERVIEW_SCHEMA } },
+        model: MODEL, max_tokens: 4000,
+        output_config: { effort: "low", format: { type: "json_schema", schema: INTERVIEW_SCHEMA } },
         system: `You are the competitive-intelligence intake SCORER. Assess COVERAGE of each placement dimension from the records + interview, then choose the next question. You do NOT invent a readiness number — you report each dimension's status WITH EVIDENCE; the system computes the score.
 
 Assess EVERY dimension (one coverage entry each): ${DIMENSIONS.map((d) => `${d.key} (${d.label})`).join(", ")}.
-For each: status = covered (records or an answer clearly establish it) / partial (hinted but thin) / missing (genuinely absent) / not_applicable (the company's STAGE can't have it). source = records / answer / none. note = the actual evidence — quote or paraphrase what the records/answers said, or why it's n/a. BE STRICT: a vague mention is 'partial', not 'covered'; never mark 'covered' unless the records genuinely say it.
+For each: status = covered (records or an answer clearly establish it) / partial (hinted but thin) / missing (genuinely absent) / not_applicable (the company's STAGE can't have it). source = records / answer / none. note = the actual evidence, TERSE (max ~140 chars) — a short paraphrase of what the records/answers said, or why it's n/a. Keep every string short; do not pad. BE STRICT: a vague mention is 'partial', not 'covered'; never mark 'covered' unless the records genuinely say it.
 
 GOVERNANCE — read the records FIRST and DEFER hard: the GTM + product records usually establish product, personas, positioning, ICP. A dimension the records cover is 'covered' (source=records) — never re-ask it.
 
@@ -210,7 +209,13 @@ NEXT QUESTION — next_dimension = the highest-WEIGHT dimension still 'missing' 
         // deno-lint-ignore no-explicit-any
       } as any)) as Anthropic.Message;
       const text = resp.content.filter((b) => b.type === "text").map((b) => (b as { text: string }).text).join("");
-      const out = JSON.parse(text) as { coverage: { dimension: string; status: string; source: string; note: string }[]; next_dimension: string; question: string; why: string };
+      let out: { coverage: { dimension: string; status: string; source: string; note: string }[]; next_dimension: string; question: string; why: string };
+      try { out = JSON.parse(text); }
+      catch {
+        // Truncated/invalid output must NOT block the flow: end the interview
+        // gracefully so the picture step (the real synthesis) proceeds.
+        return json({ done: true, question: "", why: "", readiness: 75, gaps: "", coverage: [], partial: true });
+      }
       // COMPUTE readiness from the assessed coverage — the actual score:
       // weighted, reproducible, auditable. n/a dims leave the denominator.
       const cov = (out.coverage ?? []).filter((c) => (DIM_KEYS as readonly string[]).includes(c.dimension));
@@ -239,9 +244,8 @@ NEXT QUESTION — next_dimension = the highest-WEIGHT dimension still 'missing' 
 
     if (step === "picture") {
       const resp = (await anthropic.messages.create({
-        model: MODEL, max_tokens: 2000,
-        thinking: { type: "adaptive" },
-        output_config: { effort: "high", format: { type: "json_schema", schema: PICTURE_SCHEMA } },
+        model: MODEL, max_tokens: 4000,
+        output_config: { effort: "medium", format: { type: "json_schema", schema: PICTURE_SCHEMA } },
         system: "Synthesize the records + interview into the FULL PICTURE of this product and its market — the brief a competitive researcher needs to find exactly the right rivals. picture = 1-2 tight paragraphs: what it is, who buys it (personas + industries + segment), how it positions and what it replaces, the features that win deals, and any deal-loss/competitor hints from the interview. The structured fields = the same content, distilled. known_competitors = every rival the user NAMED in the records or interview (comma-separated; empty string if none) — these seed and anchor the search. Ground every claim in the records/transcript — no embellishment.",
         messages: [{ role: "user", content: [
           records ? `THE RECORDS:\n${records}` : "THE RECORDS: (none)",
@@ -250,7 +254,10 @@ NEXT QUESTION — next_dimension = the highest-WEIGHT dimension still 'missing' 
         // deno-lint-ignore no-explicit-any
       } as any)) as Anthropic.Message;
       const text = resp.content.filter((b) => b.type === "text").map((b) => (b as { text: string }).text).join("");
-      return json(JSON.parse(text));
+      let picOut: unknown;
+      try { picOut = JSON.parse(text); }
+      catch { return json({ error: "The picture came back incomplete — try '✦ Drill down' again, or search directly from your records." }, 502); }
+      return json(picOut);
     }
 
     // landscape: the LONG half (live web search) as its own request, so no

@@ -327,7 +327,18 @@ export default function CompetitiveSetup({ onDone, productId }: { onDone: () => 
     try {
       const data = await pictureRun.go(() => invoke({ step: "picture", records: recordsDump, transcript: history }));
       setPicture(data.picture || "");
-      setCtx({ product: data.product || "", features: data.features || "", who: data.who || "", industries: data.industries || "", positioning: data.positioning || "", more: data.more || "", competitors: data.known_competitors || "" });
+      // MERGE, don't overwrite: a field the picture returns fills its box; a
+      // field it leaves empty keeps whatever the records/you already had — so
+      // an answered industry/competitor lands without wiping anything else.
+      setCtx((cur) => ({
+        product: (data.product || "").trim() || cur.product,
+        features: (data.features || "").trim() || cur.features,
+        who: (data.who || "").trim() || cur.who,
+        industries: (data.industries || "").trim() || cur.industries,
+        positioning: (data.positioning || "").trim() || cur.positioning,
+        more: (data.more || "").trim() || cur.more,
+        competitors: (data.known_competitors || "").trim() || cur.competitors,
+      }));
       setChatDone(true);
       // HOLD what the interview surfaced: queue a proposal on the GTM record so
       // the answers update the PROFILE (personas / industries / positioning),
