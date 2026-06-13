@@ -10,13 +10,42 @@ import { getOrgId } from "@/lib/org";
 import { Section, Chip, Banner, Empty, Modal, ConfirmDialog } from "@/components/ui";
 import { Markdown } from "@/components/Markdown";
 
-type Skill = { id: string; key: string; name: string; description: string | null; category: string | null; instructions: string | null; source: string | null; created_at: string };
+type Skill = { id: string; key: string; name: string; description: string | null; category: string | null; instructions: string | null; source: string | null; created_at: string; kind: string | null; parent_id: string | null; areas: string[] | null; connectors: string[] | null };
 type Usage = Record<string, { count: number; agents: string[]; ids: string[] }>; // skill_id -> who uses it (names for display, ids for matching)
 
 const CATS = ["all", "product", "gtm", "research", "general"] as const;
 type Cat = typeof CATS[number];
 const catTone = (c: string | null) => (c === "product" ? "accent" : c === "gtm" ? "violet" : c === "research" ? "green" : "default");
-const BLANK = { name: "", description: "", instructions: "", category: "general" };
+const BLANK = { name: "", description: "", instructions: "", category: "general", kind: "child", parentId: "" };
+
+// Export a skill as a real SKILL.md (frontmatter + body) — the same shape
+// scripts/build-skills.mjs parses, plus `parent` for the cornerstone a child
+// tailors. The markdown body is canonical; this just materializes the file.
+function fmLine(k: string, v: string | string[] | null | undefined): string {
+  if (v == null) return "";
+  if (Array.isArray(v)) return v.length ? `${k}: ${v.join(", ")}\n` : "";
+  return v.trim() ? `${k}: ${v.trim()}\n` : "";
+}
+function buildSkillMd(s: Skill, parentKey: string | null): string {
+  const fm = "---\n"
+    + fmLine("key", s.key)
+    + fmLine("name", s.name)
+    + fmLine("category", s.category || "general")
+    + fmLine("description", s.description)
+    + `cornerstone: ${s.kind === "cornerstone"}\n`
+    + fmLine("parent", parentKey)
+    + fmLine("areas", s.areas)
+    + fmLine("connectors", s.connectors)
+    + "---\n";
+  return fm + "\n" + (s.instructions ?? "").trim() + "\n";
+}
+function downloadText(filename: string, text: string) {
+  const blob = new Blob([text], { type: "text/markdown;charset=utf-8" });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url; a.download = filename; a.click();
+  URL.revokeObjectURL(url);
+}
 
 export default function SkillLibrary() {
   const supabase = createClient();
@@ -40,7 +69,7 @@ export default function SkillLibrary() {
 
   const load = useCallback(async () => {
     const [{ data: sk }, { data: as }, { data: ag }] = await Promise.all([
-      supabase.from("skills").select("id, key, name, description, category, instructions, source, created_at").order("name"),
+      supabase.from("skills").select("id, key, name, description, category, instructions, source, created_at, kind, parent_id, areas, connectors").order("name"),
       supabase.from("agent_skills").select("skill_id, agent_id"),
       supabase.from("agents").select("id, name").order("name"),
     ]);
@@ -57,20 +86,31 @@ export default function SkillLibrary() {
   useEffect(() => { load(); }, [load]);
 
   function openCreate() { setEditId(null); setForm(BLANK); setPreview(false); setOpen(true); setError(null); }
-  function openEdit(s: Skill) { setEditId(s.id); setForm({ name: s.name, description: s.description ?? "", instructions: s.instructions ?? "", category: s.category ?? "general" }); setPreview(false); setOpen(true); setError(null); }
+  function openEdit(s: Skill) { setEditId(s.id); setForm({ name: s.name, description: s.description ?? "", instructions: s.instructions ?? "", category: s.category ?? "general", kind: s.kind ?? "child", parentId: s.parent_id ?? "" }); setPreview(false); setOpen(true); setError(null); }
+
+  // Materialize a skill as a downloadable SKILL.md. parent_id resolves to the
+  // cornerstone's key so the file round-trips the cornerstone/child link.
+  function downloadSkill(s: Skill) {
+    const parentKey = s.parent_id ? (skills.find((x) => x.id === s.parent_id)?.key ?? null) : null;
+    downloadText(`${s.key || "skill"}.md`, buildSkillMd(s, parentKey));
+  }
+  const cornerstones = skills.filter((s) => s.kind === "cornerstone");
 
   async function save() {
     if (!form.name.trim()) { setError("Give the skill a name."); return; }
     setBusy(true); setError(null);
     try {
+      // A cornerstone is a root profile — it never has a parent (matches the DB
+      // skills_parent_shape check).
+      const parent_id = form.kind === "cornerstone" ? null : (form.parentId || null);
       if (editId) {
-        const { error } = await supabase.from("skills").update({ name: form.name.trim(), description: form.description.trim() || null, instructions: form.instructions.trim() || null, category: form.category }).eq("id", editId);
+        const { error } = await supabase.from("skills").update({ name: form.name.trim(), description: form.description.trim() || null, instructions: form.instructions.trim() || null, category: form.category, kind: form.kind, parent_id }).eq("id", editId);
         if (error) throw error;
       } else {
         const orgId = await getOrgId();
         if (!orgId) throw new Error("Could not resolve your organization.");
         const key = form.name.trim().toLowerCase().replace(/[^a-z0-9]+/g, "_").replace(/^_|_$/g, "") || `skill_${Date.now()}`;
-        const { error } = await supabase.from("skills").insert({ org_id: orgId, key, name: form.name.trim(), description: form.description.trim() || null, instructions: form.instructions.trim() || null, category: form.category, source: "custom" });
+        const { error } = await supabase.from("skills").insert({ org_id: orgId, key, name: form.name.trim(), description: form.description.trim() || null, instructions: form.instructions.trim() || null, category: form.category, source: "custom", kind: form.kind, parent_id });
         if (error) throw error;
       }
       setOpen(false); load();
@@ -132,12 +172,16 @@ export default function SkillLibrary() {
                 <div key={s.id} className="card card-pad" style={{ display: "flex", flexDirection: "column", gap: 8, minHeight: 140 }}>
                   <div className="row-between" style={{ gap: 8, alignItems: "flex-start" }}>
                     <button onClick={() => openEdit(s)} style={{ background: "none", border: "none", textAlign: "left", padding: 0, cursor: "pointer", fontSize: 14.5, fontWeight: 640, color: "var(--tp)", minWidth: 0 }}>{s.name}</button>
-                    <Chip tone={catTone(s.category)}>{s.category ?? "general"}</Chip>
+                    <div className="row gap-2" style={{ flexShrink: 0 }}>
+                      <Chip tone={s.kind === "cornerstone" ? "accent" : "default"}>{s.kind === "cornerstone" ? "★ Cornerstone" : "Child"}</Chip>
+                      <Chip tone={catTone(s.category)}>{s.category ?? "general"}</Chip>
+                    </div>
                   </div>
                   <div className="t-sub t-muted" style={{ fontSize: 12, lineHeight: 1.4, flex: 1 }}>{s.description || "No description."}</div>
                   <div className="row-between" style={{ alignItems: "center", gap: 6 }}>
                     <span className="t-mono-xs t-muted" title={u?.agents.join(", ")}>{u?.count ? `used by ${u.count} agent${u.count === 1 ? "" : "s"}` : "unused"}{s.source === "template" ? " · template" : ""}</span>
                     <div className="row gap-2">
+                      <button className="btn btn-secondary btn-sm" title="Download as SKILL.md" onClick={() => downloadSkill(s)}>↓ .md</button>
                       <button className="btn btn-secondary btn-sm" onClick={() => setAttachFor(s)}>Attach</button>
                       <button className="btn btn-secondary btn-sm" onClick={() => openEdit(s)}>Edit</button>
                     </div>
@@ -156,6 +200,20 @@ export default function SkillLibrary() {
             <select className="select" value={form.category} onChange={(e) => setForm({ ...form, category: e.target.value })}>
               <option value="general">General</option><option value="product">Product</option><option value="gtm">GTM</option><option value="research">Research</option>
             </select></label>
+        </div>
+        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "var(--sp-3)" }}>
+          <label className="field"><span className="t-label">Type</span>
+            <select className="select" value={form.kind} onChange={(e) => setForm({ ...form, kind: e.target.value, parentId: e.target.value === "cornerstone" ? "" : form.parentId })}>
+              <option value="cornerstone">Cornerstone (profile / identity)</option>
+              <option value="child">Child (tailors a cornerstone)</option>
+            </select></label>
+          {form.kind === "child" && (
+            <label className="field"><span className="t-label">Tailors <span className="t-muted" style={{ fontWeight: 400 }}>— optional</span></span>
+              <select className="select" value={form.parentId} onChange={(e) => setForm({ ...form, parentId: e.target.value })}>
+                <option value="">— no cornerstone —</option>
+                {cornerstones.filter((c) => c.id !== editId).map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
+              </select></label>
+          )}
         </div>
         <label className="field"><span className="t-label">What it does</span><input className="input" value={form.description} onChange={(e) => setForm({ ...form, description: e.target.value })} placeholder="A one-liner" /></label>
         <div className="field">
