@@ -51,6 +51,11 @@ instead of guessing.
    calibrated; gate on independent-source corroboration (`theme_confidence`) +
    abstention, with the autonomy dial (`review_policies`) as ceiling and the
    fail-safe as floor. (Research: arXiv 2601.07767, 2510.20460, 2604.03904.)
+7. **Relevance & tailoring reuse existing governed data — no new schema.**
+   Agent↔child relevance = `skills.areas` ∩ `connections.area`; the tailor / AI-update
+   is grounded in cornerstone + product record + the GTM record's personas/market;
+   control = `apply_skill_evolution` / `skill_revisions` + the autonomy dial over
+   C2-gated records. Skills live under Agents (IA), not as a top-level tab.
 
 ## Dependency-ordered phases
 - **A. Skills substrate**
@@ -61,14 +66,28 @@ instead of guessing.
   - **A.2** Files I/O: export skill → `SKILL.md` ✅ (slice 1); import skill ←
     uploaded file (`import-skill` edge fn, AI-structured, HITL draft) + raw original
     kept in `documents` for provenance.
-- **B. Tailoring + authoring & setup UI** — the **tailoring workflow**: attach a
-  generic template to an agent → mint a tailored instance → tailor it (AI-assisted)
-  for that agent; new agent = take/tailor a cornerstone; existing agent = update its
-  cornerstone, attach+tailor children. Upload + "tailor with AI"; the **top-down
-  decision-tree view** (replaces the radial depiction); AI-assisted setup walks the
-  tree. Real, company-grounded instance content replaces demo placeholders.
+- **B. Tailoring + agent setup (skills live UNDER Agents)**
+  - **B.1 IA:** the skills library is a **tab within Agents**, not a top-level nav
+    item — skills are agent-scoped knowledge, so they live where agents live.
+  - **B.2 Relevant skill picker:** creating/updating an agent opens a popup to attach
+    skills; it shows only the **generic child templates relevant to that agent** —
+    relevance = `skills.areas` ∩ the agent's connected areas (`connections.area`,
+    normalized product(s)/gtm) + cornerstone role. Attaching mints a tailored
+    instance (A.1b).
+  - **B.3 Tailor = grounded + controlled (one engine with "update skills with AI"):**
+    tailoring / AI-updating a skill is specialized from the agent's **cornerstone**
+    (role identity) + the **product record** + the **GTM record's market & personas**
+    (`icp`, `industries`, `primary_persona`+, `positioning`, `category_pov`,
+    `differentiation`, `win_themes`, `gtm_motion`) — all C2-gated canonical records.
+    It writes through `apply_skill_evolution` → `skill_revisions` (provenance), HITL
+    under the autonomy dial. The first tailor and ongoing AI updates use the same
+    grounded, controlled path.
+  - **B.4 Top-down decision-tree view** (replaces the radial depiction); AI-assisted
+    setup walks the tree. Real, company-grounded instance content replaces demo
+    placeholders.
 - **C. Agent rebuild** — unify identity onto the cornerstone instance (decision #4);
-  derive the runtime prompt; retire the 4-window composition; reseed the roster.
+  derive the runtime prompt; retire the 4-window composition; reseed the roster with
+  the role-named cornerstones. **Existing agents will be rebuilt onto this model.**
 - **D. Stewardship (C3)** — a steward (agent/role) per field/section so non-steward
   proposals are flagged/routed; binds to the rebuilt agent model.
 - **E. Fail-safes** — confidence-gated decision tree (the fallback edges on the
