@@ -78,12 +78,16 @@ export default function CompetitiveSetup({ onDone, productId }: { onDone: () => 
   const [readyDelta, setReadyDelta] = useState<number | null>(null);
   const [gaps, setGaps] = useState("");
   // step 2 — competitors
-  // Resume: matches found in a previous run are stashed in localStorage so
-  // leaving the wizard and coming back lets you pick them up instead of
-  // re-searching. Keyed per product line.
-  const MATCH_KEY = `ss_comp_matches_${productId ?? "all"}`;
+  // Governed run: the in-progress setup lives in competitive_setup_runs so
+  // matches SURVIVE across devices/sessions (resume is a DB read), and the
+  // run's budgets are first-class.
   const [comps, setComps] = useState<CompCand[]>([]);
-  const [savedRun, setSavedRun] = useState<{ comps: CompCand[]; at: number } | null>(null);
+  const [runId, setRunId] = useState<string | null>(null);
+  const [savedRun, setSavedRun] = useState<{ comps: CompCand[]; at: number; transcript?: { role: "q" | "a"; text: string }[]; picture?: string; context?: typeof ctx } | null>(null);
+  // Controls: how many questions the interview may ask, and how many rivals a
+  // run returns. The user owns both.
+  const [maxQuestions, setMaxQuestions] = useState(4);
+  const [targetMatches, setTargetMatches] = useState(8);
   const [savedComps, setSavedComps] = useState<{ id: string; name: string; website: string | null; linkedin: string | null }[]>([]);
   // step 3 — capabilities
   const [caps, setCaps] = useState<CapCand[]>([]);
@@ -137,10 +141,23 @@ export default function CompetitiveSetup({ onDone, productId }: { onDone: () => 
 
 
   useEffect(() => {
+    void (async () => {
     try {
-      const raw = typeof window !== "undefined" ? window.localStorage.getItem(MATCH_KEY) : null;
-      if (raw) { const parsed = JSON.parse(raw); if (Array.isArray(parsed?.comps) && parsed.comps.length) setSavedRun(parsed); }
+      let q = supabase.from("competitive_setup_runs").select("id, matches, transcript, picture, context, settings, updated_at").eq("status", "open");
+      q = productId ? q.eq("product_id", productId) : q.is("product_id", null);
+      const { data } = await q.order("updated_at", { ascending: false }).limit(1).maybeSingle();
+      if (data) {
+        setRunId(data.id);
+        const st = (data.settings ?? {}) as { max_questions?: number; target_matches?: number };
+        if (st.max_questions) setMaxQuestions(st.max_questions);
+        if (st.target_matches) setTargetMatches(st.target_matches);
+        const m = (data.matches ?? []) as CompCand[];
+        if (m.length || (data.transcript as unknown[])?.length || data.picture) {
+          setSavedRun({ comps: m, at: new Date(data.updated_at).getTime(), transcript: (data.transcript ?? []) as { role: "q" | "a"; text: string }[], picture: (data.picture as string) || "", context: (data.context ?? undefined) as typeof ctx | undefined });
+        }
+      }
     } catch { /* ignore */ }
+    })();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
   useEffect(() => {
@@ -212,6 +229,21 @@ export default function CompetitiveSetup({ onDone, productId }: { onDone: () => 
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
+  // Persist the run — upsert into the governed layer so matches survive.
+  async function persistRun(patch: { comps?: CompCand[]; transcript?: { role: "q" | "a"; text: string }[]; picture?: string }) {
+    try {
+      const orgId = await getOrgId(); if (!orgId) return;
+      const row = {
+        org_id: orgId, product_id: productId ?? null, status: "open",
+        context: ctx, picture: patch.picture ?? picture ?? null,
+        transcript: patch.transcript ?? chat, matches: patch.comps ?? comps,
+        settings: { max_questions: maxQuestions, target_matches: targetMatches },
+      };
+      if (runId) await supabase.from("competitive_setup_runs").update(row).eq("id", runId);
+      else { const { data } = await supabase.from("competitive_setup_runs").insert(row).select("id").single(); if (data) setRunId(data.id); }
+    } catch { /* best-effort */ }
+  }
+
   // What the agent searches from = exactly what's in the editable fields.
   const marketCtx = [
     picture.trim() ? `FULL PICTURE:\n${picture.trim()}` : "",
@@ -255,12 +287,12 @@ export default function CompetitiveSetup({ onDone, productId }: { onDone: () => 
   async function nextQuestion(history: { role: "q" | "a"; text: string }[]) {
     setChatBusy(true); setError(null);
     try {
-      const data = await askRun.go(() => invoke({ step: "interview", records: recordsDump, transcript: history }));
+      const data = await askRun.go(() => invoke({ step: "interview", records: recordsDump, transcript: history, max_questions: maxQuestions }));
       const r = Math.min(100, Math.max(0, Math.round(Number(data.readiness) || 0)));
       setReady((prev) => { setReadyDelta(prev !== null ? r - prev : null); return r; });
       setGaps((data.gaps as string) || "");
       if (data.done || !data.question) { setChatDone(true); setChatWhy(null); await paintPicture(history); }
-      else { setChat([...history, { role: "q", text: data.question }]); setChatWhy(data.why || null); }
+      else { const next = [...history, { role: "q" as const, text: data.question }]; setChat(next); setChatWhy(data.why || null); void persistRun({ transcript: next }); }
     } catch (e) { setError(e instanceof Error ? e.message : "The interviewer stalled."); }
     finally { setChatBusy(false); }
   }
@@ -340,10 +372,10 @@ export default function CompetitiveSetup({ onDone, productId }: { onDone: () => 
       // Each advance below is a REAL transition: profile composed → live search
       // in flight → resolved → scoring in flight → resolved → ranked.
       setSearchStep(1); // profile (step 0) is composed at fire time — ✓ immediately, search in flight
-      const land = await invokeRetry({ step: "landscape", market: marketCtx, product: { name: prod?.name, value_prop: prod?.value_prop } });
+      const land = await invokeRetry({ step: "landscape", market: marketCtx, target_matches: targetMatches, product: { name: prod?.name, value_prop: prod?.value_prop } });
       const u1 = (land.usage ?? { input: 0, output: 0 }) as { input: number; output: number };
       setSearchStep(2); // briefing in hand — scoring in flight
-      const data = await invokeRetry({ step: "competitors", market: marketCtx, briefing: land.briefing, product: { name: prod?.name, value_prop: prod?.value_prop } });
+      const data = await invokeRetry({ step: "competitors", market: marketCtx, briefing: land.briefing, target_matches: targetMatches, product: { name: prod?.name, value_prop: prod?.value_prop } });
       const u2 = (data.usage ?? { input: 0, output: 0 }) as { input: number; output: number };
       setSearchUsage({ input: u1.input + u2.input, output: u1.output + u2.output });
       setSearchStep(3); // ranking (client-side, instant)
@@ -351,7 +383,7 @@ export default function CompetitiveSetup({ onDone, productId }: { onDone: () => 
       if (!list.length) throw new Error("No rivals found — try describing the market more specifically.");
       const found = list.map((c) => ({ ...c, keep: true }));
       setComps(found); setStep(2);
-      try { window.localStorage.setItem(MATCH_KEY, JSON.stringify({ comps: found, at: Date.now() })); setSavedRun({ comps: found, at: Date.now() }); } catch { /* ignore */ }
+      void persistRun({ comps: found });
     } catch (e) { setError(e instanceof Error ? e.message : "The landscape search failed."); }
     finally { clearInterval(tick); setSearchStep(null); setBusy(null); }
   }
@@ -359,16 +391,19 @@ export default function CompetitiveSetup({ onDone, productId }: { onDone: () => 
   // review is also resumable). Only while on the candidate step.
   useEffect(() => {
     if (step !== 2 || comps.length === 0) return;
-    try { window.localStorage.setItem(MATCH_KEY, JSON.stringify({ comps, at: Date.now() })); } catch { /* ignore */ }
+    void persistRun({ comps });
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [comps, step]);
   function resumeMatches() {
-    if (!savedRun?.comps?.length) return;
-    setComps(savedRun.comps); setStep(2);
+    if (!savedRun) return;
+    if (savedRun.context) setCtx(savedRun.context);
+    if (savedRun.transcript?.length) setChat(savedRun.transcript);
+    if (savedRun.picture) setPicture(savedRun.picture);
+    if (savedRun.comps?.length) { setComps(savedRun.comps); setStep(2); }
   }
-  function clearSavedRun() {
-    try { window.localStorage.removeItem(MATCH_KEY); } catch { /* ignore */ }
-    setSavedRun(null);
+  async function clearSavedRun(status: "discarded" | "confirmed" = "discarded") {
+    try { if (runId) await supabase.from("competitive_setup_runs").update({ status }).eq("id", runId); } catch { /* ignore */ }
+    setRunId(null); setSavedRun(null);
   }
 
   async function confirmCompetitors() {
@@ -388,7 +423,7 @@ export default function CompetitiveSetup({ onDone, productId }: { onDone: () => 
       // carry the confirmed LinkedIn URLs (not a competitors column — they live on the sources)
       const withLi = (data ?? []).map((d) => ({ ...d, linkedin: keep.find((k) => k.name.trim() === d.name)?.linkedin.trim() || null }));
       setSavedComps(withLi);
-      clearSavedRun();
+      void clearSavedRun("confirmed");
       // LEGIT monitoring only: a kind is on ONLY when its confirmed link exists —
       // website needs the site URL; jobs/posts need the LinkedIn page. Press is
       // name-anchored search (no link needed).
@@ -627,22 +662,41 @@ export default function CompetitiveSetup({ onDone, productId }: { onDone: () => 
               <div className="t-mono-xs t-muted" style={{ marginTop: 8 }}>≤3 web searches, capped tokens · typically 20–40s</div>
             </div>
           ) : (<>
-            {savedRun?.comps?.length && step === 1 ? (
+            {savedRun && (savedRun.comps?.length || savedRun.transcript?.length) && step === 1 ? (
               <div className="card card-pad" style={{ background: "var(--panel-2)", borderLeft: "3px solid var(--ac)" }}>
                 <div className="row-between" style={{ gap: 8, flexWrap: "wrap", alignItems: "center" }}>
-                  <span className="t-sub" style={{ fontSize: 12.5 }}><b>{savedRun.comps.length} matches</b> from your last run ({new Date(savedRun.at).toLocaleString()}) — pick up where you left off.</span>
+                  <span className="t-sub" style={{ fontSize: 12.5 }}>
+                    {savedRun.comps?.length ? <><b>{savedRun.comps.length} matches</b> saved</> : <><b>interview in progress</b></>} from a previous run ({new Date(savedRun.at).toLocaleString()}) — picks up across devices.
+                  </span>
                   <span className="row gap-2">
-                    <button className="btn btn-sm" onClick={resumeMatches}>↩ Resume matches</button>
-                    <button className="btn btn-secondary btn-sm" onClick={clearSavedRun}>Discard</button>
+                    <button className="btn btn-sm" onClick={resumeMatches}>↩ Resume</button>
+                    <button className="btn btn-secondary btn-sm" onClick={() => clearSavedRun()}>Discard</button>
                   </span>
                 </div>
               </div>
             ) : null}
+            {/* Governance: the run's two budgets, the user's to set. */}
+            <div className="row gap-2" style={{ flexWrap: "wrap", alignItems: "center", fontSize: 12.5 }}>
+              <span className="t-mono-xs t-muted">Run settings:</span>
+              <label className="row gap-2" style={{ alignItems: "center" }}>
+                <span className="t-mono-xs">max questions</span>
+                <select className="select" value={maxQuestions} onChange={(e) => setMaxQuestions(Number(e.target.value))} style={{ padding: "2px 6px", fontSize: 12, height: "auto", width: "auto" }}>
+                  <option value={0}>0 — records only</option><option value={2}>2</option><option value={4}>4</option><option value={6}>6</option>
+                </select>
+              </label>
+              <label className="row gap-2" style={{ alignItems: "center" }}>
+                <span className="t-mono-xs">matches per run</span>
+                <select className="select" value={targetMatches} onChange={(e) => setTargetMatches(Number(e.target.value))} style={{ padding: "2px 6px", fontSize: 12, height: "auto", width: "auto" }}>
+                  <option value={5}>5</option><option value={8}>8</option><option value={10}>10</option><option value={15}>15</option>
+                </select>
+              </label>
+              <span className="t-mono-xs t-muted">— the interview defers to your records and stops at the budget.</span>
+            </div>
             <div className="row gap-2">
-              <button className="btn btn-secondary btn-sm" onClick={openChat}>{chat.length ? "✦ Continue the drill-down" : "✦ Drill down with AI"}</button>
+              <button className="btn btn-secondary btn-sm" disabled={maxQuestions === 0} onClick={openChat} title={maxQuestions === 0 ? "Set max questions above 0 to drill down" : undefined}>{chat.length ? "✦ Continue the drill-down" : "✦ Drill down with AI"}</button>
               <button className="btn btn-sm" disabled={!marketCtx} onClick={findCompetitors}
                 title={picture ? "Search from the confirmed full picture" : "You can search now, or drill down first for a sharper match"}>
-                {savedRun?.comps?.length ? "✦ New search (5–10 matches)" : "✦ Find my competitors"}
+                {savedRun?.comps?.length ? `✦ New search (${targetMatches} matches)` : `✦ Find my competitors (${targetMatches})`}
               </button>
               <button className="btn btn-secondary btn-sm" onClick={onDone}>Skip — set up by hand</button>
             </div>
