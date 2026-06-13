@@ -155,9 +155,23 @@ export default function CompetitiveSetup({ onDone, productId }: { onDone: () => 
         const st = (data.settings ?? {}) as { max_questions?: number; target_matches?: number };
         if (st.max_questions) setMaxQuestions(st.max_questions);
         if (st.target_matches) setTargetMatches(st.target_matches);
+        // AUTO-RESTORE the in-progress context — merge its non-empty fields over
+        // whatever's there, so industries/competitors (and the rest) come back
+        // filled. The records-prefill effect only fills EMPTY slots, so order
+        // doesn't matter.
+        const rc = (data.context ?? null) as Partial<typeof ctx> | null;
+        if (rc) setCtx((cur) => {
+          const next = { ...cur };
+          (Object.keys(next) as (keyof typeof next)[]).forEach((k) => { const v = rc[k]; if (typeof v === "string" && v.trim()) next[k] = v; });
+          return next;
+        });
+        if (typeof data.picture === "string" && data.picture.trim()) { setPicture(data.picture); setChatDone(true); }
+        const tr = (data.transcript ?? []) as { role: "q" | "a"; text: string }[];
+        if (tr.length) setChat(tr);
         const m = (data.matches ?? []) as CompCand[];
-        if (m.length || (data.transcript as unknown[])?.length || data.picture) {
-          setSavedRun({ comps: m, at: new Date(data.updated_at).getTime(), transcript: (data.transcript ?? []) as { role: "q" | "a"; text: string }[], picture: (data.picture as string) || "", context: (data.context ?? undefined) as typeof ctx | undefined });
+        if (m.length) setComps(m);  // keep them; the resume banner offers to jump to review
+        if (m.length || tr.length || data.picture) {
+          setSavedRun({ comps: m, at: new Date(data.updated_at).getTime(), transcript: tr, picture: (data.picture as string) || "", context: (rc ?? undefined) as typeof ctx | undefined });
         }
       }
     } catch { /* ignore */ }
@@ -247,6 +261,17 @@ export default function CompetitiveSetup({ onDone, productId }: { onDone: () => 
       else { const { data } = await supabase.from("competitive_setup_runs").insert(row).select("id").single(); if (data) setRunId(data.id); }
     } catch { /* best-effort */ }
   }
+
+  // Save context as it changes (debounced) — so industries/competitors and the
+  // rest survive even if a search is interrupted before it finishes. Only once
+  // there's something worth saving.
+  useEffect(() => {
+    if (step > 2) return;
+    if (!Object.values(ctx).some((v) => v.trim())) return;
+    const t = setTimeout(() => { void persistRun({}); }, 700);
+    return () => clearTimeout(t);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [ctx]);
 
   // What the agent searches from = exactly what's in the editable fields.
   const marketCtx = [
@@ -398,6 +423,7 @@ export default function CompetitiveSetup({ onDone, productId }: { onDone: () => 
   // ---- step 2: propose rivals (web search), confirm, insert ------------------
   async function findCompetitors() {
     setBusy("comps"); setError(null); setSearchUsage(null); setSearchSecs(0);
+    await persistRun({});   // save context first — a search interruption can't lose it
     const t0 = Date.now();
     const tick = setInterval(() => setSearchSecs(Math.round((Date.now() - t0) / 1000)), 1000);
     try {
