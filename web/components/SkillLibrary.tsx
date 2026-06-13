@@ -16,7 +16,7 @@ type Usage = Record<string, { count: number; agents: string[]; ids: string[] }>;
 const CATS = ["all", "product", "gtm", "research", "general"] as const;
 type Cat = typeof CATS[number];
 const catTone = (c: string | null) => (c === "product" ? "accent" : c === "gtm" ? "violet" : c === "research" ? "green" : "default");
-const BLANK = { name: "", description: "", instructions: "", category: "general", kind: "child", parentId: "" };
+const BLANK = { name: "", description: "", instructions: "", category: "general", kind: "child" };
 
 // Export a skill as a real SKILL.md (frontmatter + body) — the same shape
 // scripts/build-skills.mjs parses, plus `parent` for the cornerstone a child
@@ -69,7 +69,7 @@ export default function SkillLibrary() {
 
   const load = useCallback(async () => {
     const [{ data: sk }, { data: as }, { data: ag }] = await Promise.all([
-      supabase.from("skills").select("id, key, name, description, category, instructions, source, created_at, kind, parent_id, areas, connectors").order("name"),
+      supabase.from("skills").select("id, key, name, description, category, instructions, source, created_at, kind, parent_id, areas, connectors").eq("scope", "library").order("name"),
       supabase.from("agent_skills").select("skill_id, agent_id"),
       supabase.from("agents").select("id, name").order("name"),
     ]);
@@ -86,31 +86,30 @@ export default function SkillLibrary() {
   useEffect(() => { load(); }, [load]);
 
   function openCreate() { setEditId(null); setForm(BLANK); setPreview(false); setOpen(true); setError(null); }
-  function openEdit(s: Skill) { setEditId(s.id); setForm({ name: s.name, description: s.description ?? "", instructions: s.instructions ?? "", category: s.category ?? "general", kind: s.kind ?? "child", parentId: s.parent_id ?? "" }); setPreview(false); setOpen(true); setError(null); }
+  function openEdit(s: Skill) { setEditId(s.id); setForm({ name: s.name, description: s.description ?? "", instructions: s.instructions ?? "", category: s.category ?? "general", kind: s.kind ?? "child" }); setPreview(false); setOpen(true); setError(null); }
 
-  // Materialize a skill as a downloadable SKILL.md. parent_id resolves to the
-  // cornerstone's key so the file round-trips the cornerstone/child link.
+  // Materialize a skill as a downloadable SKILL.md (frontmatter + body). Library
+  // templates carry no parent; tailored instances (parent_id → template) export
+  // their lineage when downloaded from the agent surface.
   function downloadSkill(s: Skill) {
     const parentKey = s.parent_id ? (skills.find((x) => x.id === s.parent_id)?.key ?? null) : null;
     downloadText(`${s.key || "skill"}.md`, buildSkillMd(s, parentKey));
   }
-  const cornerstones = skills.filter((s) => s.kind === "cornerstone");
 
   async function save() {
     if (!form.name.trim()) { setError("Give the skill a name."); return; }
     setBusy(true); setError(null);
     try {
-      // A cornerstone is a root profile — it never has a parent (matches the DB
-      // skills_parent_shape check).
-      const parent_id = form.kind === "cornerstone" ? null : (form.parentId || null);
+      // Library skills are generic TEMPLATES (scope=library, no parent). Per-agent
+      // tailored instances are minted from the agent's Skills map, not here.
       if (editId) {
-        const { error } = await supabase.from("skills").update({ name: form.name.trim(), description: form.description.trim() || null, instructions: form.instructions.trim() || null, category: form.category, kind: form.kind, parent_id }).eq("id", editId);
+        const { error } = await supabase.from("skills").update({ name: form.name.trim(), description: form.description.trim() || null, instructions: form.instructions.trim() || null, category: form.category, kind: form.kind }).eq("id", editId);
         if (error) throw error;
       } else {
         const orgId = await getOrgId();
         if (!orgId) throw new Error("Could not resolve your organization.");
         const key = form.name.trim().toLowerCase().replace(/[^a-z0-9]+/g, "_").replace(/^_|_$/g, "") || `skill_${Date.now()}`;
-        const { error } = await supabase.from("skills").insert({ org_id: orgId, key, name: form.name.trim(), description: form.description.trim() || null, instructions: form.instructions.trim() || null, category: form.category, source: "custom", kind: form.kind, parent_id });
+        const { error } = await supabase.from("skills").insert({ org_id: orgId, key, name: form.name.trim(), description: form.description.trim() || null, instructions: form.instructions.trim() || null, category: form.category, source: "custom", kind: form.kind, scope: "library" });
         if (error) throw error;
       }
       setOpen(false); load();
@@ -201,20 +200,11 @@ export default function SkillLibrary() {
               <option value="general">General</option><option value="product">Product</option><option value="gtm">GTM</option><option value="research">Research</option>
             </select></label>
         </div>
-        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "var(--sp-3)" }}>
-          <label className="field"><span className="t-label">Type</span>
-            <select className="select" value={form.kind} onChange={(e) => setForm({ ...form, kind: e.target.value, parentId: e.target.value === "cornerstone" ? "" : form.parentId })}>
-              <option value="cornerstone">Cornerstone (profile / identity)</option>
-              <option value="child">Child (tailors a cornerstone)</option>
-            </select></label>
-          {form.kind === "child" && (
-            <label className="field"><span className="t-label">Tailors <span className="t-muted" style={{ fontWeight: 400 }}>— optional</span></span>
-              <select className="select" value={form.parentId} onChange={(e) => setForm({ ...form, parentId: e.target.value })}>
-                <option value="">— no cornerstone —</option>
-                {cornerstones.filter((c) => c.id !== editId).map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
-              </select></label>
-          )}
-        </div>
+        <label className="field"><span className="t-label">Type</span>
+          <select className="select" value={form.kind} onChange={(e) => setForm({ ...form, kind: e.target.value })}>
+            <option value="cornerstone">Cornerstone — a role/purpose profile (an agent&rsquo;s identity)</option>
+            <option value="child">Child — a general capability (tailored per agent when attached)</option>
+          </select></label>
         <label className="field"><span className="t-label">What it does</span><input className="input" value={form.description} onChange={(e) => setForm({ ...form, description: e.target.value })} placeholder="A one-liner" /></label>
         <div className="field">
           <div className="row-between" style={{ alignItems: "center", marginBottom: 4 }}>

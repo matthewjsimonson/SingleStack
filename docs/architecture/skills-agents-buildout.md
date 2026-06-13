@@ -25,15 +25,22 @@ instead of guessing.
    `SKILL.md` is materialized on download and parsed on upload; `skill_revisions`
    is the file-diff history. Storage is used only for the raw uploaded original
    (provenance), never as the canonical body.
-3. **Cornerstone/child are first-class in the library.** `skills.kind`
-   (cornerstone|child) + `skills.parent_id` (child→its cornerstone, self-FK,
-   arbitrary depth). A cornerstone is the parent profile (an agent's identity); a
-   child tailors it. *(Shipped: A.1.)*
-4. **One identity source (pending execution — Phase C).** An agent's identity is
-   its cornerstone skill; the runtime prompt is *derived* from cornerstone + child
-   skills. The parallel `agents.identity/mandate/principles/voice → system_prompt`
-   composition is retired/rendered-from-cornerstone so there is nothing to
-   contradict. **Decision to confirm with the operator before executing.**
+3. **Library = generic templates; agent = tailored instances (`template → instance`).**
+   A library skill is a generic **template** (cornerstone = a role/purpose profile like
+   "one narrative" for a CMO/CCO; child = a general capability like "competitive
+   analysis"). Attaching a template to an agent **mints a per-agent tailored
+   INSTANCE** — its own markdown body and its own `skill_revisions` history,
+   `parent_id → the template` it was tailored from. The same generic child is
+   tailored differently for a CPO vs a CMO. *(Validated against agent-design
+   research: persistent role identity + reusable skills specialized per role.)*
+   Schema: `skills.kind` (cornerstone|child) ✅ A.1; `skills.scope`
+   (library|agent) + `skills.agent_id` (instance owner) + `parent_id` re-purposed
+   as **instance→template lineage** (A.1b).
+4. **One identity source = the cornerstone skill (CONFIRMED).** An agent's identity
+   is its **cornerstone instance**; the runtime prompt is *derived* from cornerstone
+   + tailored children. The parallel `agents.identity/mandate/principles/voice →
+   system_prompt` composition is retired / rendered *from* the cornerstone, so there
+   is one source and nothing to contradict. *(Executes in Phase C.)*
 5. **The skill hierarchy and the fail-safe decision tree are one graph.** Two edge
    types on the same top-down tree: *composition* edges (`parent_id`: this child
    tailors that parent) and *fallback* edges (when unclear → ask_human / hand to
@@ -47,16 +54,21 @@ instead of guessing.
 
 ## Dependency-ordered phases
 - **A. Skills substrate**
-  - **A.1** `skills.kind` + `parent_id` (cornerstone/child). ✅ *(20260613050000)*
-  - **A.2** Files I/O: export skill → `SKILL.md`; surface cornerstone/child in the
-    library; import skill ← uploaded file (`import-skill` edge fn, AI-structured,
-    HITL draft) + raw original kept in `documents` for provenance.
-- **B. Authoring & setup UI** — upload + "tailor with AI" in the library; the
-  **top-down hierarchy/decision-tree view** (replaces the radial depiction);
-  AI-assisted setup walks the tree. Real, company-grounded child-skill content
-  replaces demo placeholders.
-- **C. Agent rebuild** — unify identity onto the cornerstone (decision #4); derive
-  the runtime prompt; reseed the roster. *(Confirm before executing.)*
+  - **A.1** `skills.kind` (cornerstone/child). ✅ *(20260613050000)*
+  - **A.1b** `template → instance`: `skills.scope` (library|agent) + `skills.agent_id`
+    (instance owner); re-purpose `parent_id` as instance→template lineage (drop the
+    old cornerstone-no-parent check). Library view filters to `scope='library'`.
+  - **A.2** Files I/O: export skill → `SKILL.md` ✅ (slice 1); import skill ←
+    uploaded file (`import-skill` edge fn, AI-structured, HITL draft) + raw original
+    kept in `documents` for provenance.
+- **B. Tailoring + authoring & setup UI** — the **tailoring workflow**: attach a
+  generic template to an agent → mint a tailored instance → tailor it (AI-assisted)
+  for that agent; new agent = take/tailor a cornerstone; existing agent = update its
+  cornerstone, attach+tailor children. Upload + "tailor with AI"; the **top-down
+  decision-tree view** (replaces the radial depiction); AI-assisted setup walks the
+  tree. Real, company-grounded instance content replaces demo placeholders.
+- **C. Agent rebuild** — unify identity onto the cornerstone instance (decision #4);
+  derive the runtime prompt; retire the 4-window composition; reseed the roster.
 - **D. Stewardship (C3)** — a steward (agent/role) per field/section so non-steward
   proposals are flagged/routed; binds to the rebuilt agent model.
 - **E. Fail-safes** — confidence-gated decision tree (the fallback edges on the
