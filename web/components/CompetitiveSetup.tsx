@@ -77,6 +77,10 @@ export default function CompetitiveSetup({ onDone, productId }: { onDone: () => 
   const [ready, setReady] = useState<number | null>(null);
   const [readyDelta, setReadyDelta] = useState<number | null>(null);
   const [gaps, setGaps] = useState("");
+  // The per-dimension coverage behind the score — what's covered, partial,
+  // missing, n/a, and from where. The readiness IS computed from this.
+  type Cov = { dimension: string; label: string; status: string; source: string; note: string; weight: number };
+  const [coverage, setCoverage] = useState<Cov[]>([]);
   // step 2 — competitors
   // Governed run: the in-progress setup lives in competitive_setup_runs so
   // matches SURVIVE across devices/sessions (resume is a DB read), and the
@@ -291,6 +295,7 @@ export default function CompetitiveSetup({ onDone, productId }: { onDone: () => 
       const r = Math.min(100, Math.max(0, Math.round(Number(data.readiness) || 0)));
       setReady((prev) => { setReadyDelta(prev !== null ? r - prev : null); return r; });
       setGaps((data.gaps as string) || "");
+      if (Array.isArray(data.coverage)) setCoverage(data.coverage as Cov[]);
       if (data.done || !data.question) { setChatDone(true); setChatWhy(null); await paintPicture(history); }
       else { const next = [...history, { role: "q" as const, text: data.question }]; setChat(next); setChatWhy(data.why || null); void persistRun({ transcript: next }); }
     } catch (e) { setError(e instanceof Error ? e.message : "The interviewer stalled."); }
@@ -728,6 +733,24 @@ export default function CompetitiveSetup({ onDone, productId }: { onDone: () => 
                     <div className="t-mono-xs t-muted" style={{ marginTop: 5 }}>
                       {chatDone ? "Specific enough — the picture is painted." : ready >= 80 ? "Good enough to move on — answer more only if you want a sharper cut." : gaps ? `Still thin: ${gaps}` : "Keep going — each answer narrows who you actually compete with."}
                     </div>
+                    {coverage.length > 0 && (
+                      <div style={{ marginTop: 8 }}>
+                        <div className="t-mono-xs t-muted" style={{ marginBottom: 4 }}>What the score is built from — hover for the evidence:</div>
+                        <div className="row gap-2" style={{ flexWrap: "wrap" }}>
+                          {coverage.slice().sort((a, b) => b.weight - a.weight).map((c) => {
+                            const icon = c.status === "covered" ? "✓" : c.status === "partial" ? "◐" : c.status === "not_applicable" ? "–" : "○";
+                            const col = c.status === "covered" ? "var(--gn-text, #15803d)" : c.status === "partial" ? "var(--am-text, #D97706)" : c.status === "not_applicable" ? "var(--tm)" : "var(--rd-text, #B91C1C)";
+                            const bg = c.status === "covered" ? "var(--gn-bg, #CDEBD6)" : "var(--fill)";
+                            return (
+                              <span key={c.dimension} className="t-mono-xs" title={`${c.status}${c.source !== "none" ? ` · from ${c.source}` : ""}${c.note ? `\n${c.note}` : ""}`}
+                                style={{ padding: "2px 7px", borderRadius: 6, background: bg, color: col, fontWeight: 600, cursor: "default", opacity: c.status === "not_applicable" ? 0.6 : 1 }}>
+                                {icon} {c.label}{c.source === "records" ? " ·rec" : c.source === "answer" ? " ·you" : ""}
+                              </span>
+                            );
+                          })}
+                        </div>
+                      </div>
+                    )}
                   </div>
                 )}
                 <div style={{ flex: 1, overflowY: "auto", padding: "16px 20px" }} className="stack-3">

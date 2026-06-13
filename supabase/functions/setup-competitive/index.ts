@@ -54,16 +54,46 @@ const COMPETITORS_SCHEMA = {
   required: ["competitors"],
 };
 
+// The placement dimensions — the SAME axes a competitor search/placement uses.
+// Each carries a weight; readiness is COMPUTED from per-dimension coverage, not
+// guessed. This is the scoring + check system: auditable, reproducible.
+const DIMENSIONS = [
+  { key: "product",      label: "What it is",              weight: 2 },
+  { key: "features",     label: "Features / capabilities", weight: 2 },
+  { key: "personas",     label: "Buyer personas",          weight: 2 },
+  { key: "industries",   label: "Industries / verticals",  weight: 1.5 },
+  { key: "segment",      label: "Segment (SMB/mid/ent)",   weight: 1 },
+  { key: "positioning",  label: "Positioning / category",  weight: 2 },
+  { key: "known_rivals", label: "Known rivals",            weight: 1.5 },
+  { key: "deal_loss",    label: "Who they lose to",        weight: 1 },
+] as const;
+const DIM_KEYS = DIMENSIONS.map((d) => d.key);
+const STATUS_SCORE: Record<string, number> = { covered: 1, partial: 0.5, missing: 0, not_applicable: 0 };
+
+// The model ASSESSES coverage per dimension (with evidence + source); the
+// function computes the score. not_applicable drops a dimension from BOTH
+// numerator and denominator (maturity-aware).
 const INTERVIEW_SCHEMA = {
   type: "object", additionalProperties: false,
   properties: {
-    done: { type: "boolean" },      // true = enough specificity; stop asking
-    question: { type: "string" },   // the next question ("" when done)
-    why: { type: "string" },        // one line: why this question sharpens the competitor search
-    readiness: { type: "integer" }, // 0..100 — how precisely a competitor search could run RIGHT NOW
-    gaps: { type: "string" },       // what's still thin, one line ("" when nothing material)
+    coverage: {
+      type: "array",
+      items: {
+        type: "object", additionalProperties: false,
+        properties: {
+          dimension: { type: "string", enum: DIM_KEYS },
+          status: { type: "string", enum: ["covered", "partial", "missing", "not_applicable"] },
+          source: { type: "string", enum: ["records", "answer", "none"] },
+          note: { type: "string" },   // the actual evidence (or why n/a)
+        },
+        required: ["dimension", "status", "source", "note"],
+      },
+    },
+    next_dimension: { type: "string" },   // dim the next question targets, "" if none
+    question: { type: "string" },         // "" when nothing worth asking
+    why: { type: "string" },
   },
-  required: ["done", "question", "why", "readiness", "gaps"],
+  required: ["coverage", "next_dimension", "question", "why"],
 };
 
 const PICTURE_SCHEMA = {
@@ -158,23 +188,53 @@ Deno.serve(async (req: Request) => {
     if (step === "interview") {
       const budget = Math.max(0, Math.min(8, Math.round(Number((body as { max_questions?: number }).max_questions) || 4)));
       const asked = transcript.filter((t) => t.role === "q").length;
-      // Hard stop server-side too: budget spent → done, no question.
-      if (asked >= budget) {
-        return json({ done: true, question: "", why: "", readiness: 80, gaps: "Question budget reached — searching from the records + your answers." });
-      }
       const resp = (await anthropic.messages.create({
-        model: MODEL, max_tokens: 1200,
+        model: MODEL, max_tokens: 1600,
         thinking: { type: "adaptive" },
         output_config: { effort: "medium", format: { type: "json_schema", schema: INTERVIEW_SCHEMA } },
-        system: `You are doing competitive-intelligence intake. You have everything the user's records already say, plus the interview so far. Ask the SINGLE most discriminating question the records do NOT answer — the one whose answer most changes WHO their real competitors are. High-value angles when missing: deal-deciding personas, industries/verticals served, segment (SMB/mid/enterprise), deployment model, price band, geography, who they actually lose deals to today, WHICH COMPETITORS THEY ALREADY KNOW THEY FACE (always worth asking early — named rivals anchor the whole search), and which feature wins deals. MATURITY MODEL: first infer the company's stage from the records/transcript (exploring = pre-launch; early = first users/deals; scaling = repeatable motion; established = mature) — ask ONE stage question only if you can't infer it. Then never ask a question the stage can't answer: no deal-loss or win-rate questions pre-revenue, no pricing-history questions pre-pricing; for young companies favor intended buyer, the alternative people use today, and the wedge. GOVERNANCE — read the records FIRST and DEFER to them hard: the GTM and product records usually answer product, personas, positioning, ICP, and more. Do NOT ask anything the records or transcript already answer, even loosely — re-asking is the failure mode to avoid. You have a QUESTION BUDGET of ${budget} (you have already asked ${asked}); set done=true the instant the budget is spent OR the records + answers are enough — whichever comes first. Ask only the single highest-value gap that the records genuinely leave open. One question at a time, conversational and concrete. ALWAYS score readiness (0..100): how precisely could a competitor search run RIGHT NOW on what's known? Calibrate across the dimensions that decide rivals — product+features, personas, industries, segment, positioning, deal-loss hints: all strong ≈ 85-95; most covered ≈ 65-80; basics only ≈ 35-55 — GRADED FOR THE STAGE: an exploring-stage company with crisp identity + intended buyer + the alternative they replace can hit 80+ without deal history. Honest, monotonic with information (an answer never lowers it). gaps = one plain line on what's still thin ('' when nothing material). Set done=true when readiness ≥ 80 or further questions would add little.`,
+        system: `You are the competitive-intelligence intake SCORER. Assess COVERAGE of each placement dimension from the records + interview, then choose the next question. You do NOT invent a readiness number — you report each dimension's status WITH EVIDENCE; the system computes the score.
+
+Assess EVERY dimension (one coverage entry each): ${DIMENSIONS.map((d) => `${d.key} (${d.label})`).join(", ")}.
+For each: status = covered (records or an answer clearly establish it) / partial (hinted but thin) / missing (genuinely absent) / not_applicable (the company's STAGE can't have it). source = records / answer / none. note = the actual evidence — quote or paraphrase what the records/answers said, or why it's n/a. BE STRICT: a vague mention is 'partial', not 'covered'; never mark 'covered' unless the records genuinely say it.
+
+GOVERNANCE — read the records FIRST and DEFER hard: the GTM + product records usually establish product, personas, positioning, ICP. A dimension the records cover is 'covered' (source=records) — never re-ask it.
+
+MATURITY — infer stage (exploring=pre-launch / early=first deals / scaling=repeatable / established=mature). Mark deal_loss not_applicable for exploring/pre-revenue; for young companies favor intended buyer, the alternative they replace, and the wedge.
+
+NEXT QUESTION — next_dimension = the highest-WEIGHT dimension still 'missing' or 'partial' and worth asking at this stage; write one concrete, conversational question for it (known rivals anchor the search, so prioritize them early when missing). If nothing is worth asking, next_dimension='' and question=''. One question at a time.`,
         messages: [{ role: "user", content: [
           records ? `THE RECORDS (everything already known):\n${records}` : "THE RECORDS: (none yet)",
           transcriptText ? `INTERVIEW SO FAR:\n${transcriptText}` : "INTERVIEW SO FAR: (not started)",
+          `\nQUESTION BUDGET: ${budget} total; ${asked} already asked.`,
         ].join("\n\n") }],
         // deno-lint-ignore no-explicit-any
       } as any)) as Anthropic.Message;
       const text = resp.content.filter((b) => b.type === "text").map((b) => (b as { text: string }).text).join("");
-      return json(JSON.parse(text));
+      const out = JSON.parse(text) as { coverage: { dimension: string; status: string; source: string; note: string }[]; next_dimension: string; question: string; why: string };
+      // COMPUTE readiness from the assessed coverage — the actual score:
+      // weighted, reproducible, auditable. n/a dims leave the denominator.
+      const cov = (out.coverage ?? []).filter((c) => (DIM_KEYS as readonly string[]).includes(c.dimension));
+      let num = 0, den = 0;
+      for (const d of DIMENSIONS) {
+        const status = cov.find((x) => x.dimension === d.key)?.status ?? "missing";
+        if (status === "not_applicable") continue;
+        den += d.weight; num += d.weight * (STATUS_SCORE[status] ?? 0);
+      }
+      const readiness = den > 0 ? Math.round((num / den) * 100) : 0;
+      const labelOf = (k: string) => DIMENSIONS.find((d) => d.key === k)?.label ?? k;
+      const weightOf = (k: string) => DIMENSIONS.find((d) => d.key === k)?.weight ?? 1;
+      const gapsArr = cov.filter((c) => c.status === "missing" || c.status === "partial");
+      const gaps = gapsArr.map((c) => labelOf(c.dimension)).join(", ");
+      const budgetSpent = asked >= budget;
+      const topGapWeight = Math.max(0, ...gapsArr.map((c) => weightOf(c.dimension)));
+      // Done = budget spent, OR no worthwhile question, OR high score with no
+      // high-weight gap left.
+      const done = budgetSpent || !out.question?.trim() || (readiness >= 85 && topGapWeight < 1.5);
+      return json({
+        done, question: done ? "" : out.question, why: out.why ?? "", readiness,
+        gaps: budgetSpent && gapsArr.length ? `Budget reached — still thin: ${gaps}` : gaps,
+        coverage: cov.map((c) => ({ ...c, label: labelOf(c.dimension), weight: weightOf(c.dimension) })),
+      });
     }
 
     if (step === "picture") {
