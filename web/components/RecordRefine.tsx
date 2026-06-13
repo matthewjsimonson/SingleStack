@@ -102,8 +102,15 @@ export default function RecordRefine({ target, recordName, onApplied, onClose }:
       });
       if (cErr) { await supabase.from("proposals").delete().eq("id", prop.id); throw cErr; }
       if (mode === "apply") {
-        const { error: aErr } = await supabase.rpc("accept_proposal", { p_proposal: prop.id, p_ratifier: "refine-chat" });
+        const { data: aRes, error: aErr } = await supabase.rpc("accept_proposal", { p_proposal: prop.id, p_ratifier: "refine-chat" });
         if (aErr) throw aErr;
+        // Optimistic concurrency: the field moved since this suggestion was drafted,
+        // so nothing was applied. Don't claim "applied" — leave the suggestion
+        // actionable and tell the user to reopen against the current value.
+        if (aRes === "conflicted") {
+          setError("This field changed since the suggestion was drafted, so it wasn't applied. Reopen Refine to work from the current value.");
+          return;
+        }
         onApplied?.();
       }
       setChat(chat.map((t, i) => i !== ti ? t : { ...t, suggestions: t.suggestions?.map((s, j) => j === si ? { ...s, state: mode === "apply" ? "applied" : "queued" } : s) }));
