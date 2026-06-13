@@ -74,7 +74,9 @@ export default function SectionedFields({ target }: { target: Target }) {
 
   async function save(id: string) {
     setError(null);
-    const { error } = await supabase.from("record_fields").update({ value: draft }).eq("id", id);
+    // Human edit channel — the write-gate refuses a raw record_fields.value update
+    // (canonical values change only via a ratified proposal or this human path).
+    const { error } = await supabase.rpc("human_set_field_value", { p_field: id, p_value: draft });
     if (error) { setError(errText(error, "Could not save.")); return; }
     setEditing(null);
     await load();
@@ -108,7 +110,9 @@ export default function SectionedFields({ target }: { target: Target }) {
         }
       }
       if (inserts.length) { const { error } = await supabase.from("record_fields").insert(inserts); if (error) throw error; }
-      for (const u of updates) { const { error } = await supabase.from("record_fields").update({ value: u.value }).eq("id", u.id); if (error) throw error; }
+      // Updates go through the human edit channel (the write-gate blocks raw value
+      // updates); brand-new field inserts are additive and not gated.
+      for (const u of updates) { const { error } = await supabase.rpc("human_set_field_value", { p_field: u.id, p_value: u.value }); if (error) throw error; }
       // If the panel was open with drafts but nothing was written, say so plainly
       // instead of silently closing — surfaces a client-state bug as a real message.
       if (inserts.length === 0 && updates.length === 0) {
