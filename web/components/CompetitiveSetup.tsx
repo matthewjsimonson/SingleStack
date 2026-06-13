@@ -331,6 +331,13 @@ export default function CompetitiveSetup({ onDone, productId }: { onDone: () => 
     setChatOpen(true);
     if (chat.length === 0 && !chatBusy) void nextQuestion([]);
   }
+  // Ask one more, even after it called itself done — raises the budget by one
+  // and re-engages from the current transcript. This is the 'continue' path.
+  function askAnother() {
+    setChatDone(false);
+    setMaxQuestions((q) => Math.max(q + 1, chat.filter((m) => m.role === "q").length + 1));
+    void nextQuestion(chat);
+  }
   // Go back: re-open a previous answer (partial or wrong), discard everything
   // after it, and continue the interview from there. The question that prompted
   // it stays on screen; readiness re-scores on the next send.
@@ -842,6 +849,9 @@ export default function CompetitiveSetup({ onDone, productId }: { onDone: () => 
                   {chatDone && !chatBusy && (
                     <div className="card card-pad" style={{ borderLeft: "3px solid var(--gn-text, #15803d)", fontSize: 12.5 }}>
                       Got what it needs — the full picture is on the setup screen. Review it, ✎ Edit anything (including any answer above), then ✦ Find my competitors.
+                      <div className="row gap-2" style={{ marginTop: 8 }}>
+                        <button className="btn btn-secondary btn-sm" onClick={askAnother}>✦ Ask another question</button>
+                      </div>
                     </div>
                   )}
                 </div>

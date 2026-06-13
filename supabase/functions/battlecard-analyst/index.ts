@@ -165,6 +165,25 @@ Deno.serve(async (req: Request) => {
       valueProp = vp?.value ?? null;
     }
 
+    // OUR positioning — the narrative basis. For a new account with no live
+    // signals (no G2/CRM yet), competitive positioning is NARRATIVE: drawn from
+    // how WE position vs them, our GTM record, and the competitor's overview.
+    let ourPositioning = "";
+    const { data: gtmRec } = await supabase.from("gtm_records").select("id").order("created_at").limit(1).maybeSingle();
+    if (gtmRec) {
+      const { data: gf } = await supabase.from("record_fields").select("field_key, value").eq("gtm_record_id", gtmRec.id)
+        .in("field_key", ["positioning", "differentiation", "category_pov", "value_prop", "win_themes", "pillars", "icp"]);
+      const g = (k: string) => gf?.find((f) => f.field_key === k)?.value;
+      ourPositioning = [
+        g("positioning") && `How we position: ${g("positioning")}`,
+        g("differentiation") && `Our differentiation: ${g("differentiation")}`,
+        g("category_pov") && `Our category POV: ${g("category_pov")}`,
+        g("win_themes") && `Our win themes: ${g("win_themes")}`,
+        g("pillars") && `Our message pillars: ${g("pillars")}`,
+        g("icp") && `Our ICP: ${g("icp")}`,
+      ].filter(Boolean).join("\n");
+    }
+
     const matrix = (caps ?? []).map((c) => {
       const us = (scores ?? []).find((s) => s.capability_id === c.id && s.competitor_id === null)?.score ?? 0;
       const them = (scores ?? []).find((s) => s.capability_id === c.id && s.competitor_id === competitorId)?.score ?? 0;
@@ -172,9 +191,14 @@ Deno.serve(async (req: Request) => {
     });
     const themeList = themes ?? [];
     const sigList = sigs ?? [];
-    if (themeList.length === 0 && sigList.length === 0 && matrix.length === 0) {
-      if (runId) await supabase.from("agent_runs").update({ status: "succeeded", output: "no evidence", finished_at: new Date().toISOString() }).eq("id", runId);
-      return json({ proposed: 0, created: 0, message: `No themes, signals, or matrix data for ${comp.name} yet — log signals and run synthesis first.` });
+    // NARRATIVE MODE: no live signals/themes. Valid when we still have a basis
+    // to reason from — our positioning, the competitor's overview, or the
+    // matrix. Only truly nothing (no records, no overview, no matrix) bails.
+    const narrative = themeList.length === 0 && sigList.length === 0;
+    const haveBasis = !narrative || !!ourPositioning || !!valueProp || !!profileText || !!comp.notes || matrix.length > 0;
+    if (!haveBasis) {
+      if (runId) await supabase.from("agent_runs").update({ status: "succeeded", output: "no basis", finished_at: new Date().toISOString() }).eq("id", runId);
+      return json({ proposed: 0, created: 0, message: `Nothing to draft from for ${comp.name} yet — add their overview, fill your GTM positioning, or log a signal, then run again.` });
     }
 
     const refreshList = refreshIds.length ? (existing ?? []).filter((e) => refreshIds.includes(e.id)) : [];
@@ -184,6 +208,7 @@ Deno.serve(async (req: Request) => {
     const prompt = [
       `COMPETITOR: ${comp.name} (${comp.relationship})${comp.notes ? `\nOverview: ${comp.notes}` : ""}`,
       valueProp ? `OUR VALUE PROP: ${valueProp}` : "",
+      ourPositioning ? `OUR POSITIONING & GTM (the narrative basis):\n${ourPositioning}` : "",
       matrix.length ? `CAPABILITY MATRIX (0=none..3=strong):\n${matrix.join("\n")}` : "",
       profileText ? `THEIR RATIFIED SIGNAL PROFILE (the raw battlecard — human-saved, strong evidence):\n${profileText}` : "",
       themeList.length ? `THEIR THEMES (synthesized intelligence):\n${themeList.map((t, i) => `{T${i}} [${t.category}/${t.state}] ${t.title} — ${t.summary ?? ""}`).join("\n")}` : "",
@@ -201,7 +226,9 @@ Deno.serve(async (req: Request) => {
       cornerstones.length ? `\nYOUR CORNERSTONE SKILLS (always on):\n${cornerstones.map((s) => `## ${s.name}\n${s.instructions ?? ""}`).join("\n\n")}` : "",
       `\nTHE SKILL FOR THIS TASK — apply it:\n## ${childSkill.name}\n${childSkill.instructions ?? ""}`,
       step.instruction ? `\nSTEP INSTRUCTION: ${step.instruction}` : "",
-      `\nGATE CONTRACT (non-negotiable output rules): you are proposing STRUCTURED battlecard items (kinds: ${KINDS.join(", ")}) about this competitor, strictly from the evidence provided. Every item MUST cite the signal indices that back it (signal_indices) — an item you cannot back with at least one listed signal or a clear matrix delta must not be proposed. Set theme_index to the {T#} that motivated the item, or -1. Never invent capabilities, pricing, or quotes. Prefer fewer, well-evidenced items over coverage. Do not duplicate existing items. title = the point a seller needs (one line); detail = the substantiation (2-3 sentences, factual tone).`,
+      narrative
+        ? `\nGATE CONTRACT — NARRATIVE MODE (no live signals on this competitor yet): you are proposing STRUCTURED battlecard items (kinds: ${KINDS.join(", ")}) grounded in OUR POSITIONING vs THEM — drawn from our value prop, our GTM positioning/differentiation/win-themes, the competitor's overview, and the capability matrix. This is honest narrative positioning, NOT fabricated facts: you may NOT invent the competitor's pricing, features, customers, or quotes — anything you assert about THEM must come from their overview or the matrix; everything else must be framed as OUR positioning/POV (how we win, the question a rep should ask, the honest reframe). signal_indices = [] is expected here; set theme_index = -1. In each rationale, state the basis (e.g. "from our positioning + their overview"). Prefer a few sharp, defensible items over coverage. Do not duplicate existing items. title = the point a seller needs (one line); detail = 2-3 sentences, honest and concrete — no bluffing.`
+        : `\nGATE CONTRACT (non-negotiable output rules): you are proposing STRUCTURED battlecard items (kinds: ${KINDS.join(", ")}) about this competitor, strictly from the evidence provided. Every item MUST cite the signal indices that back it (signal_indices) — an item you cannot back with at least one listed signal or a clear matrix delta must not be proposed. Set theme_index to the {T#} that motivated the item, or -1. Never invent capabilities, pricing, or quotes. Prefer fewer, well-evidenced items over coverage. Do not duplicate existing items. title = the point a seller needs (one line); detail = the substantiation (2-3 sentences, factual tone).`,
       `\nMINE THE CAPABILITY MATRIX: the deltas are first-class battlecard fuel. Where WE lead (us > them on a capability) → propose a 'win' or 'strength' a rep should press, and a 'discovery' question that exposes the gap. Where THEY lead (them > us) → propose the 'objection' a rep will hear and how to handle it honestly, or a 'trap' to avoid walking into. Name the capability and the delta in detail, and cite the signals that established their side of it (the score's evidence). A delta with no signal evidence behind it is a weak basis — prefer the ones your signals corroborate.`,
     ].filter(Boolean).join("\n");
 
@@ -241,8 +268,8 @@ Deno.serve(async (req: Request) => {
       } else {
         const { error } = await supabase.from("intel_updates").insert({
           org_id: orgId, scope: "battlecard", kind: "battlecard_item", theme_id,
-          payload: { competitor_id: competitorId, kind: it.kind, title: it.title.trim(), detail: it.detail?.trim() || null, signal_ids, theme_id, rationale: it.rationale, proposed_by: agent.name },
-          summary: `${comp.name} battlecard · ${it.kind}: "${it.title.trim()}" (${signal_ids.length} signal${signal_ids.length === 1 ? "" : "s"})`,
+          payload: { competitor_id: competitorId, kind: it.kind, title: it.title.trim(), detail: it.detail?.trim() || null, signal_ids, theme_id, rationale: (narrative ? "Narrative (from positioning, no live signal yet): " : "") + (it.rationale ?? ""), proposed_by: agent.name, basis: narrative ? "narrative" : "evidence" },
+          summary: `${comp.name} battlecard · ${it.kind}: "${it.title.trim()}" ${narrative ? "· narrative (positioning)" : `(${signal_ids.length} signal${signal_ids.length === 1 ? "" : "s"})`}`,
           status: "pending",
         });
         if (!error) proposed++;
@@ -281,7 +308,7 @@ Deno.serve(async (req: Request) => {
     const suffix = refreshList.length ? ` (${refreshed} refresh${refreshed === 1 ? "" : "es"}, ${still} confirmed accurate)` : "";
     return json({ proposed, created, autonomous, refreshed, message: (autonomous
       ? `${created} battlecard item${created === 1 ? "" : "s"} added for ${comp.name} (autonomous policy).`
-      : `${proposed} battlecard item${proposed === 1 ? "" : "s"} proposed for ${comp.name} — review them in Signals → Review.`) + suffix });
+      : `${proposed} battlecard item${proposed === 1 ? "" : "s"} proposed for ${comp.name}${narrative ? " from your positioning (no live signals yet — these are narrative)" : ""} — review them in Signals → Review.`) + suffix });
   } catch (e) {
     return await fail(e instanceof Error ? e.message : "analyst run failed");
   }
