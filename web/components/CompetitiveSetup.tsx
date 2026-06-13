@@ -838,7 +838,7 @@ export default function CompetitiveSetup({ onDone, productId }: { onDone: () => 
 
       {step === 3 && (
         <div className="stack-3">
-          <div className="t-sub t-muted" style={{ fontSize: 12.5 }}>The functionality vectors to compare on — proposed from your product, market, and rivals. These become the matrix rows; scores then come from <b>evidence</b>, ratified by you, never hand-typed guesses.</div>
+          <div className="t-sub t-muted" style={{ fontSize: 12.5 }}>The matrix rows — the <b>standard, industry-recognized capability areas</b> buyers grade every vendor in your category on (verified against how the category is actually evaluated), not niche internal features. Scores then come from <b>evidence</b>, ratified by you.</div>
           {capsRun.active && caps.length === 0 ? <div className="card card-pad" style={{ borderLeft: "3px solid var(--ac)" }}>
             <div className="row-between" style={{ marginBottom: 8 }}><span className="t-label" style={{ color: "var(--tm)" }}>Designing your matrix</span></div>
             <AgentStepList run={capsRun} />

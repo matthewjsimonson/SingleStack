@@ -42,9 +42,9 @@ export const AGENT_STAGES: Record<string, string[]> = {
   ],
   // setup-competitive · capabilities
   setupCaps: [
-    "Reading your profile and confirmed rivals",
-    "Finding the vectors that decide deals in your market",
-    "Balancing product vs GTM dimensions",
+    "Reading your category and confirmed rivals",
+    "Checking how the category is actually graded (G2 / analyst areas)",
+    "Selecting standard, cross-vendor capability areas",
     "Trimming to a usable matrix",
   ],
   // agent-propose (an officer reviews a record and drafts a change)

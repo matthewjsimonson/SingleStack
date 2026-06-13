@@ -324,21 +324,34 @@ NEXT QUESTION — next_dimension = the highest-WEIGHT dimension still 'missing' 
 
     if (step === "capabilities") {
       const rivalNames = (Array.isArray(body.competitors) ? body.competitors : []).filter((n: unknown) => typeof n === "string") as string[];
+      // VERIFIED, not invented: web-ground the CATEGORY's standard evaluation
+      // areas — the feature-function areas review sites and analysts actually
+      // grid every vendor on — then extract them. This stops the matrix from
+      // being self-referential niche rows.
+      const { text: briefing } = await searchBriefing(
+        key,
+        `You are a software-category analyst. Identify the STANDARD capability / feature-function areas that buyers use to evaluate EVERY vendor in this category — the kind of rows a G2/Capterra feature grid or a Gartner/Forrester evaluation uses. Report 10-14 recognized, cross-vendor areas in INDUSTRY-STANDARD names (e.g. for CRM: pipeline & deal management, reporting & dashboards, workflow automation, integrations & API, mobile, security & compliance). These must apply to ALL the named rivals, not just one product. Avoid proprietary/marketing framings and hyper-niche rows.`,
+        [
+          market ? `THE MARKET / PRODUCT CONTEXT:\n${market}` : (product.name ? `Product: ${product.name}` : ""),
+          product.value_prop ? `Value prop: ${product.value_prop}` : "",
+          rivalNames.length ? `VENDORS IN THIS CATEGORY (the rows must apply to all): ${rivalNames.join(", ")}` : "",
+        ].filter(Boolean).join("\n"),
+      );
       const resp = (await anthropic.messages.create({
-        model: MODEL, max_tokens: 2500,
-        thinking: { type: "adaptive" },
-        output_config: { effort: "high", format: { type: "json_schema", schema: CAPABILITIES_SCHEMA } },
-        system: "You design competitive capability matrices for product & GTM teams. Propose the 8–12 capability rows (functionality vectors) this team should compare themselves against rivals on — the dimensions that actually decide deals in their market. Mostly product capabilities; include 2–3 gtm vectors (e.g. pricing transparency, ecosystem/integrations, enterprise readiness) when they decide deals. Each: a short row label (3–5 words, matrix-friendly) and one line on why it decides deals. No fluff rows.",
+        model: MODEL, max_tokens: 3000,
+        output_config: { effort: "medium", format: { type: "json_schema", schema: CAPABILITIES_SCHEMA } },
+        system: `You build a competitive capability matrix from the analyst briefing below. Select the 8–12 best ROWS — each a STANDARD, INDUSTRY-RECOGNIZED feature-function area for this category that applies to EVERY vendor (so we can score us AND each rival on it). Rules: use the category's conventional names from the briefing, not our product's internal/proprietary language; one row per distinct capability AREA (map specific features into the standard area they belong to — do NOT make a row per niche feature); each row must be scoreable across all named rivals. Mostly product capability areas; include 2–3 gtm/commercial vectors only when they genuinely decide deals in this category (e.g. integrations/ecosystem, security & compliance, pricing/packaging). name = the short standard area label (2–5 words); why = one line on why buyers weigh it. No buzzword or fluff rows.`,
         messages: [{ role: "user", content: [
-          product.name ? `OUR PRODUCT: ${product.name}` : "",
-          product.value_prop ? `VALUE PROP: ${product.value_prop}` : "",
-          market ? `MARKET: ${market}` : "",
-          rivalNames.length ? `CONFIRMED RIVALS: ${rivalNames.join(", ")}` : "",
-        ].filter(Boolean).join("\n") || "Propose a general-purpose B2B SaaS capability matrix." }],
+          `ANALYST BRIEFING (the category's standard evaluation areas):\n${briefing || "(none — fall back to the conventional areas for this category)"}`,
+          market ? `\nOUR CONTEXT (for mapping our features to standard areas, NOT for inventing rows):\n${market}` : "",
+          rivalNames.length ? `\nVENDORS THE ROWS MUST APPLY TO: ${rivalNames.join(", ")}` : "",
+        ].filter(Boolean).join("\n") }],
         // deno-lint-ignore no-explicit-any
       } as any)) as Anthropic.Message;
       const text = resp.content.filter((b) => b.type === "text").map((b) => (b as { text: string }).text).join("");
-      const out = JSON.parse(text) as { capabilities: { name: string; category: string; why: string }[] };
+      let out: { capabilities: { name: string; category: string; why: string }[] };
+      try { out = JSON.parse(text); }
+      catch { return json({ error: "The matrix-row proposal came back incomplete — try again." }, 502); }
       const capabilities = (out.capabilities ?? []).filter((c) => c.name?.trim()).map((c) => ({ ...c, name: c.name.trim(), category: c.category === "gtm" ? "gtm" : "product" }));
       return json({ capabilities });
     }
