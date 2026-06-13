@@ -13,6 +13,7 @@
 import { useEffect, useState, useCallback } from "react";
 import { createClient } from "@/lib/supabase/client";
 import { useAgentRun, AgentStepList } from "@/components/AgentProgress";
+import MonitoringStatus from "@/components/MonitoringStatus";
 import { getOrgId } from "@/lib/org";
 import { Chip, Modal } from "@/components/ui";
 import { SOURCE_CATALOG, type SourceDef } from "@/lib/sources";
@@ -189,6 +190,7 @@ export default function SourceManager({ scope = {}, title = "Sources" }: { scope
 
   return (
     <>
+      <div style={{ marginBottom: "var(--sp-3)" }}><MonitoringStatus competitorId={scope.competitorId} compact /></div>
       <div className="card card-pad row-between" style={{ marginBottom: "var(--sp-5)", gap: 12 }}>
         <div className="row gap-2" style={{ flexWrap: "wrap", minWidth: 0 }}>
           <span className="t-label">{title}</span>

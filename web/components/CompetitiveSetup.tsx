@@ -16,6 +16,7 @@ import { useAgentRun, AgentProgress, AgentStepList } from "@/components/AgentPro
 import ProfileReadiness from "@/components/ProfileReadiness";
 import { CATALOG_BY_KIND } from "@/lib/sources";
 import { standUpCompetitiveAgents } from "@/lib/standUpCompetitive";
+import MonitoringStatus from "@/components/MonitoringStatus";
 
 type Step = 1 | 2 | 3 | 4 | 5;
 type CompCand = { name: string; website: string; linkedin: string; overview: string; relationship: string; match: number; why: string; overlap: string; keep: boolean };
@@ -1018,6 +1019,7 @@ export default function CompetitiveSetup({ onDone, productId }: { onDone: () => 
             </div>
           )}
           {wfNote && <div className="card card-pad" style={{ background: "var(--panel-2)", fontSize: 12.5 }}>{wfNote}</div>}
+          {createdSources.length > 0 && <MonitoringStatus />}
           {createdSources.length > 0 && (
             <>
               <button className="btn btn-sm" disabled={busy === "ignite"} onClick={igniteAll}>{busy === "ignite" ? "Pulling…" : `⚡ Run the first pulls now (${Math.min(createdSources.length, 12)})`}</button>
