@@ -19,6 +19,24 @@ full body ON DEMAND via the read_skill tool — progressive disclosure. Only the
 These files are the **canonical, version-controlled source of truth** for the built-in
 skills. Per-org customizations still live in the `skills` table (editable in the app).
 
+## Naming (non-negotiable — no marketing headlines)
+
+The library holds two kinds of skill, and the name must say which:
+
+- **Cornerstone = WHO THE AGENT IS.** A cornerstone is the generally-accepted
+  **role profile** — the role and its responsibilities (an agent's identity).
+  **Name it the role**: `Chief Product Officer`, `Chief Engineering Agent`,
+  `Chief Revenue Officer`, `Chief Creative Officer`, `Chief of Staff`. The body is
+  "you are the [role]; you own [responsibilities]; how you operate." `cornerstone: true`.
+- **Child = FOR A SPECIFIC TASK.** A child is a trait / framework / "hat" a role
+  puts on for one job. **Name it the task**: `Competitive battlecard`,
+  `Architecture review`, `Roadmap prioritization`. The body is a task playbook.
+
+**No marketing headlines.** Never name a skill with a slogan ("Buildable truth",
+"Win the category", "One narrative"). The name is a label, not a tagline — the role
+or the task, in plain words. A reader must be able to tell cornerstone-vs-child from
+the name alone.
+
 ## Regenerate after editing
 
 ```
