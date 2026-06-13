@@ -529,6 +529,22 @@ export default function CompetitiveSetup({ onDone, productId }: { onDone: () => 
     if (next.has(kind)) next.delete(kind); else next.add(kind);
     return { ...m, [compId]: next };
   });
+  // Confirm/fix the links right here — website persists to the competitor row;
+  // linkedin feeds the source config. resolveTarget shows the EXACT URL/aim a
+  // source will use, so a checkbox is never a black box.
+  const setCompLink = (id: string, field: "website" | "linkedin", val: string) =>
+    setSavedComps((cs) => cs.map((c) => c.id === id ? { ...c, [field]: val } : c));
+  async function saveCompWebsite(id: string, val: string) {
+    try { await supabase.from("competitors").update({ website: val.trim() || null }).eq("id", id); } catch { /* best-effort */ }
+  }
+  function resolveTarget(c: { name: string; website: string | null; linkedin: string | null }, k: string): { url: string | null; aim: string } {
+    if (k === "website") return { url: c.website || null, aim: c.website || "needs the website URL" };
+    if (k === "press") return { url: null, aim: `web search · "${c.name}" press, funding, launches, exec moves` };
+    if (k === "linkedin_jobs") return { url: c.linkedin ? c.linkedin.replace(/\/+$/, "") + "/jobs" : null, aim: c.linkedin ? c.linkedin.replace(/\/+$/, "") + "/jobs" : "needs the LinkedIn URL" };
+    if (k === "linkedin_posts") return { url: c.linkedin || null, aim: c.linkedin || "needs the LinkedIn URL" };
+    return { url: null, aim: "" };
+  }
+
   async function confirmMonitoring() {
     setBusy("save-mon"); setError(null);
     try {
@@ -913,31 +929,37 @@ export default function CompetitiveSetup({ onDone, productId }: { onDone: () => 
               <option value="daily">Daily</option><option value="weekly">Weekly</option><option value="manual">Manual only</option>
             </select>
           </div>
-          <div className="card" style={{ overflowX: "auto" }}>
-            <table style={{ borderCollapse: "collapse", width: "100%", fontSize: 13 }}>
-              <thead><tr>
-                <th style={{ textAlign: "left", padding: "10px 14px", fontSize: 11, fontWeight: 600, color: "var(--tm)", textTransform: "uppercase", letterSpacing: "0.05em" }}>Competitor</th>
-                {MONITOR_KINDS.map(([k, label]) => <th key={k} style={{ padding: "10px 8px", fontSize: 11, fontWeight: 600, color: "var(--tm)" }}>{label}</th>)}
-              </tr></thead>
-              <tbody>
-                {savedComps.map((c) => (
-                  <tr key={c.id} style={{ borderTop: "1px solid var(--border)" }}>
-                    <td style={{ padding: "8px 14px", fontWeight: 600 }}>{c.name}
-                      {!c.website && <span className="t-mono-xs t-muted" style={{ marginLeft: 6 }}>no site URL</span>}
-                      {!c.linkedin && <span className="t-mono-xs t-muted" style={{ marginLeft: 6 }}>no LinkedIn URL</span>}
-                    </td>
-                    {MONITOR_KINDS.map(([k]) => {
-                      const blocked = k === "website" ? !c.website : (k === "linkedin_jobs" || k === "linkedin_posts") ? !c.linkedin : false;
-                      return (
-                        <td key={k} style={{ padding: "6px 8px", textAlign: "center" }} title={blocked ? "Needs the confirmed link (go back and add it) — nothing is monitored without one" : undefined}>
-                          <input type="checkbox" disabled={blocked} checked={monitor[c.id]?.has(k) ?? false} onChange={() => toggleMonitor(c.id, k)} />
-                        </td>
-                      );
-                    })}
-                  </tr>
-                ))}
-              </tbody>
-            </table>
+          <div className="t-mono-xs t-muted" style={{ marginBottom: 4 }}>Confirm the links each monitor will use — fix any that are wrong, then check the sources you want. Click a link to open it and verify it's real.</div>
+          <div className="stack-3">
+            {savedComps.map((c) => (
+              <div key={c.id} className="card card-pad" style={{ background: "var(--panel-2)" }}>
+                <div style={{ fontWeight: 640, fontSize: 13.5, marginBottom: 6 }}>{c.name}</div>
+                {/* the two links the monitors anchor on — editable + verifiable */}
+                <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "var(--sp-3)", marginBottom: 8 }}>
+                  <label className="field" style={{ margin: 0 }}><span className="t-label">Website {c.website && <a href={c.website} target="_blank" rel="noreferrer" style={{ fontWeight: 400, textTransform: "none", letterSpacing: 0, color: "var(--ac-text, var(--ac))" }}>↗ open</a>}</span>
+                    <input className="input" value={c.website ?? ""} onChange={(e) => setCompLink(c.id, "website", e.target.value)} onBlur={(e) => saveCompWebsite(c.id, e.target.value)} placeholder="https://their-site.com" /></label>
+                  <label className="field" style={{ margin: 0 }}><span className="t-label">LinkedIn {c.linkedin && <a href={c.linkedin} target="_blank" rel="noreferrer" style={{ fontWeight: 400, textTransform: "none", letterSpacing: 0, color: "var(--ac-text, var(--ac))" }}>↗ open</a>}</span>
+                    <input className="input" value={c.linkedin ?? ""} onChange={(e) => setCompLink(c.id, "linkedin", e.target.value)} placeholder="linkedin.com/company/…" /></label>
+                </div>
+                {/* per-source: checkbox + the EXACT target it will hit */}
+                <div className="stack-2">
+                  {MONITOR_KINDS.map(([k, label]) => {
+                    const t = resolveTarget(c, k);
+                    const blocked = (k === "website" || k === "linkedin_jobs" || k === "linkedin_posts") && !t.url;
+                    const on = monitor[c.id]?.has(k) ?? false;
+                    return (
+                      <label key={k} className="row gap-2" style={{ alignItems: "center", cursor: blocked ? "not-allowed" : "pointer", opacity: blocked ? 0.5 : 1 }}>
+                        <input type="checkbox" disabled={blocked} checked={on && !blocked} onChange={() => toggleMonitor(c.id, k)} />
+                        <span style={{ fontSize: 12.5, fontWeight: 600, minWidth: 96 }}>{label}</span>
+                        {t.url
+                          ? <a href={t.url} target="_blank" rel="noreferrer" className="t-mono-xs" style={{ color: "var(--ac-text, var(--ac))", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }} onClick={(e) => e.stopPropagation()}>{t.url} ↗</a>
+                          : <span className="t-mono-xs t-muted" style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{t.aim}</span>}
+                      </label>
+                    );
+                  })}
+                </div>
+              </div>
+            ))}
           </div>
           <div className="card card-pad" style={{ background: "var(--panel-2)" }}>
             <div className="t-label" style={{ color: "var(--tm)", marginBottom: 6 }}>Specific links the search couldn&rsquo;t know <span className="t-sub t-muted" style={{ textTransform: "none", letterSpacing: 0 }}>— a pricing page, a LinkedIn area, docs; each becomes its own monitor</span></div>
