@@ -175,12 +175,23 @@ instead of guessing.
         `orchestrate_roster`, `distill_lessons`, `propose_dimensions`, `draft_decision`,
         `draft_how` (resolver + `logUsage`), and `score_capabilities` (agent_runs path →
         resolver only, agent-scope supersedes `agent.model`). Parse-verified.
-      - **Wave 4 — TODO**: the harder ones held back deliberately — `outcome_watch` (AI
-        call sits in a helper with no `supabase` in scope — thread it through),
-        `run_workflow` (multi-step body builder), and the multi-call streaming
-        `agent_propose` (advisor lenses + main) / `agent_run` (tool loop) on the
-        agent_runs path; plus the conversational/setup/connector tier
-        (`refine_record`, `source_recipe`, `connector_distill`, the `setup_*` phases).
+      - **Wave 4 — SHIPPED**: the hard tail — `refine_record`, `source_recipe`,
+        `outcome_watch` (wired inside `checkOne`); the streaming agent_runs-path
+        `agent_run` (tool-loop `callModel` carries effort) and `agent_propose` (main
+        proposal — both stream + non-stream paths — AND every per-advisor lens governed
+        by its own `adv.id`); `run_workflow` (per-step); `connector-runner` (all three
+        calls — web/MCP retrieval as `connector_pull` with usage summed across the
+        server-tool loop and threaded out, plus the distill); the multi-phase
+        `setup-records` (extract/interview/draft) and `setup-competitive` (interview/
+        picture/competitors/capabilities + the shared `searchBriefing` web-search helper,
+        model-governed, supabase threaded in to resolve+log); and `agent_chat`.
+      - **F2.1 — COMPLETE: 27/27 Anthropic-calling functions route through
+        `resolveModelPolicy` with today's values as the floor fallback (provably
+        non-regressing).** Every `ai_usage`-path call now logs; the `agent_runs`-path
+        calls (agent_run/propose/chat, battlecards, score_capabilities, run_workflow)
+        resolve model+effort with agent-scope superseding `agent.model`, and keep their
+        existing `agent_runs` accounting (no double-log). Spend is now fully measured and
+        fully governable — the precondition for an honest F2.2 implication preview.
     - **F2.2** — the Settings dial beside the autonomy dial: org preset + per-area /
       per-agent overrides + per-task pin, each with the implication preview. The UI
       surfaces floors (a lever at its floor is shown, not silently clamped).

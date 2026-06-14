@@ -68,6 +68,7 @@ export const TASK_TIER: Record<string, Tier> = {
   setup_competitive_capabilities: "reasoning",
 
   // conversational — multi-turn, latency-sensitive.
+  agent_chat: "conversational",
   refine_record: "conversational",
   source_recipe: "conversational",
   setup_records_interview: "conversational",

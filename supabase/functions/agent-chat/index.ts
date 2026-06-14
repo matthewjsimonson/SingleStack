@@ -24,6 +24,7 @@
 
 import Anthropic from "npm:@anthropic-ai/sdk@0.69.0";
 import { createClient, type SupabaseClient } from "npm:@supabase/supabase-js@2";
+import { resolveModelPolicy } from "../_shared/ai_policy.ts";
 
 const DEFAULT_MODEL = "claude-opus-4-8";
 const PRICING: Record<string, { input: number; output: number }> = {
@@ -87,7 +88,8 @@ Deno.serve(async (req: Request) => {
   if (aErr) return json({ error: `agent lookup failed: ${aErr.message}` }, 500);
   if (!agent) return json({ error: `no active agent with key '${agent_key}'` }, 404);
 
-  const model = (agent.model as string) || DEFAULT_MODEL;
+  const pol = await resolveModelPolicy(supabase, { task: "agent_chat", agentId: agent.id as string, fallback: { model: (agent.model as string) || DEFAULT_MODEL, effort: "high" } });
+  const model = pol.model;
   const orgId = agent.org_id as string;
 
   try {
@@ -293,6 +295,7 @@ Deno.serve(async (req: Request) => {
               model,
               max_tokens: 2000,
               thinking: { type: "adaptive", display: "summarized" }, // summarized → reasoning text is populated on Opus 4.8
+              output_config: { effort: pol.effort },
               system: [{ type: "text", text: system, cache_control: { type: "ephemeral" } }],
               messages: messages.map((m) => ({ role: m.role, content: m.content })),
               // deno-lint-ignore no-explicit-any
@@ -333,6 +336,7 @@ Deno.serve(async (req: Request) => {
       model,
       max_tokens: 2000,
       thinking: { type: "adaptive" },
+      output_config: { effort: pol.effort },
       system: [{ type: "text", text: system, cache_control: { type: "ephemeral" } }],
       messages: messages.map((m) => ({ role: m.role, content: m.content })),
       // deno-lint-ignore no-explicit-any

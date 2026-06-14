@@ -21,6 +21,8 @@
 
 import Anthropic from "npm:@anthropic-ai/sdk@0.69.0";
 import { createClient, type SupabaseClient } from "npm:@supabase/supabase-js@2";
+import { logUsage } from "../_shared/ai_usage.ts";
+import { resolveModelPolicy } from "../_shared/ai_policy.ts";
 
 const MODEL = "claude-opus-4-8";
 const CORS = {
@@ -132,8 +134,10 @@ const CAPABILITIES_SCHEMA = {
 
 // Web-search loop (same pause_turn pattern as connector-runner): returns one
 // citation-grounded briefing the structured pass then extracts from.
-async function searchBriefing(key: string, sys: string, user: string): Promise<{ text: string; usage: { input: number; output: number } }> {
+async function searchBriefing(supabase: SupabaseClient, key: string, sys: string, user: string): Promise<{ text: string; usage: { input: number; output: number } }> {
   const anthropic = new Anthropic({ apiKey: key });
+  // Model-governed (the deliberate no-thinking speed budget is preserved — effort unchanged).
+  const lp = await resolveModelPolicy(supabase, { task: "setup_competitive_landscape", fallback: { model: MODEL, effort: "high" } });
   // deno-lint-ignore no-explicit-any
   let messages: any[] = [{ role: "user", content: user }];
   let text = "";
@@ -142,7 +146,7 @@ async function searchBriefing(key: string, sys: string, user: string): Promise<{
   // no extended thinking. The briefing is for extraction, not prose.
   for (let i = 0; i < 2; i++) {
     const resp = (await anthropic.messages.create({
-      model: MODEL,
+      model: lp.model,
       max_tokens: 2200,
       tools: [{ type: "web_search_20260209", name: "web_search", max_uses: 3 }],
       system: [{ type: "text", text: sys + " BE FAST: run at most 3 focused searches, then write the briefing immediately — terse bullets, no prose padding." }],
@@ -155,6 +159,7 @@ async function searchBriefing(key: string, sys: string, user: string): Promise<{
     if (resp.stop_reason === "pause_turn") { messages = [...messages, { role: "assistant", content: resp.content }]; continue; }
     break;
   }
+  await logUsage(supabase, { task: "setup_competitive_landscape", model: lp.model, usage: { input_tokens: usage.input, output_tokens: usage.output } });
   return { text: text.trim().slice(0, 12_000), usage };
 }
 
@@ -188,9 +193,10 @@ Deno.serve(async (req: Request) => {
     if (step === "interview") {
       const budget = Math.max(0, Math.min(8, Math.round(Number((body as { max_questions?: number }).max_questions) || 4)));
       const asked = transcript.filter((t) => t.role === "q").length;
+      const pol = await resolveModelPolicy(supabase, { task: "setup_competitive_interview", fallback: { model: MODEL, effort: "low" } });
       const resp = (await anthropic.messages.create({
-        model: MODEL, max_tokens: 4000,
-        output_config: { effort: "low", format: { type: "json_schema", schema: INTERVIEW_SCHEMA } },
+        model: pol.model, max_tokens: 4000,
+        output_config: { effort: pol.effort, format: { type: "json_schema", schema: INTERVIEW_SCHEMA } },
         system: `You are the competitive-intelligence intake SCORER. Assess COVERAGE of each placement dimension from the records + interview, then choose the next question. You do NOT invent a readiness number — you report each dimension's status WITH EVIDENCE; the system computes the score.
 
 Assess EVERY dimension (one coverage entry each): ${DIMENSIONS.map((d) => `${d.key} (${d.label})`).join(", ")}.
@@ -209,6 +215,7 @@ NEXT QUESTION — next_dimension = the highest-WEIGHT dimension still 'missing' 
         // deno-lint-ignore no-explicit-any
       } as any)) as Anthropic.Message;
       const text = resp.content.filter((b) => b.type === "text").map((b) => (b as { text: string }).text).join("");
+      await logUsage(supabase, { task: "setup_competitive_interview", model: pol.model, usage: resp.usage });
       let out: { coverage: { dimension: string; status: string; source: string; note: string }[]; next_dimension: string; question: string; why: string };
       try { out = JSON.parse(text); }
       catch {
@@ -243,9 +250,10 @@ NEXT QUESTION — next_dimension = the highest-WEIGHT dimension still 'missing' 
     }
 
     if (step === "picture") {
+      const pol = await resolveModelPolicy(supabase, { task: "setup_competitive_picture", fallback: { model: MODEL, effort: "medium" } });
       const resp = (await anthropic.messages.create({
-        model: MODEL, max_tokens: 4000,
-        output_config: { effort: "medium", format: { type: "json_schema", schema: PICTURE_SCHEMA } },
+        model: pol.model, max_tokens: 4000,
+        output_config: { effort: pol.effort, format: { type: "json_schema", schema: PICTURE_SCHEMA } },
         system: "Synthesize the records + interview into the FULL PICTURE of this product and its market — the brief a competitive researcher needs to find exactly the right rivals. picture = 1-2 tight paragraphs: what it is, who buys it (personas + industries + segment), how it positions and what it replaces, the features that win deals, and any deal-loss/competitor hints from the interview. The structured fields = the same content, distilled. known_competitors = every rival the user NAMED in the records or interview (comma-separated; empty string if none) — these seed and anchor the search. Ground every claim in the records/transcript — no embellishment.",
         messages: [{ role: "user", content: [
           records ? `THE RECORDS:\n${records}` : "THE RECORDS: (none)",
@@ -254,6 +262,7 @@ NEXT QUESTION — next_dimension = the highest-WEIGHT dimension still 'missing' 
         // deno-lint-ignore no-explicit-any
       } as any)) as Anthropic.Message;
       const text = resp.content.filter((b) => b.type === "text").map((b) => (b as { text: string }).text).join("");
+      await logUsage(supabase, { task: "setup_competitive_picture", model: pol.model, usage: resp.usage });
       let picOut: unknown;
       try { picOut = JSON.parse(text); }
       catch { return json({ error: "The picture came back incomplete — try '✦ Drill down' again, or search directly from your records." }, 502); }
@@ -270,6 +279,7 @@ NEXT QUESTION — next_dimension = the highest-WEIGHT dimension still 'missing' 
       const { data: existing } = await supabase.from("competitors").select("name");
       const known = (existing ?? []).map((c) => c.name);
       const { text: briefing, usage } = await searchBriefing(
+        supabase,
         key,
         `You are a competitive-landscape researcher. If the user NAMES known competitors in the market context, verify those FIRST (site, current positioning), then search beyond them. Use web search to identify the REAL competitors in the user's market — companies a buyer would actually evaluate against them. Assess every candidate on FOUR dimensions: (1) buyer overlap — do they sell to the same personas? (2) industry overlap — same verticals? (3) capability overlap — which of the user's features/modules do they also offer? (4) positioning collision — do they claim the same category or replace the same thing? For each rival report: company name, homepage URL, head-on (direct) vs partial/adjacent, and the per-dimension read with what you found. For each rival also report their LinkedIn company page URL (linkedin.com/company/...) and a 2-3 sentence factual overview (who they are, what they sell, to whom) — URLs only from what you actually found, never constructed. Concrete and current. Return about ${target} rivals — the ones that genuinely matter MOST, not a directory dump; fewer high-overlap rivals beat a long thin list.`,
         [
@@ -292,6 +302,7 @@ NEXT QUESTION — next_dimension = the highest-WEIGHT dimension still 'missing' 
       // Two-phase path: the client passes the landscape briefing; only when
       // absent do we search inline (backward-compatible single-call mode).
       const briefing = (body.briefing as string | undefined)?.trim() || (await searchBriefing(
+        supabase,
         key,
         `You are a competitive-landscape researcher. Use web search to identify the REAL competitors in the user's market — companies a buyer would actually evaluate against them. Assess every candidate on FOUR dimensions: (1) buyer overlap — do they sell to the same personas? (2) industry overlap — same verticals? (3) capability overlap — which of the user's features/modules do they also offer? (4) positioning collision — do they claim the same category or replace the same thing? For each rival report: company name, homepage URL, head-on (direct) vs partial/adjacent, and the per-dimension read with what you found. For each rival also report their LinkedIn company page URL (linkedin.com/company/...) and a 2-3 sentence factual overview (who they are, what they sell, to whom) — URLs only from what you actually found, never constructed. Concrete and current. Return about ${target} rivals — the ones that genuinely matter MOST, not a directory dump; fewer high-overlap rivals beat a long thin list.`,
         [
@@ -303,14 +314,16 @@ NEXT QUESTION — next_dimension = the highest-WEIGHT dimension still 'missing' 
       )).text;
       if (!briefing) return json({ error: "The landscape search returned nothing — try describing the market more specifically." }, 502);
 
+      const pol = await resolveModelPolicy(supabase, { task: "setup_competitive_competitors", fallback: { model: MODEL, effort: "medium" } });
       const resp = (await anthropic.messages.create({
-        model: MODEL, max_tokens: 2000,
-        output_config: { effort: "medium", format: { type: "json_schema", schema: COMPETITORS_SCHEMA } },
+        model: pol.model, max_tokens: 2000,
+        output_config: { effort: pol.effort, format: { type: "json_schema", schema: COMPETITORS_SCHEMA } },
         system: "Extract the competitors from the research briefing into the schema. Keep only real, named companies with a clear competitive rationale. website = their homepage URL from the briefing ('' if absent). linkedin = their LinkedIn company page URL from the briefing ('' if absent) — NEVER constructed. overview = 2-3 factual sentences on who they are from the briefing. match = an HONEST 0..100 competitive-overlap score derived from the four dimensions in the briefing (buyer, industry, capability, positioning): head-on across all four ≈ 80-95; strong on two-three ≈ 50-75; adjacent/partial ≈ 25-50. Never inflate; if the briefing is thin on a dimension, score conservatively. overlap = one line naming which dimensions overlap and which don't (e.g. 'same buyer (PMM) + capability (battlecards); different industry focus, no unified record'). Do not invent companies not in the briefing.",
         messages: [{ role: "user", content: briefing }],
         // deno-lint-ignore no-explicit-any
       } as any)) as Anthropic.Message;
       const text = resp.content.filter((b) => b.type === "text").map((b) => (b as { text: string }).text).join("");
+      await logUsage(supabase, { task: "setup_competitive_competitors", model: pol.model, usage: resp.usage });
       const out = JSON.parse(text) as { competitors: { name: string; website: string; linkedin: string; overview: string; relationship: string; match: number; why: string; overlap: string }[] };
       const knownLower = new Set(known.map((n) => n.toLowerCase()));
       const competitors = (out.competitors ?? [])
@@ -329,6 +342,7 @@ NEXT QUESTION — next_dimension = the highest-WEIGHT dimension still 'missing' 
       // grid every vendor on — then extract them. This stops the matrix from
       // being self-referential niche rows.
       const { text: briefing } = await searchBriefing(
+        supabase,
         key,
         `You are a software-category analyst. Identify the STANDARD capability / feature-function areas that buyers use to evaluate EVERY vendor in this category — the kind of rows a G2/Capterra feature grid or a Gartner/Forrester evaluation uses. Report 10-14 recognized, cross-vendor areas in INDUSTRY-STANDARD names (e.g. for CRM: pipeline & deal management, reporting & dashboards, workflow automation, integrations & API, mobile, security & compliance). These must apply to ALL the named rivals, not just one product. Avoid proprietary/marketing framings and hyper-niche rows.`,
         [
@@ -337,9 +351,10 @@ NEXT QUESTION — next_dimension = the highest-WEIGHT dimension still 'missing' 
           rivalNames.length ? `VENDORS IN THIS CATEGORY (the rows must apply to all): ${rivalNames.join(", ")}` : "",
         ].filter(Boolean).join("\n"),
       );
+      const pol = await resolveModelPolicy(supabase, { task: "setup_competitive_capabilities", fallback: { model: MODEL, effort: "medium" } });
       const resp = (await anthropic.messages.create({
-        model: MODEL, max_tokens: 3000,
-        output_config: { effort: "medium", format: { type: "json_schema", schema: CAPABILITIES_SCHEMA } },
+        model: pol.model, max_tokens: 3000,
+        output_config: { effort: pol.effort, format: { type: "json_schema", schema: CAPABILITIES_SCHEMA } },
         system: `You build a competitive capability matrix from the analyst briefing below. Select the 8–12 best ROWS — each a STANDARD, INDUSTRY-RECOGNIZED feature-function area for this category that applies to EVERY vendor (so we can score us AND each rival on it). Rules: use the category's conventional names from the briefing, not our product's internal/proprietary language; one row per distinct capability AREA (map specific features into the standard area they belong to — do NOT make a row per niche feature); each row must be scoreable across all named rivals. Mostly product capability areas; include 2–3 gtm/commercial vectors only when they genuinely decide deals in this category (e.g. integrations/ecosystem, security & compliance, pricing/packaging). name = the short standard area label (2–5 words); why = one line on why buyers weigh it. No buzzword or fluff rows.`,
         messages: [{ role: "user", content: [
           `ANALYST BRIEFING (the category's standard evaluation areas):\n${briefing || "(none — fall back to the conventional areas for this category)"}`,
@@ -349,6 +364,7 @@ NEXT QUESTION — next_dimension = the highest-WEIGHT dimension still 'missing' 
         // deno-lint-ignore no-explicit-any
       } as any)) as Anthropic.Message;
       const text = resp.content.filter((b) => b.type === "text").map((b) => (b as { text: string }).text).join("");
+      await logUsage(supabase, { task: "setup_competitive_capabilities", model: pol.model, usage: resp.usage });
       let out: { capabilities: { name: string; category: string; why: string }[] };
       try { out = JSON.parse(text); }
       catch { return json({ error: "The matrix-row proposal came back incomplete — try again." }, 502); }
