@@ -37,6 +37,34 @@ The library holds two kinds of skill, and the name must say which:
 or the task, in plain words. A reader must be able to tell cornerstone-vs-child from
 the name alone.
 
+## Category (grouping — apply this logic consistently)
+
+`category` is the skill's **primary domain**, and it must reflect what the skill
+actually does — not which officer happens to hold it:
+
+- **product** — building the product: strategy, roadmap, modules/features,
+  architecture, engineering, technical accuracy, capabilities.
+  *(Chief Product Officer, Chief Engineering Agent, Roadmap prioritization, Architecture review.)*
+- **gtm** — going to market: positioning, messaging, personas, narrative,
+  competitive battlecards/copy, pricing/packaging.
+  *(Chief Revenue Officer, Chief Creative Officer, Positioning sharpening, Persona
+  messaging, Competitive battlecard, Narrative & brand voice, Competitive messenger.)*
+- **research** — gathering and **scoring evidence/intelligence** (the analysis
+  layer that feeds GTM, not the messaging itself).
+  *(Capability evidence scoring, Competitive evidence analyst.)*
+- **general** — cross-cutting org/agent operations, tied to neither product nor GTM.
+  *(Chief of Staff.)*
+
+Test: positioning is **gtm** even on a CPO (it's market-facing); architecture is
+**product**, never general; turning evidence into a score is **research**, turning a
+ratified fact into seller copy is **gtm**.
+
+`areas` (children only) lists the surfaces a child applies to — from the area
+vocabulary `product, gtm, competitive, strategy, market, signals, frontier, roadmap,
+content, campaigns, initiatives` — and drives which agents the child is offered to
+(it must overlap the agent's connected areas). Cornerstones set no `areas` (a
+cornerstone is the general identity).
+
 ## Regenerate after editing
 
 ```

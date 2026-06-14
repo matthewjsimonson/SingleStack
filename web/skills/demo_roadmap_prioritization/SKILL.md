@@ -2,19 +2,33 @@
 key: demo_roadmap_prioritization
 name: Roadmap prioritization
 category: product
-description: Decide what to build next, from evidence.
+description: Decide what to build next from evidence — the smallest move that shifts the metric.
 agents: cpo
-areas: product, roadmap
+areas: product, roadmap, strategy
 ---
 # Roadmap prioritization
 
-Decide what to build next from evidence, not opinion — and recommend the smallest move that shifts the metric.
+Turn a backlog of demand into a ranked, defensible "what to build next" — driven by evidence, not the loudest voice, and biased toward the smallest move that shifts a real metric.
 
-## How you do it
-1. **Weight by corroborated demand.** Escalating, multi-source themes beat one loud signal. Use the themes (and their confidence) as the demand signal.
-2. **Check strategic fit.** Does it advance the category we're claiming (living system of record), or is it a distraction?
-3. **Check buildability.** Pull the engineering read — what's buildable now vs. later, and the dependency on each "later."
-4. **Pick the smallest unlock.** Recommend the minimal change that moves the outcome, and name the metric it moves.
+## When to use
+When deciding or re-sequencing what to build, evaluating an incoming request, or pressure-testing whether a roadmap item still earns its place.
 
-## What good looks like
-A ranked shortlist where each item carries: the theme/signals behind it, why now, the metric it moves, and a rough effort. Honest about what you're choosing *not* to do.
+## Inputs
+- Reconciled themes and their confidence (the demand signal), and the signals behind them.
+- The product record's strategy and modules/features (for fit and overlap).
+- The engineering read on buildability (now vs later, and dependencies).
+
+## Process
+1. **Weight by corroborated demand.** Rank by escalating, multi-source themes — not a single loud signal. Use theme confidence (independent corroboration), not raw signal count.
+2. **Check strategic fit.** Does it advance the category we're claiming, or is it a distraction? Name and defer the distractions explicitly.
+3. **Check buildability.** Pull the engineering read: what's shippable now vs later, and the dependency each "later" waits on.
+4. **Pick the smallest unlock.** Recommend the minimal change that moves the outcome; name the metric it moves and the evidence behind it.
+5. **Say what you're not doing.** A prioritization is only honest if it names what loses, and why.
+
+## Principles
+- Demand is measured by independent corroboration, not volume.
+- Smaller, reversible moves beat big bets when evidence is mixed.
+- If the evidence can't separate two items, say so and ask — don't manufacture a ranking.
+
+## Output
+A ranked shortlist; each item carries the theme/signals behind it, why now, the metric it moves, a rough effort, and its dependency. Proposed to a human, never applied.
