@@ -9,23 +9,28 @@
 import { useState } from "react";
 import { useSearchParams } from "next/navigation";
 import { SubTabs } from "@/components/ui";
+import Ecosystem from "@/components/Ecosystem";
 import AgentsView from "./AgentsView";
 import WorkflowsView from "./WorkflowsView";
 import SkillLibrary from "@/components/SkillLibrary";
 
-type Tab = "agents" | "skills" | "workflows";
+type Tab = "ecosystem" | "agents" | "skills" | "workflows";
 
 export default function AgentsWorkbench() {
   const params = useSearchParams();
   const initial = params.get("tab");
-  // "plays" is retired — any old deep link lands on Workflows.
+  // The Ecosystem is the workforce home/overview (default). Deep links to the
+  // other tabs still resolve; "plays" is retired → Workflows.
   const [tab, setTab] = useState<Tab>(
-    initial === "workflows" || initial === "plays" ? "workflows" : initial === "skills" ? "skills" : "agents",
+    initial === "agents" ? "agents"
+      : initial === "skills" ? "skills"
+      : initial === "workflows" || initial === "plays" ? "workflows"
+      : "ecosystem",
   );
   return (
     <div>
-      <SubTabs<Tab> tabs={[{ key: "agents", label: "Agents" }, { key: "skills", label: "Skills" }, { key: "workflows", label: "Workflows" }]} active={tab} onChange={setTab} />
-      {tab === "agents" ? <AgentsView /> : tab === "skills" ? <SkillLibrary /> : <WorkflowsView />}
+      <SubTabs<Tab> tabs={[{ key: "ecosystem", label: "Ecosystem" }, { key: "agents", label: "Agents" }, { key: "skills", label: "Skills" }, { key: "workflows", label: "Workflows" }]} active={tab} onChange={setTab} />
+      {tab === "ecosystem" ? <Ecosystem /> : tab === "agents" ? <AgentsView /> : tab === "skills" ? <SkillLibrary /> : <WorkflowsView />}
     </div>
   );
 }

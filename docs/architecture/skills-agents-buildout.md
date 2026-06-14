@@ -288,9 +288,19 @@ instead of guessing.
     read (`healthy | watch | at-risk`) with an explainable headline. Thresholds are
     guard-railed + stated, not magic. Verified by `scripts/verify-lifecycle.mjs`
     (12 checks, green) — durable, like the resolver tests.
-  - **G.2 — the living surface.** A breathing ecosystem view (its own area of the app,
-    not a Settings tab): the balance map, the cost dial woven in (adjust a scope and see
-    coverage/harmony move), and loop-risk alerts. Reuses the implication-preview engine.
+  - **G.2 — SHIPPED (the living surface).** `Ecosystem` is the **default/overview tab of
+    the Agents area** (the workforce home, per the IA decision) — `AgentsWorkbench` now
+    leads with it. It renders the verified model over RLS-fenced reads: a **harmony
+    banner** (status always answerable — healthy/watch/at-risk + the explainable
+    headline), the **lifecycle loop** (the five loop stages in order with status dots +
+    spend + last-activity, then position/sell/steward), ranked **loop-risk alerts** (each
+    with a "Feed {stage} →" control), the **area focus / cost lens** (per-area spend
+    share, status chip, agent coverage, a share bar, "+ put an agent on X" for
+    uncovered/neglected; links to Settings → AI & cost for the levers), and the
+    blank-slate **onboarding path** (records → agents → run). HITL/control is
+    navigational (the human decides + acts; conversational rebalance is G.3). Its data/
+    logic layer is fully verified; **the React render is NOT build-verifiable in-sandbox**
+    (no `web/node_modules`) — needs a `next build`/visual pass.
   - **G.3 — conversational rebalance (HITL, under the autonomy dial).** An agent that
     reads the imbalance and *proposes* reallocations — shift focus/agents/preset toward a
     starved feeder, cite the evidence — nothing auto-applies; mirrors the
