@@ -124,6 +124,16 @@ instead of guessing.
   proposals are flagged/routed; binds to the rebuilt agent model.
 - **E. Fail-safes** — confidence-gated decision tree (the fallback edges on the
   Phase-B tree); evidence-first; runtime-enforced under the autonomy dial.
+- **F. AI cost governance** — manage models / effort / token spend (decision #8).
+  No chat; a Settings surface. Reuses the autonomy-dial pattern.
+  - **F1 — SHIPPED**: `ai_usage` ledger + shared `logUsage` (one source of PRICING)
+    wired into the generators; Settings "AI & token management" shows spend by task
+    and model.
+  - **F2** — the cost dial: an `ai_policies` table (per org, per task → model / effort /
+    max_tokens / caching / grounding depth + quality/economy presets), generators read
+    it, and each lever shows its **implication** (projected cost delta + a quality note)
+    from the price table + recent usage. Guard-railed defaults so quality can't silently
+    drop. Build E (and beyond) reading this dial.
 
 ## Control layer (done, underpins everything)
 - **C1** conflict-aware `accept_proposal` (optimistic concurrency, race-safe). ✅

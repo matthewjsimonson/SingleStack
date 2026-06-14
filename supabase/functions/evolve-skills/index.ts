@@ -25,6 +25,7 @@
 import Anthropic from "npm:@anthropic-ai/sdk@0.69.0";
 import { createClient, type SupabaseClient } from "npm:@supabase/supabase-js@2";
 import { SKILL_QBAR, exemplarFor } from "../_shared/skill_spec.ts";
+import { logUsage } from "../_shared/ai_usage.ts";
 
 const MODEL = "claude-opus-4-8";
 const CORS = {
@@ -203,6 +204,7 @@ Deno.serve(async (req: Request) => {
         messages: [{ role: "user", content: userMsg }],
         // deno-lint-ignore no-explicit-any
       } as any)) as Anthropic.Message;
+      await logUsage(supabase, { task: "evolve_draft", model: MODEL, usage: resp.usage, agentId: agent.id });
       const block = resp.content.find((b) => b.type === "text");
       if (!block || block.type !== "text") throw new Error("no draft returned");
       const d = JSON.parse(block.text) as { name: string; description: string; category: string; instructions: string; areas: string[]; connectors: string[]; rationale: string };
@@ -331,6 +333,7 @@ Deno.serve(async (req: Request) => {
       messages: [{ role: "user", content: userMsg }],
       // deno-lint-ignore no-explicit-any
     } as any)) as Anthropic.Message;
+    await logUsage(supabase, { task: "evolve_skills", model: MODEL, usage: resp.usage, agentId: agent.id });
 
     const block = resp.content.find((b) => b.type === "text");
     if (!block || block.type !== "text") throw new Error("no revisions returned");

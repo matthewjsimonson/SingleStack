@@ -9,6 +9,7 @@ import { Section, Chip, Banner, ConfirmDialog } from "@/components/ui";
 import { SOURCE_CATALOG, type SourceDef } from "@/lib/sources";
 import { loadDemoData, clearDemoIntel } from "@/lib/demoSeed";
 import TeamManager from "@/components/TeamManager";
+import TokenUsage from "@/components/TokenUsage";
 
 type Source = { id: string; label: string; icon: string; origin: string; kind: string; status: string };
 
@@ -238,7 +239,7 @@ export default function SettingsView() {
             </Section>
           </>)}
 
-          {section === "hitl" && (
+          {section === "hitl" && (<>
             <Section label="Review & autonomy">
               <div className="t-sub t-muted" style={{ fontSize: 12.5, marginBottom: 12 }}>How much each part of the platform may do before you ratify. SingleStack runs on <strong>graduated autonomy</strong> — these dials set where the line sits, per surface. Everything is audited regardless of mode.</div>
               <div className="stack-3">
@@ -265,7 +266,8 @@ export default function SettingsView() {
               </div>
               <div className="t-sub t-muted" style={{ fontSize: 11.5, marginTop: 12 }}><strong>Records</strong> &amp; <strong>Intelligence</strong> are enforced now — on Autonomous, agent proposals auto-ratify and synthesis auto-creates themes (audited). <strong>Automations</strong> is recorded and honored as it rolls out. Untrusted / imported content is always screened and queued, regardless of mode.</div>
             </Section>
-          )}
+            <TokenUsage />
+          </>)}
 
           {section === "security" && (
             <Section label="Security & audit">

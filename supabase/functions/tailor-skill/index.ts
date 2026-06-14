@@ -22,6 +22,7 @@
 import Anthropic from "npm:@anthropic-ai/sdk@0.69.0";
 import { createClient, type SupabaseClient } from "npm:@supabase/supabase-js@2";
 import { SKILL_QBAR, exemplarFor } from "../_shared/skill_spec.ts";
+import { logUsage } from "../_shared/ai_usage.ts";
 
 const MODEL = "claude-opus-4-8";
 const CORS = {
@@ -152,6 +153,7 @@ Deno.serve(async (req: Request) => {
     } as any)) as Anthropic.Message;
 
     const text = resp.content.filter((b) => b.type === "text").map((b) => (b as { text: string }).text).join("");
+    await logUsage(supabase, { task: "tailor_skill", model: MODEL, usage: resp.usage, agentId: skill.agent_id });
     try { return json(JSON.parse(text)); }
     catch { return json({ error: "The assistant's response was cut off before it finished. Please try again, or send a shorter steer." }, 502); }
   } catch (e) {
