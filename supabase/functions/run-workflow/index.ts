@@ -13,6 +13,7 @@
 
 import Anthropic from "npm:@anthropic-ai/sdk@0.69.0";
 import { createClient, type SupabaseClient } from "npm:@supabase/supabase-js@2";
+import { resolveModelPolicy } from "../_shared/ai_policy.ts";
 
 const DEFAULT_MODEL = "claude-opus-4-8";
 const PRICING: Record<string, { input: number; output: number }> = {
@@ -141,7 +142,8 @@ Deno.serve(async (req: Request) => {
       const ag = agentById(step.agent_id);
       if (!ag) continue; // an officer that no longer exists — skip the step
       const [corner, playSkill] = await Promise.all([loadCornerstones(ag.id), step.skill_id ? loadSkill(step.skill_id) : Promise.resolve(null)]);
-      const aModel = (ag.model as string) || DEFAULT_MODEL;
+      const sPol = await resolveModelPolicy(supabase, { task: "run_workflow", agentId: ag.id as string, fallback: { model: (ag.model as string) || DEFAULT_MODEL, effort: "high" } });
+      const aModel = sPol.model;
       const skillsBlock = [
         corner.length ? `\n\nYOUR CORNERSTONE SKILLS (always on):\n${corner.map((s) => `## ${s.name}\n${s.instructions ?? ""}`).join("\n\n")}` : "",
         playSkill ? `\n\nTHE PLAY SKILL FOR THIS STEP — apply it:\n## ${playSkill.name}\n${playSkill.instructions ?? ""}` : "",
@@ -163,7 +165,7 @@ Deno.serve(async (req: Request) => {
       ].filter(Boolean).join("\n");
       const body = {
         model: aModel, max_tokens: 8000, thinking: { type: "adaptive", display: "summarized" },
-        output_config: { effort: "high", format: { type: "json_schema", schema: SCHEMA } },
+        output_config: { effort: sPol.effort, format: { type: "json_schema", schema: SCHEMA } },
         system: [{ type: "text", text: system, cache_control: { type: "ephemeral" } }],
         messages: [{ role: "user", content: user }],
       };

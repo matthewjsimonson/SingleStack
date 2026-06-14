@@ -64,6 +64,8 @@ export const TASK_TIER: Record<string, Tier> = {
   run_workflow: "reasoning",
   draft_decision: "reasoning",
   draft_how: "reasoning",
+  connector_pull: "reasoning", // tool-use retrieval (web/MCP) — needs capability, not the extraction floor
+  setup_competitive_capabilities: "reasoning",
 
   // conversational — multi-turn, latency-sensitive.
   refine_record: "conversational",
@@ -75,6 +77,7 @@ export const TASK_TIER: Record<string, Tier> = {
   connector_distill: "extraction",
   setup_competitive_picture: "extraction",
   setup_competitive_landscape: "extraction",
+  setup_competitive_competitors: "extraction",
   setup_records_extract: "extraction",
 };
 
