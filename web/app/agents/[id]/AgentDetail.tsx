@@ -11,7 +11,7 @@ import { Markdown } from "@/components/Markdown";
 import { CONNECTOR_CATALOG } from "@/lib/connectors";
 
 type Agent = { id: string; key: string; name: string; role: string | null; model: string | null; system_prompt: string | null; is_active: boolean; identity: string | null; mandate: string | null; principles: string | null; voice: string | null };
-type Skill = { id: string; key: string; name: string; description: string | null; category: string | null; instructions: string | null; areas: string[]; connectors: string[]; source: string | null };
+type Skill = { id: string; key: string; name: string; description: string | null; category: string | null; instructions: string | null; areas: string[]; connectors: string[]; source: string | null; kind: string | null; scope: string | null; parent_id: string | null; agent_id: string | null };
 type Connection = { id: string; kind: string; label: string; area: string | null; mcp_url: string | null; status: string; config: { purpose?: string | null } | null; targets: { type?: string; ref: string; label?: string }[] | null; guidance: string | null };
 type InitiativeOpt = { id: string; title: string; stage: string | null; scope: string | null };
 type WorkstreamOpt = { id: string; title: string; area: string | null; initiative_id: string; initiative_title?: string };
@@ -45,7 +45,7 @@ export default function AgentDetail({ agentId }: { agentId: string }) {
   const load = useCallback(async () => {
     const { data: a } = await supabase.from("agents").select("id, key, name, role, model, system_prompt, is_active, identity, mandate, principles, voice").eq("id", agentId).maybeSingle();
     const [{ data: sk }, { data: as }, { data: cs }, { data: wf }, { data: al }, { data: inits }, { data: ws }] = await Promise.all([
-      supabase.from("skills").select("id, key, name, description, category, instructions, areas, connectors, source").order("name"),
+      supabase.from("skills").select("id, key, name, description, category, instructions, areas, connectors, source, kind, scope, parent_id, agent_id").or(`scope.eq.library,and(scope.eq.agent,agent_id.eq.${agentId})`).order("name"),
       supabase.from("agent_skills").select("skill_id, is_cornerstone").eq("agent_id", agentId),
       supabase.from("connections").select("id, kind, label, area, mcp_url, status, config, targets, guidance").eq("agent_id", agentId).order("created_at"),
       supabase.from("workflows").select("id, name, description, agent_id, steps, is_active").order("created_at", { ascending: false }),
@@ -108,7 +108,7 @@ export default function AgentDetail({ agentId }: { agentId: string }) {
 
       {tab === "overview" && <Overview agent={agent} onSaved={load} setError={setError}
         skillsCount={attached.size} areas={connections.filter((c) => c.kind === "internal").map((c) => c.label)} alignCount={alignments.length} tabTo={setTab} />}
-      {tab === "skills" && <Skills agentId={agentId} agentName={agent.name} skills={skills} attached={attached} cornerstones={cornerstones} reload={load} setError={setError} />}
+      {tab === "skills" && <Skills agentId={agentId} agentName={agent.name} skills={skills} attached={attached} cornerstones={cornerstones} connAreas={connections.filter((c) => c.kind === "internal").map((c) => c.area).filter((a): a is string => !!a)} reload={load} setError={setError} />}
       {tab === "scope" && <Scope agentId={agentId} connections={connections} alignments={alignments} initiatives={initiatives} workstreams={workstreams} reload={load} setError={setError} />}
       {tab === "workflows" && <Workflows workflows={agentWorkflows} />}
     </div>
@@ -291,7 +291,7 @@ function SkillsGraph({ agentName, cornerstone, childList, selectedId, onSelect, 
   );
 }
 
-function Skills({ agentId, agentName, skills, attached, cornerstones, reload, setError }: { agentId: string; agentName: string; skills: Skill[]; attached: Set<string>; cornerstones: Set<string>; reload: () => void; setError: (s: string | null) => void }) {
+function Skills({ agentId, agentName, skills, attached, cornerstones, connAreas, reload, setError }: { agentId: string; agentName: string; skills: Skill[]; attached: Set<string>; cornerstones: Set<string>; connAreas: string[]; reload: () => void; setError: (s: string | null) => void }) {
   const supabase = createClient();
   const [creating, setCreating] = useState(false);
   const [form, setForm] = useState({ name: "", description: "", instructions: "", category: "general", cornerstone: false, areas: [] as string[], connectors: [] as string[] });
@@ -312,10 +312,30 @@ function Skills({ agentId, agentName, skills, attached, cornerstones, reload, se
   async function toggle(skillId: string, on: boolean) {
     setError(null);
     if (on) {
+      // Attaching a library TEMPLATE mints a per-agent tailored INSTANCE (its own
+      // body + revision history, parent_id -> template). The agent works from the
+      // instance, so tailoring it never touches the template or other agents.
+      const t = skills.find((s) => s.id === skillId);
+      if (!t) { setError("Template not found."); return; }
       const orgId = await getOrgId();
-      await supabase.from("agent_skills").insert({ org_id: orgId, agent_id: agentId, skill_id: skillId });
+      if (!orgId) { setError("Could not resolve your organization."); return; }
+      const isCorner = t.kind === "cornerstone";
+      const key = `${t.key}__${Date.now().toString(36)}`;
+      const { data: inst, error: insErr } = await supabase.from("skills").insert({
+        org_id: orgId, key, name: t.name, description: t.description, instructions: t.instructions,
+        category: t.category, areas: isCorner ? [] : t.areas, connectors: t.connectors,
+        kind: t.kind ?? "child", scope: "agent", agent_id: agentId, parent_id: t.id, source: "tailored",
+      }).select("id").single();
+      if (insErr || !inst) { setError(insErr?.message ?? "Could not attach the skill."); return; }
+      if (isCorner) await supabase.from("agent_skills").update({ is_cornerstone: false }).eq("agent_id", agentId).eq("is_cornerstone", true);
+      await supabase.from("agent_skills").insert({ org_id: orgId, agent_id: agentId, skill_id: inst.id, is_cornerstone: isCorner });
     } else {
-      await supabase.from("agent_skills").delete().eq("agent_id", agentId).eq("skill_id", skillId);
+      // Detaching deletes the instance (agent-owned; meaningless detached) — its
+      // agent_skills row + revisions cascade. A legacy directly-attached template
+      // (pre-instances) is only detached, never deleted from the library.
+      const s = skills.find((x) => x.id === skillId);
+      if (s?.scope === "agent") await supabase.from("skills").delete().eq("id", skillId);
+      else await supabase.from("agent_skills").delete().eq("agent_id", agentId).eq("skill_id", skillId);
       if (selected === skillId) setSelected(null);
     }
     reload();
@@ -401,7 +421,9 @@ function Skills({ agentId, agentName, skills, attached, cornerstones, reload, se
       const orgId = await getOrgId();
       if (!orgId) throw new Error("Could not resolve your organization.");
       const key = form.name.trim().toLowerCase().replace(/[^a-z0-9]+/g, "_").replace(/^_|_$/g, "") || `skill_${Date.now()}`;
-      const { data, error } = await supabase.from("skills").insert({ org_id: orgId, key, name: form.name.trim(), description: form.description.trim() || null, instructions: form.instructions.trim() || null, category: form.category, areas: form.cornerstone ? [] : form.areas, connectors: form.connectors }).select("id").single();
+      // Authored on the agent → it's a per-agent INSTANCE (scope=agent), not a
+      // library template. parent_id stays null (authored fresh, not from a template).
+      const { data, error } = await supabase.from("skills").insert({ org_id: orgId, key, name: form.name.trim(), description: form.description.trim() || null, instructions: form.instructions.trim() || null, category: form.category, areas: form.cornerstone ? [] : form.areas, connectors: form.connectors, kind: form.cornerstone ? "cornerstone" : "child", scope: "agent", agent_id: agentId, source: "tailored" }).select("id").single();
       if (error) throw error;
       // Exactly one cornerstone: if this new skill is the identity, demote the current one first.
       if (form.cornerstone) await supabase.from("agent_skills").update({ is_cornerstone: false }).eq("agent_id", agentId).eq("is_cornerstone", true);
@@ -415,7 +437,18 @@ function Skills({ agentId, agentName, skills, attached, cornerstones, reload, se
   const attachedSkills = skills.filter((s) => attached.has(s.id));
   const cornerstone = attachedSkills.find((s) => cornerstones.has(s.id)) ?? null;
   const childList = attachedSkills.filter((s) => !cornerstones.has(s.id));
-  const library = skills.filter((s) => !attached.has(s.id));
+  // The picker offers generic library TEMPLATES (never other agents' instances),
+  // scoped to what fits this agent: cornerstone templates when setting identity;
+  // for child skills, only those whose areas overlap the agent's connected areas
+  // (general skills, and the no-connections case, always show).
+  const normArea = (a: string) => (a === "products" ? "product" : a);
+  const agentAreas = new Set(connAreas.map(normArea));
+  // Templates this agent already has a tailored instance of — don't offer them again.
+  const attachedParents = new Set(skills.filter((s) => attached.has(s.id) && s.parent_id).map((s) => s.parent_id as string));
+  const templates = skills.filter((s) => s.scope === "library" && !attachedParents.has(s.id));
+  const library = form.cornerstone
+    ? templates.filter((s) => s.kind === "cornerstone")
+    : templates.filter((s) => s.kind !== "cornerstone" && (agentAreas.size === 0 || !(s.areas?.length) || s.areas.some((a) => agentAreas.has(a))));
   const selSkill = attachedSkills.find((s) => s.id === selected) ?? null;
   const selIsCorner = selSkill ? cornerstones.has(selSkill.id) : false;
   const openCreate = (asCornerstone: boolean) => { setSelected(null); setForm({ name: "", description: "", instructions: "", category: "general", cornerstone: asCornerstone, areas: [], connectors: [] }); setIntent(""); setCreateTab("scratch"); setCreating(true); };
