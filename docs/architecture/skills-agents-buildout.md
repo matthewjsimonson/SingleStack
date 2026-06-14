@@ -99,18 +99,19 @@ instead of guessing.
   - **B.4 Top-down decision-tree view** (replaces the radial depiction); AI-assisted
     setup walks the tree. Real, company-grounded instance content replaces demo
     placeholders.
-- **C. Agent rebuild** — unify identity onto the cornerstone instance (decision #4).
-  Done as a careful ADDITIVE migration (no destructive big-bang):
-  - **C2 Create-agent — SHIPPED** (see B.3c): new agents stand up on the cornerstone
-    model, runtime untouched.
-  - **C1** runtime derives identity from the cornerstone for EXISTING agents
-    (`agent-run/chat/propose`): when a cornerstone is attached, it is the identity;
-    `system_prompt` is ignored (fallback only when no cornerstone). Removes the
-    dual-identity contradiction.
-  - **C3** AgentDetail: the cornerstone becomes the identity editor; retire/render-from
-    the 4-window (`identity/mandate/principles/voice`).
-  - **C4** migrate existing seeded agents onto cornerstone instances (from the role
-    templates); then `system_prompt` is fully derived. Reseed is then clean.
+- **C. Agent rebuild — identity unified onto the cornerstone (decision #4). COMPLETE**
+  (careful additive migration, no destructive big-bang):
+  - **C2 Create-agent — SHIPPED** (B.3c): new agents stand up on the cornerstone model.
+  - **C1 — SHIPPED**: runtime derives identity from the cornerstone (`agent-run/chat/
+    propose`); when a cornerstone is attached it IS the identity and `system_prompt` is
+    ignored (fallback only when none). Dual-identity contradiction removed.
+  - **C3 — SHIPPED**: AgentDetail Overview is cornerstone-aware — when a cornerstone
+    exists, identity points to the Skills tab and the 4-window editor is retired; the
+    windows remain only as a fallback for an agent with no cornerstone (which nudges
+    you to give it one).
+  - **C4 — resolved by design**: the seed already attaches a cornerstone per agent, so
+    C1 resolves seeded agents' identity to it (legacy `system_prompt` = ignored
+    fallback). No data migration needed (and the roster is currently empty).
 - **D. Stewardship (C3)** — a steward (agent/role) per field/section so non-steward
   proposals are flagged/routed; binds to the rebuilt agent model.
 - **E. Fail-safes** — confidence-gated decision tree (the fallback edges on the

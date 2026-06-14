@@ -108,7 +108,7 @@ export default function AgentDetail({ agentId }: { agentId: string }) {
       </div>
 
       {tab === "overview" && <Overview agent={agent} onSaved={load} setError={setError}
-        skillsCount={attached.size} areas={connections.filter((c) => c.kind === "internal").map((c) => c.label)} alignCount={alignments.length} tabTo={setTab} />}
+        skillsCount={attached.size} areas={connections.filter((c) => c.kind === "internal").map((c) => c.label)} alignCount={alignments.length} hasCornerstone={cornerstones.size > 0} tabTo={setTab} />}
       {tab === "skills" && <Skills agentId={agentId} agentName={agent.name} skills={skills} attached={attached} cornerstones={cornerstones} connAreas={connections.filter((c) => c.kind === "internal").map((c) => c.area).filter((a): a is string => !!a)} reload={load} setError={setError} />}
       {tab === "scope" && <Scope agentId={agentId} connections={connections} alignments={alignments} initiatives={initiatives} workstreams={workstreams} reload={load} setError={setError} />}
       {tab === "workflows" && <Workflows workflows={agentWorkflows} />}
@@ -133,7 +133,7 @@ function composeCornerstone(w: { identity: string; mandate: string; principles: 
   }).filter(Boolean).join("\n\n");
 }
 
-function Overview({ agent, onSaved, setError, skillsCount, areas, alignCount, tabTo }: { agent: Agent; onSaved: () => void; setError: (s: string | null) => void; skillsCount: number; areas: string[]; alignCount: number; tabTo: (t: Tab) => void }) {
+function Overview({ agent, onSaved, setError, skillsCount, areas, alignCount, hasCornerstone, tabTo }: { agent: Agent; onSaved: () => void; setError: (s: string | null) => void; skillsCount: number; areas: string[]; alignCount: number; hasCornerstone: boolean; tabTo: (t: Tab) => void }) {
   const supabase = createClient();
   const [role, setRole] = useState(agent.role ?? "");
   const [model, setModel] = useState(agent.model ?? "claude-opus-4-8");
@@ -188,7 +188,7 @@ function Overview({ agent, onSaved, setError, skillsCount, areas, alignCount, ta
     <>
       <Section label="Setup at a glance">
         <div style={{ display: "grid", gridTemplateColumns: "repeat(4, 1fr)", gap: "var(--sp-3)" }}>
-          <Dial label="Identity" value={`${filled}/4`} hint={filled === 4 ? "fully set" : "windows filled below"} />
+          <Dial label="Identity" value={hasCornerstone ? "Cornerstone" : `${filled}/4`} hint={hasCornerstone ? "set on the Skills tab" : "windows filled below"} to={hasCornerstone ? "skills" : undefined} />
           <Dial label="Skills" value={String(skillsCount)} hint={skillsCount ? "playbooks it applies" : "none attached"} to="skills" />
           <Dial label="Access" value={areas.length ? String(areas.length) : "all"} hint={areas.length ? areas.join(", ") : "full foundation"} to="scope" />
           <Dial label="Focus" value={String(alignCount)} hint={alignCount ? "initiatives / tasks" : "no alignment"} to="scope" />
@@ -210,21 +210,30 @@ function Overview({ agent, onSaved, setError, skillsCount, areas, alignCount, ta
         </div>
       </Section>
 
-      <Section label="Core identity" action={<button className="btn btn-sm" onClick={() => setAiOpen(true)} style={{ background: "var(--ac)", color: "#fff" }}>✨ Set up with AI</button>}>
-        <div className="t-sub t-muted" style={{ fontSize: 12.5, marginBottom: 12 }}>The four windows below compose this officer&rsquo;s core prompt — staged so it&rsquo;s legible, not one blank box. Fill what matters; empty windows are skipped. Use <strong>Set up with AI</strong> to draft all four from a sentence, grounded in your product truth. Its <strong>skills</strong> (including a ★ cornerstone skill) are the playbooks layered on top of this identity.</div>
-        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "var(--sp-3)" }}>
-          {CORNER_WINDOWS.map((win) => (
-            <label key={win.key} className="field">
-              <span className="t-label">{win.label}</span>
-              <span className="t-sub t-muted" style={{ fontSize: 11.5, marginBottom: 4 }}>{win.hint}</span>
-              <textarea className="textarea" rows={5} value={w[win.key]} onChange={(e) => setW({ ...w, [win.key]: e.target.value })} placeholder={win.ph} />
-            </label>
-          ))}
-        </div>
-        <div className="row gap-2" style={{ marginTop: "var(--sp-3)" }}>
-          <button className="btn" onClick={save} disabled={busy}>{busy ? "Saving…" : "Save identity"}</button>
-        </div>
-      </Section>
+      {hasCornerstone ? (
+        <Section label="Core identity">
+          <div className="card card-pad">
+            <div className="t-sub" style={{ fontSize: 12.5, lineHeight: 1.5 }}>This agent&rsquo;s identity is its <strong>★ cornerstone skill</strong> — the always-on profile the runtime uses on every job. Edit it on the <strong>Skills</strong> tab (open the cornerstone, or use <strong>✦ Tailor with AI</strong>). The legacy identity windows are retired now that the cornerstone is the single source of identity.</div>
+            <div className="row gap-2" style={{ marginTop: 10 }}><button className="btn btn-sm" onClick={() => tabTo("skills")} style={{ background: "var(--ac)", color: "#fff" }}>Go to Skills →</button></div>
+          </div>
+        </Section>
+      ) : (
+        <Section label="Core identity" action={<button className="btn btn-sm" onClick={() => setAiOpen(true)} style={{ background: "var(--ac)", color: "#fff" }}>✨ Set up with AI</button>}>
+          <div className="t-sub t-muted" style={{ fontSize: 12.5, marginBottom: 12 }}>This agent has <strong>no cornerstone skill yet</strong>, so these windows are its fallback identity. The better path: give it a cornerstone on the <strong>Skills</strong> tab (✦ Create / Tailor with AI) — that becomes its single, always-on identity and these windows are retired.</div>
+          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "var(--sp-3)" }}>
+            {CORNER_WINDOWS.map((win) => (
+              <label key={win.key} className="field">
+                <span className="t-label">{win.label}</span>
+                <span className="t-sub t-muted" style={{ fontSize: 11.5, marginBottom: 4 }}>{win.hint}</span>
+                <textarea className="textarea" rows={5} value={w[win.key]} onChange={(e) => setW({ ...w, [win.key]: e.target.value })} placeholder={win.ph} />
+              </label>
+            ))}
+          </div>
+          <div className="row gap-2" style={{ marginTop: "var(--sp-3)" }}>
+            <button className="btn" onClick={save} disabled={busy}>{busy ? "Saving…" : "Save identity"}</button>
+          </div>
+        </Section>
+      )}
 
       <Modal open={aiOpen} onClose={() => setAiOpen(false)} title="Set up the identity with AI" width={620}>
         <div className="t-sub t-muted" style={{ fontSize: 12.5, marginBottom: 12 }}>Describe who this officer should be in a sentence or two. AI drafts all four windows, grounded in your product truth — you review and edit before saving.</div>
