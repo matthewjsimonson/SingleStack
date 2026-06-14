@@ -5,8 +5,9 @@
 --   product using the SAME one-parent pattern record_fields/proposals already use, and
 --   add an optional governed area_id tag so a signal is attributable to the area it feeds.
 -- Conventions: matches sibling tables (current_org_id RLS already on signals).
--- Risk: low + lossless. Every existing row has gtm_record_id set and product_record_id
---   null, so it already satisfies the new one-parent CHECK; no backfill needed.
+-- Risk: low + lossless. The one-parent CHECK is added NOT VALID because the remote has
+--   pre-existing "orphan" signals with no gtm_record_id; we enforce going forward without
+--   touching legacy data (see the constraint note below).
 -- Author: SingleStack · Date: 2026-06-14
 -- NOTE: gtm_record_id becomes nullable. Existing rows are unchanged; only NEW product
 --   signals set product_record_id. App code that reads signals.gtm_record_id should treat
@@ -25,9 +26,13 @@ comment on column signals.area_id is 'Optional governed area this signal feeds (
 alter table signals alter column gtm_record_id drop not null;
 
 alter table signals drop constraint if exists signals_one_parent;
+-- NOT VALID: enforce exactly-one-parent on every NEW/updated row, without failing on
+-- pre-existing rows that violate it. The remote has legacy "orphan" signals with no
+-- gtm_record_id; we govern going forward rather than guess at (delete/reparent) real
+-- data. A later cleanup can fix the orphans and then `validate constraint` to fully lock.
 alter table signals add constraint signals_one_parent check (
   (product_record_id is not null)::int + (gtm_record_id is not null)::int = 1
-);
+) not valid;
 
 -- 3. Indexes for the new parents/tag (org_id index already exists from the base table).
 create index if not exists signals_product_record_id_idx on signals (product_record_id);
