@@ -8,6 +8,7 @@ import { Chip, Banner, Empty } from "@/components/ui";
 import { ensureTeam } from "@/lib/ensureTeam";
 import PageBar from "@/components/PageBar";
 import RosterReview from "@/components/RosterReview";
+import AgentCreateChat from "@/components/AgentCreateChat";
 import { useProductScope } from "@/lib/ProductContext";
 
 type Agent = { id: string; key: string; name: string; role: string | null; model: string | null; system_prompt: string | null; is_active: boolean; product_id: string | null };
@@ -26,6 +27,7 @@ export default function AgentsView() {
   const [form, setForm] = useState<typeof BLANK>(BLANK);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [aiOpen, setAiOpen] = useState(false);
 
   const load = useCallback(async () => {
     await ensureTeam(supabase); // seed the standard executive roster if this org has none
@@ -87,7 +89,8 @@ export default function AgentsView() {
 
   return (
     <div style={{ maxWidth: 1040, margin: "0 auto" }}>
-      <PageBar actions={editing === null ? <button className="btn btn-sm" onClick={startNew}>+ New agent</button> : undefined} />
+      <PageBar actions={editing === null ? <span className="row gap-2"><button className="btn btn-sm" onClick={() => setAiOpen(true)} style={{ background: "var(--ac)", color: "#fff" }}>✦ Create with AI</button><button className="btn btn-secondary btn-sm" onClick={startNew}>+ New agent</button></span> : undefined} />
+      {aiOpen && <AgentCreateChat onCreated={load} onClose={() => setAiOpen(false)} />}
 
       {editing === null && <div style={{ marginBottom: "var(--sp-6)" }}><RosterReview onChanged={load} /></div>}
 
