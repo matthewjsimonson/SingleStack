@@ -24,6 +24,7 @@
 
 import Anthropic from "npm:@anthropic-ai/sdk@0.69.0";
 import { createClient, type SupabaseClient } from "npm:@supabase/supabase-js@2";
+import { SKILL_QBAR, exemplarFor } from "../_shared/skill_spec.ts";
 
 const MODEL = "claude-opus-4-8";
 const CORS = {
@@ -163,19 +164,7 @@ Deno.serve(async (req: Request) => {
       const { data: themes } = await tQ;
       if ((themes ?? []).length) ground.push("", "RELEVANT THEMES:", ...(themes ?? []).map((t) => `• (${t.category}) ${t.title}${t.summary ? ` — ${t.summary}` : ""}${t.recommendation ? ` → ${t.recommendation}` : ""}`));
 
-      // SingleStack's skill quality bar (Anthropic Agent Skill house style). Every
-      // drafted skill — cornerstone or child — meets ALL of this. Mirrors
-      // web/skills/README.md so the in-app generator and the built-in library match.
-      const QBAR = [
-        "QUALITY BAR (the skill is not done without ALL of these — Anthropic Agent Skill style):",
-        "1) `description` = the ROUTING SIGNAL: what it PRODUCES + WHEN to use (concrete triggers) + when NOT to (name the right sibling skill instead). Trigger-rich, third person, not a tagline.",
-        "2) NAMED INPUTS: the SPECIFIC SingleStack data it reads — record fields by name, signals/themes, the capability matrix, connectors — never a vague 'use evidence'.",
-        "3) An OPERATIONAL PROCEDURE with criteria/thresholds (scores, cut-offs, order of operations) — executable, not vague principles.",
-        "4) An EXPLICIT OUTPUT shape (the exact format it returns, so it's consistent and reviewable).",
-        "5) ONE worked, domain-specific EXAMPLE.",
-        "6) A 'Reject / push back if' list — the failure modes a reviewer bounces (uncited, overclaim, abstain-when-thin, propose-not-apply).",
-        "Be specific to THIS company; no generic filler, no changelog, no hype.",
-      ].join("\n");
+      const QBAR = SKILL_QBAR;
 
       const system = kind === "cornerstone"
         ? [
@@ -202,6 +191,7 @@ Deno.serve(async (req: Request) => {
           : `WHAT THE OPERATOR WANTS THIS ${kind === "cornerstone" ? "AGENT (its cornerstone)" : "CHILD SKILL"} TO DO/BE:\n${intent}`,
         area ? `\nTARGET AREA: ${area}` : "",
         ground.length ? `\n\nGROUNDING:\n${ground.join("\n")}` : "",
+        `\n\nGOLD-STANDARD EXAMPLE (a skill at the required bar — your output must match this depth and structure):\n${exemplarFor(kind === "cornerstone" ? "cornerstone" : "child")}`,
         current ? "\n\nReturn the improved skill now." : "\n\nDraft the skill now.",
       ].filter(Boolean).join("");
 
@@ -316,6 +306,8 @@ Deno.serve(async (req: Request) => {
 
     const system = [
       `You evolve the playbooks ("instructions") of ${agent.name}${agent.role ? `, ${agent.role}` : ""}, an executive agent, so they stay current with new intelligence.`,
+      "",
+      SKILL_QBAR,
       "",
       "REVISE an existing skill when the new intelligence (themes + signals) MEANINGFULLY changes how that EXISTING capability should be applied — same job, sharper playbook. For each skill:",
       "• If it does: set change=true and rewrite the FULL instructions — preserve the skill's intent, evolve the specifics, and keep it at SingleStack's quality bar (a child: named inputs · an operational procedure with criteria · an explicit output · a worked example · a 'reject if' list, plus a routing-signal description; a cornerstone: what you own · how you operate · scope & handoffs · how you act · what good looks like). Not a changelog. Cite the exact theme/signal titles in `drivers`.",

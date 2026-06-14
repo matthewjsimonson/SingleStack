@@ -21,6 +21,7 @@
 
 import Anthropic from "npm:@anthropic-ai/sdk@0.69.0";
 import { createClient, type SupabaseClient } from "npm:@supabase/supabase-js@2";
+import { SKILL_QBAR, exemplarFor } from "../_shared/skill_spec.ts";
 
 const MODEL = "claude-opus-4-8";
 const CORS = {
@@ -57,13 +58,6 @@ const SCHEMA = {
   },
   required: ["reply", "recommendations", "draft"],
 };
-
-const QBAR = [
-  "QUALITY BAR (Anthropic Agent Skill style — the tailored skill keeps ALL of this):",
-  "1) description = routing signal: what it PRODUCES + WHEN to use + when NOT to.",
-  "2) NAMED inputs (specific SingleStack data), 3) an operational PROCEDURE with criteria, 4) an explicit OUTPUT shape, 5) a worked EXAMPLE, 6) a 'Reject / push back if' list.",
-  "A cornerstone instead uses: What you own / How you operate / Scope & handoffs / How you act / What good looks like.",
-].join("\n");
 
 Deno.serve(async (req: Request) => {
   if (req.method === "OPTIONS") return new Response("ok", { headers: CORS });
@@ -130,8 +124,8 @@ Deno.serve(async (req: Request) => {
     const system = [
       `You are tailoring the ${isCornerstone ? "CORNERSTONE (identity)" : "CHILD"} skill "${skill.name}" for ${agentName}${agentRole ? `, ${agentRole}` : ""}, in conversation with its operator. You specialize the generic skill for THIS agent and THIS company.`,
       "Discuss first, then propose. Surface a CONTROLLED set of evidence-backed recommendations — at most 4, ONLY when genuinely relevant, each citing its source (a signal/theme, a product/GTM record field, a frontier capability, or the skill quality bar). Never a firehose; restraint is the point. Do not invent facts beyond the grounding provided.",
-      "When the conversation has enough, return `draft` = the FULL rewritten instructions for this instance at the quality bar, specialized to this agent/company (else draft=null and keep discussing). Keep the body's structure; change the substance.",
-      QBAR,
+      "When the conversation has enough, return `draft` = the FULL rewritten instructions for this instance at the quality bar, specialized to this agent/company (else draft=null and keep discussing). Match the depth and structure of the GOLD-STANDARD EXAMPLE exactly.",
+      SKILL_QBAR,
     ].join("\n\n");
 
     const convo = transcript.map((t) => ({ role: t.role === "a" ? "user" as const : "assistant" as const, content: t.text }));
@@ -149,6 +143,7 @@ Deno.serve(async (req: Request) => {
           themeText ? `ACTIVE THEMES (in this skill's areas):\n${themeText}` : "",
           sigText ? `RECENT SIGNALS:\n${sigText}` : "",
           capText ? `FRONTIER CAPABILITIES (now possible to leverage):\n${capText}` : "",
+          `GOLD-STANDARD EXAMPLE (a skill at the required bar — your draft must match this depth and structure):\n${exemplarFor(isCornerstone ? "cornerstone" : "child")}`,
           "Open: the single highest-value way this skill should be tailored for this agent/company right now — or an honest 'this holds up' — with at most a few cited recommendations.",
         ].filter(Boolean).join("\n\n") },
         ...convo,
