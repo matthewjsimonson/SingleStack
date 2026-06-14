@@ -23,6 +23,7 @@
 
 import Anthropic from "npm:@anthropic-ai/sdk@0.69.0";
 import { createClient, type SupabaseClient } from "npm:@supabase/supabase-js@2";
+import { resolveModelPolicy } from "../_shared/ai_policy.ts";
 
 const MODEL = "claude-opus-4-8";
 const PRICING: Record<string, { input: number; output: number }> = {
@@ -102,7 +103,8 @@ Deno.serve(async (req: Request) => {
     childSkill = sk ?? null;
   }
   if (!childSkill) return json({ error: `workflow "${wf.name}" step 1 has no skill — attach your scoring skill to it` }, 400);
-  const model = agent.model || MODEL;
+  const pol = await resolveModelPolicy(supabase, { task: "score_capabilities", agentId: agent.id, fallback: { model: agent.model || MODEL, effort: "high" } });
+  const model = pol.model;
 
   const { data: run } = await supabase.from("agent_runs")
     .insert({ org_id: orgId, agent_id: agent.id, status: "running", input: { competitor_id: competitorId, task: "score_capabilities" }, model })
@@ -161,7 +163,7 @@ Deno.serve(async (req: Request) => {
       model, max_tokens: 3000,
       system,
       messages: [{ role: "user", content: prompt }],
-      output_config: { effort: "high", format: { type: "json_schema", schema: SCHEMA } },
+      output_config: { effort: pol.effort, format: { type: "json_schema", schema: SCHEMA } },
       // deno-lint-ignore no-explicit-any
     } as any);
 

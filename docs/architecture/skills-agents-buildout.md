@@ -171,11 +171,16 @@ instead of guessing.
         battlecards account via `agent_runs`, so no double-log). The battlecards also
         **close the `agents.model` reconciliation**: agent-scope policy supersedes the
         legacy field, falling back to `agent.model || MODEL`. Parse-verified.
-      - **Waves 3-4 — TODO**: reasoning/synthesis (`synthesize_signals`,
-        `score_capabilities`, `orchestrate_roster`, `outcome_watch`, `distill_lessons`,
-        `propose_dimensions`, `draft_decision`, `draft_how`, `run_workflow`), then
-        conversational/setup/connectors and the multi-call `agent_propose`/`agent_run`
-        (careful: streaming + advisor lenses + the agent_runs path).
+      - **Wave 3 — SHIPPED**: reasoning/synthesis — `synthesize_signals`,
+        `orchestrate_roster`, `distill_lessons`, `propose_dimensions`, `draft_decision`,
+        `draft_how` (resolver + `logUsage`), and `score_capabilities` (agent_runs path →
+        resolver only, agent-scope supersedes `agent.model`). Parse-verified.
+      - **Wave 4 — TODO**: the harder ones held back deliberately — `outcome_watch` (AI
+        call sits in a helper with no `supabase` in scope — thread it through),
+        `run_workflow` (multi-step body builder), and the multi-call streaming
+        `agent_propose` (advisor lenses + main) / `agent_run` (tool loop) on the
+        agent_runs path; plus the conversational/setup/connector tier
+        (`refine_record`, `source_recipe`, `connector_distill`, the `setup_*` phases).
     - **F2.2** — the Settings dial beside the autonomy dial: org preset + per-area /
       per-agent overrides + per-task pin, each with the implication preview. The UI
       surfaces floors (a lever at its floor is shown, not silently clamped).
@@ -216,9 +221,10 @@ instead of guessing.
     - **Agents area (the workforce home)** — per-agent config (identity/cornerstone, skills
       per decision #7, the agent's own cost policy + area alignments) AND, as its overview
       surface, the **Ecosystem** (coverage/harmony + the onboarding path + per-area cost
-      lens). Recommendation: the Ecosystem is the Agents area's default/overview, not a 4th
-      disconnected top-level nav item — honoring decision #7 and "agents are the workforce."
-      (Open IA decision — confirm before G.2.)
+      lens). **DECIDED**: the Ecosystem is the Agents area's default/overview surface, not a
+      4th disconnected top-level nav item — honoring decision #7 and "agents are the
+      workforce." The Agents area becomes the workforce home (Ecosystem overview · Roster ·
+      Skills · Cost lens).
     All three lenses read/write the same RLS-fenced rows: no surface owns a private copy of
     the policy, so spend, coverage, and autonomy stay coherent by construction.
   - **G.0 — the model (no new UI).** Define the lifecycle-stage taxonomy + the **feeder

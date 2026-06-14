@@ -20,6 +20,8 @@
 
 import Anthropic from "npm:@anthropic-ai/sdk@0.69.0";
 import { createClient, type SupabaseClient } from "npm:@supabase/supabase-js@2";
+import { logUsage } from "../_shared/ai_usage.ts";
+import { resolveModelPolicy } from "../_shared/ai_policy.ts";
 
 const MODEL = "claude-opus-4-8";
 const MAX_CHANGES = 5;       // hard cap on proposed changes per run (anti-over-rotation)
@@ -179,15 +181,17 @@ Deno.serve(async (req: Request) => {
     const userMsg = `CURRENT INTELLIGENCE (our users' needs + the market):\n${intel}\n\nTHE ROSTER (agents, their cornerstone + play skills):\n${roster}\n\nTHE WORKFLOWS THESE AGENTS RUN:\n${workflowsBlock}\n\nReturn skill changes + holds that make the agents and their workflows the best they can be for our users — exercising restraint, and NEVER proposing record-content changes.`;
 
     const anthropic = new Anthropic({ apiKey: key });
+    const pol = await resolveModelPolicy(supabase, { task: "orchestrate_roster", fallback: { model: MODEL, effort: "high" } });
     const resp = (await anthropic.messages.create({
-      model: MODEL,
+      model: pol.model,
       max_tokens: 6000,
       thinking: { type: "adaptive" },
-      output_config: { effort: "high", format: { type: "json_schema", schema: SCHEMA } },
+      output_config: { effort: pol.effort, format: { type: "json_schema", schema: SCHEMA } },
       system: [{ type: "text", text: system, cache_control: { type: "ephemeral" } }],
       messages: [{ role: "user", content: userMsg }],
       // deno-lint-ignore no-explicit-any
     } as any)) as Anthropic.Message;
+    await logUsage(supabase, { task: "orchestrate_roster", model: pol.model, usage: resp.usage });
 
     const block = resp.content.find((b) => b.type === "text");
     if (!block || block.type !== "text") throw new Error("no recommendations returned");
