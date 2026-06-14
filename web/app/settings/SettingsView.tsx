@@ -10,6 +10,7 @@ import { SOURCE_CATALOG, type SourceDef } from "@/lib/sources";
 import { loadDemoData, clearDemoIntel } from "@/lib/demoSeed";
 import TeamManager from "@/components/TeamManager";
 import TokenUsage from "@/components/TokenUsage";
+import CostDial from "@/components/CostDial";
 
 type Source = { id: string; label: string; icon: string; origin: string; kind: string; status: string };
 
@@ -18,6 +19,7 @@ const SETTINGS_SECTIONS = [
   { key: "team", label: "Team & access" },
   { key: "sources", label: "Sources & connectors" },
   { key: "hitl", label: "Review & autonomy" },
+  { key: "ai", label: "AI & cost" },
   { key: "security", label: "Security & audit" },
 ] as const;
 
@@ -266,6 +268,10 @@ export default function SettingsView() {
               </div>
               <div className="t-sub t-muted" style={{ fontSize: 11.5, marginTop: 12 }}><strong>Records</strong> &amp; <strong>Intelligence</strong> are enforced now — on Autonomous, agent proposals auto-ratify and synthesis auto-creates themes (audited). <strong>Automations</strong> is recorded and honored as it rolls out. Untrusted / imported content is always screened and queued, regardless of mode.</div>
             </Section>
+          </>)}
+
+          {section === "ai" && (<>
+            <CostDial />
             <TokenUsage />
           </>)}
 

@@ -19,7 +19,9 @@
 // "quality can't silently drop" guarantee, enforced at the single chokepoint.
 //
 // These exports (TASK_TIER, FLOORS, PRESET_MATRIX, MODELS) are the source of
-// truth the Settings cost-dial UI (F2.2) reuses to compute implication previews.
+// truth. The web mirrors the data blocks in web/lib/aiPolicy.ts for the cost-dial
+// UI's instant implication preview — keep the two in sync when tiers/floors/matrix
+// change (this file is authoritative at runtime).
 // ============================================================================
 
 export type Tier = "authoring" | "reasoning" | "conversational" | "extraction";

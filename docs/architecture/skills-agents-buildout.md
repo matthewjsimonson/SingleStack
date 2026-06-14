@@ -192,9 +192,21 @@ instead of guessing.
         resolve model+effort with agent-scope superseding `agent.model`, and keep their
         existing `agent_runs` accounting (no double-log). Spend is now fully measured and
         fully governable — the precondition for an honest F2.2 implication preview.
-    - **F2.2** — the Settings dial beside the autonomy dial: org preset + per-area /
-      per-agent overrides + per-task pin, each with the implication preview. The UI
-      surfaces floors (a lever at its floor is shown, not silently clamped).
+    - **F2.2a — SHIPPED**: the org cost dial. New Settings → "AI & cost" section
+      (`CostDial` + the F1 `TokenUsage` ledger moved in beside it). Pick
+      Default/Quality/Balanced/Economy at org scope (writes one `ai_policies`
+      scope='org' row directly, like the autonomy dial writes `review_policies`;
+      delete-then-insert since the org-scope uniqueness is a partial index). Live
+      **implication preview**: re-prices the last 30 days of `ai_usage` (tier-tagged)
+      at each preset's model — exact for the model swap; effort shown per tier but not
+      priced (labelled directional). Per-tier breakdown surfaces the resolved
+      (model, effort) and an **"at floor"** chip (the clamp is shown, never hidden).
+      Catalog logic mirrored in `web/lib/aiPolicy.ts` (sync-noted both ways; the edge
+      `_shared/ai_policy.ts` stays authoritative at runtime); `TokenUsage` now draws
+      its task labels from the same single source.
+    - **F2.2b — TODO**: scoped overrides — per-agent and per-task pins (reuse the
+      re-pricing helper, re-pricing that agent's / task's own usage incl. the
+      `agent_runs` path). Per-**area** is the Ecosystem's lens (Phase G).
     - **F2.3 (deferred)** — advanced levers per decision #8: `max_tokens` cap,
       grounding-depth, task-budget. Caching stays enforced-on (pure win, not a dial).
     Build E (and beyond) reading this dial.

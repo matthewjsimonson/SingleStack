@@ -6,16 +6,15 @@
 import { useCallback, useEffect, useState } from "react";
 import { createClient } from "@/lib/supabase/client";
 import { Section } from "@/components/ui";
+import { TASK_LABEL as POLICY_TASK_LABEL } from "@/lib/aiPolicy";
 
 type Row = { task: string; model: string | null; input_tokens: number | null; output_tokens: number | null; cost_usd: number | null };
 type Agg = { calls: number; cost: number; tokens: number };
 
 const usd = (n: number) => `$${n < 0.01 && n > 0 ? n.toFixed(4) : n.toFixed(2)}`;
 const toks = (n: number) => (n >= 1_000_000 ? `${(n / 1_000_000).toFixed(1)}M` : n >= 1_000 ? `${(n / 1_000).toFixed(1)}k` : String(n));
-const TASK_LABEL: Record<string, string> = {
-  tailor_skill: "Tailor skill", draft_skill: "Create skill", draft_agent: "Create agent",
-  evolve_draft: "Draft (evolve)", evolve_skills: "Evolve from signals", "agent run": "Agent runs",
-};
+// One label source (web/lib/aiPolicy) + the agent_runs merge bucket.
+const TASK_LABEL: Record<string, string> = { ...POLICY_TASK_LABEL, "agent run": "Agent runs" };
 
 export default function TokenUsage() {
   const supabase = createClient();
@@ -68,7 +67,7 @@ export default function TokenUsage() {
 
   return (
     <Section label="AI & token management">
-      <div className="t-sub t-muted" style={{ fontSize: 12.5, marginBottom: 12 }}>Where your AI spend goes, across every task and model. Controls to tune model, effort, and caps per task — with the cost/quality implication of each lever — come next.</div>
+      <div className="t-sub t-muted" style={{ fontSize: 12.5, marginBottom: 12 }}>Where your AI spend goes, across every task and model — the ground truth the dial above re-prices when you change a preset.</div>
       {loading ? <div className="t-sub t-muted">Loading…</div> : (
         <>
           <div className="row gap-2" style={{ marginBottom: "var(--sp-3)", flexWrap: "wrap" }}>
