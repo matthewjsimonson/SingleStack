@@ -16,6 +16,8 @@
 
 import Anthropic from "npm:@anthropic-ai/sdk@0.69.0";
 import { createClient, type SupabaseClient } from "npm:@supabase/supabase-js@2";
+import { logUsage } from "../_shared/ai_usage.ts";
+import { resolveModelPolicy } from "../_shared/ai_policy.ts";
 
 const MODEL = "claude-opus-4-8";
 const CORS = {
@@ -97,10 +99,11 @@ Deno.serve(async (req: Request) => {
 
     const convo = transcript.map((t) => ({ role: t.role === "a" ? "user" as const : "assistant" as const, content: t.text }));
     const anthropic = new Anthropic({ apiKey: key });
+    const pol = await resolveModelPolicy(supabase, { task: "refine_record", fallback: { model: MODEL, effort: "medium" } });
     const resp = (await anthropic.messages.create({
-      model: MODEL, max_tokens: 2500,
+      model: pol.model, max_tokens: 2500,
       thinking: { type: "adaptive" },
-      output_config: { effort: "medium", format: { type: "json_schema", schema: SCHEMA } },
+      output_config: { effort: pol.effort, format: { type: "json_schema", schema: SCHEMA } },
       system: [{ type: "text", text: system, cache_control: { type: "ephemeral" } }],
       messages: [
         { role: "user", content: [
@@ -114,6 +117,7 @@ Deno.serve(async (req: Request) => {
       ],
       // deno-lint-ignore no-explicit-any
     } as any)) as Anthropic.Message;
+    await logUsage(supabase, { task: "refine_record", model: pol.model, usage: resp.usage });
 
     const text = resp.content.filter((b) => b.type === "text").map((b) => (b as { text: string }).text).join("");
     return json(JSON.parse(text));
