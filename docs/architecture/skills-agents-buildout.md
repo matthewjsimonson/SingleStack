@@ -129,11 +129,46 @@ instead of guessing.
   - **F1 — SHIPPED**: `ai_usage` ledger + shared `logUsage` (one source of PRICING)
     wired into the generators; Settings "AI & token management" shows spend by task
     and model.
-  - **F2** — the cost dial: an `ai_policies` table (per org, per task → model / effort /
-    max_tokens / caching / grounding depth + quality/economy presets), generators read
-    it, and each lever shows its **implication** (projected cost delta + a quality note)
-    from the price table + recent usage. Guard-railed defaults so quality can't silently
-    drop. Build E (and beyond) reading this dial.
+  - **F2** — the cost dial: governed cost-↔-quality **alignment**, not a budget cap.
+    Per **task / agent / solution-area**, decide *which model* and *what effort* an AI
+    action uses, so spend tracks the value of the work. Prescriptive in both directions:
+    stop Opus/high being burned on a throwaway extraction, AND stop a customer-facing
+    authoring task being starved into garbage. Three composable concepts:
+    - **Tiers** (what the work *needs*) — every task is classified by stakes
+      (`authoring | reasoning | conversational | extraction`). The tier carries the
+      **quality floor**: the minimum (model, effort) below which output degrades. This
+      is the prescriptive backbone. (Code: `_shared/ai_policy.ts → TASK_TIER`, `FLOORS`.)
+    - **Presets** (how much to *spend*) — `quality | balanced | economy` map each tier
+      to a (model, effort) via a guard-railed matrix; `custom` pins raw levers.
+      `balanced` is the recommended default: holds high-stakes tiers at today's quality
+      (opus/high) while economizing the cheap tiers. (`PRESET_MATRIX`.)
+    - **Scopes** (where it *applies*) — one policy row per scope target; resolution is
+      **most-specific-wins: task-pin > agent > area > org**. Absent ⇒ the caller's own
+      current default (the non-regression guarantee).
+    The **floor is clamped at resolve time** (`resolveModelPolicy`), so execution can
+    never run below a tier's floor regardless of how a row was written — "quality can't
+    silently drop," enforced at the single chokepoint. The dial UI shows each lever's
+    **implication** (last-30-day `ai_usage` re-priced under the candidate; model swap is
+    exact from `PRICING`, effort is directional) + a quality note.
+    - **F2.0 — SHIPPED**: substrate, zero behavior change. `ai_policies` table
+      (`20260614040000`; per-org, RLS, partial-unique per scope target, structural
+      CHECKs; joins the `review_policies`/`ai_usage` cross-cutting family) +
+      `_shared/ai_policy.ts` (tier map, preset matrix, floors, `resolveModelPolicy` with
+      floor-default fallback) + `ai_policy.test.ts` (precedence, clamp, matrix≥floor
+      invariant — all green). Nothing reads it yet.
+    - **F2.1** — wire the chokepoint into all 26 generators in verifiable waves: replace
+      the hardcoded `model`/`effort` with `resolveModelPolicy(..., { fallback: <today's
+      values> })` (provably non-regressing) AND close the `logUsage` gap (5/26 → 26/26),
+      since the implication preview is only honest if every call is measured. Each
+      generator's `task` id is registered in `TASK_TIER`.
+    - **F2.2** — the Settings dial beside the autonomy dial: org preset + per-area /
+      per-agent overrides + per-task pin, each with the implication preview. The UI
+      surfaces floors (a lever at its floor is shown, not silently clamped).
+    - **F2.3 (deferred)** — advanced levers per decision #8: `max_tokens` cap,
+      grounding-depth, task-budget. Caching stays enforced-on (pure win, not a dial).
+    Build E (and beyond) reading this dial.
+    - *Open reconciliation:* `agents.model` (legacy free-text runtime field) vs the
+      per-agent cost policy — F2.1/F2.2 decide whether agent-scope policy supersedes it.
 
 ## Control layer (done, underpins everything)
 - **C1** conflict-aware `accept_proposal` (optimistic concurrency, race-safe). ✅
