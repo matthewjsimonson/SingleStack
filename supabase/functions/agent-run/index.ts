@@ -22,6 +22,7 @@
 
 import Anthropic from "npm:@anthropic-ai/sdk@0.69.0";
 import { createClient, type SupabaseClient } from "npm:@supabase/supabase-js@2";
+import { resolveModelPolicy } from "../_shared/ai_policy.ts";
 
 const DEFAULT_MODEL = "claude-opus-4-8";
 const MAX_STEPS = 8; // bounded agent loop — stability over open-endedness
@@ -152,7 +153,8 @@ Deno.serve(async (req: Request) => {
   const { data: agent } = await supabase.from("agents").select("id, org_id, name, role, model, system_prompt").eq("key", agent_key).eq("is_active", true).maybeSingle();
   if (!agent) return json({ error: `no active agent '${agent_key}'` }, 404);
   const orgId = agent.org_id as string;
-  const model = (agent.model as string) || DEFAULT_MODEL;
+  const pol = await resolveModelPolicy(supabase, { task: "agent_run", agentId: agent.id as string, fallback: { model: (agent.model as string) || DEFAULT_MODEL, effort: "high" } });
+  const model = pol.model;
 
   // The agent's CORNERSTONE skills only — names + descriptions (progressive
   // disclosure; full body loads on demand via read_skill). Cornerstones are the
@@ -334,6 +336,7 @@ Deno.serve(async (req: Request) => {
       model,
       max_tokens: 8000,
       thinking: { type: "adaptive", display: "summarized" }, // summarized → reasoning text is actually present on Opus 4.8
+      output_config: { effort: pol.effort },
       system: [{ type: "text", text: systemText, cache_control: { type: "ephemeral" } }],
       tools: useMcp ? [...baseTools, ...mcpToolsets] : baseTools,
       ...(useMcp ? { mcp_servers: mcpServers } : {}),

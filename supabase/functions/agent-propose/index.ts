@@ -21,6 +21,7 @@
 
 import Anthropic from "npm:@anthropic-ai/sdk@0.69.0";
 import { createClient, type SupabaseClient } from "npm:@supabase/supabase-js@2";
+import { resolveModelPolicy } from "../_shared/ai_policy.ts";
 const DEFAULT_CLAUDE_MODEL = "claude-opus-4-8";
 const DEFAULT_TOP_K = 6;
 
@@ -140,7 +141,8 @@ Deno.serve(async (req: Request) => {
   if (!agent) return json({ error: `no active agent with key '${primaryKey}'` }, 404);
 
   const orgId = agent.org_id as string;
-  const model = (agent.model as string) || DEFAULT_CLAUDE_MODEL;
+  const pol = await resolveModelPolicy(supabase, { task: "agent_propose", agentId: agent.id as string, fallback: { model: (agent.model as string) || DEFAULT_CLAUDE_MODEL, effort: "high" } });
+  const model = pol.model;
 
   // ---- open an agent_runs record (running) ----------------------------------
   const { data: run, error: runErr } = await supabase
@@ -273,10 +275,12 @@ Deno.serve(async (req: Request) => {
         advSkillsBlock,
       ].join("\n");
       try {
+        const advPol = await resolveModelPolicy(supabase, { task: "agent_propose", agentId: adv.id as string, fallback: { model: (adv.model as string) || DEFAULT_CLAUDE_MODEL, effort: "high" } });
         const advMsg = (await anthropic.messages.create({
-          model: (adv.model as string) || DEFAULT_CLAUDE_MODEL,
+          model: advPol.model,
           max_tokens: 1200,
           thinking: { type: "adaptive" },
+          output_config: { effort: advPol.effort },
           system: [{ type: "text", text: advSystem, cache_control: { type: "ephemeral" } }],
           messages: [{ role: "user", content: recordIntelText }],
           // deno-lint-ignore no-explicit-any
@@ -295,7 +299,7 @@ Deno.serve(async (req: Request) => {
       model,
       max_tokens: 24000,
       thinking: { type: "adaptive", display: "summarized" }, // summarized → reasoning text is populated on Opus 4.8
-      output_config: { effort: "high", format: { type: "json_schema", schema: PROPOSAL_SCHEMA } },
+      output_config: { effort: pol.effort, format: { type: "json_schema", schema: PROPOSAL_SCHEMA } },
       system: [{ type: "text", text: systemText, cache_control: { type: "ephemeral" } }],
       messages: [{ role: "user", content: userText }],
     };
@@ -396,7 +400,7 @@ Deno.serve(async (req: Request) => {
       max_tokens: 24000,
       thinking: { type: "adaptive" },
       output_config: {
-        effort: "high",
+        effort: pol.effort,
         format: { type: "json_schema", schema: PROPOSAL_SCHEMA },
       },
       system: [{ type: "text", text: systemText, cache_control: { type: "ephemeral" } }],
