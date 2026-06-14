@@ -25,8 +25,46 @@ layer is **ungoverned**, and it shows:
   can't draw it.
 
 Cohesion is the whole game in orchestration. So the fix is structural, not cosmetic:
-**make areas a governed knowledge layer, and make a workflow's footprint a queryable
-fact derived from real step rows.** Then the surface can be prescriptive.
+**make areas a governed *orchestration vocabulary*, and make a workflow's footprint a
+queryable fact derived from real step rows.** Then the surface can be prescriptive.
+
+## What already exists — areas are a lens, not a new knowledge layer
+
+The product **already has a governed knowledge layer**, and it is well-built. Areas do
+not replace it; they sit over it as the orchestration lens.
+
+```
+product_records / gtm_records                         the hubs
+  └─ record_fields (field_key, label, value, section) the content — FIELD-LEVEL
+       ├─ proposals → proposal_changes  (target a record_field)   proposed change
+       ├─ ratifications / field_revisions (approve + version)     trust + audit
+       └─ sources                                                 provenance
+  └─ signals (evidence; today: gtm_record only)
+```
+
+This layer is **deliberately domain-agnostic**: `record_fields.section` is *free text*
+("section names are data, not a fixed enum"), fields are client-defined, no migration
+to add them. We honor that. So:
+
+- **The record stays domain-agnostic.** Areas never replace `record_fields.section`.
+  Each area instead **declares the section(s) it maintains** — a governed bridge
+  (`area_sections`), reconciled to real section values. That is the only coupling
+  between the opinionated PLG operating-model and the client-configurable content.
+- **Orchestration unifies on areas** — `connections.area_id`, `skill_areas`,
+  `workflow_steps.area_id`. Who-does-what is exactly where a governed vocabulary
+  belongs (and replaces the loose free-text `connections.area`).
+- **Proposals + ratifications stay field-level** and are *attributed* to an area via
+  the field's section. Coverage then reads: "for this area — are its sections
+  maintained, its proposals worked, its signals ingested, and by which agent/skill/
+  workflow?" Cohesion by attribution, not a parallel vocabulary.
+- **Signals become bi-circle.** Today `signals.gtm_record_id` is `not null` (GTM-only).
+  We extend signals to product (nullable `product_record_id` + the one-parent CHECK
+  that `record_fields`/`proposals` already use) and add an optional `area_id` tag, so
+  the build circle has a first-class evidence substrate uniform with GTM.
+
+So the accurate name for this work is the **governed orchestration vocabulary**: the
+lens that lets agents, skills, workflows, proposals, and signals all be reasoned about
+through one set of areas — *over* the knowledge layer that already governs the content.
 
 ## The architecture, in one picture
 
@@ -47,11 +85,12 @@ fact derived from real step rows.** Then the surface can be prescriptive.
    PRESCRIPTION = the specific missing piece + the action that closes it (HITL)
 ```
 
-## 1) The governed knowledge layer — `areas` + `area_tasks`
+## 1) The governed orchestration vocabulary — `areas` + `area_tasks` (the lens)
 
 The PLG taxonomy (`plg-ecosystem.md`) stops being hardcoded TypeScript and becomes
-**data** — a lookup table, per schema §7 (display names, ordering, metadata) and §1.1
-(the spine everything hangs from).
+**data** — a lookup table, per schema §7 (display names, ordering, metadata). It is the
+*orchestration* spine (who-does-what), bound to the content layer via `area_sections`
+— not a second copy of the record's structure.
 
 ```
 areas                         -- the canonical PLG areas (the vocabulary)
@@ -78,11 +117,14 @@ area_tasks                    -- the unit a workflow step covers (promoted per �
 Then the existing loose references become **real FKs** (§1.5), so the vocabulary is
 enforced, not hoped-for:
 
-- `connections.area_id → areas(id)` (replacing the free-text `area`).
+- `connections.area_id → areas(id)` (replacing the free-text `connections.area`).
 - `skill_areas (skill_id, area_id)` — a join table replacing `skills.areas jsonb`
   (§8: jsonb is not for relationships; §4: it's queried independently — "which child
   skills serve this area?").
-- `signals.area_id → areas(id)` (it already has `scope`/`category`; this sharpens it).
+- `area_sections (area_id, section)` — the bridge to the content layer: which
+  `record_fields.section`(s) each area maintains (1-to-many; reconciled to real values).
+- `signals`: add nullable `product_record_id` + the one-parent CHECK (make it bi-circle)
+  and an optional `area_id` tag, so signals are attributable to the area they feed.
 
 > **Reconciliation note (load-bearing):** this migration must resolve the existing
 > `"product"`/`"products"` drift to one canonical key set as it backfills. That is the
@@ -173,9 +215,12 @@ orchestration trustworthy.
 
 1. **P1 — knowledge layer (additive, safe).** Create `areas` + `area_tasks` (enum
    `area_circle`), seed the PLG taxonomy from `plg-ecosystem.md`. RLS in-migration.
-2. **P2 — bind the vocabulary (reconcile + backfill).** `skill_areas` join;
-   `connections.area_id`, `signals.area_id`; resolve the `"product"/"products"` drift;
-   update reads/writes. The careful one — its own migration + verify.
+2. **P2 — bind orchestration to areas (reconcile + backfill).** `skill_areas` join;
+   `connections.area_id` (reconcile the free-text `area`, incl. `"product"/"products"`);
+   `area_sections` bridge; extend `signals` to product (`product_record_id` + one-parent
+   CHECK + optional `area_id`); wire `seed_plg_areas` into org bootstrap + backfill
+   existing orgs. The careful one — reshapes shipped tables; its own migration set +
+   verify. **Pause here to run through the deploy pipeline before P3+.**
 3. **P3 — orchestration model.** `workflow_steps` (+ enum); backfill from
    `workflows.steps jsonb`; repoint `run-workflow` + `orchestrate-roster`; keep a
    compatibility read until cut over.
