@@ -1,13 +1,14 @@
 "use client";
 
-// The Ecosystem (Phase G) — the agent-workforce home, as a COVERAGE map of the
-// product-led-growth process (docs/architecture/plg-ecosystem.md). Two record-
-// centered circles — Build/Product (the PM areas; execution is the engine) and
-// GTM (the PMM areas, across the flywheel) — each area answering, per task: is
-// there an agent, with the right cornerstone + child-skills, running the right
-// workflow, to actually do this? Gap-first and build-forward, because a gap in a
-// feeder stalls the flywheel. Status is always answerable (singlestack-ui §1.5):
-// the banner says what's happening; every gap/partial carries a control to act.
+// The Ecosystem (Phase G) — the agent-workforce home, as ONE view of the product-
+// led-growth MOTION. A single heart shows both records — Build/Product (the PM
+// engine, where execution with frontier models is the differentiator) and GTM (the
+// PMM flywheel) — and the loop between them: product builds fuel growth; usage/PQL
+// signals feed back into the product. Filter down to either circle exclusively.
+// Each area answers, per task: is there an agent, with the right cornerstone +
+// child-skills, running the right workflow, to actually do this? Gap-first and
+// build-forward — a gap in a feeder stalls the flywheel. Status is always
+// answerable (singlestack-ui §1.5); every gap/partial carries a control to act.
 // Reads the verified model (web/lib/ecosystem.ts) over RLS-fenced data.
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { createClient } from "@/lib/supabase/client";
@@ -18,6 +19,7 @@ import {
 } from "@/lib/ecosystem";
 
 type Input = Parameters<typeof computeCoverage>[0];
+type Lens = "all" | "product" | "gtm";
 
 const statusTone = (s: AreaStatus) =>
   s === "covered" ? { fill: "var(--gn-fill)", text: "var(--gn-text)", label: "Covered" }
@@ -34,6 +36,65 @@ const fixFor = (area: Area, c: Check): { href: string; label: string } =>
   : c === "cornerstone" ? { href: "/agents?tab=agents", label: "Give it a cornerstone" }
   : c === "skills" ? { href: "/agents?tab=skills", label: "Add a child skill" }
   : { href: "/agents?tab=workflows", label: "Create a workflow" };
+
+const tally = (areas: AreaCoverage[]) => ({
+  covered: areas.filter((a) => a.status === "covered").length,
+  partial: areas.filter((a) => a.status === "partial").length,
+  gap: areas.filter((a) => a.status === "gap").length,
+  total: areas.length,
+});
+
+// A thin coverage bar — green covered, amber partial, red gap. Data appears; no spring.
+function CoverageBar({ areas }: { areas: AreaCoverage[] }) {
+  const t = tally(areas);
+  const seg = (n: number, color: string) =>
+    n > 0 ? <span style={{ flex: n, background: color, height: "100%" }} /> : null;
+  return (
+    <div style={{ display: "flex", height: 6, borderRadius: 999, overflow: "hidden", background: "var(--surface-2, var(--well))", gap: 1 }}>
+      {seg(t.covered, "var(--gn-text)")}
+      {seg(t.partial, "var(--am)")}
+      {seg(t.gap, "var(--rd)")}
+    </div>
+  );
+}
+
+// One record core inside the heart: the record, its coverage, what it is.
+function Core({ title, role, areas, engine, active, onClick }: {
+  title: string; role: string; areas: AreaCoverage[]; engine?: boolean; active: boolean; onClick: () => void;
+}) {
+  const t = tally(areas);
+  return (
+    <button
+      onClick={onClick}
+      className="card card-pad"
+      style={{
+        flex: "1 1 240px", minWidth: 0, textAlign: "left", cursor: "pointer", background: "var(--surface-0, var(--bg))",
+        borderColor: active ? "var(--ac-text)" : "var(--border)", borderWidth: active ? 1.5 : 1,
+        boxShadow: active ? "0 0 0 3px var(--ac-fill)" : undefined, transition: "border-color var(--dur-fast, 120ms), box-shadow var(--dur-fast, 120ms)",
+      }}
+    >
+      <div className="row gap-2" style={{ alignItems: "center", marginBottom: 4, flexWrap: "wrap" }}>
+        <span style={{ fontWeight: 740, fontSize: 14 }}>{title}</span>
+        {engine && <span className="chip" style={{ fontSize: 9, background: "var(--ac-fill)", color: "var(--ac-text)", fontWeight: 700 }}>engine</span>}
+      </div>
+      <div className="t-sub t-muted" style={{ fontSize: 11.5, lineHeight: 1.4, marginBottom: 9 }}>{role}</div>
+      <CoverageBar areas={areas} />
+      <div className="t-mono-xs t-muted" style={{ fontSize: 10.5, marginTop: 7 }}>
+        {t.covered}/{t.total} covered{t.gap ? ` · ${t.gap} gap${t.gap === 1 ? "" : "s"}` : ""}{t.partial ? ` · ${t.partial} partial` : ""}
+      </div>
+    </button>
+  );
+}
+
+// The motion connector between the two cores — the PLG loop, made legible.
+function Motion() {
+  return (
+    <div className="t-mono-xs t-muted" style={{ flex: "0 0 auto", display: "flex", flexDirection: "column", justifyContent: "center", gap: 6, fontSize: 10, padding: "0 4px", minWidth: 92, textAlign: "center" }}>
+      <span style={{ color: "var(--ac-text)", fontWeight: 700 }}>builds fuel growth →</span>
+      <span style={{ color: "var(--tm)" }}>← usage &amp; PQL signals</span>
+    </div>
+  );
+}
 
 function CheckDots({ cov }: { cov: AreaCoverage }) {
   return (
@@ -86,17 +147,14 @@ function AreaCard({ cov }: { cov: AreaCoverage }) {
   );
 }
 
-function Circle({ title, blurb, areas }: { title: string; blurb: string; areas: AreaCoverage[] }) {
+function FilterTab({ label, sub, active, onClick }: { label: string; sub: string; active: boolean; onClick: () => void }) {
   return (
-    <div style={{ flex: "1 1 380px", minWidth: 0 }}>
-      <div style={{ marginBottom: 8 }}>
-        <div style={{ fontWeight: 720, fontSize: 13.5 }}>{title}</div>
-        <div className="t-sub t-muted" style={{ fontSize: 11.5, lineHeight: 1.4 }}>{blurb}</div>
-      </div>
-      <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(230px, 1fr))", gap: 10 }}>
-        {areas.map((c) => <AreaCard key={c.area.key} cov={c} />)}
-      </div>
-    </div>
+    <button onClick={onClick} className="btn btn-sm" style={{
+      background: active ? "var(--ac-fill)" : "transparent", color: active ? "var(--ac-text)" : "var(--tp)",
+      borderColor: active ? "var(--ac-text)" : "var(--border)", fontWeight: active ? 700 : 540,
+    }}>
+      {label}<span className="t-mono-xs" style={{ marginLeft: 6, opacity: 0.7, fontSize: 10 }}>{sub}</span>
+    </button>
   );
 }
 
@@ -105,6 +163,7 @@ export default function Ecosystem() {
   const [data, setData] = useState<Input | null>(null);
   const [counts, setCounts] = useState({ products: 0, gtm: 0, agents: 0 });
   const [loading, setLoading] = useState(true);
+  const [lens, setLens] = useState<Lens>("all");
 
   const load = useCallback(async () => {
     const [{ data: ag }, { data: conns }, { data: agSk }, { data: sk }, { data: wf }, { count: pc }, { count: gc }] = await Promise.all([
@@ -140,7 +199,11 @@ export default function Ecosystem() {
   const noRecords = counts.products === 0 && counts.gtm === 0;
   const noAgents = counts.agents === 0;
   const ht = harmonyTone(health.harmony.status);
-  const todo = [...health.rankedGaps, ...health.rankedPartials];
+
+  // Filter the areas + the unattended list to the chosen lens (the heart stays whole).
+  const lensAreas = lens === "product" ? productCov : lens === "gtm" ? gtmCov : [...productCov, ...gtmCov];
+  const lensKeys = new Set(lensAreas.map((a) => a.area.key));
+  const todo = [...health.rankedGaps, ...health.rankedPartials].filter((c) => lensKeys.has(c.area.key));
 
   const Step = ({ n, done, title, body, href, cta }: { n: number; done: boolean; title: string; body: string; href: string; cta: string }) => (
     <div className="card card-pad" style={{ display: "flex", gap: 12, alignItems: "flex-start", opacity: done ? 0.6 : 1 }}>
@@ -155,9 +218,9 @@ export default function Ecosystem() {
 
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: "var(--sp-4)" }}>
-      {/* Harmony banner — status is always answerable */}
+      {/* The heart — both records and the PLG motion between them. */}
       <div className="card card-pad" style={{ background: ht.fill, borderColor: ht.text }}>
-        <div className="row-between" style={{ alignItems: "center", flexWrap: "wrap", gap: 8 }}>
+        <div className="row-between" style={{ alignItems: "center", flexWrap: "wrap", gap: 8, marginBottom: 12 }}>
           <div className="row gap-2" style={{ alignItems: "center", minWidth: 0 }}>
             <span style={{ width: 9, height: 9, borderRadius: 999, background: ht.text, flexShrink: 0 }} />
             <span style={{ fontWeight: 720, color: ht.text }}>{ht.label}</span>
@@ -167,6 +230,19 @@ export default function Ecosystem() {
             {health.counts.covered} covered · {health.counts.partial} partial · {health.counts.gap} gap
           </span>
         </div>
+        <div className="row" style={{ display: "flex", flexWrap: "wrap", gap: 10, alignItems: "stretch" }}>
+          <Core title="Build / Product" role="The PM engine — make the product worth growing. Execution with frontier models is the heart." areas={productCov} engine active={lens === "product"} onClick={() => setLens(lens === "product" ? "all" : "product")} />
+          <Motion />
+          <Core title="Go-to-market" role="The PMM flywheel — grow it across Acquire → Activate → Convert → Retain → Expand → Advocate." areas={gtmCov} active={lens === "gtm"} onClick={() => setLens(lens === "gtm" ? "all" : "gtm")} />
+        </div>
+      </div>
+
+      {/* Filter the motion down to one circle. */}
+      <div className="row gap-2" style={{ flexWrap: "wrap", alignItems: "center" }}>
+        <span className="t-mono-xs t-muted" style={{ fontSize: 10.5, marginRight: 2 }}>View</span>
+        <FilterTab label="The full motion" sub={`${health.counts.total}`} active={lens === "all"} onClick={() => setLens("all")} />
+        <FilterTab label="Product" sub={`${productCov.length}`} active={lens === "product"} onClick={() => setLens("product")} />
+        <FilterTab label="GTM" sub={`${gtmCov.length}`} active={lens === "gtm"} onClick={() => setLens("gtm")} />
       </div>
 
       {(noRecords || noAgents) && (
@@ -180,9 +256,9 @@ export default function Ecosystem() {
         </Section>
       )}
 
-      {/* Gap-first: what's unattended (lead with the Build engine) */}
+      {/* Gap-first: what's unattended in the current lens (lead with the Build engine). */}
       {todo.length > 0 && (
-        <Section label="What's unattended">
+        <Section label={lens === "all" ? "What's unattended" : `What's unattended · ${lens === "product" ? "Product" : "GTM"}`}>
           <div className="t-sub t-muted" style={{ fontSize: 12, marginBottom: 10 }}>Closest to the flywheel first. A gap is no agent on the area; a partial is an agent that isn't fully equipped.</div>
           <div className="stack-2">
             {todo.slice(0, 5).map((cov) => {
@@ -208,11 +284,10 @@ export default function Ecosystem() {
         </Section>
       )}
 
-      {/* The two circles */}
-      <Section label="The two circles">
-        <div className="row" style={{ display: "flex", flexWrap: "wrap", gap: "var(--sp-4)", alignItems: "flex-start" }}>
-          <Circle title="Build / Product — the PM engine" blurb="Make the product worth growing. Execution with frontier models is the heart." areas={productCov} />
-          <Circle title="Go-to-market — the PMM flywheel" blurb="Grow it across Acquire → Activate → Convert → Retain → Expand → Advocate." areas={gtmCov} />
+      {/* The areas of the current lens. */}
+      <Section label={lens === "all" ? "Every area" : lens === "product" ? "Build / Product areas" : "Go-to-market areas"}>
+        <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(230px, 1fr))", gap: 10 }}>
+          {lensAreas.map((c) => <AreaCard key={c.area.key} cov={c} />)}
         </div>
       </Section>
     </div>
