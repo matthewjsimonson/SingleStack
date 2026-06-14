@@ -218,7 +218,16 @@ instead of guessing.
     Build E (and beyond) reading this dial.
     - *Open reconciliation:* `agents.model` (legacy free-text runtime field) vs the
       per-agent cost policy — F2.1/F2.2 decide whether agent-scope policy supersedes it.
-- **G. The Ecosystem — coverage & harmony across the PLG lifecycle.** The cost dial (F2)
+- **G. The Ecosystem — coverage & harmony across the PLG lifecycle.**
+  > **RE-FRAMED (current) → see `docs/architecture/plg-ecosystem.md`.** The surface is
+  > now a **coverage map of the PLG process** — two record-centered circles (Build/Product
+  > = the PM areas, execution the engine; GTM = the PMM areas, across the flywheel), each
+  > area graded per task on agent · cornerstone · child-skills · workflow. The model lives
+  > in `web/lib/ecosystem.ts` (verified by `scripts/verify-ecosystem.mjs`, 12 checks). The
+  > G.0–G.2 spend/lifecycle notes below are the prior framing, superseded for this surface;
+  > the spend lens stays in the F2 cost dial.
+
+  The cost dial (F2)
   governs *spend per scope*; it does not, on its own, stop a user from over-committing
   agents/focus/tokens to one area while a feeder stage starves — which breaks the
   **recursive** loop (product/GTM records + agents co-evolving: Build → Ship → Sense →
