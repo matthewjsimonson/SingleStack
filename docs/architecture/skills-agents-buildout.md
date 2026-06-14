@@ -85,7 +85,10 @@ instead of guessing.
       `SkillTailorChat`, launched from an agent's attached skill. Grounded in the
       cornerstone + product record + GTM market/personas + signals/themes/capabilities;
       proposes an editable body; Apply writes via `apply_skill_evolution` → `skill_revisions`.
-    - **B.3b Create skill (template) — chat** (next).
+    - **B.3b Create skill (template) — chat — SHIPPED.** `draft-skill` edge fn +
+      `SkillCreateChat`, launched from the Skills library ("✦ Create with AI").
+      Authors a generic library template (cornerstone or child) conversationally,
+      grounded + exemplar-anchored + cited recommendations; accept inserts scope='library'.
     - **B.3c Create agent — chat** (folds into Phase C so it's not built twice).
   - **B.4 Top-down decision-tree view** (replaces the radial depiction); AI-assisted
     setup walks the tree. Real, company-grounded instance content replaces demo

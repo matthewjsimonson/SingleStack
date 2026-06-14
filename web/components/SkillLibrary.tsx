@@ -9,6 +9,7 @@ import { createClient } from "@/lib/supabase/client";
 import { getOrgId } from "@/lib/org";
 import { Section, Chip, Banner, Empty, Modal, ConfirmDialog } from "@/components/ui";
 import { Markdown } from "@/components/Markdown";
+import SkillCreateChat from "@/components/SkillCreateChat";
 
 type Skill = { id: string; key: string; name: string; description: string | null; category: string | null; instructions: string | null; source: string | null; created_at: string; kind: string | null; parent_id: string | null; areas: string[] | null; connectors: string[] | null };
 type Usage = Record<string, { count: number; agents: string[]; ids: string[] }>; // skill_id -> who uses it (names for display, ids for matching)
@@ -66,6 +67,7 @@ export default function SkillLibrary() {
   const [busy, setBusy] = useState(false);
   const [delId, setDelId] = useState<string | null>(null);
   const [attachFor, setAttachFor] = useState<Skill | null>(null);
+  const [aiOpen, setAiOpen] = useState(false);
 
   const load = useCallback(async () => {
     const [{ data: sk }, { data: as }, { data: ag }] = await Promise.all([
@@ -157,7 +159,8 @@ export default function SkillLibrary() {
           ))}
         </div>
         <div style={{ flex: 1 }} />
-        <button className="btn btn-sm" onClick={openCreate} style={{ background: "var(--ac)", color: "#fff" }}>+ New skill</button>
+        <button className="btn btn-sm" onClick={() => setAiOpen(true)} style={{ background: "var(--ac)", color: "#fff" }}>✦ Create with AI</button>
+        <button className="btn btn-secondary btn-sm" onClick={openCreate}>+ New skill</button>
       </div>
 
       {loading ? <div className="t-sub t-muted">Loading…</div>
@@ -246,6 +249,8 @@ export default function SkillLibrary() {
       </Modal>
 
       {delId && <ConfirmDialog title="Delete skill?" message="This removes the skill from the library and detaches it from every agent. This can't be undone." confirmLabel="Delete" onConfirm={doDelete} onCancel={() => setDelId(null)} />}
+
+      {aiOpen && <SkillCreateChat onCreated={load} onClose={() => setAiOpen(false)} />}
 
       <div style={{ marginTop: "var(--sp-6)" }}>
         <Section label="Tip">
