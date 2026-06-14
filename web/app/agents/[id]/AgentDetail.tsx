@@ -8,6 +8,7 @@ import { createClient } from "@/lib/supabase/client";
 import { getOrgId } from "@/lib/org";
 import { Section, Chip, Banner, BackLink, Empty, Modal } from "@/components/ui";
 import { Markdown } from "@/components/Markdown";
+import SkillTailorChat from "@/components/SkillTailorChat";
 import { CONNECTOR_CATALOG } from "@/lib/connectors";
 
 type Agent = { id: string; key: string; name: string; role: string | null; model: string | null; system_prompt: string | null; is_active: boolean; identity: string | null; mandate: string | null; principles: string | null; voice: string | null };
@@ -306,6 +307,7 @@ function Skills({ agentId, agentName, skills, attached, cornerstones, connAreas,
   const [preview, setPreview] = useState(false);
   const [connInput, setConnInput] = useState("");
   const [showImprove, setShowImprove] = useState(false);
+  const [tailorFor, setTailorFor] = useState<Skill | null>(null); // open the chat-based tailor
   const [improveAsk, setImproveAsk] = useState("");
   const [improving, setImproving] = useState(false);
 
@@ -469,6 +471,7 @@ function Skills({ agentId, agentName, skills, attached, cornerstones, connAreas,
 
       {evolving && <EvolvePanel agentId={agentId} onApplied={reload} onClose={() => setEvolving(false)} setError={setError} />}
       {histSkill && <SkillHistory skill={histSkill} onClose={() => setHistSkill(null)} />}
+      {tailorFor && <SkillTailorChat skillId={tailorFor.id} skillName={tailorFor.name} onApplied={reload} onClose={() => setTailorFor(null)} />}
 
       <Modal open={creating} onClose={() => { setCreating(false); setIntent(""); }} title={form.cornerstone ? "Set the cornerstone" : "New child skill"} width={680}>
         {/* Anthropic-style: build from scratch (AI-assisted) or start from a template. */}
@@ -535,6 +538,7 @@ function Skills({ agentId, agentName, skills, attached, cornerstones, connAreas,
         {selSkill && (<>
           <div className="row gap-2" style={{ flexWrap: "wrap", marginBottom: 12 }}>
             <button className="btn btn-secondary btn-sm" onClick={() => toggleCornerstone(selSkill.id, !selIsCorner)} title={selIsCorner ? "Demote to a child skill" : "Make this the agent's cornerstone (identity, always on)"}>{selIsCorner ? "Demote to child" : "☆ Make cornerstone"}</button>
+            <button className="btn btn-sm" onClick={() => setTailorFor(selSkill)} style={{ background: "var(--ac)", color: "#fff" }}>✦ Tailor with AI</button>
             <button className="btn btn-secondary btn-sm" onClick={() => setHistSkill(selSkill)}>History</button>
             <button className="btn btn-secondary btn-sm" onClick={() => toggle(selSkill.id, false)} style={{ color: "var(--rd-text)" }}>Detach</button>
           </div>

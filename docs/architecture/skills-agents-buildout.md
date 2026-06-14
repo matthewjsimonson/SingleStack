@@ -74,14 +74,19 @@ instead of guessing.
     relevance = `skills.areas` ∩ the agent's connected areas (`connections.area`,
     normalized product(s)/gtm) + cornerstone role. Attaching mints a tailored
     instance (A.1b).
-  - **B.3 Tailor = grounded + controlled (one engine with "update skills with AI"):**
-    tailoring / AI-updating a skill is specialized from the agent's **cornerstone**
-    (role identity) + the **product record** + the **GTM record's market & personas**
-    (`icp`, `industries`, `primary_persona`+, `positioning`, `category_pov`,
-    `differentiation`, `win_themes`, `gtm_motion`) — all C2-gated canonical records.
-    It writes through `apply_skill_evolution` → `skill_revisions` (provenance), HITL
-    under the autonomy dial. The first tailor and ongoing AI updates use the same
-    grounded, controlled path.
+  - **B.3 Chat builder — contextual conversational flows over the generator** (HITL;
+    each ends in an accept, nothing auto-applies). Mirrors `RecordRefine`/`refine-record`.
+    Every flow surfaces a **controlled, evidence-backed recommendation set** — at most
+    a few, each citing its source: **signals/themes**, the **product/GTM record**, a
+    **frontier capability** (capability-domain signals), or the **skill quality bar**
+    (best practice). "Controlled external" = the distilled quality bar (Anthropic-derived)
+    + the capability signals already in the system — **no live web calls**.
+    - **B.3a Tailor (= the grounded tailor) — SHIPPED.** `tailor-skill` edge fn +
+      `SkillTailorChat`, launched from an agent's attached skill. Grounded in the
+      cornerstone + product record + GTM market/personas + signals/themes/capabilities;
+      proposes an editable body; Apply writes via `apply_skill_evolution` → `skill_revisions`.
+    - **B.3b Create skill (template) — chat** (next).
+    - **B.3c Create agent — chat** (folds into Phase C so it's not built twice).
   - **B.4 Top-down decision-tree view** (replaces the radial depiction); AI-assisted
     setup walks the tree. Real, company-grounded instance content replaces demo
     placeholders.
