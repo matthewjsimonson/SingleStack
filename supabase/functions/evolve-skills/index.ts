@@ -163,17 +163,33 @@ Deno.serve(async (req: Request) => {
       const { data: themes } = await tQ;
       if ((themes ?? []).length) ground.push("", "RELEVANT THEMES:", ...(themes ?? []).map((t) => `• (${t.category}) ${t.title}${t.summary ? ` — ${t.summary}` : ""}${t.recommendation ? ` → ${t.recommendation}` : ""}`));
 
+      // SingleStack's skill quality bar (Anthropic Agent Skill house style). Every
+      // drafted skill — cornerstone or child — meets ALL of this. Mirrors
+      // web/skills/README.md so the in-app generator and the built-in library match.
+      const QBAR = [
+        "QUALITY BAR (the skill is not done without ALL of these — Anthropic Agent Skill style):",
+        "1) `description` = the ROUTING SIGNAL: what it PRODUCES + WHEN to use (concrete triggers) + when NOT to (name the right sibling skill instead). Trigger-rich, third person, not a tagline.",
+        "2) NAMED INPUTS: the SPECIFIC SingleStack data it reads — record fields by name, signals/themes, the capability matrix, connectors — never a vague 'use evidence'.",
+        "3) An OPERATIONAL PROCEDURE with criteria/thresholds (scores, cut-offs, order of operations) — executable, not vague principles.",
+        "4) An EXPLICIT OUTPUT shape (the exact format it returns, so it's consistent and reviewable).",
+        "5) ONE worked, domain-specific EXAMPLE.",
+        "6) A 'Reject / push back if' list — the failure modes a reviewer bounces (uncited, overclaim, abstain-when-thin, propose-not-apply).",
+        "Be specific to THIS company; no generic filler, no changelog, no hype.",
+      ].join("\n");
+
       const system = kind === "cornerstone"
         ? [
-            `You are drafting the CORNERSTONE skill — the general-purpose IDENTITY — of ${agent.name}${agent.role ? `, ${agent.role}` : ""}, an executive agent in SingleStack.`,
-            "The cornerstone defines who this agent IS and how it operates across EVERY job, tailored to this company's product truth and ICP. It is general — not task-specific.",
-            "Write a tight, usable playbook in markdown, second person ('You are…', 'You…'). Ground it in the product truth & ICP and the operator's description. Be specific to THIS company — no generic filler, no changelog.",
+            `You are drafting the CORNERSTONE skill — the always-on IDENTITY — of ${agent.name}${agent.role ? `, ${agent.role}` : ""}, an executive agent in SingleStack.`,
+            "The cornerstone defines who this agent IS and how it operates across EVERY job, tailored to this company's product truth, ICP, and GTM. It is general — not task-specific.",
+            QBAR,
+            "CORNERSTONE SHAPE (identity, same bar), second person ('You are…'). description: the role, what it owns, and that it's the always-on identity for this agent. Body sections, in order: '## What you own' · '## How you operate' (decision criteria, not platitudes) · '## Scope & handoffs' (what's YOURS vs what you DEFER, and to which other officer — this is what keeps agents from contradicting each other) · '## How you act' (propose-never-apply; abstain or escalate when evidence is thin or the call is irreversible) · '## What good looks like'.",
             "Set areas to [] (a cornerstone is general). Set connectors only if the identity clearly depends on a specific external system; otherwise [].",
           ].join("\n")
         : [
             `You are drafting a CHILD skill for ${agent.name}${agent.role ? `, ${agent.role}` : ""}, an executive agent in SingleStack.`,
-            "A child skill is task/area-specific and BUILDS ON the agent's cornerstone (its identity, shown in grounding). It gives focused direction for one kind of work — it does NOT restate the identity.",
-            "Write a tight, usable playbook in markdown, second person. Ground it in the operator's description and the area intelligence.",
+            "A child skill is task/area-specific and BUILDS ON the agent's cornerstone (its identity, shown in grounding). Focused direction for ONE kind of work — do NOT restate the identity.",
+            QBAR,
+            "CHILD BODY SECTIONS, in order: '## When to use' (bullet triggers + a 'Don't use for' line naming the right sibling skill) · '## Inputs' (named SingleStack data) · '## Procedure' (executable, with criteria/thresholds) · '## Output' (the exact shape) · '## Worked example' (one concrete example) · '## Reject / push back if'. Ground every input and the example in this company's product truth, GTM/personas, and the area intelligence provided.",
             `Set areas to the relevant surface keys from this set: ${AREA_KEYS.join(", ")}. Set connectors to any external MCP systems the skill clearly needs, by label (e.g. DeepWiki, G2, GitHub). Use [] if none.`,
           ].join("\n");
 
@@ -182,7 +198,7 @@ Deno.serve(async (req: Request) => {
       const current = (input.current ?? "").trim();
       const userMsg = [
         current
-          ? `IMPROVE THIS EXISTING ${kind === "cornerstone" ? "CORNERSTONE" : "CHILD SKILL"} PLAYBOOK — keep its intent and structure, apply the change, return the FULL improved playbook:\n${current}\n\nTHE IMPROVEMENT THE OPERATOR WANTS:\n${intent}`
+          ? `IMPROVE THIS EXISTING ${kind === "cornerstone" ? "CORNERSTONE" : "CHILD SKILL"} PLAYBOOK — keep its intent, apply the change, AND bring it fully up to the quality bar above (add any missing sections — named inputs, an operational procedure, an explicit output, a worked example, 'reject if'). Return the FULL improved playbook:\n${current}\n\nTHE IMPROVEMENT THE OPERATOR WANTS:\n${intent}`
           : `WHAT THE OPERATOR WANTS THIS ${kind === "cornerstone" ? "AGENT (its cornerstone)" : "CHILD SKILL"} TO DO/BE:\n${intent}`,
         area ? `\nTARGET AREA: ${area}` : "",
         ground.length ? `\n\nGROUNDING:\n${ground.join("\n")}` : "",
@@ -191,7 +207,7 @@ Deno.serve(async (req: Request) => {
 
       const anthropic = new Anthropic({ apiKey: key });
       const resp = (await anthropic.messages.create({
-        model: MODEL, max_tokens: 3000, thinking: { type: "adaptive" },
+        model: MODEL, max_tokens: 4000, thinking: { type: "adaptive" },
         output_config: { effort: "high", format: { type: "json_schema", schema: DRAFT_SCHEMA } },
         system: [{ type: "text", text: system, cache_control: { type: "ephemeral" } }],
         messages: [{ role: "user", content: userMsg }],
@@ -302,7 +318,7 @@ Deno.serve(async (req: Request) => {
       `You evolve the playbooks ("instructions") of ${agent.name}${agent.role ? `, ${agent.role}` : ""}, an executive agent, so they stay current with new intelligence.`,
       "",
       "REVISE an existing skill when the new intelligence (themes + signals) MEANINGFULLY changes how that EXISTING capability should be applied — same job, sharper playbook. For each skill:",
-      "• If it does: set change=true and rewrite the FULL instructions — preserve the skill's intent and structure, evolve the specifics. Keep it a tight, usable playbook (not a changelog). Cite the exact theme/signal titles in `drivers`.",
+      "• If it does: set change=true and rewrite the FULL instructions — preserve the skill's intent, evolve the specifics, and keep it at SingleStack's quality bar (a child: named inputs · an operational procedure with criteria · an explicit output · a worked example · a 'reject if' list, plus a routing-signal description; a cornerstone: what you own · how you operate · scope & handoffs · how you act · what good looks like). Not a changelog. Cite the exact theme/signal titles in `drivers`.",
       "• If it does NOT: set change=false, leave proposed_instructions empty, drivers empty, and say why in one line in rationale. Do NOT manufacture changes — a no-op is the right answer when nothing relevant shifted.",
       "Return one revisions entry per skill, keyed by the exact skill_id given.",
       "",

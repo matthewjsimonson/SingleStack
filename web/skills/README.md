@@ -66,6 +66,33 @@ into seller copy is **gtm** (Competitive messenger).
 A `general` (both-domains) skill should set `areas` spanning `product` and `gtm` so
 the agent picker offers it to officers on either side.
 
+## Quality bar (every skill meets this — the library AND the in-app generator)
+
+Skills are the product. A skill — hand-written or produced by the in-app
+builder/tailor — is not done until it has all of:
+
+1. **Description = routing signal.** What it PRODUCES + WHEN to use (concrete
+   triggers) + when NOT to (name the right skill instead). Trigger-rich, third
+   person — it's how an agent decides to reach for the skill.
+2. **Named inputs.** The specific SingleStack data it reads (fields, tables,
+   signals, connectors) — so the agent knows where to look, not "use evidence".
+3. **Operational procedure with criteria/thresholds** — an executable method
+   (scores, cut-offs, order of operations), not vague principles.
+4. **Explicit output shape** — the exact format it returns, consistent and reviewable.
+5. **A worked, domain-specific example.**
+6. **"Reject / push back if…"** — the failure modes a reviewer bounces (where the
+   guardrails live: uncited, overclaim, abstain-when-thin, propose-not-apply).
+
+**Child body:** `When to use` (+ "Don't use for") · `Inputs` · `Procedure` ·
+`Output` · `Worked example` · `Reject / push back if`.
+
+**Cornerstone (the agent's identity) — same bar, identity shape:** `What you own` ·
+`How you operate` (criteria, not platitudes) · `Scope & handoffs` (what's yours vs
+deferred, and to which officer — this is what keeps agents from contradicting each
+other) · `How you act` (propose-not-apply; abstain/escalate when evidence is thin or
+the call is irreversible) · `What good looks like`. The cornerstone description states
+the role, what it owns, and that it's the always-on identity for its agent.
+
 ## Regenerate after editing
 
 ```
