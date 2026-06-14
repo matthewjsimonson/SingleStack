@@ -103,6 +103,36 @@ Make the build a first-class, governed, orchestratable thing. Five moves, smalle
 build is provenance-linked and field/diff-ratifiable. This is the enterprise-credible
 answer to the vibe-coding risk data — and our moat.
 
+## The build lifecycle & handoff model (research-grounded)
+
+A second research pass (4 cited workstreams, 2024–2026) on *how PMs actually build,
+prototype, and hand off to frontier models* — the spec the engine (P2.5b) builds to:
+
+- **The handoff is a structured spec, not a blob.** requirements → design → tasks; EARS
+  machine-checkable acceptance criteria; **tests as the contract** ("done" is a predicate
+  CI checks); a context bundle of **lightweight identifiers** (file paths, schema entity
+  IDs) resolved just-in-time + a scoped rules file. (GitHub Spec Kit; AWS Kiro; Anthropic
+  context-engineering; Osmani.) → *SingleStack:* `build_context_links` **is** the
+  lightweight-ref bundle; the `skills` are the scoped rules; the `brief` should be
+  structured (req/design/tasks) with a pre-handoff consistency check.
+- **Prototype ≠ production.** prototype = reference implementation + a known-limitations
+  list; production still needs data model, integration, and NFRs (security/tests/a11y).
+  The gap is measured (Veracode 45% vuln; CodeRabbit AI PRs 1.7× issues). (Figma; Reforge;
+  CHI 2025.) → `builds.kind` (`prototype|production`); a productionization/NFR checklist
+  gate before merge (P2.5b).
+- **PR-centric lifecycle; the agent cannot declare itself done.** agent opens a PR →
+  reviewer pass + human review → merge → deploy. GitHub's coding agent **cannot merge/
+  approve its own work**. (GitHub Copilot agent; Graphite; merge-gate analysis.) →
+  `builds.status` lifecycle; the reviewer pass is a **required machine-readable status
+  check** (P2.5b); the HITL merge gate is non-delegable.
+- **"merged" ≠ "shipped" ≠ "verified".** shipped = a production deploy that passed
+  post-merge checks (Vercel Deployment Checks); verified = outcome metrics met → the
+  existing **`expected_outcomes`** loop. → verified-ship floor trigger (built in P2.5a.2);
+  `verified` wired to `expected_outcomes` (P2.5b).
+- **Oversight as a design property** (EU AI Act Art. 14): the surface must show the agent's
+  plan, diff, reviewer findings, and check status *at the merge moment*, so a human can
+  detect anomalies and override against automation bias — not approve blind.
+
 ## Where this sits in the plan
 
 ```
