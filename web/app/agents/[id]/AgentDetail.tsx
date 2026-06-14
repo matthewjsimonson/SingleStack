@@ -108,7 +108,8 @@ export default function AgentDetail({ agentId }: { agentId: string }) {
       </div>
 
       {tab === "overview" && <Overview agent={agent} onSaved={load} setError={setError}
-        skillsCount={attached.size} areas={connections.filter((c) => c.kind === "internal").map((c) => c.label)} alignCount={alignments.length} hasCornerstone={cornerstones.size > 0} tabTo={setTab} />}
+        skillsCount={attached.size} areas={connections.filter((c) => c.kind === "internal").map((c) => c.label)} alignCount={alignments.length} hasCornerstone={cornerstones.size > 0}
+        cornerstoneSkill={skills.find((s) => attached.has(s.id) && cornerstones.has(s.id)) ?? null} childSkills={skills.filter((s) => attached.has(s.id) && !cornerstones.has(s.id))} tabTo={setTab} />}
       {tab === "skills" && <Skills agentId={agentId} agentName={agent.name} skills={skills} attached={attached} cornerstones={cornerstones} connAreas={connections.filter((c) => c.kind === "internal").map((c) => c.area).filter((a): a is string => !!a)} reload={load} setError={setError} />}
       {tab === "scope" && <Scope agentId={agentId} connections={connections} alignments={alignments} initiatives={initiatives} workstreams={workstreams} reload={load} setError={setError} />}
       {tab === "workflows" && <Workflows workflows={agentWorkflows} />}
@@ -133,7 +134,7 @@ function composeCornerstone(w: { identity: string; mandate: string; principles: 
   }).filter(Boolean).join("\n\n");
 }
 
-function Overview({ agent, onSaved, setError, skillsCount, areas, alignCount, hasCornerstone, tabTo }: { agent: Agent; onSaved: () => void; setError: (s: string | null) => void; skillsCount: number; areas: string[]; alignCount: number; hasCornerstone: boolean; tabTo: (t: Tab) => void }) {
+function Overview({ agent, onSaved, setError, skillsCount, areas, alignCount, hasCornerstone, cornerstoneSkill, childSkills, tabTo }: { agent: Agent; onSaved: () => void; setError: (s: string | null) => void; skillsCount: number; areas: string[]; alignCount: number; hasCornerstone: boolean; cornerstoneSkill: Skill | null; childSkills: Skill[]; tabTo: (t: Tab) => void }) {
   const supabase = createClient();
   const [role, setRole] = useState(agent.role ?? "");
   const [model, setModel] = useState(agent.model ?? "claude-opus-4-8");
@@ -211,10 +212,26 @@ function Overview({ agent, onSaved, setError, skillsCount, areas, alignCount, ha
       </Section>
 
       {hasCornerstone ? (
-        <Section label="Core identity">
+        <Section label="Overview" action={<button className="btn btn-secondary btn-sm" onClick={() => tabTo("skills")}>Tailor / edit →</button>}>
+          {/* The agent's "resume", derived LIVE from its cornerstone + skills — so it's
+              always current and you can read/QA/tailor the agent at a glance. */}
           <div className="card card-pad">
-            <div className="t-sub" style={{ fontSize: 12.5, lineHeight: 1.5 }}>This agent&rsquo;s identity is its <strong>★ cornerstone skill</strong> — the always-on profile the runtime uses on every job. Edit it on the <strong>Skills</strong> tab (open the cornerstone, or use <strong>✦ Tailor with AI</strong>). The legacy identity windows are retired now that the cornerstone is the single source of identity.</div>
-            <div className="row gap-2" style={{ marginTop: 10 }}><button className="btn btn-sm" onClick={() => tabTo("skills")} style={{ background: "var(--ac)", color: "#fff" }}>Go to Skills →</button></div>
+            <div className="t-label" style={{ color: "var(--tm)" }}>Identity</div>
+            <div style={{ fontSize: 14.5, fontWeight: 660, marginTop: 2 }}>{agent.name}{agent.role ? ` · ${agent.role}` : ""}</div>
+            {cornerstoneSkill?.description && <div className="t-sub" style={{ marginTop: 4, lineHeight: 1.5 }}>{cornerstoneSkill.description}</div>}
+
+            <div className="t-label" style={{ color: "var(--tm)", marginTop: 18 }}>Capabilities <span className="t-mono-xs t-muted">({childSkills.length})</span></div>
+            {childSkills.length === 0
+              ? <div className="t-sub t-muted" style={{ fontSize: 12.5, marginTop: 4 }}>No skills attached yet — add or create them on the Skills tab.</div>
+              : <div className="stack-2" style={{ marginTop: 6 }}>
+                  {childSkills.map((s) => (
+                    <div key={s.id} className="card card-pad" style={{ borderLeft: "2px solid var(--vl)", padding: "8px 12px" }}>
+                      <div style={{ fontSize: 13, fontWeight: 620 }}>{s.name}{s.category ? <span className="t-mono-xs t-muted"> · {s.category}</span> : null}</div>
+                      {s.description && <div className="t-sub t-muted" style={{ fontSize: 12, marginTop: 2, lineHeight: 1.4 }}>{s.description}</div>}
+                    </div>
+                  ))}
+                </div>}
+            <div className="t-mono-xs t-muted" style={{ marginTop: 12 }}>Derived live from this agent&rsquo;s cornerstone + skills — it stays current as you tailor them.</div>
           </div>
         </Section>
       ) : (
