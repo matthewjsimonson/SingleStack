@@ -276,12 +276,18 @@ instead of guessing.
       recency) and **governance mode** (the `ai_policies`/`review_policies` per cell)
       layer in when G.2 wires real reads — the function signature already takes the
       inputs it needs.
-  - **G.1 — health & harmony signals.** Classify each cell: `covered | thin | uncovered`,
-    `starved | balanced | over-committed` (spend/attention share vs the loop's needs),
-    `fresh | stale`. **Recursion-aware:** flag a *loop risk* when a feeder stage is
-    starved/stale/uncovered while a downstream stage is over-invested — the specific
-    failure the dial alone can't catch. Thresholds are guard-railed and explainable, not
-    magic numbers.
+  - **G.1 — SHIPPED (classification, no UI).** `classifyBalance` in `lifecycle.ts`:
+    **stage status** (`active | quiet | empty` — quiet = had spend but >14d stale, the
+    distinction that separates "going dark" from "never run"); **area status**
+    (`over-committed | balanced | under-invested | neglected | uncovered` — the
+    over-commit rule is absolute-majority OR a fair-share gap, robust even at 2 areas
+    where a fair-multiple can't fire); **ranked loop-risks** (severity = loop-spine
+    weight × what-it-feeds share × empty-worse-than-stale, with `high|medium|low` and a
+    plain-English message — "Validate is dark while Build is your busiest stage —
+    outcomes aren't feeding back, so the loop can't learn"); and an overall **harmony**
+    read (`healthy | watch | at-risk`) with an explainable headline. Thresholds are
+    guard-railed + stated, not magic. Verified by `scripts/verify-lifecycle.mjs`
+    (12 checks, green) — durable, like the resolver tests.
   - **G.2 — the living surface.** A breathing ecosystem view (its own area of the app,
     not a Settings tab): the balance map, the cost dial woven in (adjust a scope and see
     coverage/harmony move), and loop-risk alerts. Reuses the implication-preview engine.

@@ -158,3 +158,79 @@ export function computeBalance(input: BalanceInput) {
   const totalSpend = input.usage.reduce((s, u) => s + (u.cost_usd ?? 0), 0) + (input.runs ?? []).reduce((s, r) => s + (r.cost_usd ?? 0), 0);
   return { stages, areas: Object.fromEntries(areas), loopRisks, totalSpend, nowMs: now };
 }
+
+// ============================================================================
+// G.1 — health & harmony classification. Turns the raw balance into explainable,
+// ranked signals: which stages are dark, where the workforce is over-committed
+// vs neglected, and which loop-risks actually threaten the recursion. Plain
+// English on purpose — this copy feeds the G.2 surface and the G.3 rebalance
+// agent. Thresholds are guard-railed and stated, not magic.
+// ============================================================================
+export type StageStatus = "active" | "quiet" | "empty";
+export type AreaStatus = "over-committed" | "balanced" | "under-invested" | "neglected" | "uncovered";
+export type Harmony = "healthy" | "watch" | "at-risk";
+export type RiskLevel = "high" | "medium" | "low";
+
+const ACTIVE_WINDOW = 14 * 864e5; // activity within 14d = "active"
+
+export type Balance = ReturnType<typeof computeBalance>;
+
+export function classifyBalance(b: Balance) {
+  const now = b.nowMs;
+  const isLoop = (s: Stage) => STAGE_META[s].kind === "loop";
+  const stageStatus = (s: Stage): StageStatus => {
+    const c = b.stages[s];
+    if (c.spend <= 0) return "empty";
+    return c.lastAtMs != null && now - c.lastAtMs <= ACTIVE_WINDOW ? "active" : "quiet";
+  };
+  const stageHealth = {} as Record<Stage, { status: StageStatus; spend: number; lastAtMs: number | null; loopCritical: boolean }>;
+  for (const s of STAGES) stageHealth[s] = { status: stageStatus(s), spend: b.stages[s].spend, lastAtMs: b.stages[s].lastAtMs, loopCritical: isLoop(s) };
+
+  // --- area focus: over-committed vs neglected, vs a fair share -------------
+  const areaEntries = Object.entries(b.areas).filter(([a]) => a !== "(unscoped)");
+  const totalAreaSpend = areaEntries.reduce((s, [, c]) => s + c.spend, 0);
+  const live = areaEntries.filter(([, c]) => c.agents > 0 || c.spend > 0);
+  const fair = live.length > 0 ? 1 / live.length : 0;
+  const TINY = 0.005;
+  const areaHealth = areaEntries.map(([area, c]) => {
+    const share = totalAreaSpend > 0 ? c.spend / totalAreaSpend : 0;
+    let status: AreaStatus;
+    if (c.agents === 0) status = "uncovered";
+    else if (c.spend <= TINY) status = "neglected";
+    // Over-committed: a clear majority of the workforce's focus in one area, OR
+    // (with ≥3 live areas) a share well above its fair slice. The absolute rule
+    // is what catches the 2-area "one hoards" case the fair-multiple can't.
+    else if (share > 0.5 || (live.length >= 3 && share - fair > 0.2)) status = "over-committed";
+    else if (live.length >= 3 && fair > 0 && share < 0.5 * fair) status = "under-invested";
+    else status = "balanced";
+    return { area, status, share, spend: c.spend, agents: c.agents };
+  }).sort((x, y) => y.spend - x.spend);
+
+  // --- loop-risk ranking ----------------------------------------------------
+  // severity = feeder weight (loop-spine matters more) × what it feeds (downstream
+  // share of total spend) × empty-is-worse-than-stale.
+  const risks = b.loopRisks.map((r) => {
+    const feederEmpty = b.stages[r.feeder].spend <= 0;
+    const dShare = b.totalSpend > 0 ? r.downstreamSpend / b.totalSpend : 0;
+    const severity = (isLoop(r.feeder) ? 2 : 1) * dShare * (feederEmpty ? 1.5 : 1);
+    const level: RiskLevel = severity >= 0.5 ? "high" : severity >= 0.2 ? "medium" : "low";
+    const fL = STAGE_META[r.feeder].label, dL = STAGE_META[r.downstream].label;
+    const message = `${fL} is ${feederEmpty ? "dark" : "going quiet"} while ${dL} is one of your busiest stages — ${r.feeder === "validate" ? "outcomes aren't feeding back, so the loop can't learn" : `${dL} is running on ${feederEmpty ? "no" : "stale"} input from ${fL}`}.`;
+    return { feeder: r.feeder, downstream: r.downstream, severity, level, message };
+  }).sort((a, c) => c.severity - a.severity);
+
+  // --- overall harmony ------------------------------------------------------
+  const emptyLoopStages = STAGES.filter((s) => isLoop(s) && stageHealth[s].status === "empty");
+  const overCommitted = areaHealth.filter((a) => a.status === "over-committed");
+  const uncoveredLive = areaHealth.filter((a) => a.status === "uncovered" && a.spend > 0);
+  let status: Harmony = "healthy";
+  if (risks.some((r) => r.level === "high") || emptyLoopStages.length > 0) status = "at-risk";
+  else if (risks.some((r) => r.level === "medium") || overCommitted.length > 0 || uncoveredLive.length > 0) status = "watch";
+
+  const headline =
+    status === "healthy" ? "Balanced — attention is spread across the loop and your areas."
+    : status === "at-risk" ? (risks[0]?.message ?? `${emptyLoopStages.map((s) => STAGE_META[s].label).join(" & ")} ${emptyLoopStages.length === 1 ? "is" : "are"} dark — the loop can't close.`)
+    : (risks[0]?.message ?? (overCommitted.length ? `${overCommitted[0].area} is taking an outsized share of the workforce — other areas may be starving.` : "Some areas are uncovered — worth a look."));
+
+  return { stageHealth, areaHealth, risks, harmony: { status, headline } };
+}
