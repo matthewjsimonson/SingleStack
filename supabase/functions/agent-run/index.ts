@@ -158,12 +158,16 @@ Deno.serve(async (req: Request) => {
   // disclosure; full body loads on demand via read_skill). Cornerstones are the
   // agent's general-purpose lens, always on. Child (non-cornerstone) skills are
   // for specific tasks and belong to workflows or a "/" summon — NOT general chat.
-  const { data: skillRows } = await supabase.from("agent_skills").select("skills ( key, name, description )").eq("agent_id", agent.id).eq("is_cornerstone", true);
+  const { data: skillRows } = await supabase.from("agent_skills").select("skills ( key, name, description, instructions )").eq("agent_id", agent.id).eq("is_cornerstone", true);
   // deno-lint-ignore no-explicit-any
-  const skills = (skillRows ?? []).map((r: any) => r.skills).filter(Boolean) as { key: string; name: string; description: string | null }[];
+  const skills = (skillRows ?? []).map((r: any) => r.skills).filter(Boolean) as { key: string; name: string; description: string | null; instructions: string | null }[];
   const skillCatalog = skills.length
     ? skills.map((s) => `- ${s.key}: ${s.name}${s.description ? ` — ${s.description}` : ""}`).join("\n")
     : "(no skills attached)";
+  // Identity unification: the cornerstone IS the agent's identity and runs on every
+  // job, so inline its full instructions as the base (not deferred to read_skill).
+  // Ignore the legacy system_prompt when a cornerstone exists; fall back only when not.
+  const cornerstoneText = skills.map((s) => s.instructions).filter(Boolean)[0] ?? "";
 
   // MCP connectors attached to this agent. Claude uses their tools IN the loop —
   // Anthropic executes them server-side (Messages API mcp_servers, beta). Gated:
@@ -294,7 +298,7 @@ Deno.serve(async (req: Request) => {
   const canPropose = !!(ctx.record_id && (ctx.record_type === "product" || ctx.record_type === "gtm"));
 
   const systemText = [
-    agent.system_prompt || `You are ${agent.name}${agent.role ? `, ${agent.role}` : ""}, an executive agent in SingleStack.`,
+    cornerstoneText || agent.system_prompt || `You are ${agent.name}${agent.role ? `, ${agent.role}` : ""}, an executive agent in SingleStack.`,
     "",
     "You operate AGENTICALLY: use the tools to gather what you need and to ground your work, then answer. Don't guess when a tool can tell you. Keep tool use purposeful — a few targeted calls, not exhaustive sweeps.",
     canPropose

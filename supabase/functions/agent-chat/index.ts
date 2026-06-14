@@ -94,10 +94,17 @@ Deno.serve(async (req: Request) => {
     // ---- Skills: the agent's attached, tailorable playbooks. -----------------
     const { data: skillRows } = await supabase
       .from("agent_skills")
-      .select("skills ( name, description, instructions, category )")
+      .select("is_cornerstone, skills ( name, description, instructions, category )")
       .eq("agent_id", agent.id);
     // deno-lint-ignore no-explicit-any
     const skills = (skillRows ?? []).map((r: any) => r.skills).filter(Boolean);
+    // Identity unification: when a cornerstone is attached, IT is the identity (its
+    // instructions are in the skills block below); the legacy 4-window system_prompt
+    // is ignored so the two can't contradict. Fallback to system_prompt only when no
+    // cornerstone exists.
+    // deno-lint-ignore no-explicit-any
+    const hasCornerstone = (skillRows ?? []).some((r: any) => r.is_cornerstone);
+    const neutralIdentity = `You are ${agent.name}${agent.role ? `, ${agent.role}` : ""}, an executive agent in SingleStack.`;
 
     // ---- Connections: the internal areas this agent is allowed to see. -------
     const { data: connRows } = await supabase
@@ -256,7 +263,7 @@ Deno.serve(async (req: Request) => {
       : "";
 
     const system = [
-      agent.system_prompt || `You are ${agent.name}${agent.role ? `, ${agent.role}` : ""}, an executive agent in SingleStack.`,
+      hasCornerstone ? neutralIdentity : (agent.system_prompt || neutralIdentity),
       "",
       "You advise the operator on this organization's product and go-to-market. Be concise, specific, and action-oriented. When asked for a daily briefing, give a tight summary of what needs attention and 2–3 concrete recommended next steps. Ground everything in the data below; if data is missing, say so plainly.",
       "",

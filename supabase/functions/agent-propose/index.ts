@@ -181,9 +181,13 @@ Deno.serve(async (req: Request) => {
     // The officer proposes USING its playbooks, grounded in the intelligence of
     // the areas it's connected to. No connections declared → full access.
     const { data: skillRows } = await supabase
-      .from("agent_skills").select("skills ( name, description, instructions, category )").eq("agent_id", agent.id);
+      .from("agent_skills").select("is_cornerstone, skills ( name, description, instructions, category )").eq("agent_id", agent.id);
     // deno-lint-ignore no-explicit-any
     const skills = (skillRows ?? []).map((r: any) => r.skills).filter(Boolean);
+    // Identity unification: a cornerstone (its instructions are in the skills block)
+    // is the identity; ignore the legacy system_prompt when one is attached.
+    // deno-lint-ignore no-explicit-any
+    const hasCornerstone = (skillRows ?? []).some((r: any) => r.is_cornerstone);
     const { data: connRows } = await supabase
       .from("connections").select("area").eq("agent_id", agent.id).eq("kind", "internal");
     const declaredAreas = [...new Set((connRows ?? []).map((c) => c.area).filter(Boolean))] as string[];
@@ -228,7 +232,7 @@ Deno.serve(async (req: Request) => {
       : "";
 
     const systemText = [
-      agent.system_prompt ?? `You are ${agent.name}, an agent that improves records.`,
+      hasCornerstone ? `You are ${agent.name}, an executive agent in SingleStack.` : (agent.system_prompt ?? `You are ${agent.name}, an agent that improves records.`),
       "",
       `You are connected to: ${areas.map((a) => areaLabels[a] ?? a).join(", ")}. Ground your proposal in the record and the intelligence provided.`,
       "You propose a concrete, well-grounded change to the record below. Apply your",
