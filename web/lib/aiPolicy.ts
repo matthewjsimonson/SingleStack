@@ -165,14 +165,19 @@ export function repriceRow(row: UsageRow, model: string): number | null {
   return (inT * p.input + outT * p.output + cr * p.input * CACHE_READ_MULT + cw * p.input * CACHE_WRITE_MULT) / 1_000_000;
 }
 
-// Project total spend over a set of task-tagged usage rows under a preset.
-// Returns { current, projected }. Model swap is exact; effort is NOT modeled
-// here (shown separately as a directional note).
-export function projectPreset(rows: UsageRow[], preset: Exclude<Preset, "custom">): { current: number; projected: number } {
+// Project total spend over a set of usage rows under a preset. Returns
+// { current, projected }. Model swap is exact; effort is NOT modeled here (shown
+// separately as a directional note). Pass `fixedTier` for rows without a usable
+// task (e.g. agent_runs), so they're tiered consistently rather than defaulted.
+export function projectPreset(
+  rows: UsageRow[],
+  preset: Exclude<Preset, "custom">,
+  fixedTier?: Tier,
+): { current: number; projected: number } {
   let current = 0, projected = 0;
   for (const r of rows) {
     current += r.cost_usd ?? 0;
-    const lever = resolvedLever(preset, tierOf(r.task));
+    const lever = resolvedLever(preset, fixedTier ?? tierOf(r.task));
     projected += repriceRow(r, lever.model) ?? (r.cost_usd ?? 0);
   }
   return { current, projected };

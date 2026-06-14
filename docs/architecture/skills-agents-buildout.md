@@ -204,9 +204,15 @@ instead of guessing.
       Catalog logic mirrored in `web/lib/aiPolicy.ts` (sync-noted both ways; the edge
       `_shared/ai_policy.ts` stays authoritative at runtime); `TokenUsage` now draws
       its task labels from the same single source.
-    - **F2.2b — TODO**: scoped overrides — per-agent and per-task pins (reuse the
-      re-pricing helper, re-pricing that agent's / task's own usage incl. the
-      `agent_runs` path). Per-**area** is the Ecosystem's lens (Phase G).
+    - **F2.2b — SHIPPED**: scoped overrides in `CostDial`. A **Per-agent** panel
+      (every active agent → Org/Quality/Balanced/Economy, re-pricing that agent's own
+      30-day spend across `ai_usage` + `agent_runs` — runs tiered as reasoning, since
+      they carry no task tag) and a **Per-task** panel (tasks with 30-day spend, by
+      cost → same selector, re-pricing that task's usage by its tier). Each writes an
+      `ai_policies` row (`scope='agent'`/`'task'`, delete-then-insert per partial
+      unique), and resolution is already live in the runtime (`task-pin > agent > org`).
+      Preset-only for now; **custom raw model/effort pins deferred**. Per-**area** is
+      the Ecosystem's lens (Phase G).
     - **F2.3 (deferred)** — advanced levers per decision #8: `max_tokens` cap,
       grounding-depth, task-budget. Caching stays enforced-on (pure win, not a dial).
     Build E (and beyond) reading this dial.
