@@ -56,6 +56,14 @@ instead of guessing.
    is grounded in cornerstone + product record + the GTM record's personas/market;
    control = `apply_skill_evolution` / `skill_revisions` + the autonomy dial over
    C2-gated records. Skills live under Agents (IA), not as a top-level tab.
+8. **Token budget is a first-class constraint.** Quality and cost are balanced, not
+   traded. Levers, in order of preference: (a) prompt-cache stable prefixes — system
+   AND the grounding block (multi-turn chats must not reprocess grounding); (b)
+   thinking-effort tiering (high only for final drafts, medium for conversational
+   turns); (c) model tiering (Opus for hard authoring, Sonnet/Haiku for light steps);
+   (d) bounded grounding (fetch only what the task needs). `max_tokens` is a cap, not
+   spend. Apply these as we touch each generator; never regress a working path for a
+   speculative saving.
 
 ## Dependency-ordered phases
 - **A. Skills substrate**
