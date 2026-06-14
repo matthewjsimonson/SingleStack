@@ -256,15 +256,26 @@ instead of guessing.
       Skills · Cost lens).
     All three lenses read/write the same RLS-fenced rows: no surface owns a private copy of
     the policy, so spend, coverage, and autonomy stay coherent by construction.
-  - **G.0 — the model (no new UI).** Define the lifecycle-stage taxonomy + the **feeder
-    graph** (which stage feeds which — the recursion edges), validated against
-    `intelligence-map.md` / `compounding-intelligence.md` (don't invent a lifecycle —
-    surface the one we already model). Map each `task`→stage (alongside its
-    `TASK_TIER`) and each agent→area via `connections`. Ship a read-only **balance
-    computation**: per (area × stage), derive `{ agent coverage, recent spend (ai_usage
-    via agent→area + task→stage), aliveness (record-field freshness, signal/theme/outcome
-    cadence, proposal/ratification recency), governance mode }`. Pure + tested, like the
-    resolver.
+  - **G.0 — SHIPPED (the model, no UI).** `web/lib/lifecycle.ts`: the lifecycle
+    surfaced from `intelligence-and-ship.md` — **8 stages** (`sense → synthesize →
+    decide → build → validate` loop + `position` hub + `sell` arm + `steward`
+    workforce), the **feeder graph** (`STAGE_FEEDS` — the recursion edges, incl.
+    `validate → sense` closing the loop), **`TASK_STAGE`** mapping every task (verified
+    same task universe as `TASK_TIER`), and a pure **`computeBalance`**: per-stage
+    rollup (spend/calls/last-activity/agents — the recursion view), per-area rollup
+    (agent-attributed spend split evenly across an agent's connected areas + connected-
+    agent coverage — the workforce-focus view), and **loop-risk detection** (a feeder
+    stage quiet/empty while what it feeds is busy). Pure + verified via
+    `scripts/verify-models.mjs` (also guards the web↔edge cost-model mirror). **Grid
+    decision (resolved):** compute the area×stage substrate, expose a **stage rollup
+    (primary — loop-risk)** + an **area rollup (focus/over-commitment)** — both
+    concerns from one model. Thresholds/classification are G.1.
+    - *G.0 deferred enrichment (→ G.2 data wiring):* `computeBalance` currently derives
+      coverage/spend/last-activity from `ai_usage`/`agent_runs`/`connections`. Richer
+      **aliveness** (record-field freshness, signal/theme/outcome cadence, ratification
+      recency) and **governance mode** (the `ai_policies`/`review_policies` per cell)
+      layer in when G.2 wires real reads — the function signature already takes the
+      inputs it needs.
   - **G.1 — health & harmony signals.** Classify each cell: `covered | thin | uncovered`,
     `starved | balanced | over-committed` (spend/attention share vs the loop's needs),
     `fresh | stale`. **Recursion-aware:** flag a *loop risk* when a feeder stage is
