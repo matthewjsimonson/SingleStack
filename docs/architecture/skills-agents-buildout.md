@@ -161,6 +161,13 @@ instead of guessing.
       values> })` (provably non-regressing) AND close the `logUsage` gap (5/26 → 26/26),
       since the implication preview is only honest if every call is measured. Each
       generator's `task` id is registered in `TASK_TIER`.
+      - **Wave 1 — SHIPPED**: the four already-logging authoring/reasoning generators
+        (`draft_agent`, `draft_skill`, `tailor_skill`, `evolve_draft`+`evolve_skills`)
+        now resolve via the dial with today's values as the fallback floor; `logUsage`
+        records the resolved model. Parse-verified.
+      - **Waves 2-4 — TODO**: the remaining 21 generators, grouped by surface
+        (authoring/battlecards/setup → reasoning/synthesis → conversational/connectors),
+        each wiring the resolver AND adding the missing `logUsage` call.
     - **F2.2** — the Settings dial beside the autonomy dial: org preset + per-area /
       per-agent overrides + per-task pin, each with the implication preview. The UI
       surfaces floors (a lever at its floor is shown, not silently clamped).
@@ -169,6 +176,39 @@ instead of guessing.
     Build E (and beyond) reading this dial.
     - *Open reconciliation:* `agents.model` (legacy free-text runtime field) vs the
       per-agent cost policy — F2.1/F2.2 decide whether agent-scope policy supersedes it.
+- **G. The Ecosystem — coverage & harmony across the PLG lifecycle.** The cost dial (F2)
+  governs *spend per scope*; it does not, on its own, stop a user from over-committing
+  agents/focus/tokens to one area while a feeder stage starves — which breaks the
+  **recursive** loop (product/GTM records + agents co-evolving: Build → Ship → Sense →
+  Sell → Learn → back to Build). Phase G is the living surface that makes the *whole
+  system's balance* legible and steerable: a breathing map of where attention and spend
+  sit across the lifecycle, what's covered vs neglected, and where imbalance threatens
+  the loop. Depends on F2.1 (full `ai_usage` measurement) + F2.2 (the dial) — you can't
+  show balance you don't measure, or rebalance without a governed lever.
+  - **G.0 — the model (no new UI).** Define the lifecycle-stage taxonomy + the **feeder
+    graph** (which stage feeds which — the recursion edges), validated against
+    `intelligence-map.md` / `compounding-intelligence.md` (don't invent a lifecycle —
+    surface the one we already model). Map each `task`→stage (alongside its
+    `TASK_TIER`) and each agent→area via `connections`. Ship a read-only **balance
+    computation**: per (area × stage), derive `{ agent coverage, recent spend (ai_usage
+    via agent→area + task→stage), aliveness (record-field freshness, signal/theme/outcome
+    cadence, proposal/ratification recency), governance mode }`. Pure + tested, like the
+    resolver.
+  - **G.1 — health & harmony signals.** Classify each cell: `covered | thin | uncovered`,
+    `starved | balanced | over-committed` (spend/attention share vs the loop's needs),
+    `fresh | stale`. **Recursion-aware:** flag a *loop risk* when a feeder stage is
+    starved/stale/uncovered while a downstream stage is over-invested — the specific
+    failure the dial alone can't catch. Thresholds are guard-railed and explainable, not
+    magic numbers.
+  - **G.2 — the living surface.** A breathing ecosystem view (its own area of the app,
+    not a Settings tab): the balance map, the cost dial woven in (adjust a scope and see
+    coverage/harmony move), and loop-risk alerts. Reuses the implication-preview engine.
+  - **G.3 — conversational rebalance (HITL, under the autonomy dial).** An agent that
+    reads the imbalance and *proposes* reallocations — shift focus/agents/preset toward a
+    starved feeder, cite the evidence — nothing auto-applies; mirrors the
+    `RecordRefine`/chat-builder pattern and the `review_policies` graduated autonomy.
+  - *Open decisions for G.0:* the exact stage taxonomy + feeder edges, and whether the
+    grid is (area × stage) or area-first with stage as a lens. Settle before G.1.
 
 ## Control layer (done, underpins everything)
 - **C1** conflict-aware `accept_proposal` (optimistic concurrency, race-safe). ✅

@@ -26,6 +26,7 @@ import Anthropic from "npm:@anthropic-ai/sdk@0.69.0";
 import { createClient, type SupabaseClient } from "npm:@supabase/supabase-js@2";
 import { SKILL_QBAR, exemplarFor } from "../_shared/skill_spec.ts";
 import { logUsage } from "../_shared/ai_usage.ts";
+import { resolveModelPolicy } from "../_shared/ai_policy.ts";
 
 const MODEL = "claude-opus-4-8";
 const CORS = {
@@ -197,14 +198,15 @@ Deno.serve(async (req: Request) => {
       ].filter(Boolean).join("");
 
       const anthropic = new Anthropic({ apiKey: key });
+      const pol = await resolveModelPolicy(supabase, { task: "evolve_draft", agentId: agent.id, area, fallback: { model: MODEL, effort: "high" } });
       const resp = (await anthropic.messages.create({
-        model: MODEL, max_tokens: 8000, thinking: { type: "adaptive" },
-        output_config: { effort: "high", format: { type: "json_schema", schema: DRAFT_SCHEMA } },
+        model: pol.model, max_tokens: 8000, thinking: { type: "adaptive" },
+        output_config: { effort: pol.effort, format: { type: "json_schema", schema: DRAFT_SCHEMA } },
         system: [{ type: "text", text: system, cache_control: { type: "ephemeral" } }],
         messages: [{ role: "user", content: userMsg }],
         // deno-lint-ignore no-explicit-any
       } as any)) as Anthropic.Message;
-      await logUsage(supabase, { task: "evolve_draft", model: MODEL, usage: resp.usage, agentId: agent.id });
+      await logUsage(supabase, { task: "evolve_draft", model: pol.model, usage: resp.usage, agentId: agent.id });
       const block = resp.content.find((b) => b.type === "text");
       if (!block || block.type !== "text") throw new Error("no draft returned");
       const d = JSON.parse(block.text) as { name: string; description: string; category: string; instructions: string; areas: string[]; connectors: string[]; rationale: string };
@@ -324,16 +326,17 @@ Deno.serve(async (req: Request) => {
     const userMsg = `INTELLIGENCE DIGEST (scoped to this agent's connected areas: ${areas.join(", ")}):\n${digest}\n\nSKILLS TO REVIEW:\n${skillList}\n\nPropose evolutions.`;
 
     const anthropic = new Anthropic({ apiKey: key });
+    const pol = await resolveModelPolicy(supabase, { task: "evolve_skills", agentId: agent.id, fallback: { model: MODEL, effort: "high" } });
     const resp = (await anthropic.messages.create({
-      model: MODEL,
+      model: pol.model,
       max_tokens: 8000,
       thinking: { type: "adaptive" },
-      output_config: { effort: "high", format: { type: "json_schema", schema: SCHEMA } },
+      output_config: { effort: pol.effort, format: { type: "json_schema", schema: SCHEMA } },
       system: [{ type: "text", text: system, cache_control: { type: "ephemeral" } }],
       messages: [{ role: "user", content: userMsg }],
       // deno-lint-ignore no-explicit-any
     } as any)) as Anthropic.Message;
-    await logUsage(supabase, { task: "evolve_skills", model: MODEL, usage: resp.usage, agentId: agent.id });
+    await logUsage(supabase, { task: "evolve_skills", model: pol.model, usage: resp.usage, agentId: agent.id });
 
     const block = resp.content.find((b) => b.type === "text");
     if (!block || block.type !== "text") throw new Error("no revisions returned");
