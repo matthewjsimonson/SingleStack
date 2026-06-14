@@ -1,13 +1,8 @@
-import { createClient } from "@/lib/supabase/server";
-import Shell from "@/components/Shell";
-import SkillLibrary from "@/components/SkillLibrary";
+import { redirect } from "next/navigation";
 
-export default async function SkillsPage() {
-  const supabase = await createClient();
-  const { data: { user } } = await supabase.auth.getUser();
-  return (
-    <Shell email={user?.email} crumbs={[{ label: "Skills library" }]}>
-      <SkillLibrary />
-    </Shell>
-  );
+// The skills library now lives as a tab inside Agents (skills are agent-scoped
+// knowledge). Keep this route as a permanent redirect so old links/bookmarks land
+// on the new home.
+export default function SkillsPage() {
+  redirect("/agents?tab=skills");
 }
