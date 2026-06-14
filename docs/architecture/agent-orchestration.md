@@ -57,10 +57,14 @@ to add them. We honor that. So:
   the field's section. Coverage then reads: "for this area — are its sections
   maintained, its proposals worked, its signals ingested, and by which agent/skill/
   workflow?" Cohesion by attribution, not a parallel vocabulary.
-- **Signals become bi-circle.** Today `signals.gtm_record_id` is `not null` (GTM-only).
-  We extend signals to product (nullable `product_record_id` + the one-parent CHECK
-  that `record_fields`/`proposals` already use) and add an optional `area_id` tag, so
-  the build circle has a first-class evidence substrate uniform with GTM.
+- **Signals are ALREADY bi-circle — no change needed.** `signals` has had `scope`
+  (`org`|`product`|`gtm`) + `product_id → product_records` since `20260529000009`
+  (`gtm_record_id` nullable since `20260528000013`), governed by `signals_scope_shape`.
+  Org/product/competitor-scoped signals legitimately have no `gtm_record_id`. The build
+  circle's evidence substrate already exists; orchestration attributes signals to a circle
+  via the existing `scope`/`product_id`/`competitor_id`. (An earlier draft proposed adding
+  `product_record_id` + a one-parent CHECK — that duplicated `product_id` and contradicted
+  `signals_scope_shape`; reverted in `20260615000500`.)
 
 So the accurate name for this work is the **governed orchestration vocabulary**: the
 lens that lets agents, skills, workflows, proposals, and signals all be reasoned about
@@ -123,8 +127,9 @@ enforced, not hoped-for:
   skills serve this area?").
 - `area_sections (area_id, section)` — the bridge to the content layer: which
   `record_fields.section`(s) each area maintains (1-to-many; reconciled to real values).
-- `signals`: add nullable `product_record_id` + the one-parent CHECK (make it bi-circle)
-  and an optional `area_id` tag, so signals are attributable to the area they feed.
+- `signals`: no schema change — already bi-circle via `scope` + `product_id`. Area
+  attribution (a governed `area_id` tag) is deferred to the coverage phase, when its
+  consumer is defined (same discipline as `area_sections`).
 
 > **Reconciliation note (load-bearing):** this migration must resolve the existing
 > `"product"`/`"products"` drift to one canonical key set as it backfills. That is the
@@ -217,8 +222,7 @@ orchestration trustworthy.
    `area_circle`), seed the PLG taxonomy from `plg-ecosystem.md`. RLS in-migration.
 2. **P2 — bind orchestration to areas (reconcile + backfill).** `skill_areas` join;
    `connections.area_id` (reconcile the free-text `area`, incl. `"product"/"products"`);
-   `area_sections` bridge; extend `signals` to product (`product_record_id` + one-parent
-   CHECK + optional `area_id`); wire `seed_plg_areas` into org bootstrap + backfill
+   wire `seed_plg_areas` into org bootstrap + backfill
    existing orgs. The careful one — reshapes shipped tables; its own migration set +
    verify. **Pause here to run through the deploy pipeline before P3+.**
 3. **P3 — orchestration model.** `workflow_steps` (+ enum); backfill from
