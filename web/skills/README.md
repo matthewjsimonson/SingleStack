@@ -49,21 +49,22 @@ actually does — not which officer happens to hold it:
   competitive battlecards/copy, pricing/packaging.
   *(Chief Revenue Officer, Chief Creative Officer, Positioning sharpening, Persona
   messaging, Competitive battlecard, Narrative & brand voice, Competitive messenger.)*
-- **research** — gathering and **scoring evidence/intelligence** (the analysis
-  layer that feeds GTM, not the messaging itself).
-  *(Capability evidence scoring, Competitive evidence analyst.)*
-- **general** — cross-cutting org/agent operations, tied to neither product nor GTM.
-  *(Chief of Staff.)*
+- **general** — applies to **both product and GTM**, specialized by **tailoring**
+  per agent (the same skill informs product strategy for a CPO and GTM for a CRO),
+  *or* a cross-cutting org/agent operation tied to neither domain alone.
+  *(Capability evidence scoring, Competitive evidence analyst — competitive analysis
+  serves both; Chief of Staff — roster ops.)*
+- **research** — reserved for pure intelligence-gathering that is itself neither
+  product nor GTM work (none built-in yet).
 
-Test: positioning is **gtm** even on a CPO (it's market-facing); architecture is
-**product**, never general; turning evidence into a score is **research**, turning a
-ratified fact into seller copy is **gtm**.
+Tests: positioning is **gtm** even on a CPO (it's market-facing); architecture is
+**product**, never general; **competitive analysis is `general`** — the product side
+turns strengths/weaknesses into strategy, the GTM side turns them into battlecards,
+and *tailoring* is what specializes the one skill for each; turning a ratified fact
+into seller copy is **gtm** (Competitive messenger).
 
-`areas` (children only) lists the surfaces a child applies to — from the area
-vocabulary `product, gtm, competitive, strategy, market, signals, frontier, roadmap,
-content, campaigns, initiatives` — and drives which agents the child is offered to
-(it must overlap the agent's connected areas). Cornerstones set no `areas` (a
-cornerstone is the general identity).
+A `general` (both-domains) skill should set `areas` spanning `product` and `gtm` so
+the agent picker offers it to officers on either side.
 
 ## Regenerate after editing
 
