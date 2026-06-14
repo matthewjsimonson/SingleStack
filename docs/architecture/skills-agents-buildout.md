@@ -165,9 +165,17 @@ instead of guessing.
         (`draft_agent`, `draft_skill`, `tailor_skill`, `evolve_draft`+`evolve_skills`)
         now resolve via the dial with today's values as the fallback floor; `logUsage`
         records the resolved model. Parse-verified.
-      - **Waves 2-4 — TODO**: the remaining 21 generators, grouped by surface
-        (authoring/battlecards/setup → reasoning/synthesis → conversational/connectors),
-        each wiring the resolver AND adding the missing `logUsage` call.
+      - **Wave 2 — SHIPPED**: six authoring generators (`synthesize_profile`,
+        `profile_to_strategy`, `import_record`, `draft_cornerstone`, `battlecard_analyst`,
+        `battlecard_messaging`) routed through the resolver + `logUsage` added (the
+        battlecards account via `agent_runs`, so no double-log). The battlecards also
+        **close the `agents.model` reconciliation**: agent-scope policy supersedes the
+        legacy field, falling back to `agent.model || MODEL`. Parse-verified.
+      - **Waves 3-4 — TODO**: reasoning/synthesis (`synthesize_signals`,
+        `score_capabilities`, `orchestrate_roster`, `outcome_watch`, `distill_lessons`,
+        `propose_dimensions`, `draft_decision`, `draft_how`, `run_workflow`), then
+        conversational/setup/connectors and the multi-call `agent_propose`/`agent_run`
+        (careful: streaming + advisor lenses + the agent_runs path).
     - **F2.2** — the Settings dial beside the autonomy dial: org preset + per-area /
       per-agent overrides + per-task pin, each with the implication preview. The UI
       surfaces floors (a lever at its floor is shown, not silently clamped).
@@ -185,6 +193,34 @@ instead of guessing.
   sit across the lifecycle, what's covered vs neglected, and where imbalance threatens
   the loop. Depends on F2.1 (full `ai_usage` measurement) + F2.2 (the dial) — you can't
   show balance you don't measure, or rebalance without a governed lever.
+  - **Framing — the agent workforce home.** Controlling agents is a first-class part of
+    the product (the future workforce), so the Ecosystem is not a monitoring tab bolted
+    onto Settings — it is the **home of the workforce** and its alignment to the PLG
+    lifecycle. The symbiotic onboarding it choreographs (blank slate → running ecosystem):
+    1. **Records first** — set up the Product + GTM Record (company/product truth). The
+       blank-slate Ecosystem gates on this: "no truth yet → set up your records."
+    2. **Lifecycle map, empty** — once truth exists, the map shows every area/stage
+       uncovered, and offers a guided path: "these areas need an agent."
+    3. **Guided agent setup** — create an agent (`draft-agent` chat) → its cornerstone →
+       attach + tailor child skills (`draft-skill`/`tailor-skill`) tailored to *this*
+       business → **align** it to area(s) via `connections`. (Reuses Phases B/C.)
+    4. **Coverage fills, harmony appears, cost projects** — as agents align, the map
+       fills, harmony signals light up, and the cost lens shows projected spend per area.
+    5. **Living** — ongoing coverage/harmony/cost, with conversational rebalance (G.3).
+  - **IA — one governed data layer, three lenses.** Cost spend/control does not live in
+    one place; it is a **lens** over the same governed tables (`ai_policies`,
+    `review_policies`, `connections`, `agents`, `skills`, `records`, `ai_usage`), shown at
+    the right altitude on each surface:
+    - **Settings** — org *defaults* an admin sets once: the autonomy dial, the org cost
+      preset, pricing visibility.
+    - **Agents area (the workforce home)** — per-agent config (identity/cornerstone, skills
+      per decision #7, the agent's own cost policy + area alignments) AND, as its overview
+      surface, the **Ecosystem** (coverage/harmony + the onboarding path + per-area cost
+      lens). Recommendation: the Ecosystem is the Agents area's default/overview, not a 4th
+      disconnected top-level nav item — honoring decision #7 and "agents are the workforce."
+      (Open IA decision — confirm before G.2.)
+    All three lenses read/write the same RLS-fenced rows: no surface owns a private copy of
+    the policy, so spend, coverage, and autonomy stay coherent by construction.
   - **G.0 — the model (no new UI).** Define the lifecycle-stage taxonomy + the **feeder
     graph** (which stage feeds which — the recursion edges), validated against
     `intelligence-map.md` / `compounding-intelligence.md` (don't invent a lifecycle —

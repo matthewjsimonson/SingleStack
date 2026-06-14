@@ -23,6 +23,8 @@
 import Anthropic from "npm:@anthropic-ai/sdk@0.69.0";
 import { createClient, type SupabaseClient } from "npm:@supabase/supabase-js@2";
 import { assertSafeUrl, fetchTextSafe, screenForInjection, wrapUntrusted } from "../_shared/security.ts";
+import { logUsage } from "../_shared/ai_usage.ts";
+import { resolveModelPolicy } from "../_shared/ai_policy.ts";
 
 const MODEL = "claude-opus-4-8";
 const MAX_CHARS = 200_000; // cap the source so a huge paste can't blow the token budget
@@ -146,15 +148,17 @@ Deno.serve(async (req: Request) => {
     ].join("\n");
 
     const anthropic = new Anthropic({ apiKey: key });
+    const pol = await resolveModelPolicy(supabase, { task: "import_record", fallback: { model: MODEL, effort: "high" } });
     const message = (await anthropic.messages.create({
-      model: MODEL,
+      model: pol.model,
       max_tokens: 16000,
       thinking: { type: "adaptive" },
-      output_config: { effort: "high", format: { type: "json_schema", schema: PROPOSAL_SCHEMA } },
+      output_config: { effort: pol.effort, format: { type: "json_schema", schema: PROPOSAL_SCHEMA } },
       system: [{ type: "text", text: system, cache_control: { type: "ephemeral" } }],
       messages: [{ role: "user", content: userText }],
       // deno-lint-ignore no-explicit-any
     } as any)) as Anthropic.Message;
+    await logUsage(supabase, { task: "import_record", model: pol.model, usage: message.usage });
 
     const block = message.content.find((b) => b.type === "text");
     if (!block || block.type !== "text") throw new Error(`no proposal returned (stop_reason: ${message.stop_reason})`);
