@@ -104,7 +104,7 @@ Deno.serve(async (req: Request) => {
     const convo = transcript.map((t) => ({ role: t.role === "a" ? "user" as const : "assistant" as const, content: t.text }));
     const anthropic = new Anthropic({ apiKey: key });
     const resp = (await anthropic.messages.create({
-      model: MODEL, max_tokens: 4000, thinking: { type: "adaptive" },
+      model: MODEL, max_tokens: 8000, thinking: { type: "adaptive" },
       output_config: { effort: "high", format: { type: "json_schema", schema: SCHEMA } },
       system: [{ type: "text", text: system, cache_control: { type: "ephemeral" } }],
       messages: [
@@ -122,7 +122,8 @@ Deno.serve(async (req: Request) => {
     } as any)) as Anthropic.Message;
 
     const text = resp.content.filter((b) => b.type === "text").map((b) => (b as { text: string }).text).join("");
-    return json(JSON.parse(text));
+    try { return json(JSON.parse(text)); }
+    catch { return json({ error: "The assistant's response was cut off before it finished. Please try again, or send a shorter message." }, 502); }
   } catch (e) {
     return json({ error: e instanceof Error ? e.message : String(e) }, 500);
   }

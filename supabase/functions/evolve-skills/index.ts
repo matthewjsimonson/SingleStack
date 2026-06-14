@@ -197,7 +197,7 @@ Deno.serve(async (req: Request) => {
 
       const anthropic = new Anthropic({ apiKey: key });
       const resp = (await anthropic.messages.create({
-        model: MODEL, max_tokens: 4000, thinking: { type: "adaptive" },
+        model: MODEL, max_tokens: 8000, thinking: { type: "adaptive" },
         output_config: { effort: "high", format: { type: "json_schema", schema: DRAFT_SCHEMA } },
         system: [{ type: "text", text: system, cache_control: { type: "ephemeral" } }],
         messages: [{ role: "user", content: userMsg }],
@@ -324,7 +324,7 @@ Deno.serve(async (req: Request) => {
     const anthropic = new Anthropic({ apiKey: key });
     const resp = (await anthropic.messages.create({
       model: MODEL,
-      max_tokens: 4000,
+      max_tokens: 8000,
       thinking: { type: "adaptive" },
       output_config: { effort: "high", format: { type: "json_schema", schema: SCHEMA } },
       system: [{ type: "text", text: system, cache_control: { type: "ephemeral" } }],
