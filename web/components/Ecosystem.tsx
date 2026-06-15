@@ -71,6 +71,7 @@ export default function Ecosystem() {
   const [loading, setLoading] = useState(true);
   const [lens, setLens] = useState<Lens>("all");
   const [selKey, setSelKey] = useState<string | null>(null);
+  const [showTodo, setShowTodo] = useState(false);
 
   const load = useCallback(async () => {
     const [{ data: ag }, { data: conns }, { data: agSk }, { data: sk }, { data: wf }, { count: pc }, { count: gc }] = await Promise.all([
@@ -124,6 +125,7 @@ export default function Ecosystem() {
   const noAgents = counts.agents === 0;
   const ht = harmonyTone(health.harmony.status);
   const sel = selKey ? covByKey.get(selKey) ?? null : null;
+  const drawerOpen = selKey !== null || showTodo;
   const lensKeys = new Set(laidOut.flatMap((l) => l.nodes.map((n) => n.area.key)));
   const todo = [...health.rankedGaps, ...health.rankedPartials].filter((c) => lensKeys.has(c.area.key));
   const cyclePath = (above: boolean) => { const y = 300, dy = above ? -54 : 54; return `M 332 ${y} C 430 ${y + dy}, 530 ${y + dy}, 628 ${y}`; };
@@ -156,7 +158,7 @@ export default function Ecosystem() {
       return (
         <div>
           <div className="row gap-2" style={{ alignItems: "center", marginBottom: 8 }}>
-            <button className="btn btn-sm btn-secondary" onClick={() => setSelKey(null)} style={{ fontSize: 11 }}>← All gaps</button>
+            <button className="btn btn-sm btn-secondary" onClick={() => { setSelKey(null); setShowTodo(true); }} style={{ fontSize: 11 }}>← All gaps</button>
             <span className="chip" style={{ fontSize: 9.5, fontWeight: 700, background: t.fill, color: t.text, marginLeft: "auto" }}>{t.label}</span>
           </div>
           <div className="row gap-2" style={{ alignItems: "center", flexWrap: "wrap", marginBottom: 2 }}>
@@ -245,9 +247,23 @@ export default function Ecosystem() {
         </div>
       )}
 
-      {/* Map (canvas) + coverage rail — no page scroll; the rail scrolls itself. */}
-      <div style={{ display: "flex", gap: "var(--sp-3, 12px)", alignItems: "flex-start", flexWrap: "wrap" }}>
-        <div className="card" style={{ flex: "1 1 460px", minWidth: 300, padding: 8, overflow: "hidden" }}>
+      {/* Toolbar: legend + the unattended trigger (pops the drawer). */}
+      <div className="row-between" style={{ flexWrap: "wrap", gap: 8, alignItems: "center" }}>
+        <div className="row gap-2" style={{ flexWrap: "wrap", alignItems: "center", fontSize: 10.5 }}>
+          {([["Covered", "var(--gn-text)"], ["Partial", "var(--am)"], ["Gap", "var(--rd)"]] as const).map(([lab, col]) => (
+            <span key={lab} className="row gap-1" style={{ alignItems: "center", gap: 4, color: "var(--tm)" }}>
+              <span style={{ width: 9, height: 9, borderRadius: 999, background: col, flexShrink: 0 }} />{lab}
+            </span>
+          ))}
+        </div>
+        <button onClick={() => { setSelKey(null); setShowTodo(true); }} className="btn btn-sm"
+          style={{ fontSize: 11, fontWeight: 600, borderColor: health.counts.gap ? "var(--rd)" : "var(--border)", color: health.counts.gap ? "var(--rd)" : "var(--tp)" }}>
+          {health.counts.gap + health.counts.partial} unattended →
+        </button>
+      </div>
+
+      {/* The map (canvas). Click a node to pop out its coverage. */}
+      <div className="card" style={{ padding: 8, overflow: "hidden" }}>
           <svg viewBox={`0 0 ${VB.w} ${VB.h}`} style={{ width: "100%", height: "auto", display: "block" }} role="img" aria-label="Ecosystem coverage map">
             <defs>
               <marker id="eco-arrow" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M 0 1 L 9 5 L 0 9 z" style={{ fill: "var(--ac-text)" }} /></marker>
@@ -284,10 +300,13 @@ export default function Ecosystem() {
           </svg>
         </div>
 
-        <aside className="card card-pad" style={{ flex: "0 1 340px", minWidth: 280, alignSelf: "stretch", position: "sticky", top: 12, maxHeight: "calc(100vh - 96px)", overflowY: "auto" }}>
-          {renderRail()}
-        </aside>
-      </div>
+      {/* The pop-out drawer — only when a node (or the unattended trigger) is clicked. */}
+      <div onClick={() => { setSelKey(null); setShowTodo(false); }} aria-hidden={!drawerOpen}
+        style={{ position: "fixed", inset: 0, background: "rgba(11,11,12,0.32)", opacity: drawerOpen ? 1 : 0, pointerEvents: drawerOpen ? "auto" : "none", transition: "opacity var(--dur-base, 200ms) ease", zIndex: 60 }} />
+      <aside aria-hidden={!drawerOpen}
+        style={{ position: "fixed", top: 0, right: 0, height: "100vh", width: "min(384px, 92vw)", background: "var(--surface-0, #fff)", borderLeft: "1px solid var(--border)", boxShadow: "-10px 0 28px rgba(11,11,12,0.12)", transform: drawerOpen ? "translateX(0)" : "translateX(100%)", transition: "transform var(--dur-slow, 280ms) var(--ease-out, cubic-bezier(0.16,1,0.3,1))", zIndex: 61, overflowY: "auto", padding: 16 }}>
+        {drawerOpen && renderRail()}
+      </aside>
     </div>
   );
 }
