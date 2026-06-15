@@ -16,6 +16,10 @@ import {
   PRODUCT_AREAS, GTM_AREAS, CHECK_LABEL, computeCoverage, classifyCoverage,
   type Area, type Check, type AreaStatus, type Harmony,
 } from "@/lib/ecosystem";
+import { Modal } from "@/components/ui";
+import { getOrgId } from "@/lib/org";
+import SkillCreateChat from "@/components/SkillCreateChat";
+import WorkflowCreateChat from "@/components/WorkflowCreateChat";
 
 type Lens = "all" | "product" | "gtm";
 type Agent = { id: string; name: string };
@@ -72,6 +76,7 @@ export default function Ecosystem() {
   const [lens, setLens] = useState<Lens>("all");
   const [selKey, setSelKey] = useState<string | null>(null);
   const [showTodo, setShowTodo] = useState(false);
+  const [creating, setCreating] = useState<null | "skill" | "workflow" | "agent">(null);
 
   const load = useCallback(async () => {
     const [{ data: ag }, { data: conns }, { data: agSk }, { data: sk }, { data: wf }, { count: pc }, { count: gc }] = await Promise.all([
@@ -131,6 +136,14 @@ export default function Ecosystem() {
   const cyclePath = (above: boolean) => { const y = 300, dy = above ? -54 : 54; return `M 332 ${y} C 430 ${y + dy}, 530 ${y + dy}, 628 ${y}`; };
 
   // ---- the right rail: a named coverage layer ----
+  const connectAgent = async (agentId: string) => {
+    if (!sel) return;
+    const orgId = await getOrgId();
+    if (!orgId) return;
+    await supabase.from("connections").insert({ org_id: orgId, agent_id: agentId, kind: "internal", label: sel.area.label, area: sel.area.connAreas[0], status: "connected" });
+    await load(); setCreating(null);
+  };
+
   const renderLayer = (check: Check, items: string[], area: Area) => {
     const on = items.length > 0;
     const f = fixFor(area, check);
@@ -146,7 +159,7 @@ export default function Ecosystem() {
             {items.map((it) => <span key={it} className="chip" style={{ fontSize: 10.5, background: "var(--well, var(--surface-2))", color: "var(--tp)" }}>{it}</span>)}
           </div>
         ) : (
-          <a href={f.href} className="btn btn-sm btn-secondary" style={{ fontSize: 10.5, marginLeft: 16 }}>+ {f.label}</a>
+          <button onClick={() => setCreating(check === "workflow" ? "workflow" : check === "agent" ? "agent" : "skill")} className="btn btn-sm btn-secondary" style={{ fontSize: 10.5, marginLeft: 16 }}>+ {f.label}</button>
         )}
       </div>
     );
@@ -300,13 +313,33 @@ export default function Ecosystem() {
           </svg>
         </div>
 
-      {/* The pop-out drawer — only when a node (or the unattended trigger) is clicked. */}
-      <div onClick={() => { setSelKey(null); setShowTodo(false); }} aria-hidden={!drawerOpen}
-        style={{ position: "fixed", inset: 0, background: "rgba(11,11,12,0.32)", opacity: drawerOpen ? 1 : 0, pointerEvents: drawerOpen ? "auto" : "none", transition: "opacity var(--dur-base, 200ms) ease", zIndex: 60 }} />
-      <aside aria-hidden={!drawerOpen}
-        style={{ position: "fixed", top: 0, right: 0, height: "100vh", width: "min(384px, 92vw)", background: "var(--surface-0, #fff)", borderLeft: "1px solid var(--border)", boxShadow: "-10px 0 28px rgba(11,11,12,0.12)", transform: drawerOpen ? "translateX(0)" : "translateX(100%)", transition: "transform var(--dur-slow, 280ms) var(--ease-out, cubic-bezier(0.16,1,0.3,1))", zIndex: 61, overflowY: "auto", padding: 16 }}>
-        {drawerOpen && renderRail()}
-      </aside>
+      {/* The pop-out drawer — hidden while a create flow is open (those overlay above). */}
+      {!creating && (
+        <>
+          <div onClick={() => { setSelKey(null); setShowTodo(false); }} aria-hidden={!drawerOpen}
+            style={{ position: "fixed", inset: 0, background: "rgba(11,11,12,0.32)", opacity: drawerOpen ? 1 : 0, pointerEvents: drawerOpen ? "auto" : "none", transition: "opacity var(--dur-base, 200ms) ease", zIndex: 60 }} />
+          <aside aria-hidden={!drawerOpen}
+            style={{ position: "fixed", top: 0, right: 0, height: "100vh", width: "min(384px, 92vw)", background: "var(--surface-0, #fff)", borderLeft: "1px solid var(--border)", boxShadow: "-10px 0 28px rgba(11,11,12,0.12)", transform: drawerOpen ? "translateX(0)" : "translateX(100%)", transition: "transform var(--dur-slow, 280ms) var(--ease-out, cubic-bezier(0.16,1,0.3,1))", zIndex: 61, overflowY: "auto", padding: 16 }}>
+            {drawerOpen && renderRail()}
+          </aside>
+        </>
+      )}
+
+      {/* In-context creation — complete it here, refresh, move on. */}
+      {creating === "skill" && <SkillCreateChat onCreated={() => { load(); setCreating(null); }} onClose={() => setCreating(null)} />}
+      {creating === "workflow" && sel && <WorkflowCreateChat area={sel.area} onCreated={() => { load(); setCreating(null); }} onClose={() => setCreating(null)} />}
+      {creating === "agent" && sel && (
+        <Modal open onClose={() => setCreating(null)} title={`Put an agent on ${sel.area.label}`} width={420}>
+          <div className="stack-2">
+            {(raw?.agents ?? []).length > 0 ? (raw?.agents ?? []).map((a) => (
+              <button key={a.id} className="card card-pad" style={{ textAlign: "left", cursor: "pointer", width: "100%" }} onClick={() => connectAgent(a.id)}>
+                <span style={{ fontWeight: 640, fontSize: 13 }}>{a.name}</span>
+                <span className="t-sub t-muted" style={{ fontSize: 11.5, display: "block" }}>Connect to {sel.area.label}</span>
+              </button>
+            )) : <div className="t-sub t-muted" style={{ fontSize: 12.5 }}>No agents yet — <a href="/agents?tab=agents">create one</a> first, then connect it here.</div>}
+          </div>
+        </Modal>
+      )}
     </div>
   );
 }
