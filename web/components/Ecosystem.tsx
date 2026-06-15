@@ -320,7 +320,15 @@ export default function Ecosystem() {
             style={{ position: "fixed", inset: 0, background: "rgba(11,11,12,0.32)", opacity: drawerOpen ? 1 : 0, pointerEvents: drawerOpen ? "auto" : "none", transition: "opacity var(--dur-base, 200ms) ease", zIndex: 60 }} />
           <aside aria-hidden={!drawerOpen}
             style={{ position: "fixed", top: 0, right: 0, height: "100vh", width: "min(384px, 92vw)", background: "var(--surface-0, #fff)", borderLeft: "1px solid var(--border)", boxShadow: "-10px 0 28px rgba(11,11,12,0.12)", transform: drawerOpen ? "translateX(0)" : "translateX(100%)", transition: "transform var(--dur-slow, 280ms) var(--ease-out, cubic-bezier(0.16,1,0.3,1))", zIndex: 61, overflowY: "auto", padding: 16 }}>
-            {drawerOpen && renderRail()}
+            {drawerOpen && (
+              <>
+                <div className="row-between" style={{ alignItems: "center", marginBottom: 10 }}>
+                  <span className="t-mono-xs t-muted" style={{ fontSize: 10, textTransform: "uppercase", letterSpacing: 0.4 }}>Coverage</span>
+                  <button className="btn btn-sm btn-secondary" onClick={() => { setSelKey(null); setShowTodo(false); }} aria-label="Close" style={{ fontSize: 11 }}>✕ Close</button>
+                </div>
+                {renderRail()}
+              </>
+            )}
           </aside>
         </>
       )}
