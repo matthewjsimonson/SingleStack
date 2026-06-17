@@ -11,6 +11,7 @@ import { createClient } from "@/lib/supabase/client";
 import { getOrgId } from "@/lib/org";
 import { Markdown } from "@/components/Markdown";
 import type { Area } from "@/lib/ecosystem";
+import type { StandardPlaybook } from "@/lib/playbooks";
 
 type Rec = { source: "task" | "agent" | "skill" | "record" | "best_practice"; point: string; evidence: string };
 type Step = { agent_id: string; skill_id: string | null; signals: "none" | "internal" | "external" | "both"; instruction: string };
@@ -19,7 +20,7 @@ type Turn = { role: "q" | "a"; text: string; recommendations?: Rec[]; draft?: Dr
 
 const uid = () => (typeof crypto !== "undefined" && crypto.randomUUID ? crypto.randomUUID() : `s_${Date.now()}_${Math.random().toString(36).slice(2)}`);
 
-export default function WorkflowCreateChat({ area, onCreated, onClose }: { area: Area; onCreated?: () => void; onClose: () => void }) {
+export default function WorkflowCreateChat({ area, areaId, standard, onCreated, onClose }: { area: Area; areaId?: string | null; standard?: StandardPlaybook | null; onCreated?: () => void; onClose: () => void }) {
   const supabase = createClient();
   const [chat, setChat] = useState<Turn[]>([]);
   const [answer, setAnswer] = useState("");
@@ -44,7 +45,7 @@ export default function WorkflowCreateChat({ area, onCreated, onClose }: { area:
     const { data: s } = await supabase.auth.getSession();
     const token = s.session?.access_token;
     const { data, error } = await supabase.functions.invoke("draft-workflow", {
-      body: { transcript, area: { key: area.key, label: area.label, circle: area.circle, connAreas: area.connAreas, tasks: area.tasks, blurb: area.blurb } },
+      body: { transcript, standard: standard ?? null, area: { key: area.key, label: area.label, circle: area.circle, connAreas: area.connAreas, tasks: area.tasks, blurb: area.blurb } },
       headers: token ? { Authorization: `Bearer ${token}` } : undefined,
     });
     if (error) {
@@ -85,7 +86,8 @@ export default function WorkflowCreateChat({ area, onCreated, onClose }: { area:
       const steps = lastDraft.steps.map((s) => ({ id: uid(), agent_id: s.agent_id, skill_id: s.skill_id ?? null, signals: s.signals, instruction: s.instruction }));
       const { error } = await supabase.from("workflows").insert({
         org_id: orgId, name: edit.name.trim(), description: edit.description.trim() || null,
-        agent_id: steps[0]?.agent_id ?? null, trigger: "manual", target_type: area.circle, steps, is_active: true,
+        agent_id: steps[0]?.agent_id ?? null, trigger: "manual", target_type: area.circle,
+        area_id: areaId ?? null, standard_key: standard?.key ?? null, steps, is_active: true,
       });
       if (error) throw error;
       setNotice(`Created "${edit.name.trim()}" — aligned to ${area.label}.`);
@@ -100,8 +102,8 @@ export default function WorkflowCreateChat({ area, onCreated, onClose }: { area:
       <aside style={{ position: "fixed", top: 0, right: 0, height: "100vh", width: 640, maxWidth: "96vw", background: "var(--panel)", borderLeft: "1px solid var(--border)", boxShadow: "var(--shadow-md)", zIndex: 71, display: "flex", flexDirection: "column" }}>
         <div className="row-between" style={{ padding: "16px 20px", borderBottom: "1px solid var(--border)", alignItems: "center", gap: 8 }}>
           <div style={{ minWidth: 0 }}>
-            <div style={{ fontSize: 15, fontWeight: 660 }}>✦ Create a workflow with AI</div>
-            <div className="t-sub t-muted" style={{ fontSize: 12 }}>Aligned to <b>{area.label}</b> — drafted from the area&apos;s tasks and your real agents &amp; skills</div>
+            <div style={{ fontSize: 15, fontWeight: 660 }}>✦ {standard ? "Set up a standard workflow" : "Create a workflow with AI"}</div>
+            <div className="t-sub t-muted" style={{ fontSize: 12 }}>{standard ? <>Standard playbook: <b>{standard.name}</b> · {area.label}</> : <>Aligned to <b>{area.label}</b> — from the area&apos;s tasks and your real agents &amp; skills</>}</div>
           </div>
           <button className="btn btn-secondary btn-sm" onClick={onClose}>Close</button>
         </div>

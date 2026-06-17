@@ -14,8 +14,9 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import { createClient } from "@/lib/supabase/client";
 import {
   PRODUCT_AREAS, GTM_AREAS, CHECK_LABEL, computeCoverage, classifyCoverage,
-  type Area, type Check, type AreaStatus, type Harmony,
+  type Area, type AreaStatus, type Harmony,
 } from "@/lib/ecosystem";
+import { playbooksFor, type StandardPlaybook } from "@/lib/playbooks";
 import { Modal } from "@/components/ui";
 import { getOrgId } from "@/lib/org";
 import SkillCreateChat from "@/components/SkillCreateChat";
@@ -26,8 +27,8 @@ type Agent = { id: string; name: string };
 type Skill = { id: string; name: string | null; kind: string | null; areas: string[] | null };
 type Conn = { agent_id: string | null; area: string | null };
 type AgSkill = { agent_id: string; skill_id: string };
-type Workflow = { id: string; name: string; agent_id: string | null; target_type: string | null; is_active: boolean | null };
-type Raw = { agents: Agent[]; connections: Conn[]; agentSkills: AgSkill[]; skills: Skill[]; workflows: Workflow[] };
+type Workflow = { id: string; name: string; agent_id: string | null; target_type: string | null; is_active: boolean | null; area_id: string | null; standard_key: string | null };
+type Raw = { agents: Agent[]; connections: Conn[]; agentSkills: AgSkill[]; skills: Skill[]; workflows: Workflow[]; areas: { id: string; key: string }[] };
 
 const harmonyTone = (h: Harmony) =>
   h === "healthy" ? { fill: "var(--gn-fill)", text: "var(--gn-text)", label: "Healthy" }
@@ -41,11 +42,6 @@ const chipTone = (s: AreaStatus) =>
   s === "covered" ? { fill: "var(--gn-fill)", text: "var(--gn-text)", label: "Covered" }
   : s === "partial" ? { fill: "color-mix(in srgb, var(--am) 15%, transparent)", text: "var(--am)", label: "Partial" }
   : { fill: "color-mix(in srgb, var(--rd) 13%, transparent)", text: "var(--rd)", label: "Gap" };
-const fixFor = (area: Area, c: Check): { href: string; label: string } =>
-  c === "agent" ? { href: "/agents?tab=agents", label: `Put an agent on ${area.label}` }
-  : c === "cornerstone" ? { href: "/agents?tab=agents", label: "Give it a cornerstone" }
-  : c === "skills" ? { href: "/agents?tab=skills", label: "Add a child skill" }
-  : { href: "/agents?tab=workflows", label: "Create / align a workflow" };
 const shortLabel = (l: string) => { const s = l.split(/ [&/]/)[0].trim(); return s.length > 15 ? s.slice(0, 14) + "…" : s; };
 
 // --- layout -----------------------------------------------------------------
@@ -77,19 +73,21 @@ export default function Ecosystem() {
   const [selKey, setSelKey] = useState<string | null>(null);
   const [showTodo, setShowTodo] = useState(false);
   const [creating, setCreating] = useState<null | "skill" | "workflow" | "agent">(null);
+  const [creatingStandard, setCreatingStandard] = useState<StandardPlaybook | null>(null);
 
   const load = useCallback(async () => {
-    const [{ data: ag }, { data: conns }, { data: agSk }, { data: sk }, { data: wf }, { count: pc }, { count: gc }] = await Promise.all([
+    const [{ data: ag }, { data: conns }, { data: agSk }, { data: sk }, { data: wf }, { data: ar }, { count: pc }, { count: gc }] = await Promise.all([
       supabase.from("agents").select("id, name").eq("is_active", true).order("name"),
       supabase.from("connections").select("agent_id, area").eq("kind", "internal"),
       supabase.from("agent_skills").select("agent_id, skill_id"),
       supabase.from("skills").select("id, name, kind, areas"),
-      supabase.from("workflows").select("id, name, agent_id, target_type, is_active"),
+      supabase.from("workflows").select("id, name, agent_id, target_type, is_active, area_id, standard_key"),
+      supabase.from("areas").select("id, key"),
       supabase.from("product_records").select("id", { count: "exact", head: true }),
       supabase.from("gtm_records").select("id", { count: "exact", head: true }),
     ]);
     const agents = (ag ?? []) as Agent[];
-    setRaw({ agents, connections: (conns ?? []) as Conn[], agentSkills: (agSk ?? []) as AgSkill[], skills: (sk ?? []) as Skill[], workflows: (wf ?? []) as Workflow[] });
+    setRaw({ agents, connections: (conns ?? []) as Conn[], agentSkills: (agSk ?? []) as AgSkill[], skills: (sk ?? []) as Skill[], workflows: (wf ?? []) as Workflow[], areas: (ar ?? []) as { id: string; key: string }[] });
     setCounts({ products: pc ?? 0, gtm: gc ?? 0, agents: agents.length });
     setLoading(false);
   }, [supabase]);
@@ -98,6 +96,7 @@ export default function Ecosystem() {
   const coverage = useMemo(() => raw ? computeCoverage({ agents: raw.agents, connections: raw.connections, agentSkills: raw.agentSkills, skills: raw.skills, workflows: raw.workflows }) : null, [raw]);
   const health = useMemo(() => coverage ? classifyCoverage(coverage) : null, [coverage]);
   const covByKey = useMemo(() => new Map((coverage?.areas ?? []).map((a) => [a.area.key, a] as const)), [coverage]);
+  const areaIdByKey = useMemo(() => new Map((raw?.areas ?? []).map((a) => [a.key, a.id] as const)), [raw]);
   const clusters = useMemo(() => clustersFor(lens), [lens]);
   const laidOut = useMemo(() => clusters.map((c) => ({ c, nodes: nodePositions(c) })), [clusters]);
 
@@ -144,27 +143,6 @@ export default function Ecosystem() {
     await load(); setCreating(null);
   };
 
-  const renderLayer = (check: Check, items: string[], area: Area) => {
-    const on = items.length > 0;
-    const f = fixFor(area, check);
-    return (
-      <div style={{ padding: "8px 0", borderTop: "1px solid var(--line-2, var(--border))" }}>
-        <div className="row gap-2" style={{ alignItems: "center", marginBottom: on ? 5 : 3 }}>
-          <span style={{ width: 8, height: 8, borderRadius: 999, flexShrink: 0, background: on ? "var(--gn-text)" : "transparent", border: on ? "none" : "1.5px solid var(--rd)" }} />
-          <span style={{ fontSize: 12, fontWeight: 660 }}>{CHECK_LABEL[check]}</span>
-          <span className="t-mono-xs t-muted" style={{ fontSize: 10, marginLeft: "auto" }}>{on ? items.length : "none"}</span>
-        </div>
-        {on ? (
-          <div className="row gap-1" style={{ flexWrap: "wrap", gap: 4, paddingLeft: 16 }}>
-            {items.map((it) => <span key={it} className="chip" style={{ fontSize: 10.5, background: "var(--well, var(--surface-2))", color: "var(--tp)" }}>{it}</span>)}
-          </div>
-        ) : (
-          <button onClick={() => setCreating(check === "workflow" ? "workflow" : check === "agent" ? "agent" : "skill")} className="btn btn-sm btn-secondary" style={{ fontSize: 10.5, marginLeft: 16 }}>+ {f.label}</button>
-        )}
-      </div>
-    );
-  };
-
   const renderRail = () => {
     if (sel) {
       const d = detailFor(sel.area); const t = chipTone(sel.status);
@@ -181,25 +159,60 @@ export default function Ecosystem() {
           <div className="t-mono-xs t-muted" style={{ fontSize: 10, marginBottom: 6 }}>{sel.area.circle === "product" ? "Build / Product" : "Go-to-market"}{sel.area.record ? ` · maintains ${sel.area.record}` : ""}{sel.area.flywheel ? ` · ${sel.area.flywheel}` : ""}</div>
           <div className="t-sub t-muted" style={{ fontSize: 11.5, lineHeight: 1.45, marginBottom: 10 }}>{sel.area.blurb}</div>
 
-          <div className="t-mono-xs t-muted" style={{ fontSize: 10, textTransform: "uppercase", letterSpacing: 0.4, marginBottom: 4 }}>What this area must do</div>
-          <ul style={{ margin: "0 0 6px", padding: 0, listStyle: "none", display: "flex", flexDirection: "column", gap: 3 }}>
-            {sel.area.tasks.map((task) => (
-              <li key={task.key} className="t-sub" style={{ fontSize: 11.5, paddingLeft: 12, position: "relative", lineHeight: 1.35, color: "var(--tp)" }}>
-                <span style={{ position: "absolute", left: 0, color: "var(--tm)" }}>·</span>{task.label}
-              </li>
-            ))}
-          </ul>
+          {/* Agent on the area */}
+          <div className="row gap-2" style={{ alignItems: "center", flexWrap: "wrap", padding: "8px 0", borderTop: "1px solid var(--line-2, var(--border))" }}>
+            <span style={{ width: 8, height: 8, borderRadius: 999, flexShrink: 0, background: d.agents.length ? "var(--gn-text)" : "transparent", border: d.agents.length ? "none" : "1.5px solid var(--rd)" }} />
+            <span style={{ fontSize: 12, fontWeight: 660 }}>Agent</span>
+            <span className="t-sub t-muted" style={{ fontSize: 11.5 }}>{d.agents.length ? d.agents.join(", ") : "none on this area yet"}</span>
+            {!d.agents.length && <button onClick={() => setCreating("agent")} className="btn btn-sm btn-secondary" style={{ fontSize: 10.5, marginLeft: "auto" }}>+ Put an agent</button>}
+          </div>
 
-          <div className="t-mono-xs t-muted" style={{ fontSize: 10, textTransform: "uppercase", letterSpacing: 0.4, marginTop: 8 }}>Who & what covers it</div>
-          {renderLayer("agent", d.agents, sel.area)}
-          {renderLayer("cornerstone", d.cornerstones, sel.area)}
-          {renderLayer("skills", d.childSkills, sel.area)}
-          {renderLayer("workflow", d.workflows, sel.area)}
-          {d.workflows.length > 0 && (
-            <div className="t-sub t-muted" style={{ fontSize: 10.5, lineHeight: 1.4, marginTop: 8, padding: 8, borderRadius: 6, background: "color-mix(in srgb, var(--am) 9%, transparent)", color: "var(--am)" }}>
-              Note: workflows aren&apos;t yet aligned to areas/tasks, so this layer is approximate — a workflow on the agent counts even if it doesn&apos;t target these tasks. Tightening this is the next step.
-            </div>
-          )}
+          {/* Standard playbook — the prescriptive checklist (a suggestion; tailorable) */}
+          <div className="t-mono-xs t-muted" style={{ fontSize: 10, textTransform: "uppercase", letterSpacing: 0.4, margin: "8px 0 4px" }}>Standard playbook</div>
+          <div className="stack-2">
+            {playbooksFor(sel.area.key).map((pb) => {
+              const areaDbId = areaIdByKey.get(sel.area.key);
+              const wf = (raw?.workflows ?? []).find((w) => w.is_active !== false && !!areaDbId && w.area_id === areaDbId && w.standard_key === pb.key);
+              const present = !!wf;
+              const haveSkill = (name: string) => d.childSkills.some((s) => s.toLowerCase().includes(name.toLowerCase().split(" ")[0]));
+              return (
+                <div key={pb.key} className="card card-pad" style={{ borderLeft: `3px solid ${present ? "var(--gn-text)" : "var(--rd)"}` }}>
+                  <div className="row-between" style={{ alignItems: "flex-start", gap: 8 }}>
+                    <div style={{ minWidth: 0, flex: 1 }}>
+                      <div style={{ fontSize: 12.5, fontWeight: 660 }}>{pb.name}</div>
+                      <div className="t-sub t-muted" style={{ fontSize: 11, lineHeight: 1.35, marginTop: 1 }}>{pb.purpose}</div>
+                    </div>
+                    {present
+                      ? <span className="chip" style={{ flexShrink: 0, fontSize: 9, background: "var(--gn-fill)", color: "var(--gn-text)", fontWeight: 700 }}>✓ set up</span>
+                      : <button onClick={() => { setCreatingStandard(pb); setCreating("workflow"); }} className="btn btn-sm" style={{ flexShrink: 0, fontSize: 10.5 }}>Set up</button>}
+                  </div>
+                  {present && wf && <div className="t-mono-xs t-muted" style={{ fontSize: 10, marginTop: 4 }}>↳ {wf.name}</div>}
+                  <div className="row gap-1" style={{ flexWrap: "wrap", gap: 4, marginTop: 6 }}>
+                    {pb.skills.map((sk) => (
+                      <span key={sk} className="chip" style={{ fontSize: 10, background: "var(--well, var(--surface-2))", color: haveSkill(sk) ? "var(--tp)" : "var(--tm)" }}>{haveSkill(sk) ? "" : "○ "}{sk}</span>
+                    ))}
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+
+          {/* Custom workflows mapped to this area */}
+          {(() => {
+            const areaDbId = areaIdByKey.get(sel.area.key);
+            const customWfs = (raw?.workflows ?? []).filter((w) => w.is_active !== false && !!areaDbId && w.area_id === areaDbId && !w.standard_key);
+            return customWfs.length > 0 ? (
+              <>
+                <div className="t-mono-xs t-muted" style={{ fontSize: 10, textTransform: "uppercase", letterSpacing: 0.4, margin: "12px 0 4px" }}>Custom (mapped here)</div>
+                <div className="stack-2">{customWfs.map((w) => <div key={w.id} className="card card-pad" style={{ fontSize: 12 }}>{w.name}</div>)}</div>
+              </>
+            ) : null;
+          })()}
+
+          <div className="row gap-2" style={{ marginTop: 10, flexWrap: "wrap" }}>
+            <button onClick={() => { setCreatingStandard(null); setCreating("workflow"); }} className="btn btn-sm btn-secondary" style={{ fontSize: 10.5 }}>+ Map a custom workflow</button>
+            <button onClick={() => setCreating("skill")} className="btn btn-sm btn-secondary" style={{ fontSize: 10.5 }}>+ Add a skill</button>
+          </div>
         </div>
       );
     }
@@ -335,7 +348,7 @@ export default function Ecosystem() {
 
       {/* In-context creation — complete it here, refresh, move on. */}
       {creating === "skill" && <SkillCreateChat onCreated={() => { load(); setCreating(null); }} onClose={() => setCreating(null)} />}
-      {creating === "workflow" && sel && <WorkflowCreateChat area={sel.area} onCreated={() => { load(); setCreating(null); }} onClose={() => setCreating(null)} />}
+      {creating === "workflow" && sel && <WorkflowCreateChat area={sel.area} areaId={areaIdByKey.get(sel.area.key)} standard={creatingStandard} onCreated={() => { load(); setCreating(null); setCreatingStandard(null); }} onClose={() => { setCreating(null); setCreatingStandard(null); }} />}
       {creating === "agent" && sel && (
         <Modal open onClose={() => setCreating(null)} title={`Put an agent on ${sel.area.label}`} width={420}>
           <div className="stack-2">

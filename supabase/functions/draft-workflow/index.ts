@@ -83,6 +83,7 @@ Deno.serve(async (req: Request) => {
     const body = await req.json().catch(() => ({}));
     const transcript = (Array.isArray(body.transcript) ? body.transcript : []) as { role: string; text: string }[];
     const area = (body.area ?? {}) as AreaCtx;
+    const standard = (body.standard ?? null) as { name: string; purpose: string; skills: string[] } | null;
     const connAreas = new Set(area.connAreas ?? []);
 
     // ---- roster: real agents + their child skills + who's connected to this area
@@ -134,6 +135,7 @@ Deno.serve(async (req: Request) => {
       system: [{ type: "text", text: system, cache_control: { type: "ephemeral" } }],
       messages: [
         { role: "user", content: [
+          standard ? `STANDARD PLAYBOOK to instantiate — draft THIS specifically (not a different workflow):\n• ${standard.name} — ${standard.purpose}\n• Standard skills it needs: ${(standard.skills ?? []).join(", ")}\nMap this playbook onto an ordered step-chain using the roster; prefer connected agents who hold (or whose cornerstone covers) these skills, and name any missing skill in your reply.` : "",
           `AREA TASKS to cover:\n${tasksText || "(no tasks listed)"}`,
           `ROSTER (the only agents/skills you may use):\n${rosterText || "(no agents yet — recommend creating/connecting one)"}`,
           recordText ? `${area.circle === "product" ? "PRODUCT" : "GTM"} TRUTH:\n${recordText}` : "",
