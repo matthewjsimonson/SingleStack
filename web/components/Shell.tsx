@@ -1,13 +1,14 @@
 "use client";
 
-// App shell. Grouped sidebar matching the product's mental model:
-//   Foundation  → Overview, Product records, GTM records
-//   Intelligence → Signals, Competitors        (placeholders)
-//   Build        → Roadmap, Ship               (placeholders)
-//   Campaigns    → Content, Enablement         (placeholders)
-//   Agents
-// Live sections route to real pages; placeholders route to a "coming soon"
-// scaffold so the full IA is visible and navigable now.
+// App shell. Grouped sidebar, consolidated to a cohesive ~10-surface IA
+// (the 22->10 cleanup):
+//   Foundation   → Product records, GTM records
+//   Intelligence → Signals, Competitive (incl. seller lens), Market, Frontier
+//   Product      → Strategy, Roadmap, Ship
+//   Go-to-market → GTM work (Content+Campaigns+Enablement), Accounts (lifecycle/PQL)
+//   Agents, Settings
+// PQL is a state/signal on Accounts, not a tab; Desk folds into Competitive;
+// GTM strategy folds into Strategy as a lens.
 import { createClient } from "@/lib/supabase/client";
 import { useRouter, usePathname } from "next/navigation";
 import { useState, type ReactNode } from "react";
@@ -73,12 +74,8 @@ const GROUPS: Group[] = [
   {
     label: "Go-to-market",
     items: [
-      { label: "Strategy", href: "/gtm-strategy" },
-      { label: "Desk", href: "/sell" },
-      { label: "Qualified leads", href: "/pql" },
-      { label: "Content", href: "/content" },
-      { label: "Campaigns", href: "/campaigns" },
-      { label: "Enablement", href: "/enablement" },
+      { label: "GTM work", href: "/gtm-work" },
+      { label: "Accounts", href: "/accounts" },
     ],
   },
 ];
