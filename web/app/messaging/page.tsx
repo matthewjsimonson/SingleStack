@@ -1,6 +1,7 @@
 import { createClient } from "@/lib/supabase/server";
 import Shell from "@/components/Shell";
 import MessagingView from "@/components/MessagingView";
+import ErrorBoundary from "@/components/ErrorBoundary";
 
 // Messaging — the GTM-strategy root, its own feature-rich module (not a tab).
 export default async function Page() {
@@ -8,7 +9,9 @@ export default async function Page() {
   const { data: { user } } = await supabase.auth.getUser();
   return (
     <Shell email={user?.email} crumbs={[{ label: "Messaging" }]}>
-      <MessagingView />
+      <ErrorBoundary label="The Messaging workspace failed to render. Share the message below and we'll fix it.">
+        <MessagingView />
+      </ErrorBoundary>
     </Shell>
   );
 }
