@@ -6,7 +6,7 @@
 import { useEffect, useState, useCallback } from "react";
 import { createClient } from "@/lib/supabase/client";
 import { getOrgId } from "@/lib/org";
-import { Section, Chip, Banner, BackLink, Empty, Modal } from "@/components/ui";
+import { Section, Chip, Banner, BackLink, Empty, Modal, SourceChip } from "@/components/ui";
 import { Markdown } from "@/components/Markdown";
 import SkillTailorChat from "@/components/SkillTailorChat";
 import { CONNECTOR_CATALOG } from "@/lib/connectors";
@@ -36,6 +36,7 @@ export default function AgentDetail({ agentId }: { agentId: string }) {
   const [cornerstones, setCornerstones] = useState<Set<string>>(new Set());
   const [connections, setConnections] = useState<Connection[]>([]);
   const [agentWorkflows, setAgentWorkflows] = useState<AgentWorkflow[]>([]);
+  const [roster, setRoster] = useState<{ id: string; name: string }[]>([]);
   const [alignments, setAlignments] = useState<Alignment[]>([]);
   const [initiatives, setInitiatives] = useState<InitiativeOpt[]>([]);
   const [workstreams, setWorkstreams] = useState<WorkstreamOpt[]>([]);
@@ -45,7 +46,7 @@ export default function AgentDetail({ agentId }: { agentId: string }) {
 
   const load = useCallback(async () => {
     const { data: a } = await supabase.from("agents").select("id, key, name, role, model, system_prompt, is_active, identity, mandate, principles, voice").eq("id", agentId).maybeSingle();
-    const [{ data: sk }, { data: as }, { data: cs }, { data: wf }, { data: al }, { data: inits }, { data: ws }] = await Promise.all([
+    const [{ data: sk }, { data: as }, { data: cs }, { data: wf }, { data: al }, { data: inits }, { data: ws }, { data: ros }] = await Promise.all([
       supabase.from("skills").select("id, key, name, description, category, instructions, areas, connectors, source, kind, scope, parent_id, agent_id").or(`scope.eq.library,and(scope.eq.agent,agent_id.eq.${agentId})`).order("name"),
       supabase.from("agent_skills").select("skill_id, is_cornerstone").eq("agent_id", agentId),
       supabase.from("connections").select("id, kind, label, area, mcp_url, status, config, targets, guidance").eq("agent_id", agentId).order("created_at"),
@@ -53,6 +54,8 @@ export default function AgentDetail({ agentId }: { agentId: string }) {
       supabase.from("agent_alignments").select("id, role, guidance, initiative_id, workstream_id, initiatives(title, stage), initiative_workstreams(title, area)").eq("agent_id", agentId).order("created_at"),
       supabase.from("initiatives").select("id, title, stage, scope").order("created_at", { ascending: false }).limit(200),
       supabase.from("initiative_workstreams").select("id, title, area, initiative_id").order("created_at", { ascending: false }).limit(400),
+      // Roster for rendering workflow STEP labels (agent + skill names) in the diff/history.
+      supabase.from("agents").select("id, name").order("name"),
     ]);
     setAgent(a); setSkills(sk ?? []);
     setAttached(new Set((as ?? []).map((x) => x.skill_id)));
@@ -61,7 +64,8 @@ export default function AgentDetail({ agentId }: { agentId: string }) {
     // Workflows this agent participates in — as owner, or named in any step.
     // deno-lint-ignore no-explicit-any
     setAgentWorkflows(((wf ?? []) as any[]).filter((w) => w.agent_id === agentId || (Array.isArray(w.steps) && w.steps.some((s: any) => s?.agent_id === agentId)))
-      .map((w) => ({ id: w.id, name: w.name, description: w.description, is_active: w.is_active, stepCount: Array.isArray(w.steps) ? w.steps.length : 0 })));
+      .map((w) => ({ id: w.id, name: w.name, description: w.description, is_active: w.is_active, steps: Array.isArray(w.steps) ? w.steps : [], stepCount: Array.isArray(w.steps) ? w.steps.length : 0 })));
+    setRoster((ros ?? []) as { id: string; name: string }[]);
     const initById = new Map((inits ?? []).map((i) => [i.id, i.title]));
     // deno-lint-ignore no-explicit-any
     setAlignments(((al ?? []) as any[]).map((r) => r.workstream_id
@@ -112,7 +116,7 @@ export default function AgentDetail({ agentId }: { agentId: string }) {
         cornerstoneSkill={skills.find((s) => attached.has(s.id) && cornerstones.has(s.id)) ?? null} childSkills={skills.filter((s) => attached.has(s.id) && !cornerstones.has(s.id))} tabTo={setTab} />}
       {tab === "skills" && <Skills agentId={agentId} agentName={agent.name} skills={skills} attached={attached} cornerstones={cornerstones} connAreas={connections.filter((c) => c.kind === "internal").map((c) => c.area).filter((a): a is string => !!a)} reload={load} setError={setError} />}
       {tab === "scope" && <Scope agentId={agentId} connections={connections} alignments={alignments} initiatives={initiatives} workstreams={workstreams} reload={load} setError={setError} />}
-      {tab === "workflows" && <Workflows workflows={agentWorkflows} />}
+      {tab === "workflows" && <Workflows agentId={agentId} workflows={agentWorkflows} roster={roster} skills={skills} reload={load} setError={setError} />}
     </div>
   );
 }
@@ -913,11 +917,30 @@ function ConnRow({ c, onRemove, reload, setError }: { c: Connection; onRemove: (
 }
 
 // ---------- Workflows (the workflows this agent participates in) ----------
-type AgentWorkflow = { id: string; name: string; description: string | null; is_active: boolean; stepCount: number };
-function Workflows({ workflows }: { workflows: AgentWorkflow[] }) {
+// A workflow STEP — one agent applying one skill toward one task, with a signal
+// declaration. Mirrors the evolve-workflows / draft-workflow step shape.
+type WfStep = { agent_id: string; skill_id: string | null; signals: string; instruction: string };
+type AgentWorkflow = { id: string; name: string; description: string | null; is_active: boolean; steps: WfStep[]; stepCount: number };
+
+function Workflows({ agentId, workflows, roster, skills, reload, setError }: { agentId: string; workflows: AgentWorkflow[]; roster: { id: string; name: string }[]; skills: Skill[]; reload: () => void; setError: (s: string | null) => void }) {
+  const [evolving, setEvolving] = useState(false);
+  const [histWf, setHistWf] = useState<AgentWorkflow | null>(null);
+  // Name lookups so steps read as agent/skill names, not raw ids.
+  const agentName = (id: string) => roster.find((a) => a.id === id)?.name ?? id;
+  const skillName = (id: string | null) => (id ? skills.find((s) => s.id === id)?.name ?? id : null);
+
   return (
-    <Section label="Workflows" action={<a className="btn btn-secondary btn-sm" href="/agents?tab=workflows">Manage workflows</a>}>
-      <div className="t-sub t-muted" style={{ fontSize: 12.5, marginBottom: 12 }}>The workflows this agent runs in — as owner, or as a step in a chain. Author and edit them over in <a href="/agents?tab=workflows" style={{ color: "var(--ac-text)", fontWeight: 600 }}>Workflows</a>.</div>
+    <Section label="Workflows" action={
+      <div className="row gap-2">
+        {workflows.length > 0 && <button className="btn btn-sm" onClick={() => setEvolving((v) => !v)} style={{ background: "var(--ac)", color: "#fff" }}>Evolve workflows</button>}
+        <a className="btn btn-secondary btn-sm" href="/agents?tab=workflows">Manage workflows</a>
+      </div>
+    }>
+      <div className="t-sub t-muted" style={{ fontSize: 12.5, marginBottom: 12 }}>The workflows this agent runs in — as owner, or as a step in a chain. A workflow&rsquo;s steps are its operating procedure; <strong>Evolve workflows</strong> re-reads this agent&rsquo;s intelligence and proposes evolved steps. Author and edit them over in <a href="/agents?tab=workflows" style={{ color: "var(--ac-text)", fontWeight: 600 }}>Workflows</a>.</div>
+
+      {evolving && <WorkflowEvolvePanel agentId={agentId} agentName={agentName} skillName={skillName} onApplied={reload} onClose={() => setEvolving(false)} setError={setError} />}
+      {histWf && <WorkflowHistory workflow={histWf} agentName={agentName} skillName={skillName} onClose={() => setHistWf(null)} />}
+
       {workflows.length === 0 ? (
         <div className="t-sub t-muted" style={{ fontSize: 12.5, marginBottom: 10 }}>Not part of any workflow yet.</div>
       ) : (
@@ -932,11 +955,232 @@ function Workflows({ workflows }: { workflows: AgentWorkflow[] }) {
                 </div>
                 {w.description && <div className="t-sub t-muted" style={{ fontSize: 12.5, marginTop: 2 }}>{w.description}</div>}
               </div>
+              <button className="btn btn-secondary btn-sm" style={{ flexShrink: 0 }} onClick={() => setHistWf(w)}>History</button>
             </div>
           ))}
         </div>
       )}
     </Section>
+  );
+}
+
+// ---------- Steps diff surface (current vs proposed) ----------
+// The Diff Surface for a workflow's operating procedure: render each step as an
+// ordered, readable card (agent · skill · signals + instruction). Before/after
+// sit side by side so the change is a legible moment, not a silent overwrite.
+const SIG_TONE = (s: string): "default" | "accent" | "violet" | "green" => (s === "internal" ? "accent" : s === "external" ? "violet" : s === "both" ? "green" : "default");
+
+function StepList({ steps, agentName, skillName, tone, editable, onEditInstruction }: {
+  steps: WfStep[]; agentName: (id: string) => string; skillName: (id: string | null) => string | null;
+  tone: "current" | "proposed"; editable?: boolean; onEditInstruction?: (i: number, v: string) => void;
+}) {
+  const border = tone === "proposed" ? "var(--ac)" : "var(--border)";
+  if (steps.length === 0) return <div className="t-sub t-muted" style={{ fontSize: 12 }}>(no steps)</div>;
+  return (
+    <div className="stack-2">
+      {steps.map((s, i) => {
+        const sk = skillName(s.skill_id);
+        return (
+          <div key={i} className="card card-pad" style={{ borderLeft: `2px solid ${border}`, padding: "8px 10px" }}>
+            <div className="row gap-2" style={{ flexWrap: "wrap", alignItems: "center", marginBottom: 4 }}>
+              <span className="t-mono-xs t-muted">{i + 1}.</span>
+              <span style={{ fontSize: 12.5, fontWeight: 640 }}>{agentName(s.agent_id)}</span>
+              {sk ? <Chip tone="violet">{sk}</Chip> : <span className="t-mono-xs t-muted">no skill</span>}
+              {s.signals && s.signals !== "none" && <Chip tone={SIG_TONE(s.signals)}>signals: {s.signals}</Chip>}
+            </div>
+            {editable && onEditInstruction
+              ? <textarea className="textarea" rows={3} value={s.instruction} onChange={(e) => onEditInstruction(i, e.target.value)} />
+              : <div className="t-sub" style={{ fontSize: 12, lineHeight: 1.45, color: "var(--ts)" }}>{s.instruction}</div>}
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
+function StepsDiff({ current, proposed, agentName, skillName, onEditInstruction }: {
+  current: WfStep[]; proposed: WfStep[]; agentName: (id: string) => string; skillName: (id: string | null) => string | null;
+  onEditInstruction: (i: number, v: string) => void;
+}) {
+  return (
+    <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "var(--sp-3)" }}>
+      <div>
+        <div className="t-label" style={{ color: "var(--tm)", marginBottom: 6 }}>Current steps</div>
+        <StepList steps={current} agentName={agentName} skillName={skillName} tone="current" />
+      </div>
+      <div>
+        <div className="t-label" style={{ color: "var(--ac-text)", marginBottom: 6 }}>Proposed steps <span className="t-muted" style={{ fontWeight: 400 }}>— edit instructions before accepting</span></div>
+        <StepList steps={proposed} agentName={agentName} skillName={skillName} tone="proposed" editable onEditInstruction={onEditInstruction} />
+      </div>
+    </div>
+  );
+}
+
+// ---------- Evolve workflows from signals ----------
+// Parallel to EvolvePanel, but the unit of change is a workflow's STEPS (its
+// operating procedure) rather than a skill's instructions. Invokes the
+// evolve-workflows edge fn, renders one card per proposed revision with a steps
+// diff (current vs proposed), lets the human edit proposed instructions, and on
+// Accept calls apply_workflow_evolution() — recording a provenance-tagged revision.
+type WfRevision = { workflow_id: string; name: string; target_type: string | null; current_steps: WfStep[]; proposed_steps: WfStep[]; rationale: string; drivers: string[] };
+
+function WorkflowEvolvePanel({ agentId, agentName, skillName, onApplied, onClose, setError }: {
+  agentId: string; agentName: (id: string) => string; skillName: (id: string | null) => string | null;
+  onApplied: () => void; onClose: () => void; setError: (s: string | null) => void;
+}) {
+  const supabase = createClient();
+  const [loading, setLoading] = useState(true);
+  const [note, setNote] = useState<string | null>(null);
+  const [revs, setRevs] = useState<WfRevision[]>([]);
+  // Editable proposed steps, keyed by workflow_id.
+  const [drafts, setDrafts] = useState<Record<string, WfStep[]>>({});
+  const [applying, setApplying] = useState<string | null>(null);
+  // After accept, collapse the card to a ratified line.
+  const [ratified, setRatified] = useState<Record<string, string>>({});
+
+  const run = useCallback(async () => {
+    setLoading(true); setError(null); setNote(null);
+    try {
+      const { data: s } = await supabase.auth.getSession();
+      const token = s.session?.access_token;
+      const { data, error } = await supabase.functions.invoke("evolve-workflows", {
+        body: { agent_id: agentId },
+        headers: token ? { Authorization: `Bearer ${token}` } : undefined,
+      });
+      if (error) throw error;
+      if (data?.error) throw new Error(data.error);
+      const rs: WfRevision[] = data?.revisions ?? [];
+      setRevs(rs);
+      setDrafts(Object.fromEntries(rs.map((r) => [r.workflow_id, r.proposed_steps.map((st) => ({ ...st }))])));
+      setRatified({});
+      if (rs.length === 0) setNote(data?.message ?? "No workflow changes warranted by current intelligence. These procedures are up to date.");
+    } catch (e) { setError(e instanceof Error ? e.message : "Could not evolve workflows."); }
+    finally { setLoading(false); }
+  }, [supabase, agentId, setError]);
+
+  useEffect(() => { run(); }, [run]);
+
+  async function accept(r: WfRevision) {
+    setApplying(r.workflow_id); setError(null);
+    try {
+      const steps = drafts[r.workflow_id] ?? r.proposed_steps;
+      const { error } = await supabase.rpc("apply_workflow_evolution", {
+        p_workflow: r.workflow_id,
+        p_steps: steps,
+        p_drivers: r.drivers.map((d) => ({ kind: "intelligence", title: d })),
+        p_note: r.rationale,
+      });
+      if (error) throw error;
+      setRatified((prev) => ({ ...prev, [r.workflow_id]: `Ratified · ${steps.length} step${steps.length === 1 ? "" : "s"}` }));
+      onApplied();
+    } catch (e) { setError(e instanceof Error ? e.message : "Could not apply workflow evolution."); }
+    finally { setApplying(null); }
+  }
+  function dismiss(id: string) { setRevs((prev) => prev.filter((x) => x.workflow_id !== id)); }
+  function editInstruction(wfId: string, i: number, v: string) {
+    setDrafts((prev) => {
+      const next = (prev[wfId] ?? []).map((st, idx) => (idx === i ? { ...st, instruction: v } : st));
+      return { ...prev, [wfId]: next };
+    });
+  }
+
+  return (
+    <div className="card card-pad" style={{ marginBottom: "var(--sp-3)", borderColor: "var(--ac)", background: "var(--ac-fill)" }}>
+      <div className="row-between" style={{ marginBottom: 10 }}>
+        <div className="row gap-2"><span style={{ fontWeight: 660 }}>Evolve workflows from signals</span></div>
+        <div className="row gap-2">
+          <button className="btn btn-secondary btn-sm" onClick={run} disabled={loading}>{loading ? "Analyzing…" : "Re-run"}</button>
+          <button className="btn btn-secondary btn-sm" onClick={onClose}>Close</button>
+        </div>
+      </div>
+
+      {loading && <div className="t-sub t-muted">Reading this agent&apos;s intelligence and proposing evolved workflow steps…</div>}
+      {!loading && note && <div className="t-sub" style={{ fontSize: 13 }}>{note}</div>}
+
+      <div className="stack-3">
+        {revs.map((r) => {
+          const done = ratified[r.workflow_id];
+          if (done) {
+            return (
+              <div key={r.workflow_id} className="card card-pad" style={{ background: "var(--panel)", borderColor: "var(--gn)" }}>
+                <div className="row gap-2" style={{ alignItems: "center" }}>
+                  <Chip tone="green">evolved</Chip>
+                  <span style={{ fontSize: 13.5, fontWeight: 640 }}>{r.name}</span>
+                  <span className="t-mono-xs t-muted">{done}</span>
+                </div>
+              </div>
+            );
+          }
+          return (
+            <div key={r.workflow_id} className="card card-pad" style={{ background: "var(--panel)" }}>
+              <div className="row gap-2" style={{ marginBottom: 6 }}>
+                <Chip tone="accent">revise</Chip>
+                <span style={{ fontSize: 14, fontWeight: 640 }}>{r.name}</span>
+                {r.target_type && r.target_type !== "none" && <Chip tone={r.target_type === "gtm" ? "violet" : "accent"}>{r.target_type}</Chip>}
+              </div>
+              <div className="t-sub" style={{ fontSize: 12.5, marginBottom: 8 }}><strong>Why:</strong> {r.rationale}</div>
+              {r.drivers.length > 0 && (
+                <div className="row gap-2" style={{ flexWrap: "wrap", marginBottom: 10 }}>
+                  {r.drivers.map((d, i) => <SourceChip key={i} icon="◆" label={d} />)}
+                </div>
+              )}
+              <StepsDiff current={r.current_steps} proposed={drafts[r.workflow_id] ?? r.proposed_steps} agentName={agentName} skillName={skillName} onEditInstruction={(i, v) => editInstruction(r.workflow_id, i, v)} />
+              <div className="row gap-2" style={{ marginTop: 10 }}>
+                <button className="btn btn-success btn-sm" onClick={() => accept(r)} disabled={applying === r.workflow_id}>{applying === r.workflow_id ? "Applying…" : "Accept & evolve"}</button>
+                <button className="btn btn-secondary btn-sm" onClick={() => dismiss(r.workflow_id)} disabled={applying === r.workflow_id}>Dismiss</button>
+              </div>
+            </div>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
+// ---------- Workflow revision history ----------
+// Parallel to SkillHistory: every steps value a workflow has held, newest first,
+// with source (edit | evolved | seed) provenance, drivers, note, and the steps
+// rendered readably (agent · skill · instruction per step).
+type WfRev = { id: string; created_at: string; steps: WfStep[] | null; source: string; drivers: { kind?: string; title: string }[] | null; note: string | null };
+
+function WorkflowHistory({ workflow, agentName, skillName, onClose }: {
+  workflow: AgentWorkflow; agentName: (id: string) => string; skillName: (id: string | null) => string | null; onClose: () => void;
+}) {
+  const supabase = createClient();
+  const [revs, setRevs] = useState<WfRev[]>([]);
+  const [loading, setLoading] = useState(true);
+  useEffect(() => {
+    (async () => {
+      const { data } = await supabase.from("workflow_revisions").select("id, created_at, steps, source, drivers, note").eq("workflow_id", workflow.id).order("created_at", { ascending: false });
+      setRevs((data ?? []) as WfRev[]); setLoading(false);
+    })();
+  }, [supabase, workflow.id]);
+  const sourceLabel = (s: string) => (s === "evolved" ? "evolved from signals" : s === "seed" ? "seed" : s);
+  return (
+    <Modal open onClose={onClose} title={`History · ${workflow.name}`} width={640}>
+      {loading ? <div className="t-sub t-muted">Loading…</div> : revs.length === 0 ? (
+        <div className="t-sub t-muted">No revisions yet. This workflow&apos;s steps haven&apos;t changed since it was created.</div>
+      ) : (
+        <div className="stack-3">
+          {revs.map((r, i) => (
+            <div key={r.id} className="card card-pad">
+              <div className="row gap-2" style={{ marginBottom: 6 }}>
+                <Chip tone={r.source === "evolved" ? "accent" : r.source === "seed" ? "green" : "default"}>{sourceLabel(r.source)}</Chip>
+                {i === 0 && <Chip tone="green">current</Chip>}
+                <span className="t-sub t-muted mono" style={{ fontSize: 11 }}>{new Date(r.created_at).toLocaleString()}</span>
+              </div>
+              {r.note && <div className="t-sub" style={{ fontSize: 12.5, marginBottom: 6 }}><strong>Why:</strong> {r.note}</div>}
+              {(r.drivers?.length ?? 0) > 0 && (
+                <div className="row gap-2" style={{ flexWrap: "wrap", marginBottom: 8 }}>
+                  {r.drivers!.map((d, j) => <Chip key={j}>{d.title}</Chip>)}
+                </div>
+              )}
+              <StepList steps={Array.isArray(r.steps) ? r.steps : []} agentName={agentName} skillName={skillName} tone="current" />
+            </div>
+          ))}
+        </div>
+      )}
+    </Modal>
   );
 }
 
