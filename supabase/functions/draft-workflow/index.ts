@@ -83,7 +83,7 @@ Deno.serve(async (req: Request) => {
     const body = await req.json().catch(() => ({}));
     const transcript = (Array.isArray(body.transcript) ? body.transcript : []) as { role: string; text: string }[];
     const area = (body.area ?? {}) as AreaCtx;
-    const standard = (body.standard ?? null) as { name: string; purpose: string; skills: string[] } | null;
+    const standard = (body.standard ?? null) as { name: string; purpose: string; skills: string[]; steps?: { skill: string; signals: "none" | "internal" | "external" | "both"; instruction: string }[] } | null;
     const connAreas = new Set(area.connAreas ?? []);
 
     // ---- roster: real agents + their child skills + who's connected to this area
@@ -135,7 +135,14 @@ Deno.serve(async (req: Request) => {
       system: [{ type: "text", text: system, cache_control: { type: "ephemeral" } }],
       messages: [
         { role: "user", content: [
-          standard ? `STANDARD PLAYBOOK to instantiate — draft THIS specifically (not a different workflow):\n• ${standard.name} — ${standard.purpose}\n• Standard skills it needs: ${(standard.skills ?? []).join(", ")}\nMap this playbook onto an ordered step-chain using the roster; prefer connected agents who hold (or whose cornerstone covers) these skills, and name any missing skill in your reply.` : "",
+          standard ? [
+            `STANDARD PLAYBOOK to instantiate — draft THIS specifically (not a different workflow):`,
+            `• ${standard.name} — ${standard.purpose}`,
+            `• Standard skills it needs: ${(standard.skills ?? []).join(", ")}`,
+            (standard.steps ?? []).length
+              ? `CANONICAL TEMPLATE PROCEDURE — this is the seed. INSTANTIATE it: keep this step ORDER, these SIGNALS, and each step's INTENT. For each template step, BIND it to a real roster agent_id (prefer one CONNECTED to this area) and to that agent's child skill_id whose name best matches the step's skill — set skill_id=null only if no child skill fits. Lightly adapt each instruction to this org's product/record; do NOT invent a different chain. If no roster agent can carry a step's skill, say so in your reply and recommend connecting/skilling one rather than binding the wrong agent.\n${(standard.steps ?? []).map((s, i) => `  ${i + 1}. [skill: ${s.skill}] [signals: ${s.signals}] ${s.instruction}`).join("\n")}`
+              : `Map this playbook onto an ordered step-chain using the roster; prefer connected agents who hold (or whose cornerstone covers) these skills, and name any missing skill in your reply.`,
+          ].join("\n") : "",
           `AREA TASKS to cover:\n${tasksText || "(no tasks listed)"}`,
           `ROSTER (the only agents/skills you may use):\n${rosterText || "(no agents yet — recommend creating/connecting one)"}`,
           recordText ? `${area.circle === "product" ? "PRODUCT" : "GTM"} TRUTH:\n${recordText}` : "",
