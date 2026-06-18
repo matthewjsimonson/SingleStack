@@ -5,10 +5,11 @@
 //   Foundation   → Product records, GTM records
 //   Intelligence → Signals, Competitive (incl. seller lens), Market, Frontier
 //   Product      → Strategy, Roadmap, Ship
-//   Go-to-market → GTM work (Content+Campaigns+Enablement), Accounts (lifecycle/PQL)
+//   Go-to-market → GTM work (Pre-work / Content / Campaigns), GTM Org (field hub)
 //   Agents, Settings
-// PQL is a state/signal on Accounts, not a tab; Desk folds into Competitive;
-// GTM strategy folds into Strategy as a lens.
+// GTM work is the production chain rooted in Messaging; GTM Org is the field-facing
+// sink that Enablement/Content/Competitive publish into. Leads/PQL dropped as a
+// surface (PQL stays a signal that feeds Messaging).
 import { createClient } from "@/lib/supabase/client";
 import { useRouter, usePathname } from "next/navigation";
 import { useState, type ReactNode } from "react";
@@ -75,7 +76,7 @@ const GROUPS: Group[] = [
     label: "Go-to-market",
     items: [
       { label: "GTM work", href: "/gtm-work" },
-      { label: "Accounts", href: "/accounts" },
+      { label: "GTM Org", href: "/gtm-org" },
     ],
   },
 ];
