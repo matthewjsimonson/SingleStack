@@ -1,5 +1,8 @@
-// Messaging workbench helpers — officer-key resolution + staleness delta math,
-// kept out of the component so MessagingView stays about the surface, not the math.
+// Messaging workbench helpers — officer-key resolution + grounding assembly,
+// kept out of the component so MessagingView stays about the surface, not the
+// plumbing. Messaging is a PRODUCTION surface: it takes a NEW input (a release or
+// a signal-theme) and molds a messaging brief for it, GROUNDED in the framework
+// (the GTM record + product record). The framework is read-only context here.
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { fetchAgentKey } from "@/lib/strategy";
 
@@ -14,7 +17,7 @@ export async function fetchOfficerKey(supabase: SupabaseClient): Promise<string 
   return fetchAgentKey(supabase); // cpo, else first active
 }
 
-// A theme moving in the GTM/living-memory loop.
+// A signal-theme — a NEW input that needs messaging molded around it.
 export type ThemeRow = {
   id: string;
   title: string;
@@ -23,11 +26,10 @@ export type ThemeRow = {
   conf_level: number | null;
   category: string | null;
   state: string | null;
-  last_evidence_at: string | null;
-  signal_ids: string[] | null;
+  org_id: string;
 };
 
-// A shipped release.
+// A product release — the other NEW input that needs messaging.
 export type ReleaseRow = {
   id: string;
   name: string;
@@ -36,76 +38,79 @@ export type ReleaseRow = {
   stage: string | null;
   target_date: string | null;
   product_id: string | null;
+  org_id: string;
 };
 
-// The actionable delta for ONE framework element: how much has moved since it was
-// last updated. Reflect this — don't regenerate the whole field.
-export type FieldDelta = {
-  themes: ThemeRow[];   // themes with evidence newer than the field's last update
-  releases: ReleaseRow[]; // releases shipped after the field's last update
-  stale: boolean;
+// A framework field (from a GTM record OR a product record). These are read-only
+// CONTEXT the AI drafts FROM — never edited on the messaging surface.
+export type GroundingField = { field_key: string; label: string; value: string | null; section: string | null };
+
+// The most relevant framework fields to ground a messaging brief in. We pull a
+// compact subset so the officer drafts from the org's actual positioning, value
+// prop, buyer, and product facts rather than inventing them.
+const GTM_GROUNDING_KEYS = [
+  "category_pov", "positioning", "differentiation",   // Positioning
+  "value_prop", "pillars",                            // Messaging
+  "icp", "primary_persona",                           // Buyer
+  "win_themes",                                       // Motion
+];
+const PRODUCT_GROUNDING_KEYS = [
+  "what_it_is", "who_its_for", "problem",                       // Overview
+  "core_capabilities", "differentiated_capabilities",          // Capabilities
+];
+
+const fieldLine = (f: GroundingField): string | null => {
+  const v = (f.value ?? "").trim();
+  if (!v) return null;
+  return `- ${f.label || f.field_key}: ${v}`;
 };
 
-// N themes + M releases that moved AFTER `since` (a field's last-updated ISO ts).
-// `since` null → everything counts as "moved since" (field never had a revision).
-export function deltaSince(since: string | null, themes: ThemeRow[], releases: ReleaseRow[]): FieldDelta {
-  const after = (ts: string | null | undefined): boolean => {
-    if (!ts) return false;            // no timestamp on the moving thing → can't claim it moved
-    if (!since) return true;          // field never updated → everything is newer
-    return new Date(ts).getTime() > new Date(since).getTime();
-  };
-  const movedThemes = themes.filter((t) => after(t.last_evidence_at));
-  const movedReleases = releases.filter((r) => after(r.target_date));
-  return { themes: movedThemes, releases: movedReleases, stale: movedThemes.length + movedReleases.length > 0 };
+// Assemble a compact GROUNDING string from the GTM record + product record fields.
+// Fed to the officer (Draft with AI) and the context-sidebar agents as the
+// framework to mold the release/signal's messaging brief against.
+export function buildGrounding(gtmFields: GroundingField[], productFields: GroundingField[]): string {
+  const pick = (rows: GroundingField[], keys: string[]) =>
+    keys.map((k) => rows.find((f) => f.field_key === k)).filter((f): f is GroundingField => !!f)
+      .map(fieldLine).filter((l): l is string => !!l);
+  const gtmLines = pick(gtmFields, GTM_GROUNDING_KEYS);
+  const prodLines = pick(productFields, PRODUCT_GROUNDING_KEYS);
+  const blocks: string[] = [];
+  if (gtmLines.length) blocks.push(`GTM FRAMEWORK (positioning · messaging · buyer · motion):\n${gtmLines.join("\n")}`);
+  if (prodLines.length) blocks.push(`PRODUCT RECORD (what it is · capabilities):\n${prodLines.join("\n")}`);
+  return blocks.length ? blocks.join("\n\n") : "No framework fields captured yet — draft from the input alone.";
 }
 
-// Human-readable "this element is stale — N themes + M releases moved" line.
-export function deltaLine(d: FieldDelta): string {
-  const n = d.themes.length, m = d.releases.length;
-  if (n + m === 0) return "Current — nothing has moved since it was last updated.";
-  const parts: string[] = [];
-  if (n) parts.push(`${n} theme${n === 1 ? "" : "s"}`);
-  if (m) parts.push(`${m} release${m === 1 ? "" : "s"}`);
-  return `Stale — ${parts.join(" + ")} moved since it was last updated.`;
-}
-
-// Build the focused instruction for agent-propose: name the ONE field, give the
-// delta as grounding, ask for a SINGLE update against the existing value. The
-// edge function injects this into the officer's prompt.
-export function buildInstruction(opts: {
-  fieldKey: string;
-  label: string;
-  currentValue: string | null;
-  delta: FieldDelta;
-}): string {
-  const { fieldKey, label, currentValue, delta } = opts;
-  const themeLines = delta.themes.slice(0, 6).map((t) =>
-    `- THEME "${t.title}"${t.recommendation ? ` → ${t.recommendation}` : t.summary ? ` — ${t.summary}` : ""}`).join("\n");
-  const releaseLines = delta.releases.slice(0, 6).map((r) =>
-    `- SHIPPED ${r.version ? `${r.version} ` : ""}${r.name}${r.summary ? ` — ${r.summary}` : ""}`).join("\n");
+// Describe the INPUT being messaged (a release or a signal-theme) for the AI.
+// This is the WHAT; buildGrounding() supplies the framework it's molded against.
+export function inputBrief(input: { kind: "release"; row: ReleaseRow } | { kind: "theme"; row: ThemeRow }): string {
+  if (input.kind === "release") {
+    const r = input.row;
+    return [
+      `RELEASE: ${r.version ? `${r.version} ` : ""}${r.name}${r.stage ? ` (${r.stage})` : ""}`,
+      r.summary ? `Summary: ${r.summary}` : "",
+    ].filter(Boolean).join("\n");
+  }
+  const t = input.row;
   return [
-    `Update EXACTLY ONE messaging element on this GTM record: the field "${label}" (field_key: ${fieldKey}).`,
-    `Propose a single update_field change for that record_field against its EXISTING value — refine it to reflect what has moved, do NOT regenerate from scratch and do NOT touch any other field.`,
-    ``,
-    `CURRENT VALUE:\n${currentValue && currentValue.trim() ? currentValue : "(empty)"}`,
-    ``,
-    `WHAT HAS MOVED SINCE THIS ELEMENT WAS LAST UPDATED:`,
-    themeLines || "- (no new themes)",
-    releaseLines || "- (no new releases)",
-    ``,
-    `Keep the voice and structure of the current value; fold in only the delta that genuinely changes the message. Return one update_field change for this field.`,
-  ].join("\n");
+    `SIGNAL-THEME: ${t.title}`,
+    t.summary ? `Summary: ${t.summary}` : "",
+    t.recommendation ? `Recommendation: ${t.recommendation}` : "",
+  ].filter(Boolean).join("\n");
 }
 
-// A compact human-readable brief of what has moved for ONE element — the
-// themes/releases driving its delta, fed to the chat/sidebar agents as grounding.
-export function briefText(d: FieldDelta): string {
-  const themeLines = d.themes.slice(0, 6).map((t) =>
-    `- THEME "${t.title}"${t.recommendation ? ` → ${t.recommendation}` : t.summary ? ` — ${t.summary}` : ""}`);
-  const releaseLines = d.releases.slice(0, 6).map((r) =>
-    `- SHIPPED ${r.version ? `${r.version} ` : ""}${r.name}${r.summary ? ` — ${r.summary}` : ""}`);
-  const lines = [...themeLines, ...releaseLines];
-  return lines.length ? lines.join("\n") : "Nothing has moved since this element was last updated.";
+// The full context string handed to Draft-with-AI / the sidebar: WHAT we're
+// messaging (the input) + the framework it's GROUNDED in.
+export function buildDraftContext(
+  input: { kind: "release"; row: ReleaseRow } | { kind: "theme"; row: ThemeRow },
+  grounding: string,
+): string {
+  return [
+    `MESSAGE THIS INPUT:`,
+    inputBrief(input),
+    ``,
+    `GROUNDED IN THE FRAMEWORK (context — do not edit, draft FROM it):`,
+    grounding,
+  ].join("\n");
 }
 
 // Fmt a timestamp for a monospace Source chip ("Jun 12" / "Jun 12 '25").
