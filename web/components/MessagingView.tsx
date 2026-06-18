@@ -1,32 +1,33 @@
 "use client";
 
-// Messaging — the GTM-strategy ROOT workbench. Two motions in one surface:
-//   ABSORB    — pull what's new (gtm/living-memory themes + shipped releases) into
-//               a brief rail, reflected against the existing messaging FRAMEWORK.
-//   TRANSFORM — the framework is record_fields grouped by section on the active GTM
-//               record. Per element we surface ONLY the actionable delta ("stale —
-//               N themes + M releases moved since last update"); a GTM officer drafts
-//               a focused update the human ratifies FIELD BY FIELD. Reflect deltas,
-//               don't regenerate.
-//
-// Layout: left = framework canvas (the star); right = collapsible brief/reasoning
-// rail. Writes go through the HITL gate only — human_set_field_value for hand edits,
-// agent-propose → accept_proposal for agent drafts. Never a wholesale approve.
-import { useCallback, useEffect, useRef, useState } from "react";
+// Messaging — the GTM-strategy ROOT workbench, reimagined as a TASK LIST + a
+// Word-like EDITOR + on-demand AI. Not a long scroll: the left column is a
+// dynamic task list (one row per stale framework element, current ones below a
+// divider); selecting a task opens that element in a TipTap editor. AI is on tap:
+//   - "Draft with AI"  → a popup chat (Modal) where the officer synthesizes an
+//     update for THIS element; "Use this draft" loads it into the editor.
+//   - Highlight → Agent → an agent-picker popup → a right context sidebar that
+//     rewrites JUST the selection (Apply to selection).
+// Writes go through the HITL gate only — the human reviews in the editor, then
+// Saves via human_set_field_value. Reflect deltas, don't regenerate.
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import type { Editor } from "@tiptap/react";
 import { createClient } from "@/lib/supabase/client";
 import { useProductScope } from "@/lib/ProductContext";
 import { Chip, SourceChip, Empty, Banner } from "@/components/ui";
-import { PulseDots, streamStructured } from "@/components/alive";
 import {
-  fetchOfficerKey, deltaSince, deltaLine, buildInstruction, fmtWhen,
+  fetchOfficerKey, deltaSince, deltaLine, briefText, fmtWhen,
   type ThemeRow, type ReleaseRow, type FieldDelta,
 } from "@/lib/messaging";
+import RichEditor, { editorMarkdown, type SelectionInfo } from "@/components/messaging/RichEditor";
+import DraftChatModal from "@/components/messaging/DraftChatModal";
+import AgentPickerModal, { type RosterAgent } from "@/components/messaging/AgentPickerModal";
+import ContextSidebar from "@/components/messaging/ContextSidebar";
 
 type Field = { id: string; field_key: string; label: string; value: string | null; section: string | null; position: number };
 type Gtm = { id: string; name: string; product_id: string | null };
 type Status = "idle" | "working" | "blocked" | "done";
 
-// Section order from GTM_TEMPLATE (templates.ts) so the canvas reads top-down.
 const SECTION_ORDER = ["Positioning", "Messaging", "Buyer", "Motion", "Battlecard"];
 const UNGROUPED = "Details";
 const sectionRank = (s: string) => { const i = SECTION_ORDER.indexOf(s); return i === -1 ? 99 : i; };
@@ -47,15 +48,36 @@ export default function MessagingView() {
   const [gtmCreatedAt, setGtmCreatedAt] = useState<string | null>(null);
 
   const [fields, setFields] = useState<Field[]>([]);
-  const [lastUpdated, setLastUpdated] = useState<Record<string, string | null>>({}); // record_field_id -> last revision ts
+  const [lastUpdated, setLastUpdated] = useState<Record<string, string | null>>({});
   const [themes, setThemes] = useState<ThemeRow[]>([]);
-  const [thisWeek, setThisWeek] = useState<Record<string, number>>({}); // theme_id -> +N this week
+  const [thisWeek, setThisWeek] = useState<Record<string, number>>({});
   const [releases, setReleases] = useState<ReleaseRow[]>([]);
   const [officerKey, setOfficerKey] = useState<string | null>(null);
+  const [roster, setRoster] = useState<RosterAgent[]>([]);
 
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  const [railOpen, setRailOpen] = useState(true);
+
+  // ---- AI action status (drives the Status pill) -----------------------------
+  const [status, setStatus] = useState<Status>("idle");
+  const [statusStr, setStatusStr] = useState("");
+
+  // ---- task selection + editor state -----------------------------------------
+  const [selectedId, setSelectedId] = useState<string | null>(null);
+  const [editor, setEditor] = useState<Editor | null>(null);
+  const [seed, setSeed] = useState("");                 // current editor seed (markdown/plain)
+  const [dirty, setDirty] = useState(false);
+  const [saving, setSaving] = useState(false);
+  const [justSaved, setJustSaved] = useState<string | null>(null);
+  const [selection, setSelection] = useState<SelectionInfo | null>(null);
+  const pendingRange = useRef<{ from: number; to: number } | null>(null); // selection captured for the sidebar
+
+  // ---- AI surfaces -----------------------------------------------------------
+  const [draftOpen, setDraftOpen] = useState(false);
+  const [draftAgentKey, setDraftAgentKey] = useState<string | null>(null);
+  const [pickerOpen, setPickerOpen] = useState(false);
+  const [sidebarAgent, setSidebarAgent] = useState<RosterAgent | null>(null);
+  const [sidebarSelText, setSidebarSelText] = useState<string | null>(null);
 
   // ---- pick the active GTM record (scope-aware) ------------------------------
   const loadGtms = useCallback(async () => {
@@ -65,7 +87,6 @@ export default function MessagingView() {
     const pool = scoped.length ? scoped : rows;
     setGtms(pool.map(({ id, name, product_id }) => ({ id, name, product_id })));
     if (pool.length && !pool.some((g) => g.id === gtmId)) {
-      // active product → its record; else first in scope
       const pick = active !== "all" && active !== "company"
         ? pool.find((g) => g.product_id === active) ?? pool[0]
         : pool[0];
@@ -79,12 +100,12 @@ export default function MessagingView() {
 
   useEffect(() => { loadGtms(); }, [loadGtms]);
 
-  // ---- load framework + brief streams + deltas -------------------------------
+  // ---- load framework + brief streams + deltas + roster ----------------------
   const load = useCallback(async () => {
     if (!gtmId) { setFields([]); setLoading(false); return; }
     setLoading(true); setError(null);
     const weekAgo = new Date(Date.now() - WEEK_MS).toISOString();
-    const [{ data: fl }, { data: th }, { data: rl }, { data: tw }] = await Promise.all([
+    const [{ data: fl }, { data: th }, { data: rl }, { data: tw }, { data: ag }] = await Promise.all([
       supabase.from("record_fields").select("id, field_key, label, value, section, position").eq("gtm_record_id", gtmId).order("position"),
       supabase.from("signal_themes")
         .select("id, title, summary, recommendation, conf_level, category, state, last_evidence_at, signal_ids")
@@ -94,18 +115,18 @@ export default function MessagingView() {
         .select("id, name, version, summary, stage, target_date, product_id")
         .eq("stage", "released").order("target_date", { ascending: false, nullsFirst: false }),
       supabase.from("theme_signals").select("theme_id, added_at").gte("added_at", weekAgo),
+      supabase.from("agents").select("id, key, name, role").eq("is_active", true),
     ]);
     const fieldRows = (fl ?? []) as Field[];
     setFields(fieldRows);
     setThemes((th ?? []) as ThemeRow[]);
     setReleases(((rl ?? []) as ReleaseRow[]).filter((r) => matches(r)));
+    setRoster((ag ?? []) as RosterAgent[]);
 
-    // +N this week per theme
     const counts: Record<string, number> = {};
     for (const r of (tw ?? []) as { theme_id: string }[]) counts[r.theme_id] = (counts[r.theme_id] ?? 0) + 1;
     setThisWeek(counts);
 
-    // last-updated per field, from field_revisions (fallback handled at delta time)
     const ids = fieldRows.map((f) => f.id);
     if (ids.length) {
       const { data: rev } = await supabase.from("field_revisions")
@@ -113,7 +134,7 @@ export default function MessagingView() {
         .order("created_at", { ascending: false });
       const lu: Record<string, string | null> = {};
       for (const r of (rev ?? []) as { record_field_id: string; created_at: string }[]) {
-        if (!(r.record_field_id in lu)) lu[r.record_field_id] = r.created_at; // first seen = newest (ordered desc)
+        if (!(r.record_field_id in lu)) lu[r.record_field_id] = r.created_at;
       }
       setLastUpdated(lu);
     } else setLastUpdated({});
@@ -124,133 +145,119 @@ export default function MessagingView() {
 
   useEffect(() => { load(); }, [load]);
 
-  // delta for a field: revision ts, else the record's created_at as a floor.
   const deltaFor = useCallback((f: Field): FieldDelta => {
     const since = lastUpdated[f.id] ?? gtmCreatedAt;
     return deltaSince(since, themes, releases);
   }, [lastUpdated, gtmCreatedAt, themes, releases]);
 
-  // ---- agent draft state (one element at a time) -----------------------------
-  const [status, setStatus] = useState<Status>("idle");
-  const [statusStr, setStatusStr] = useState("");
-  const [draftFieldId, setDraftFieldId] = useState<string | null>(null);
-  const [thinking, setThinking] = useState("");
-  const [showReason, setShowReason] = useState(false);
-  const [proposal, setProposal] = useState<{ id: string; value: string; label: string } | null>(null);
-  const [acting, setActing] = useState(false);
-  const stopRef = useRef(false);
-  const traceRef = useRef<HTMLDivElement>(null);
-  useEffect(() => { traceRef.current?.scrollTo({ top: traceRef.current.scrollHeight }); }, [thinking]);
+  // ---- task list: stale (with delta) first, current below a divider ----------
+  const tasks = useMemo(() => {
+    const withDelta = fields.map((f) => ({ f, d: deltaFor(f), section: f.section || UNGROUPED }));
+    const stale = withDelta.filter((t) => t.d.stale)
+      .sort((a, b) => sectionRank(a.section) - sectionRank(b.section) || a.f.position - b.f.position);
+    const current = withDelta.filter((t) => !t.d.stale)
+      .sort((a, b) => sectionRank(a.section) - sectionRank(b.section) || a.f.position - b.f.position);
+    return { stale, current };
+  }, [fields, deltaFor]);
 
-  // human Edit channel
-  const [editId, setEditId] = useState<string | null>(null);
-  const [editDraft, setEditDraft] = useState("");
-  const [justSaved, setJustSaved] = useState<string | null>(null); // field id → "ratified · just now"
+  const selectedField = useMemo(() => fields.find((f) => f.id === selectedId) ?? null, [fields, selectedId]);
+  const selectedDelta = useMemo(() => (selectedField ? deltaFor(selectedField) : null), [selectedField, deltaFor]);
+  const selectedBrief = useMemo(() => (selectedDelta ? briefText(selectedDelta) : ""), [selectedDelta]);
 
-  async function saveHuman(id: string) {
-    setError(null);
-    const { error } = await supabase.rpc("human_set_field_value", { p_field: id, p_value: editDraft });
-    if (error) { setError(error.message || "Could not save."); return; }
-    setEditId(null);
-    setJustSaved(id);
+  // Auto-select the first stale task (else first current) when the record loads.
+  useEffect(() => {
+    if (!fields.length) { setSelectedId(null); return; }
+    if (selectedId && fields.some((f) => f.id === selectedId)) return;
+    const first = tasks.stale[0]?.f ?? tasks.current[0]?.f ?? null;
+    setSelectedId(first?.id ?? null);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [fields, tasks]);
+
+  // Seed the editor whenever the selected element changes.
+  useEffect(() => {
+    setSeed(selectedField?.value ?? "");
+    setDirty(false); setSelection(null);
+    setSidebarAgent(null); setStatus("idle"); setStatusStr("");
+  }, [selectedId, selectedField]);
+
+  function selectTask(id: string) {
+    if (dirty && id !== selectedId && !confirm("Discard unsaved edits to this element?")) return;
+    setSelectedId(id);
+  }
+
+  // ---- Save (the ratification moment) ----------------------------------------
+  async function save() {
+    if (!selectedField || !editor) return;
+    setSaving(true); setError(null);
+    const value = editorMarkdown(editor);
+    const { error } = await supabase.rpc("human_set_field_value", { p_field: selectedField.id, p_value: value });
+    setSaving(false);
+    if (error) { setError(error.message || "Could not save."); setStatus("blocked"); setStatusStr(error.message); return; }
+    setDirty(false);
+    setJustSaved(selectedField.id);
+    setStatus("done"); setStatusStr("");
     await load();
   }
 
-  // Draft an update for ONE element via the GTM officer (agent-propose).
-  async function draft(f: Field) {
+  // ---- Draft with AI (popup chat) --------------------------------------------
+  function openDraft() {
     if (!officerKey) { setError("No officer available — seed agents first."); return; }
-    setError(null); setProposal(null); setThinking(""); setShowReason(false);
-    setDraftFieldId(f.id); setStatus("working"); setStatusStr(`Drafting ${f.label}…`);
-    stopRef.current = false;
-    const d = deltaFor(f);
-    try {
-      const { data: sess } = await supabase.auth.getSession();
-      const res = await streamStructured<{ proposal_id?: string }>({
-        fnName: "agent-propose",
-        token: sess.session?.access_token,
-        body: {
-          agent_key: officerKey,
-          gtm_record_id: gtmId,
-          instruction: buildInstruction({ fieldKey: f.field_key, label: f.label, currentValue: f.value, delta: d }),
-        },
-        onThinking: (s) => { if (!stopRef.current) setThinking((p) => p + s); },
-      });
-      if (stopRef.current) { setStatus("idle"); setStatusStr(""); setDraftFieldId(null); return; }
-      if (!res?.proposal_id) throw new Error("The officer returned no proposal.");
-      // pull the proposed value for THIS field from the landed proposal
-      const { data: pc } = await supabase.from("proposal_changes")
-        .select("record_field_id, label, proposed_value, change_kind")
-        .eq("proposal_id", res.proposal_id);
-      const mine = (pc ?? []).find((c) => c.record_field_id === f.id) ?? (pc ?? [])[0];
-      if (!mine) throw new Error("The proposal had no change for this element.");
-      setProposal({ id: res.proposal_id, value: mine.proposed_value ?? "", label: mine.label ?? f.label });
-      setStatus("done"); setStatusStr("");
-    } catch (e) {
-      setStatus("blocked"); setStatusStr(e instanceof Error ? e.message : "Draft failed.");
-      setError(e instanceof Error ? e.message : "Draft failed.");
+    setDraftAgentKey(draftAgentKey ?? officerKey);
+    setDraftOpen(true);
+  }
+  function useDraft(markdown: string) {
+    setSeed(markdown);                 // loads into the editor (re-seed)
+    editor?.commands.setContent(markdown, { emitUpdate: false });
+    setDirty(true);
+    setDraftOpen(false);
+    setStatus("idle"); setStatusStr("");
+  }
+
+  // ---- Highlight → Agent → picker → sidebar ----------------------------------
+  function openAgentForSelection(sel: SelectionInfo) {
+    pendingRange.current = { from: sel.from, to: sel.to };
+    setSidebarSelText(sel.text);
+    setPickerOpen(true);
+  }
+  function openAgentForElement() {
+    pendingRange.current = null;
+    setSidebarSelText(null);
+    setPickerOpen(true);
+  }
+  function pickAgent(a: RosterAgent) {
+    setPickerOpen(false);
+    setSidebarAgent(a);
+  }
+  function applyRewrite(text: string) {
+    if (!editor) return;
+    if (pendingRange.current) {
+      const { from, to } = pendingRange.current;
+      editor.chain().focus().insertContentAt({ from, to }, text).run();
+    } else {
+      // whole-element help → replace the document
+      editor.commands.setContent(text, { emitUpdate: true });
     }
-  }
-
-  function stop() {
-    stopRef.current = true;
-    setStatus("idle"); setStatusStr(""); setDraftFieldId(null); setProposal(null);
-  }
-
-  // Ratify the drafted proposal (field-level moment).
-  async function approveDraft() {
-    if (!proposal || !draftFieldId) return;
-    setActing(true); setError(null);
-    const { data: result, error } = await supabase.rpc("accept_proposal", { p_proposal: proposal.id, p_ratifier: "web" });
-    setActing(false);
-    if (error) { setStatus("blocked"); setStatusStr(error.message); setError(error.message); return; }
-    if (result === "conflicted") {
-      setStatus("blocked");
-      setStatusStr("The record moved since this draft — re-run against the current value.");
-      return;
-    }
-    const fid = draftFieldId;
-    setProposal(null); setDraftFieldId(null); setThinking(""); setStatus("idle"); setStatusStr("");
-    setJustSaved(fid);
-    await load();
-  }
-
-  // Edit-then-ratify: human takes the agent's draft into the editor.
-  function editDraftValue() {
-    if (!proposal || !draftFieldId) return;
-    setEditId(draftFieldId);
-    setEditDraft(proposal.value);
-    setProposal(null);
-  }
-
-  async function discardDraft() {
-    if (proposal) await supabase.from("proposals").delete().eq("id", proposal.id);
-    setProposal(null); setDraftFieldId(null); setThinking(""); setStatus("idle"); setStatusStr("");
+    setDirty(true);
+    setSidebarAgent(null);
   }
 
   // ---- render ----------------------------------------------------------------
-  const filled = fields.filter((f) => f.value && f.value.trim());
-  const order: string[] = [];
-  const bySection: Record<string, Field[]> = {};
-  for (const f of filled) {
-    const s = f.section || UNGROUPED;
-    if (!bySection[s]) { bySection[s] = []; order.push(s); }
-    bySection[s].push(f);
-  }
-  order.sort((a, b) => sectionRank(a) - sectionRank(b));
-
-  const briefThemes = themes.slice(0, 12);
-  const briefReleases = releases.slice(0, 8);
   const movedThemeCount = themes.length;
   const movedReleaseCount = releases.length;
+  const whatsNew = movedThemeCount + movedReleaseCount;
+  const sidebarOpen = !!sidebarAgent;
+  const gridCols = sidebarOpen
+    ? "320px minmax(0,1fr) 360px"
+    : "320px minmax(0,1fr)";
 
   return (
     <div>
-      {/* header: record selector (only if >1 in scope) + status pill */}
+      {/* header: record selector (only if >1 in scope) + What's new + status pill */}
       <div className="row-between" style={{ marginBottom: "var(--sp-4)", gap: 12, alignItems: "center", flexWrap: "wrap" }}>
         <div className="row gap-2" style={{ alignItems: "center", minWidth: 0 }}>
           <span className="t-label">Messaging framework</span>
           {gtms.length > 1 ? (
-            <select className="select" value={gtmId} onChange={(e) => { setGtmId(e.target.value); }} style={{ maxWidth: 280 }}>
+            <select className="select" value={gtmId} onChange={(e) => setGtmId(e.target.value)} style={{ maxWidth: 280 }}>
               {gtms.map((g) => <option key={g.id} value={g.id}>{g.name}</option>)}
             </select>
           ) : gtms.length === 1 ? (
@@ -258,10 +265,8 @@ export default function MessagingView() {
           ) : null}
         </div>
         <div className="row gap-2" style={{ alignItems: "center" }}>
+          <span className="t-mono-xs" style={{ color: "var(--tm)" }}>What&apos;s new · {whatsNew}</span>
           <StatusPill status={status} note={statusStr} />
-          <button className="btn btn-secondary btn-sm" onClick={() => setRailOpen((v) => !v)}>
-            {railOpen ? "Hide brief" : "Show brief"}
-          </button>
         </div>
       </div>
 
@@ -271,166 +276,162 @@ export default function MessagingView() {
         <div className="t-sub t-muted">Loading…</div>
       ) : !gtmId ? (
         <Empty title="No GTM record in scope" hint="Create a GTM record to build its messaging framework." />
+      ) : fields.length === 0 ? (
+        <Empty title="No framework captured yet" hint="Fill in the GTM record's structured fields, then reflect the brief against them here." />
       ) : (
-        <div style={{ display: "grid", gridTemplateColumns: railOpen ? "minmax(0,1fr) 340px" : "minmax(0,1fr)", gap: "var(--sp-5)", alignItems: "start" }}>
-          {/* ---------- CANVAS ---------- */}
-          <div>
-            {filled.length === 0 ? (
-              <Empty title="No framework captured yet" hint="Fill in the GTM record's structured fields, then reflect the brief against them here." />
+        <div style={{ display: "grid", gridTemplateColumns: gridCols, gap: "var(--sp-5)", alignItems: "start" }}>
+          {/* ---------- TASK LIST ---------- */}
+          <aside style={{ position: "sticky", top: 12, alignSelf: "start" }}>
+            <div className="card" style={{ overflow: "hidden" }}>
+              <div style={{ padding: "10px 12px", borderBottom: "1px solid var(--border)", background: "var(--panel-2)" }}>
+                <div className="row-between" style={{ alignItems: "center" }}>
+                  <span className="t-label">Work items</span>
+                  <span className="t-mono-xs" style={{ color: "var(--tm)" }}>{tasks.stale.length} stale</span>
+                </div>
+              </div>
+              <div style={{ maxHeight: "72vh", overflowY: "auto" }}>
+                {tasks.stale.length === 0 && (
+                  <div className="t-sub t-muted" style={{ fontSize: 12, padding: "12px 14px" }}>Nothing stale — every element is current.</div>
+                )}
+                {tasks.stale.map(({ f, d, section }) => (
+                  <TaskRow key={f.id} label={f.label} section={section}
+                    status={`${d.themes.length} themes + ${d.releases.length} releases moved`}
+                    tone="stale" active={f.id === selectedId} onClick={() => selectTask(f.id)} />
+                ))}
+                {tasks.current.length > 0 && (
+                  <div className="t-mono-xs" style={{ color: "var(--tm)", padding: "10px 14px 4px", borderTop: "1px solid var(--border)", textTransform: "uppercase", letterSpacing: 0.4 }}>Current</div>
+                )}
+                {tasks.current.map(({ f, section }) => (
+                  <TaskRow key={f.id} label={f.label} section={section} status="Current"
+                    tone="current" active={f.id === selectedId} onClick={() => selectTask(f.id)} />
+                ))}
+              </div>
+            </div>
+          </aside>
+
+          {/* ---------- EDITOR PANE ---------- */}
+          <div style={{ minWidth: 0 }}>
+            {!selectedField ? (
+              <Empty title="Select a work item" hint="Pick an element on the left to open it in the editor." />
             ) : (
-              order.map((sName) => (
-                <section className="section" key={sName}>
-                  <div className="section-head">
-                    <div className="row gap-2"><span className="t-h2" style={{ fontSize: 14.5 }}>{sName}</span><span className="chip">{bySection[sName].length}</span></div>
+              <div>
+                {/* provenance: delta line + the themes/releases driving it */}
+                <div className="row-between" style={{ alignItems: "flex-start", gap: 10, marginBottom: 8 }}>
+                  <div style={{ minWidth: 0 }}>
+                    <div className="row gap-2" style={{ alignItems: "center", flexWrap: "wrap", marginBottom: 4 }}>
+                      <span className="t-h2" style={{ fontSize: 15 }}>{selectedField.label}</span>
+                      <Chip tone="default">{selectedField.section || UNGROUPED}</Chip>
+                      {selectedDelta?.stale
+                        ? <Chip tone="amber">{selectedDelta.themes.length + selectedDelta.releases.length} moved</Chip>
+                        : <Chip tone="green">Current</Chip>}
+                    </div>
+                    <div className="t-sub" style={{ fontSize: 12, color: selectedDelta?.stale ? "var(--am-text)" : "var(--tm)" }}>{selectedDelta ? deltaLine(selectedDelta) : ""}</div>
                   </div>
-                  <div className="card" style={{ overflow: "hidden" }}>
-                    {bySection[sName].map((f, i) => {
-                      const d = deltaFor(f);
-                      const updatedTs = lastUpdated[f.id] ?? gtmCreatedAt;
-                      const isDrafting = draftFieldId === f.id && status === "working";
-                      const hasDraft = draftFieldId === f.id && proposal != null;
-                      const editing = editId === f.id;
-                      return (
-                        <div key={f.id} style={{ padding: "16px 18px", borderTop: i === 0 ? "none" : "1px solid var(--border)" }}>
-                          <div className="row-between" style={{ marginBottom: 6, alignItems: "flex-start", gap: 10 }}>
-                            <div className="row gap-2" style={{ alignItems: "center", flexWrap: "wrap" }}>
-                              <span className="t-h2" style={{ fontSize: 13, fontWeight: 620 }}>{f.label}</span>
-                              {d.stale
-                                ? <Chip tone="amber">{d.themes.length + d.releases.length} moved</Chip>
-                                : <Chip tone="green">Current</Chip>}
-                            </div>
-                            {!editing && !hasDraft && (
-                              <div className="row gap-2" style={{ flexShrink: 0 }}>
-                                <button className="btn btn-secondary btn-sm" onClick={() => { setEditId(f.id); setEditDraft(f.value ?? ""); }}>Edit</button>
-                                <button className="btn btn-accent btn-sm" disabled={status === "working"} onClick={() => draft(f)}>
-                                  {isDrafting ? "Drafting…" : "✦ Draft update"}
-                                </button>
-                              </div>
-                            )}
-                          </div>
-
-                          {/* delta line + provenance */}
-                          <div className="t-sub" style={{ fontSize: 12, color: d.stale ? "var(--am-text)" : "var(--tm)", marginBottom: d.stale ? 6 : 8 }}>{deltaLine(d)}</div>
-                          {d.stale && (
-                            <div className="row gap-2" style={{ flexWrap: "wrap", marginBottom: 8 }}>
-                              {d.themes.slice(0, 3).map((t) => (
-                                <SourceChip key={t.id} icon="◆" label={t.title} when={fmtWhen(t.last_evidence_at)} />
-                              ))}
-                              {d.releases.slice(0, 3).map((r) => (
-                                <SourceChip key={r.id} icon="▲" label={r.version ? `${r.version} ${r.name}` : r.name} when={fmtWhen(r.target_date)} />
-                              ))}
-                            </div>
-                          )}
-
-                          {/* the value, or the editor, or the agent draft to ratify */}
-                          {editing ? (
-                            <div>
-                              <textarea className="textarea" rows={4} autoFocus value={editDraft} onChange={(e) => setEditDraft(e.target.value)} style={{ marginBottom: 8 }} />
-                              <div className="row gap-2">
-                                <button className="btn btn-sm" onClick={() => saveHuman(f.id)}>Save</button>
-                                <button className="btn btn-secondary btn-sm" onClick={() => setEditId(null)}>Cancel</button>
-                              </div>
-                            </div>
-                          ) : hasDraft && proposal ? (
-                            <div className="card card-pad reveal-up" style={{ borderLeft: "2px solid var(--vl)", background: "var(--fill)" }}>
-                              <div className="t-label" style={{ marginBottom: 6, color: "var(--vl-text, var(--vl))" }}>Officer draft — ratify or edit</div>
-                              <div className="t-body" style={{ lineHeight: 1.6, whiteSpace: "pre-wrap", marginBottom: 10 }}>{proposal.value}</div>
-                              <div className="row gap-2" style={{ alignItems: "center" }}>
-                                <button className="btn btn-success btn-sm" disabled={acting} onClick={approveDraft}>{acting ? "…" : "Approve"}</button>
-                                <button className="btn btn-secondary btn-sm" disabled={acting} onClick={editDraftValue}>Edit</button>
-                                <button className="btn btn-secondary btn-sm" disabled={acting} onClick={discardDraft}>Discard</button>
-                              </div>
-                            </div>
-                          ) : (
-                            <>
-                              <div className="t-body" style={{ lineHeight: 1.6, whiteSpace: "pre-wrap" }}>{f.value}</div>
-                              {justSaved === f.id ? (
-                                <div className="t-mono-xs" style={{ color: "var(--gn)", marginTop: 6 }}>ratified · just now</div>
-                              ) : updatedTs ? (
-                                <div className="t-mono-xs" style={{ color: "var(--tm)", marginTop: 6 }}>updated {fmtWhen(updatedTs)}</div>
-                              ) : null}
-                            </>
-                          )}
-
-                          {/* live reasoning while THIS element drafts */}
-                          {isDrafting && (
-                            <div style={{ marginTop: 10 }}>
-                              <div className="t-label" style={{ color: "var(--ac)", marginBottom: 6 }}>Officer is working<PulseDots /></div>
-                              <div ref={traceRef} style={{ fontSize: 11.5, lineHeight: 1.5, fontStyle: "italic", whiteSpace: "pre-wrap", color: "var(--tm)", borderLeft: "2px solid var(--border)", paddingLeft: 10, maxHeight: 160, overflowY: "auto" }}>
-                                {thinking || "Reflecting the delta…"}
-                              </div>
-                              <button className="btn btn-secondary btn-sm" onClick={stop} style={{ marginTop: 8, color: "var(--rd-text)" }}>Stop</button>
-                            </div>
-                          )}
-                        </div>
-                      );
-                    })}
+                  <div className="row gap-2" style={{ flexShrink: 0 }}>
+                    <button className="btn btn-accent btn-sm" onClick={openDraft}>✦ Draft with AI</button>
+                    <button className="btn btn-sm" disabled={saving || !dirty} onClick={save}>{saving ? "Saving…" : "Save"}</button>
                   </div>
-                </section>
-              ))
+                </div>
+
+                {selectedDelta?.stale && (
+                  <div className="row gap-2" style={{ flexWrap: "wrap", marginBottom: 10 }}>
+                    {selectedDelta.themes.slice(0, 4).map((t) => (
+                      <SourceChip key={t.id} icon="◆" label={t.title} when={fmtWhen(t.last_evidence_at)} />
+                    ))}
+                    {selectedDelta.releases.slice(0, 4).map((r) => (
+                      <SourceChip key={r.id} icon="▲" label={r.version ? `${r.version} ${r.name}` : r.name} when={fmtWhen(r.target_date)} />
+                    ))}
+                  </div>
+                )}
+
+                <RichEditor
+                  key={selectedField.id}
+                  value={seed}
+                  onReady={setEditor}
+                  onSelection={setSelection}
+                  onAgent={openAgentForSelection}
+                />
+
+                <div className="row-between" style={{ marginTop: 8, alignItems: "center", gap: 8, flexWrap: "wrap" }}>
+                  <div className="row gap-2" style={{ alignItems: "center" }}>
+                    <button className="btn btn-secondary btn-sm" onClick={() => (selection ? openAgentForSelection(selection) : openAgentForElement())}>
+                      {selection ? "✦ Agent on selection" : "✦ Agent on element"}
+                    </button>
+                    <span className="t-sub t-muted" style={{ fontSize: 11.5 }}>Highlight text in the editor for a targeted rewrite.</span>
+                  </div>
+                  {justSaved === selectedField.id && !dirty
+                    ? <span className="t-mono-xs" style={{ color: "var(--gn)" }}>ratified · just now</span>
+                    : dirty ? <span className="t-mono-xs" style={{ color: "var(--am-text)" }}>unsaved edits</span>
+                    : lastUpdated[selectedField.id] || gtmCreatedAt
+                      ? <span className="t-mono-xs" style={{ color: "var(--tm)" }}>updated {fmtWhen(lastUpdated[selectedField.id] ?? gtmCreatedAt)}</span>
+                      : null}
+                </div>
+              </div>
             )}
           </div>
 
-          {/* ---------- BRIEF / REASONING RAIL ---------- */}
-          {railOpen && (
-            <aside style={{ position: "sticky", top: 12, alignSelf: "start" }}>
-              <div className="card card-pad" style={{ marginBottom: "var(--sp-4)" }}>
-                <div className="row-between" style={{ marginBottom: 4 }}>
-                  <span className="t-label">What's new</span>
-                  <span className="t-mono-xs" style={{ color: "var(--tm)" }}>{movedThemeCount} themes · {movedReleaseCount} shipped</span>
-                </div>
-                <div className="t-sub t-muted" style={{ fontSize: 12 }}>Reflect these against the framework. Each element shows only its own delta.</div>
-              </div>
-
-              {/* collapsible reasoning (one click away, not a modal) */}
-              {thinking && status !== "working" && (
-                <div className="card card-pad" style={{ marginBottom: "var(--sp-4)" }}>
-                  <button className="btn btn-secondary btn-sm" onClick={() => setShowReason((v) => !v)}>{showReason ? "Hide reasoning" : "Show reasoning"}</button>
-                  {showReason && (
-                    <div style={{ fontSize: 11.5, lineHeight: 1.5, fontStyle: "italic", whiteSpace: "pre-wrap", color: "var(--tm)", borderLeft: "2px solid var(--border)", paddingLeft: 10, marginTop: 8 }}>{thinking}</div>
-                  )}
-                </div>
-              )}
-
-              <div className="t-label" style={{ marginBottom: 8 }}>Themes moving</div>
-              {briefThemes.length === 0 ? (
-                <div className="t-sub t-muted" style={{ fontSize: 12.5, marginBottom: 16 }}>No GTM themes in motion.</div>
-              ) : (
-                <div className="stack-2" style={{ marginBottom: 16 }}>
-                  {briefThemes.map((t) => (
-                    <div key={t.id} className="card card-pad" style={{ borderLeft: "2px solid var(--ac)" }}>
-                      <div className="row-between" style={{ gap: 8, alignItems: "flex-start", marginBottom: 3 }}>
-                        <span style={{ fontSize: 12.5, fontWeight: 620, lineHeight: 1.35 }}>{t.title}</span>
-                        {thisWeek[t.id] ? <Chip tone="accent">+{thisWeek[t.id]} this week</Chip> : null}
-                      </div>
-                      {(t.recommendation || t.summary) && (
-                        <div className="t-sub" style={{ fontSize: 11.5, lineHeight: 1.5, marginBottom: 5 }}>{t.recommendation || t.summary}</div>
-                      )}
-                      <SourceChip icon="◆" label={t.state ?? "theme"} when={fmtWhen(t.last_evidence_at)} />
-                    </div>
-                  ))}
-                </div>
-              )}
-
-              <div className="t-label" style={{ marginBottom: 8 }}>Shipped</div>
-              {briefReleases.length === 0 ? (
-                <div className="t-sub t-muted" style={{ fontSize: 12.5 }}>Nothing shipped in scope.</div>
-              ) : (
-                <div className="stack-2">
-                  {briefReleases.map((r) => (
-                    <div key={r.id} className="card card-pad" style={{ borderLeft: "2px solid var(--gn)" }}>
-                      <div style={{ fontSize: 12.5, fontWeight: 620, lineHeight: 1.35, marginBottom: 3 }}>{r.version ? `${r.version} · ` : ""}{r.name}</div>
-                      {r.summary && <div className="t-sub" style={{ fontSize: 11.5, lineHeight: 1.5, marginBottom: 5 }}>{r.summary}</div>}
-                      <SourceChip icon="▲" label="released" when={fmtWhen(r.target_date)} />
-                    </div>
-                  ))}
-                </div>
-              )}
-            </aside>
+          {/* ---------- CONTEXT SIDEBAR ---------- */}
+          {sidebarAgent && selectedField && (
+            <ContextSidebar
+              agent={sidebarAgent}
+              elementLabel={selectedField.label}
+              elementValue={editor ? editorMarkdown(editor) : (selectedField.value ?? "")}
+              brief={selectedBrief}
+              selection={sidebarSelText}
+              onApply={applyRewrite}
+              onClose={() => setSidebarAgent(null)}
+            />
           )}
         </div>
       )}
+
+      {/* ---------- Draft-with-AI popup chat ---------- */}
+      {selectedField && (
+        <DraftChatModal
+          open={draftOpen}
+          onClose={() => setDraftOpen(false)}
+          elementLabel={selectedField.label}
+          currentValue={editor ? editorMarkdown(editor) : (selectedField.value ?? "")}
+          brief={selectedBrief}
+          agentKey={draftAgentKey}
+          roster={roster}
+          onAgentChange={setDraftAgentKey}
+          onUseDraft={useDraft}
+          onBusyChange={(b) => { setStatus(b ? "working" : "idle"); setStatusStr(b ? "Drafting…" : ""); }}
+        />
+      )}
+
+      {/* ---------- Agent picker popup ---------- */}
+      <AgentPickerModal
+        open={pickerOpen}
+        onClose={() => setPickerOpen(false)}
+        roster={roster}
+        onPick={pickAgent}
+        title="Choose an agent"
+        hint={sidebarSelText
+          ? "The agent will propose a rewrite of just the highlighted text in a context sidebar."
+          : "The agent will help with this whole element in a context sidebar."}
+      />
     </div>
+  );
+}
+
+function TaskRow({ label, section, status, tone, active, onClick }: {
+  label: string; section: string; status: string; tone: "stale" | "current"; active: boolean; onClick: () => void;
+}) {
+  return (
+    <button onClick={onClick} style={{
+      display: "block", width: "100%", textAlign: "left", cursor: "pointer", border: "none",
+      borderTop: "1px solid var(--border)", borderLeft: `2px solid ${active ? "var(--ac)" : "transparent"}`,
+      background: active ? "var(--ac-fill, var(--fill))" : "transparent",
+      padding: "10px 12px", opacity: tone === "current" && !active ? 0.72 : 1,
+    }}>
+      <div className="row gap-2" style={{ alignItems: "center", flexWrap: "wrap", marginBottom: 3 }}>
+        <span style={{ fontSize: 12.5, fontWeight: active ? 660 : 600, color: "var(--tp)" }}>{label}</span>
+        <span className="chip" style={{ fontSize: 9.5 }}>{section}</span>
+      </div>
+      <div className="t-mono-xs" style={{ color: tone === "stale" ? "var(--am-text)" : "var(--tm)" }}>{status}</div>
+    </button>
   );
 }
 

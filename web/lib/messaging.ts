@@ -97,6 +97,17 @@ export function buildInstruction(opts: {
   ].join("\n");
 }
 
+// A compact human-readable brief of what has moved for ONE element — the
+// themes/releases driving its delta, fed to the chat/sidebar agents as grounding.
+export function briefText(d: FieldDelta): string {
+  const themeLines = d.themes.slice(0, 6).map((t) =>
+    `- THEME "${t.title}"${t.recommendation ? ` → ${t.recommendation}` : t.summary ? ` — ${t.summary}` : ""}`);
+  const releaseLines = d.releases.slice(0, 6).map((r) =>
+    `- SHIPPED ${r.version ? `${r.version} ` : ""}${r.name}${r.summary ? ` — ${r.summary}` : ""}`);
+  const lines = [...themeLines, ...releaseLines];
+  return lines.length ? lines.join("\n") : "Nothing has moved since this element was last updated.";
+}
+
 // Fmt a timestamp for a monospace Source chip ("Jun 12" / "Jun 12 '25").
 export function fmtWhen(ts: string | null | undefined): string | null {
   if (!ts) return null;
