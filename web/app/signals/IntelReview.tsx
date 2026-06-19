@@ -224,7 +224,7 @@ export default function IntelReview({ onApplied, productFilter = "all" }: { onAp
                         (first picked is the primary). The human owns this call. */}
                     {u.kind === "new_theme" && products.length > 1 && (
                       <div className="field">
-                        <span className="t-label">Which product line(s)? {draft.lines.length >= 2 && <span style={{ color: "#15803d" }}>· cross-sell</span>}</span>
+                        <span className="t-label">Which product line(s)? {draft.lines.length >= 2 && <span style={{ color: "var(--gn-text)" }}>· cross-sell</span>}</span>
                         <div className="row gap-2" style={{ flexWrap: "wrap", marginTop: 4 }}>
                           {products.map((p) => {
                             const on = draft.lines.includes(p.id);

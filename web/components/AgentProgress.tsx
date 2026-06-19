@@ -67,7 +67,7 @@ export function AgentStepList({ run, note }: { run: AgentRun; note?: string }) {
           const state = i < run.index ? "done" : i === run.index ? "active" : "pending";
           return (
             <div key={i} className="row gap-2" style={{ alignItems: "center", opacity: state === "pending" ? 0.45 : 1 }}>
-              {state === "done" && <span style={{ width: 16, textAlign: "center", color: "var(--gn-text, #15803d)", fontWeight: 700, fontSize: 12 }}>✓</span>}
+              {state === "done" && <span style={{ width: 16, textAlign: "center", color: "var(--gn-text, var(--gn-text))", fontWeight: 700, fontSize: 12 }}>✓</span>}
               {state === "active" && <span style={{ width: 16, display: "inline-flex", justifyContent: "center" }}><span className="agent-progress-dot" aria-hidden /></span>}
               {state === "pending" && <span style={{ width: 16, textAlign: "center", color: "var(--tm)", fontSize: 11 }}>○</span>}
               <span style={{ fontSize: 12.5, fontWeight: state === "active" ? 650 : 500, color: state === "active" ? "var(--tp)" : "var(--ts)" }}>{label}{state === "active" ? "…" : ""}</span>

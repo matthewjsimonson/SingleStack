@@ -63,7 +63,7 @@ export function ConfirmDialog({ open = true, title, message, confirmLabel = "Con
       <div className="row gap-2" style={{ justifyContent: "flex-end" }}>
         <button className="btn btn-secondary btn-sm" onClick={onCancel}>{cancelLabel}</button>
         <button className="btn btn-sm" onClick={onConfirm}
-          style={destructive ? { background: "#b91c1c", borderColor: "#b91c1c", color: "#fff" } : undefined}>
+          style={destructive ? { background: "var(--rd-text)", borderColor: "var(--rd-text)", color: "#fff" } : undefined}>
           {confirmLabel}
         </button>
       </div>

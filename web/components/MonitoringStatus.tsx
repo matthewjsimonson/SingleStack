@@ -50,7 +50,7 @@ export default function MonitoringStatus({ competitorId, compact = false }: { co
   } else {
     tone = "stalled"; msg = `${st.scheduled} monitor${st.scheduled === 1 ? "" : "s"} set, but no scheduled pull has run${st.lastScheduledAt ? ` since ${ago(ageMs!)}` : " yet"}. The hourly heartbeat isn't firing — the project's pg_cron + Vault secrets (project_url / service_role_key) likely aren't set. Manual "Pull now" still works.`;
   }
-  const col = tone === "live" ? "var(--gn-text, #15803d)" : tone === "pending" ? "var(--ac-text, var(--ac))" : "var(--am-text, #D97706)";
+  const col = tone === "live" ? "var(--gn-text, var(--gn-text))" : tone === "pending" ? "var(--ac-text, var(--ac))" : "var(--am-text, var(--am-text))";
   const icon = tone === "live" ? "●" : tone === "pending" ? "◔" : "⚠";
 
   return (

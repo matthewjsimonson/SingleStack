@@ -177,7 +177,7 @@ export default function WorkflowRunsReview({ onChanged }: { onChanged?: () => vo
                   {tgt ? <>{tgt.agentName} drafts a proposal on <strong>{where}</strong> for your review.</> : (r.proposed_action ?? "Drafts a starter initiative.")}
                 </div>
                 <div className="row gap-2">
-                  <button className="btn btn-sm" onClick={() => accept(r)} disabled={busy === r.id} style={{ background: "#D97706", color: "#fff" }}>
+                  <button className="btn btn-sm" onClick={() => accept(r)} disabled={busy === r.id} style={{ background: "var(--am-text)", color: "#fff" }}>
                     {busy === r.id ? "Drafting…" : tgt ? "Draft with agent" : "Create draft"}
                   </button>
                   <button className="btn btn-secondary btn-sm" onClick={() => dismiss(r)} disabled={busy === r.id}>Dismiss</button>

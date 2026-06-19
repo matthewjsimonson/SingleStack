@@ -139,10 +139,10 @@ export default function RecordRefine({ target, recordName, onApplied, onClose }:
               </div>
               {/* The propositions — editable before anything persists. */}
               {m.suggestions?.map((s, si) => (
-                <div key={si} className="card card-pad" style={{ marginTop: 8, marginRight: 32, borderLeft: `3px solid ${s.state === "applied" ? "var(--gn-text, #15803d)" : s.state === "queued" ? "var(--am-text)" : "var(--ac)"}` }}>
+                <div key={si} className="card card-pad" style={{ marginTop: 8, marginRight: 32, borderLeft: `3px solid ${s.state === "applied" ? "var(--gn-text, var(--gn-text))" : s.state === "queued" ? "var(--am-text)" : "var(--ac)"}` }}>
                   <div className="row-between" style={{ marginBottom: 4, alignItems: "baseline" }}>
                     <span style={{ fontSize: 12.5, fontWeight: 640 }}>{s.section} · {s.label}</span>
-                    {s.state && <span className="t-mono-xs" style={{ color: s.state === "applied" ? "var(--gn-text, #15803d)" : "var(--am-text)", fontWeight: 700 }}>{s.state === "applied" ? "✓ applied" : "→ queued for review"}</span>}
+                    {s.state && <span className="t-mono-xs" style={{ color: s.state === "applied" ? "var(--gn-text, var(--gn-text))" : "var(--am-text)", fontWeight: 700 }}>{s.state === "applied" ? "✓ applied" : "→ queued for review"}</span>}
                   </div>
                   <div className="t-mono-xs t-muted" style={{ marginBottom: 6 }}>{s.rationale}</div>
                   {s.state ? (

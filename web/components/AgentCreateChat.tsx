@@ -16,7 +16,7 @@ type Rec = { source: "signal" | "theme" | "record" | "capability" | "best_practi
 type Draft = { name: string; role: string; category: string; description: string; instructions: string; summary: string } | null;
 type Turn = { role: "q" | "a"; text: string; recommendations?: Rec[]; draft?: Draft };
 
-const recColor = (s: Rec["source"]) => (s === "best_practice" ? "var(--vl-text)" : s === "capability" ? "var(--am-text)" : s === "record" ? "var(--ac-text)" : "var(--gn-text, #15803d)");
+const recColor = (s: Rec["source"]) => (s === "best_practice" ? "var(--vl-text)" : s === "capability" ? "var(--am-text)" : s === "record" ? "var(--ac-text)" : "var(--gn-text, var(--gn-text))");
 const slug = (s: string) => s.toLowerCase().replace(/[^a-z0-9]+/g, "_").replace(/^_|_$/g, "");
 
 export default function AgentCreateChat({ onCreated, onClose }: { onCreated?: () => void; onClose: () => void }) {

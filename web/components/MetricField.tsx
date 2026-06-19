@@ -61,12 +61,12 @@ export default function MetricField({ fieldId, unit }: { fieldId: string; unit?:
     } finally { setBusy(false); }
   }
 
-  const deltaTone = latest?.mom_delta == null ? "var(--tm)" : latest.mom_delta > 0 ? "#15803d" : latest.mom_delta < 0 ? "var(--rd-text, #b91c1c)" : "var(--tm)";
+  const deltaTone = latest?.mom_delta == null ? "var(--tm)" : latest.mom_delta > 0 ? "var(--gn-text)" : latest.mom_delta < 0 ? "var(--rd-text, var(--rd-text))" : "var(--tm)";
   const deltaStr = latest?.mom_delta == null ? "" : `${latest.mom_delta > 0 ? "↑" : latest.mom_delta < 0 ? "↓" : ""}${Math.abs(latest.mom_delta)} MoM`;
 
   return (
     <div style={{ marginLeft: 26 }}>
-      {error && <div className="t-sub" style={{ color: "var(--rd-text, #b91c1c)", marginBottom: 8 }}>{error}</div>}
+      {error && <div className="t-sub" style={{ color: "var(--rd-text, var(--rd-text))", marginBottom: 8 }}>{error}</div>}
 
       {latest ? (
         <div className="row gap-2" style={{ alignItems: "baseline", marginBottom: readings.length ? 8 : 0 }}>
@@ -105,9 +105,9 @@ export default function MetricField({ fieldId, unit }: { fieldId: string; unit?:
               </select></label>
           </div>
           {/* Provenance is required — this is the no-naked-numbers gate. */}
-          <label className="field" style={{ marginBottom: 8 }}><span className="t-label">Source <span style={{ color: "var(--rd-text, #b91c1c)" }}>*</span> {d.origin === "manual" ? "(where you got this number)" : "(the tool/report it came from)"}</span>
+          <label className="field" style={{ marginBottom: 8 }}><span className="t-label">Source <span style={{ color: "var(--rd-text, var(--rd-text))" }}>*</span> {d.origin === "manual" ? "(where you got this number)" : "(the tool/report it came from)"}</span>
             <input className="input" placeholder={d.origin === "manual" ? "e.g. Q2 board deck" : "e.g. Delighted NPS, Amplitude"} value={d.source_label} onChange={(e) => setD({ ...d, source_label: e.target.value })} /></label>
-          <label className="field" style={{ marginBottom: 10 }}><span className="t-label">Backup / evidence <span style={{ color: "var(--rd-text, #b91c1c)" }}>*</span> (link, doc, or query — so it's traceable)</span>
+          <label className="field" style={{ marginBottom: 10 }}><span className="t-label">Backup / evidence <span style={{ color: "var(--rd-text, var(--rd-text))" }}>*</span> (link, doc, or query — so it's traceable)</span>
             <input className="input" placeholder="https://… or doc reference" value={d.source_ref} onChange={(e) => setD({ ...d, source_ref: e.target.value })} /></label>
           {!provenanceOk && <div className="t-mono-xs t-muted" style={{ marginBottom: 8 }}>A source and a backup reference are required — metrics are never unsourced.</div>}
           <div className="row gap-2">

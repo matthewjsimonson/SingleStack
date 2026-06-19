@@ -56,8 +56,8 @@ export default function CompetitiveGrid({ competitors, capabilities, scores, com
     <div className="card" style={{ overflow: "hidden", maxWidth: 640, margin: "0 auto" }}>
       <svg viewBox={`0 0 ${W} ${H}`} style={{ width: "100%", display: "block", maxHeight: 380, background: "var(--panel)" }} preserveAspectRatio="xMidYMid meet">
         {/* quadrant tints — barely-there, leaders corner warmest */}
-        <rect x={PAD + innerW / 2} y={PAD} width={innerW / 2} height={innerH / 2} fill="var(--gn-bg, #16A34A)" opacity={0.05} />
-        <rect x={PAD} y={PAD} width={innerW / 2} height={innerH / 2} fill="var(--am-bg, #D97706)" opacity={0.03} />
+        <rect x={PAD + innerW / 2} y={PAD} width={innerW / 2} height={innerH / 2} fill="var(--gn-bg, var(--gn))" opacity={0.05} />
+        <rect x={PAD} y={PAD} width={innerW / 2} height={innerH / 2} fill="var(--am-bg, var(--am-text))" opacity={0.03} />
         {/* frame + midlines */}
         <rect x={PAD} y={PAD} width={innerW} height={innerH} fill="none" stroke="var(--border, #E6E8EE)" rx={10} />
         <line x1={PAD + innerW / 2} y1={PAD + 8} x2={PAD + innerW / 2} y2={PAD + innerH - 8} stroke="var(--border, #E6E8EE)" strokeDasharray="3 5" />

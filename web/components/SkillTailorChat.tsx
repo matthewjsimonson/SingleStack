@@ -15,7 +15,7 @@ type Rec = { source: "signal" | "theme" | "record" | "capability" | "best_practi
 type Draft = { instructions: string; summary: string } | null;
 type Turn = { role: "q" | "a"; text: string; recommendations?: Rec[]; draft?: Draft };
 
-const recColor = (s: Rec["source"]) => (s === "best_practice" ? "var(--vl-text)" : s === "capability" ? "var(--am-text)" : s === "record" ? "var(--ac-text)" : "var(--gn-text, #15803d)");
+const recColor = (s: Rec["source"]) => (s === "best_practice" ? "var(--vl-text)" : s === "capability" ? "var(--am-text)" : s === "record" ? "var(--ac-text)" : "var(--gn-text, var(--gn-text))");
 
 export default function SkillTailorChat({ skillId, skillName, onApplied, onClose }: { skillId: string; skillName: string; onApplied?: () => void; onClose: () => void }) {
   const supabase = createClient();

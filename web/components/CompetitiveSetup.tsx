@@ -673,7 +673,7 @@ export default function CompetitiveSetup({ onDone, productId }: { onDone: () => 
                   <div className="card card-pad" style={{ flex: "0 0 380px", scrollSnapAlign: "start", borderTop: "3px solid var(--ac)", maxHeight: 230, overflowY: "auto" }}>
                     <div className="t-label" style={{ color: "var(--ac-text, var(--ac))", marginBottom: 6 }}>✦ The full picture</div>
                     <div className="t-sub" style={{ fontSize: 12.5, lineHeight: 1.6, whiteSpace: "pre-wrap" }}>{picture}</div>
-                    {profileNote && <div className="t-mono-xs" style={{ marginTop: 6, color: "var(--gn-text, #15803d)" }}>✓ {profileNote}</div>}
+                    {profileNote && <div className="t-mono-xs" style={{ marginTop: 6, color: "var(--gn-text, var(--gn-text))" }}>✓ {profileNote}</div>}
                   </div>
                 )}
                 {([
@@ -733,7 +733,7 @@ export default function CompetitiveSetup({ onDone, productId }: { onDone: () => 
                   const state = i < searchStep ? "done" : i === searchStep ? "active" : "pending";
                   return (
                     <div key={i} className="row gap-2" style={{ alignItems: "center", opacity: state === "pending" ? 0.45 : 1 }}>
-                      {state === "done" && <span style={{ width: 16, textAlign: "center", color: "var(--gn-text, #15803d)", fontWeight: 700, fontSize: 12 }}>✓</span>}
+                      {state === "done" && <span style={{ width: 16, textAlign: "center", color: "var(--gn-text, var(--gn-text))", fontWeight: 700, fontSize: 12 }}>✓</span>}
                       {state === "active" && <span style={{ width: 16, display: "inline-flex", justifyContent: "center" }}><span className="agent-progress-dot" aria-hidden /></span>}
                       {state === "pending" && <span style={{ width: 16, textAlign: "center", color: "var(--tm)", fontSize: 11 }}>○</span>}
                       <span style={{ fontSize: 12.5, fontWeight: state === "active" ? 650 : 500, color: state === "active" ? "var(--tp)" : "var(--ts)" }}>{label}{state === "active" ? "…" : ""}</span>
@@ -800,12 +800,12 @@ export default function CompetitiveSetup({ onDone, productId }: { onDone: () => 
                     <div className="row-between" style={{ marginBottom: 5, alignItems: "baseline" }}>
                       <span className="t-label" style={{ color: "var(--tm)" }}>Search readiness</span>
                       <span className="row gap-2" style={{ alignItems: "baseline" }}>
-                        {readyDelta !== null && readyDelta > 0 && <span className="t-mono-xs" style={{ color: "var(--gn-text, #15803d)", fontWeight: 700 }}>+{readyDelta}</span>}
-                        <span className="t-mono-xs" style={{ fontWeight: 700, color: ready >= 80 ? "var(--gn-text, #15803d)" : ready >= 55 ? "var(--am-text)" : "var(--tm)" }}>{chatDone ? 100 : ready}%</span>
+                        {readyDelta !== null && readyDelta > 0 && <span className="t-mono-xs" style={{ color: "var(--gn-text, var(--gn-text))", fontWeight: 700 }}>+{readyDelta}</span>}
+                        <span className="t-mono-xs" style={{ fontWeight: 700, color: ready >= 80 ? "var(--gn-text, var(--gn-text))" : ready >= 55 ? "var(--am-text)" : "var(--tm)" }}>{chatDone ? 100 : ready}%</span>
                       </span>
                     </div>
                     <div style={{ height: 6, borderRadius: 3, background: "var(--fill)", overflow: "hidden" }}>
-                      <div style={{ width: `${chatDone ? 100 : ready}%`, height: "100%", borderRadius: 3, background: ready >= 80 || chatDone ? "var(--gn-text, #15803d)" : ready >= 55 ? "var(--am-text, #D97706)" : "var(--ac)", transition: "width 0.4s ease" }} />
+                      <div style={{ width: `${chatDone ? 100 : ready}%`, height: "100%", borderRadius: 3, background: ready >= 80 || chatDone ? "var(--gn-text, var(--gn-text))" : ready >= 55 ? "var(--am-text, var(--am-text))" : "var(--ac)", transition: "width 0.4s ease" }} />
                     </div>
                     <div className="t-mono-xs t-muted" style={{ marginTop: 5 }}>
                       {chatDone ? "Specific enough — the picture is painted." : ready >= 80 ? "Good enough to move on — answer more only if you want a sharper cut." : gaps ? `Still thin: ${gaps}` : "Keep going — each answer narrows who you actually compete with."}
@@ -816,7 +816,7 @@ export default function CompetitiveSetup({ onDone, productId }: { onDone: () => 
                         <div className="row gap-2" style={{ flexWrap: "wrap" }}>
                           {coverage.slice().sort((a, b) => b.weight - a.weight).map((c) => {
                             const icon = c.status === "covered" ? "✓" : c.status === "partial" ? "◐" : c.status === "not_applicable" ? "–" : "○";
-                            const col = c.status === "covered" ? "var(--gn-text, #15803d)" : c.status === "partial" ? "var(--am-text, #D97706)" : c.status === "not_applicable" ? "var(--tm)" : "var(--rd-text, #B91C1C)";
+                            const col = c.status === "covered" ? "var(--gn-text, var(--gn-text))" : c.status === "partial" ? "var(--am-text, var(--am-text))" : c.status === "not_applicable" ? "var(--tm)" : "var(--rd-text, #B91C1C)";
                             const bg = c.status === "covered" ? "var(--gn-bg, #CDEBD6)" : "var(--fill)";
                             return (
                               <span key={c.dimension} className="t-mono-xs" title={`${c.status}${c.source !== "none" ? ` · from ${c.source}` : ""}${c.note ? `\n${c.note}` : ""}`}
@@ -847,7 +847,7 @@ export default function CompetitiveSetup({ onDone, productId }: { onDone: () => 
                   {askRun.active && <div className="card card-pad" style={{ background: "var(--panel-2)", marginRight: 32 }}><AgentStepList run={askRun} /></div>}
                   {pictureRun.active && <div className="card card-pad" style={{ background: "var(--panel-2)", marginRight: 32 }}><AgentStepList run={pictureRun} /></div>}
                   {chatDone && !chatBusy && (
-                    <div className="card card-pad" style={{ borderLeft: "3px solid var(--gn-text, #15803d)", fontSize: 12.5 }}>
+                    <div className="card card-pad" style={{ borderLeft: "3px solid var(--gn-text, var(--gn-text))", fontSize: 12.5 }}>
                       Got what it needs — the full picture is on the setup screen. Review it, ✎ Edit anything (including any answer above), then ✦ Find my competitors.
                       <div className="row gap-2" style={{ marginTop: 8 }}>
                         <button className="btn btn-secondary btn-sm" onClick={askAnother}>✦ Ask another question</button>
@@ -862,7 +862,7 @@ export default function CompetitiveSetup({ onDone, productId }: { onDone: () => 
                     <div className="row gap-2">
                       <button className="btn btn-sm" type="submit" disabled={chatBusy || !answer.trim()}>{chatBusy ? "…" : "Send"}</button>
                       <button className={(ready ?? 0) >= 80 ? "btn btn-sm" : "btn btn-secondary btn-sm"} type="button" disabled={chatBusy || chat.length < 2} onClick={() => paintPicture(chat)}
-                        style={(ready ?? 0) >= 80 ? { background: "var(--gn-text, #15803d)", color: "#fff" } : undefined}
+                        style={(ready ?? 0) >= 80 ? { background: "var(--gn-text, var(--gn-text))", color: "#fff" } : undefined}
                         title={(ready ?? 0) >= 80 ? "You're at a good level — synthesize and move on" : "Stop here and synthesize the picture from what's answered so far"}>
                         {(ready ?? 0) >= 80 ? "✓ Good level — paint the picture" : "Enough — paint the picture"}</button>
                     </div>
@@ -1041,7 +1041,7 @@ export default function CompetitiveSetup({ onDone, productId }: { onDone: () => 
                   <div className="t-mono-xs t-muted" style={{ marginBottom: 6 }}>The first pull is the verification — what each source actually returned. Wrong link or wrong content? Fix it on the competitor&rsquo;s Signals tab before the daily cadence runs.</div>
                   {pullLog.map((l, i) => (
                     <div key={i} style={{ padding: "3px 0" }}>
-                      <div className="t-mono-xs" style={{ fontWeight: 640, color: l.ok === false ? "var(--rd-text, #B91C1C)" : l.ok ? "var(--gn-text, #15803d)" : "var(--ts)" }}>
+                      <div className="t-mono-xs" style={{ fontWeight: 640, color: l.ok === false ? "var(--rd-text, #B91C1C)" : l.ok ? "var(--gn-text, var(--gn-text))" : "var(--ts)" }}>
                         {l.ok === false ? "✗ " : l.ok ? "✓ " : ""}{l.text}
                       </div>
                       {l.signals && l.signals.length > 0 && (

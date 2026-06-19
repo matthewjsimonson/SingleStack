@@ -113,7 +113,7 @@ export default function RosterReview({ onChanged }: { onChanged?: () => void }) 
                 Reviews waiting · {changes.length}
               </button>
             )}
-            <button className="btn btn-sm" onClick={run} disabled={running} style={{ background: "#D97706", color: "#fff" }}>{running ? "Reviewing…" : "Run agent review"}</button>
+            <button className="btn btn-sm" onClick={run} disabled={running} style={{ background: "var(--am-text)", color: "#fff" }}>{running ? "Reviewing…" : "Run agent review"}</button>
           </div>
         }>
         <div className="t-sub t-muted" style={{ fontSize: 12.5 }}>

@@ -120,12 +120,12 @@ export default function MapView({ productFilter = "all", onOpenTheme }: { produc
             {/* momentum lanes, tinted live: accelerating = warm, fading = cool */}
             {projection.lanes.map((l, i) => {
               const h = (projection.lanes[i + 1]?.y0 ?? H) - l.y0;
-              const tint = l.tone === "hot" ? "#F59E0B" : l.tone === "cool" ? "#6366F1" : "#94A3B8";
+              const tint = l.tone === "hot" ? "var(--am-text)" : l.tone === "cool" ? "#6366F1" : "#94A3B8";
               const op = l.tone === "hot" ? 0.07 : l.tone === "cool" ? 0.05 : 0.025;
               return <rect key={`band${i}`} x={0} y={l.y0} width={W} height={h} fill={tint} opacity={op} />;
             })}
             {/* "Act now" zone — high-confidence right edge glows faintly */}
-            <rect x={PAD + (W - PAD * 2) * 0.66} y={PAD - 6} width={(W - PAD * 2) * 0.34 + 6} height={H - PAD * 2 + 12} fill="#16A34A" opacity={0.05} />
+            <rect x={PAD + (W - PAD * 2) * 0.66} y={PAD - 6} width={(W - PAD * 2) * 0.34 + 6} height={H - PAD * 2 + 12} fill="var(--gn)" opacity={0.05} />
             {projection.lanes.map((l, i) => i === 0 ? null : (
               <line key={i} x1={PAD} y1={l.y0} x2={W - PAD} y2={l.y0} stroke="#E6E8EE" strokeWidth={1} />
             ))}
@@ -142,7 +142,7 @@ export default function MapView({ productFilter = "all", onOpenTheme }: { produc
               const isHover = hover === n.id;
               const accel = n.momentum === "accelerating" && n.state !== "fading";
               const pulse = accel ? 1 + 0.12 * breathe : 1;            // breathing on hot nodes
-              const glow = n.flag === "escalating" ? "#D97706" : n.flag === "reconsider" ? "#D97706" : isHover ? "#4F46E5" : null;
+              const glow = n.flag === "escalating" ? "var(--am-text)" : n.flag === "reconsider" ? "var(--am-text)" : isHover ? "#4F46E5" : null;
               return (
                 <g key={n.id} transform={`translate(${n.x},${n.y})`} style={{ cursor: "pointer" }}
                    onClick={() => (onOpenTheme ? onOpenTheme(n.id) : router.push(n.href))}
@@ -153,7 +153,7 @@ export default function MapView({ productFilter = "all", onOpenTheme }: { produc
                   <circle r={n.r * pulse} fill={themeFill(n)} opacity={themeOpacity(n)}
                     stroke={glow ?? "#FFFFFF"} strokeWidth={glow ? (n.flag ? 2.5 : 2) : 1.5} />
                   {isHover && <circle r={n.r * pulse + 3} fill="none" stroke={themeFill(n)} strokeWidth={1.5} opacity={0.5} />}
-                  {n.contraCount > 0 && <circle r={3.5} cx={n.r * 0.7} cy={-n.r * 0.7} fill="#EF4444" stroke="#fff" strokeWidth={1} />}
+                  {n.contraCount > 0 && <circle r={3.5} cx={n.r * 0.7} cy={-n.r * 0.7} fill="var(--rd-text)" stroke="#fff" strokeWidth={1} />}
                   <text x={0} y={n.r + 13} fontSize={isHover ? 11.5 : 10} fontWeight={isHover ? 680 : 560} fill={isHover ? "#131417" : "#5A5E68"} textAnchor="middle" style={{ pointerEvents: "none" }}>
                     {n.title.length > 24 ? n.title.slice(0, 24) + "…" : n.title}
                   </text>
@@ -167,7 +167,7 @@ export default function MapView({ productFilter = "all", onOpenTheme }: { produc
           <div className="row gap-2" style={{ padding: "10px 14px", borderTop: "1px solid var(--border)", flexWrap: "wrap", background: "var(--panel)" }}>
             <span style={{ color: "#4F46E5", fontSize: 12, fontWeight: 600 }}>● product</span>
             <span style={{ color: "#7C3AED", fontSize: 12, fontWeight: 600 }}>● gtm</span>
-            <span style={{ color: "var(--tm)", fontSize: 11.5 }}>size = confidence · lane = momentum · position = action priority · <span style={{ color: "#EF4444" }}>●</span> contradicted · pulse = accelerating · click a node to open it</span>
+            <span style={{ color: "var(--tm)", fontSize: 11.5 }}>size = confidence · lane = momentum · position = action priority · <span style={{ color: "var(--rd-text)" }}>●</span> contradicted · pulse = accelerating · click a node to open it</span>
           </div>
         </div>
       )}

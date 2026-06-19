@@ -344,12 +344,12 @@ export default function RecordSetup({ onDone, mode = "both" }: { onDone: (produc
                 <div className="row-between" style={{ marginBottom: 5, alignItems: "baseline" }}>
                   <span className="t-label" style={{ color: "var(--tm)" }}>Draft readiness</span>
                   <span className="row gap-2" style={{ alignItems: "baseline" }}>
-                    {readyDelta !== null && readyDelta > 0 && <span className="t-mono-xs" style={{ color: "var(--gn-text, #15803d)", fontWeight: 700 }}>+{readyDelta}</span>}
-                    <span className="t-mono-xs" style={{ fontWeight: 700, color: (chatDone || ready >= 80) ? "var(--gn-text, #15803d)" : ready >= 55 ? "var(--am-text)" : "var(--tm)" }}>{chatDone ? 100 : ready}%</span>
+                    {readyDelta !== null && readyDelta > 0 && <span className="t-mono-xs" style={{ color: "var(--gn-text, var(--gn-text))", fontWeight: 700 }}>+{readyDelta}</span>}
+                    <span className="t-mono-xs" style={{ fontWeight: 700, color: (chatDone || ready >= 80) ? "var(--gn-text, var(--gn-text))" : ready >= 55 ? "var(--am-text)" : "var(--tm)" }}>{chatDone ? 100 : ready}%</span>
                   </span>
                 </div>
                 <div style={{ height: 6, borderRadius: 3, background: "var(--fill)", overflow: "hidden" }}>
-                  <div style={{ width: `${chatDone ? 100 : ready}%`, height: "100%", borderRadius: 3, background: (chatDone || ready >= 80) ? "var(--gn-text, #15803d)" : ready >= 55 ? "var(--am-text, #D97706)" : "var(--ac)", transition: "width 0.4s ease" }} />
+                  <div style={{ width: `${chatDone ? 100 : ready}%`, height: "100%", borderRadius: 3, background: (chatDone || ready >= 80) ? "var(--gn-text, var(--gn-text))" : ready >= 55 ? "var(--am-text, var(--am-text))" : "var(--ac)", transition: "width 0.4s ease" }} />
                 </div>
                 <div className="t-mono-xs t-muted" style={{ marginTop: 5 }}>
                   {chatDone ? "Enough for a strong draft." : ready >= 80 ? "Good enough to draft — answer more only for a fuller record." : gaps ? `Still thin: ${gaps}` : "Each answer fills more of the records."}
@@ -372,7 +372,7 @@ export default function RecordSetup({ onDone, mode = "both" }: { onDone: (produc
               {chatWhy && !chatDone && <div className="t-mono-xs t-muted">Why this question: {chatWhy}</div>}
               {chatBusy && <div className="t-sub t-muted" style={{ fontSize: 12.5 }}>Thinking…</div>}
               {chatDone && !chatBusy && (
-                <div className="card card-pad" style={{ borderLeft: "3px solid var(--gn-text, #15803d)", fontSize: 12.5 }}>
+                <div className="card card-pad" style={{ borderLeft: "3px solid var(--gn-text, var(--gn-text))", fontSize: 12.5 }}>
                   Got what it needs. Close this panel and <b>✦ Draft the records</b> — every field stays yours to refine before anything is created.
                 </div>
               )}
@@ -384,7 +384,7 @@ export default function RecordSetup({ onDone, mode = "both" }: { onDone: (produc
                 <div className="row gap-2">
                   <button className="btn btn-sm" type="submit" disabled={chatBusy || !answer.trim()}>{chatBusy ? "…" : "Send"}</button>
                   <button className={(ready ?? 0) >= 80 ? "btn btn-sm" : "btn btn-secondary btn-sm"} type="button" disabled={chatBusy || chat.length < 2} onClick={() => { setChatDone(true); setChatOpen(false); }}
-                    style={(ready ?? 0) >= 80 ? { background: "var(--gn-text, #15803d)", color: "#fff" } : undefined}>
+                    style={(ready ?? 0) >= 80 ? { background: "var(--gn-text, var(--gn-text))", color: "#fff" } : undefined}>
                     {(ready ?? 0) >= 80 ? "✓ Good level — go draft" : "Enough — go draft"}</button>
                 </div>
               </form>

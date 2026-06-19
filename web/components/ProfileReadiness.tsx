@@ -72,7 +72,7 @@ export default function ProfileReadiness({ compact = false, nonce = 0 }: { compa
   }
 
   if (!r) return null;
-  const color = r.score >= 80 ? "var(--gn-text, #15803d)" : r.score >= 55 ? "var(--am-text, #D97706)" : "var(--ac)";
+  const color = r.score >= 80 ? "var(--gn-text, var(--gn-text))" : r.score >= 55 ? "var(--am-text, var(--am-text))" : "var(--ac)";
 
   return (
     <div className="card card-pad" style={{ background: "var(--panel-2)" }}>
@@ -104,7 +104,7 @@ export default function ProfileReadiness({ compact = false, nonce = 0 }: { compa
           const full = d.got >= d.max;
           return (
             <span key={d.key} className="t-mono-xs" title={full ? `${d.label}: complete` : d.fix}
-              style={{ padding: "3px 8px", borderRadius: 6, background: full ? "var(--gn-bg, #CDEBD6)" : "var(--fill)", color: full ? "var(--gn-text, #15803d)" : "var(--tm)", fontWeight: 600, cursor: "default" }}>
+              style={{ padding: "3px 8px", borderRadius: 6, background: full ? "var(--gn-bg, #CDEBD6)" : "var(--fill)", color: full ? "var(--gn-text, var(--gn-text))" : "var(--tm)", fontWeight: 600, cursor: "default" }}>
               {full ? "✓" : `${d.got}/${d.max}`} {d.label}
             </span>
           );
