@@ -302,36 +302,36 @@ export default function Ecosystem() {
             /* Gentle breathing of each node group. */
             @keyframes eco-breathe {
               0%, 100% { transform: scale(1); }
-              50% { transform: scale(1.03); }
+              50% { transform: scale(1.013); }
             }
             @keyframes eco-breathe-gap {
               0%, 100% { transform: scale(1); }
-              50% { transform: scale(1.045); }
+              50% { transform: scale(1.022); }
             }
             :global(.eco-node) {
-              animation: eco-breathe 3.6s ease-in-out infinite;
+              animation: eco-breathe 4.8s ease-in-out infinite;
             }
             :global(.eco-node-gap) {
-              animation: eco-breathe-gap 3.6s ease-in-out infinite;
+              animation: eco-breathe-gap 4.8s ease-in-out infinite;
             }
             /* Faint halo at rest; lifts on hover and when selected. */
             :global(.eco-halo) {
-              opacity: 0.14;
+              opacity: 0.08;
               transition: opacity 280ms ease;
             }
-            :global(.eco-node-gap) :global(.eco-halo) { opacity: 0.2; }
-            :global(.eco-node:hover) :global(.eco-halo) { opacity: 0.34; }
-            :global(.eco-node-sel) :global(.eco-halo) { opacity: 0.4; }
+            :global(.eco-node-gap) :global(.eco-halo) { opacity: 0.12; }
+            :global(.eco-node:hover) :global(.eco-halo) { opacity: 0.22; }
+            :global(.eco-node-sel) :global(.eco-halo) { opacity: 0.3; }
             /* A touch of scale-up on hover, smooth. */
             :global(.eco-node) { transition: transform 200ms ease; }
-            :global(.eco-node):hover { animation-play-state: paused; transform: scale(1.06); }
+            :global(.eco-node):hover { animation-play-state: paused; transform: scale(1.04); }
             /* Slowly rotating core ring. */
             @keyframes eco-spin-rot { to { transform: rotate(360deg); } }
             :global(.eco-spin) {
               animation: eco-spin-rot linear infinite;
             }
             /* Calm core pulse. */
-            @keyframes eco-core { 0%, 100% { transform: scale(1); } 50% { transform: scale(1.018); } }
+            @keyframes eco-core { 0%, 100% { transform: scale(1); } 50% { transform: scale(1.009); } }
             :global(.eco-core-pulse) {
               animation: eco-core ease-in-out infinite;
             }

@@ -42,9 +42,9 @@
   --gn-fill: #E6F5EC;
   --gn-text: #15803D;
 
-  /* amber */
-  --am-fill: #FAF1E0;
-  --am-text: #92600A;
+  /* amber — clean warm amber (was a muddy olive #92600A) */
+  --am-fill: #FBF0DF;
+  --am-text: #B45309;
 
   /* red */
   --rd-fill: #FBEBEB;
