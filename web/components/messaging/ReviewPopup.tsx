@@ -12,7 +12,7 @@
 import { useEffect, useMemo, useState } from "react";
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { getOrgId } from "@/lib/org";
-import { Modal, Chip } from "@/components/ui";
+import { Modal, Chip, SubTabs } from "@/components/ui";
 import { fmtWhen, buildGrounding, buildDraftContext, type GroundingField, type ReleaseRow, type ThemeRow } from "@/lib/messaging";
 import DraftChatModal from "@/components/messaging/DraftChatModal";
 import type { RosterAgent } from "@/components/messaging/AgentPickerModal";
@@ -254,7 +254,7 @@ export default function ReviewPopup({
 
   return (
     <>
-      <Modal open={open && !draftOpen} onClose={onClose} width={1000} title={
+      <Modal open={open && !draftOpen} onClose={onClose} width={1180} title={
         <div className="row gap-2" style={{ alignItems: "center", flexWrap: "wrap" }}>
           <span>{title}</span>
           {input.kind === "release"
@@ -266,7 +266,7 @@ export default function ReviewPopup({
         {error && <div className="banner banner-error" style={{ marginBottom: 12 }}>{error}</div>}
 
         {/* mirrored screen: LEFT pick-em nav · RIGHT content panel */}
-        <div style={{ display: "grid", gridTemplateColumns: "190px minmax(0,1fr)", gap: "var(--sp-5)", alignItems: "start", minHeight: 360 }}>
+        <div style={{ display: "grid", gridTemplateColumns: "190px minmax(0,1fr)", gap: "var(--sp-5)", alignItems: "start", minHeight: 480 }}>
           {/* LEFT — pick-em nav (feels like the app's own nav) */}
           <nav style={{ display: "flex", flexDirection: "column", gap: 2, borderRight: "1px solid var(--border)", paddingRight: 12 }}>
             {NAV.map((n) => {
@@ -287,13 +287,13 @@ export default function ReviewPopup({
 
           {/* RIGHT — content panel */}
           <div style={{ minWidth: 0 }}>
-            {nav === "overview" && <Overview input={input} productName={productName} changelog={changelog} ctxLoading={ctxLoading} />}
+            {nav === "overview" && <Overview input={input} productName={productName} changelog={changelog} evidence={evidence} ctxLoading={ctxLoading} />}
             {nav === "sources" && <Sources buckets={buckets} ctxLoading={ctxLoading} />}
             {nav === "details" && <Details input={input} evidence={evidence} changelog={changelog} ctxLoading={ctxLoading} gtmName={gtmName} productName={productName} gtmFields={gtmFields} productFields={productFields} />}
             {nav === "actions" && (
               <Actions
                 input={input} brief={brief} isRatified={isRatified} saving={saving}
-                onStartConversation={startConversation} onRatify={ratify} onDismiss={onClose}
+                onStartConversation={startConversation} onSaveBrief={saveBrief} onRatify={ratify} onDismiss={onClose}
               />
             )}
           </div>
@@ -317,9 +317,25 @@ export default function ReviewPopup({
   );
 }
 
-// ---- OVERVIEW ---------------------------------------------------------------
-function Overview({ input, productName, changelog, ctxLoading }: {
-  input: Input; productName: string | null; changelog: ChangelogItem[]; ctxLoading: boolean;
+// A labeled key/value used across the Overview grids. Shows a muted "—" when the
+// value is empty so the customer still sees the shape of what's tracked.
+function FactRow({ label, value }: { label: string; value: string | null | undefined }) {
+  const v = (value ?? "").trim();
+  return (
+    <div style={{ display: "grid", gridTemplateColumns: "130px minmax(0,1fr)", gap: 10, padding: "6px 0", borderTop: "1px solid var(--border)" }}>
+      <span className="t-mono-xs" style={{ color: "var(--tm)" }}>{label}</span>
+      {v ? (
+        <span className="t-sub" style={{ fontSize: 12.5, color: "var(--ts)", lineHeight: 1.5 }}>{v}</span>
+      ) : (
+        <span className="t-sub t-muted" style={{ fontSize: 12.5, color: "var(--tm)" }}>—</span>
+      )}
+    </div>
+  );
+}
+
+// ---- OVERVIEW — a legit, structured read of the input -----------------------
+function Overview({ input, productName, changelog, evidence, ctxLoading }: {
+  input: Input; productName: string | null; changelog: ChangelogItem[]; evidence: EvidenceSignal[]; ctxLoading: boolean;
 }) {
   return (
     <div className="stack-3">
@@ -340,73 +356,154 @@ function Overview({ input, productName, changelog, ctxLoading }: {
         )}
       </div>
 
-      {/* full summary */}
-      {input.row.summary && (
-        <div className="t-body" style={{ fontSize: 13.5, lineHeight: 1.6, color: "var(--ts)" }}>{input.row.summary}</div>
-      )}
-
-      {/* signal: the Recommendation callout */}
-      {input.kind === "theme" && input.row.recommendation && (
-        <div className="card card-pad" style={{ borderLeft: "2px solid var(--ac)", background: "var(--fill)" }}>
-          <div className="t-label" style={{ color: "var(--tm)", marginBottom: 4 }}>Recommendation</div>
-          <div className="t-body" style={{ fontSize: 13, lineHeight: 1.55 }}>{input.row.recommendation}</div>
-        </div>
-      )}
-
-      {/* release: "What's in this release" changelog */}
-      {input.kind === "release" && (
-        <div>
-          <div className="t-label" style={{ color: "var(--tm)", marginBottom: 8 }}>What&apos;s in this release</div>
-          {ctxLoading ? (
-            <div className="t-sub t-muted" style={{ fontSize: 12.5 }}>Loading changelog…</div>
-          ) : changelog.length === 0 ? (
-            <div className="t-sub t-muted" style={{ fontSize: 12.5 }}>No changelog items linked to this release yet.</div>
-          ) : (
-            <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
-              {changelog.map((c) => (
-                <div key={c.id} className="row gap-2" style={{ alignItems: "center", padding: "8px 12px", border: "1px solid var(--border)", borderRadius: 8, background: "var(--panel)" }}>
-                  <span style={{ fontSize: 13, fontWeight: 600, color: "var(--tp)", minWidth: 0, flex: 1 }}>{c.title}</span>
-                  {c.change_type && <Chip tone="default">{CHANGE_LABEL[c.change_type] ?? c.change_type}</Chip>}
-                </div>
-              ))}
-            </div>
-          )}
-        </div>
-      )}
+      {input.kind === "release"
+        ? <ReleaseOverview input={input} productName={productName} changelog={changelog} ctxLoading={ctxLoading} />
+        : <ThemeOverview input={input} evidence={evidence} ctxLoading={ctxLoading} />}
     </div>
   );
 }
 
-// ---- SOURCES — the five labeled origin buckets ------------------------------
+function ReleaseOverview({ input, productName, changelog, ctxLoading }: {
+  input: Extract<Input, { kind: "release" }>; productName: string | null; changelog: ChangelogItem[]; ctxLoading: boolean;
+}) {
+  const summary = (input.row.summary ?? "").trim();
+  const stage = (input.row.stage ?? "").trim();
+  // A factual GTM framing line derived from the data (not marketing copy).
+  const whyParts: string[] = [];
+  if (changelog.length) whyParts.push(`${changelog.length} ${changelog.length === 1 ? "change" : "changes"} shipping`);
+  else whyParts.push("This release");
+  if (stage) whyParts.push(`in ${stage}`);
+  const whyTail = productName ? ` — messaging needs to land the value for ${productName}.` : " — messaging needs to land the value.";
+  const why = `${whyParts.join(" ")}${whyTail}`;
+
+  return (
+    <>
+      {/* Summary */}
+      <div>
+        <div className="t-label" style={{ color: "var(--tm)", marginBottom: 4 }}>Summary</div>
+        {summary
+          ? <div className="t-body" style={{ fontSize: 13.5, lineHeight: 1.6, color: "var(--ts)" }}>{summary}</div>
+          : <div className="t-sub t-muted" style={{ fontSize: 12.5 }}>—</div>}
+      </div>
+
+      {/* Key facts */}
+      <div>
+        <div className="t-label" style={{ color: "var(--tm)", marginBottom: 2 }}>Key facts</div>
+        <FactRow label="Version" value={input.row.version} />
+        <FactRow label="Stage" value={input.row.stage} />
+        <FactRow label="Target date" value={input.row.target_date ? fmtWhen(input.row.target_date) : null} />
+        <FactRow label="Product" value={productName} />
+      </div>
+
+      {/* What's shipping */}
+      <div>
+        <div className="row gap-2" style={{ alignItems: "baseline", marginBottom: 8 }}>
+          <span className="t-label" style={{ color: "var(--tm)" }}>What&apos;s shipping</span>
+          {!ctxLoading && <span className="t-mono-xs" style={{ color: "var(--tm)" }}>{changelog.length}</span>}
+        </div>
+        {ctxLoading ? (
+          <div className="t-sub t-muted" style={{ fontSize: 12.5 }}>Loading changelog…</div>
+        ) : changelog.length === 0 ? (
+          <div className="t-sub t-muted" style={{ fontSize: 12.5 }}>No changelog items linked to this release yet.</div>
+        ) : (
+          <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+            {changelog.map((c) => (
+              <div key={c.id} className="row gap-2" style={{ alignItems: "center", padding: "8px 12px", border: "1px solid var(--border)", borderRadius: 8, background: "var(--panel)" }}>
+                <span style={{ fontSize: 13, fontWeight: 600, color: "var(--tp)", minWidth: 0, flex: 1 }}>{c.title}</span>
+                {c.change_type && <Chip tone="default">{CHANGE_LABEL[c.change_type] ?? c.change_type}</Chip>}
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
+
+      {/* Why it matters for GTM — factual framing */}
+      <div>
+        <div className="t-label" style={{ color: "var(--tm)", marginBottom: 4 }}>Why it matters for GTM</div>
+        <div className="t-sub" style={{ fontSize: 12.5, lineHeight: 1.55, color: "var(--ts)" }}>{why}</div>
+      </div>
+    </>
+  );
+}
+
+function ThemeOverview({ input, evidence, ctxLoading }: {
+  input: Extract<Input, { kind: "theme" }>; evidence: EvidenceSignal[]; ctxLoading: boolean;
+}) {
+  const summary = (input.row.summary ?? "").trim();
+  const recommendation = (input.row.recommendation ?? "").trim();
+  // The most recent evidence timestamp drives the "Last evidence" fact.
+  const lastEvidence = evidence.map((s) => s.observed_at).filter(Boolean).map((t) => relTime(t)).find(Boolean) ?? null;
+
+  return (
+    <>
+      {/* What's happening */}
+      <div>
+        <div className="t-label" style={{ color: "var(--tm)", marginBottom: 4 }}>What&apos;s happening</div>
+        {summary
+          ? <div className="t-body" style={{ fontSize: 13.5, lineHeight: 1.6, color: "var(--ts)" }}>{summary}</div>
+          : <div className="t-sub t-muted" style={{ fontSize: 12.5 }}>—</div>}
+      </div>
+
+      {/* Signal strength */}
+      <div>
+        <div className="t-label" style={{ color: "var(--tm)", marginBottom: 2 }}>Signal strength</div>
+        <FactRow label="State" value={input.row.state} />
+        <FactRow label="Confidence" value={input.row.conf_level != null ? `${Math.round(input.row.conf_level * 100)}%` : null} />
+        <FactRow label="Last evidence" value={ctxLoading ? "Loading…" : lastEvidence} />
+        <FactRow label="Supporting signals" value={ctxLoading ? "Loading…" : String(evidence.length)} />
+      </div>
+
+      {/* Recommendation callout */}
+      <div>
+        <div className="t-label" style={{ color: "var(--tm)", marginBottom: 8 }}>Recommendation</div>
+        {recommendation ? (
+          <div className="card card-pad" style={{ borderLeft: "2px solid var(--ac)", background: "var(--fill)" }}>
+            <div className="t-body" style={{ fontSize: 13, lineHeight: 1.55 }}>{recommendation}</div>
+          </div>
+        ) : (
+          <div className="t-sub t-muted" style={{ fontSize: 12.5 }}>—</div>
+        )}
+      </div>
+    </>
+  );
+}
+
+// ---- SOURCES — the five origins as a tabbed sub-interface --------------------
 function Sources({ buckets, ctxLoading }: { buckets: Record<Bucket, SourceItem[]>; ctxLoading: boolean }) {
+  // Default to the first bucket that actually has items (else the first bucket).
+  const firstWithItems = useMemo(() => BUCKETS.find((bk) => buckets[bk.id].length > 0)?.id ?? BUCKETS[0].id, [buckets]);
+  const [tab, setTab] = useState<Bucket>(firstWithItems);
+  // Re-seat the active tab when the data (and therefore the populated bucket) changes.
+  useEffect(() => { setTab(firstWithItems); }, [firstWithItems]);
+
+  const tabs = BUCKETS.map((bk) => ({
+    key: bk.id,
+    label: `${bk.label} · ${buckets[bk.id].length}`,
+  }));
+  const active = BUCKETS.find((bk) => bk.id === tab) ?? BUCKETS[0];
+  const items = buckets[active.id];
+
   return (
     <div className="stack-3">
       <div className="t-label" style={{ color: "var(--tm)" }}>Supporting evidence &amp; materials</div>
-      {BUCKETS.map((bk) => {
-        const items = buckets[bk.id];
-        return (
-          <div key={bk.id}>
-            <div className="t-mono-xs" style={{ color: "var(--tm)", textTransform: "uppercase", letterSpacing: 0.4, marginBottom: 6 }}>{bk.label}</div>
-            {ctxLoading && items.length === 0 ? (
-              <div className="t-sub t-muted" style={{ fontSize: 12 }}>Loading…</div>
-            ) : items.length === 0 ? (
-              <div className="t-sub t-muted" style={{ fontSize: 12 }}>Nothing from {bk.label} yet.</div>
-            ) : (
-              <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
-                {items.map((it) => (
-                  <div key={it.id} style={{ padding: "8px 11px", border: "1px solid var(--border)", borderRadius: 7, background: "var(--panel)" }}>
-                    <div className="row-between" style={{ alignItems: "baseline", gap: 8 }}>
-                      <span style={{ fontSize: 12.5, fontWeight: 600, color: "var(--tp)", minWidth: 0 }}>{it.title}</span>
-                      {it.when && <span className="t-mono-xs" style={{ color: "var(--tm)", flexShrink: 0 }}>{it.when}</span>}
-                    </div>
-                    {it.desc && <div className="t-sub" style={{ fontSize: 11.5, lineHeight: 1.45, color: "var(--tm)", marginTop: 2, overflow: "hidden", display: "-webkit-box", WebkitLineClamp: 2, WebkitBoxOrient: "vertical" }}>{it.desc}</div>}
-                  </div>
-                ))}
+      <SubTabs tabs={tabs} active={tab} onChange={setTab} />
+      {ctxLoading && items.length === 0 ? (
+        <div className="t-sub t-muted" style={{ fontSize: 12.5 }}>Loading…</div>
+      ) : items.length === 0 ? (
+        <div className="t-sub t-muted" style={{ fontSize: 12.5 }}>Nothing from {active.label} yet.</div>
+      ) : (
+        <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+          {items.map((it) => (
+            <div key={it.id} style={{ padding: "11px 13px", border: "1px solid var(--border)", borderRadius: 8, background: "var(--panel)" }}>
+              <div className="row-between" style={{ alignItems: "baseline", gap: 10 }}>
+                <span style={{ fontSize: 13.5, fontWeight: 600, color: "var(--tp)", minWidth: 0 }}>{it.title}</span>
+                {it.when && <span className="t-mono-xs" style={{ color: "var(--tm)", flexShrink: 0 }}>{it.when}</span>}
               </div>
-            )}
-          </div>
-        );
-      })}
+              {it.desc && <div className="t-sub" style={{ fontSize: 12.5, lineHeight: 1.55, color: "var(--ts)", marginTop: 5 }}>{it.desc}</div>}
+            </div>
+          ))}
+        </div>
+      )}
     </div>
   );
 }
@@ -518,17 +615,30 @@ function GroundingList({ gtmFields, productFields }: { gtmFields: GroundingField
   );
 }
 
-// ---- ACTIONS — recommendations · start formulating · dismiss · brief --------
-function Actions({ input, brief, isRatified, saving, onStartConversation, onRatify, onDismiss }: {
+// ---- ACTIONS — current brief · Conversation · Formulate composer · Dismiss --
+function Actions({ input, brief, isRatified, saving, onStartConversation, onSaveBrief, onRatify, onDismiss }: {
   input: Input; brief: Brief | null; isRatified: boolean; saving: boolean;
-  onStartConversation: (seed: string | null) => void; onRatify: () => void; onDismiss: () => void;
+  onStartConversation: (seed: string | null) => void; onSaveBrief: (body: string) => void | Promise<void>;
+  onRatify: () => void; onDismiss: () => void;
 }) {
   const noun = input.kind === "release" ? "release" : "signal";
+  const title = titleOf(input);
   // The primary recommendation: a theme's recommendation, else a generic starter.
   const recommendation = input.kind === "theme" ? (input.row.recommendation ?? "").trim() : "";
   const recSeed = recommendation
-    ? `We need messaging for "${titleOf(input)}". The standing recommendation is: "${recommendation}". Give me your first take on how to express this, grounded in our framework, then ask me where to push.`
-    : `Draft the messaging for this ${noun}: "${titleOf(input)}". Give me your first take in a few tight sentences, then ask me where to push.`;
+    ? `We need messaging for "${title}". The standing recommendation is: "${recommendation}". Give me your first take on how to express this, grounded in our framework, then ask me where to push.`
+    : `Draft the messaging for this ${noun}: "${title}". Give me your first take in a few tight sentences, then ask me where to push.`;
+
+  // Formulate composer — the human writes their own thinking; no AI typing.
+  const [formulation, setFormulation] = useState("");
+  const [saved, setSaved] = useState(false);
+  const trimmed = formulation.trim();
+
+  async function sendToNextStep() {
+    if (!trimmed) return;
+    await onSaveBrief(trimmed);
+    setSaved(true);
+  }
 
   return (
     <div className="stack-3">
@@ -543,7 +653,7 @@ function Actions({ input, brief, isRatified, saving, onStartConversation, onRati
             </div>
             <div className="row gap-2">
               <button className="btn btn-secondary btn-sm" onClick={() => onStartConversation(
-                `Here is the current brief for "${titleOf(input)}":\n\n${brief.body}\n\nLet's continue refining it. Give me your read and one question about where to push.`
+                `Here is the current brief for "${title}":\n\n${brief.body}\n\nLet's continue refining it. Give me your read and one question about where to push.`
               )}>View / continue</button>
               <button className="btn btn-sm" disabled={saving || isRatified} onClick={onRatify}>{isRatified ? "Ratified" : "Ratify"}</button>
             </div>
@@ -551,22 +661,47 @@ function Actions({ input, brief, isRatified, saving, onStartConversation, onRati
         </div>
       )}
 
-      {/* Recommendations */}
+      {/* Recommendation → opens the conversation seeded by the recommendation */}
       <div>
-        <div className="t-label" style={{ color: "var(--tm)", marginBottom: 8 }}>Recommendations</div>
+        <div className="t-label" style={{ color: "var(--tm)", marginBottom: 8 }}>Recommendation</div>
         <div className="card card-pad" style={{ borderLeft: "2px solid var(--ac)" }}>
           <div className="t-body" style={{ fontSize: 13, lineHeight: 1.55, marginBottom: 10 }}>
             {recommendation || `Draft the messaging for this ${noun}.`}
           </div>
-          <button className="btn btn-accent btn-sm" onClick={() => onStartConversation(recSeed)}>Start a conversation</button>
+          <button className="btn btn-accent btn-sm" onClick={() => onStartConversation(recSeed)}>Conversation</button>
         </div>
       </div>
 
-      {/* Start formulating (human-led) + Dismiss */}
+      {/* Formulate — the human writes their own thinking; then hands off or saves */}
+      <div>
+        <div className="t-label" style={{ color: "var(--tm)", marginBottom: 8 }}>Formulate</div>
+        <textarea
+          className="textarea"
+          rows={6}
+          value={formulation}
+          onChange={(e) => { setFormulation(e.target.value); if (saved) setSaved(false); }}
+          placeholder="Write your own starting thinking — your angle, the value to land, what to avoid. No AI involved here."
+          style={{ width: "100%" }}
+        />
+        <div className="row gap-2" style={{ flexWrap: "wrap", marginTop: 8 }}>
+          <button
+            className="btn btn-sm"
+            disabled={!trimmed}
+            onClick={() => onStartConversation(
+              `Here's my starting thinking for "${title}":\n\n${trimmed}\n\nReact to this, build on it, and ask me one question.`
+            )}
+          >Bring in an agent</button>
+          <button className="btn btn-accent btn-sm" disabled={!trimmed || saving} onClick={sendToNextStep}>Send to next step</button>
+        </div>
+        {saved && (
+          <div className="t-sub" style={{ fontSize: 12.5, color: "var(--gn, var(--am-text))", marginTop: 8 }}>
+            Saved as the draft brief — ready for Tailor.
+          </div>
+        )}
+      </div>
+
+      {/* Dismiss */}
       <div className="row gap-2" style={{ flexWrap: "wrap" }}>
-        <button className="btn btn-sm" onClick={() => onStartConversation(
-          `I'll start formulating the messaging for "${titleOf(input)}" myself — help me as I go. Ask me how I want to open, then build with me.`
-        )}>Start formulating</button>
         <button className="btn btn-secondary btn-sm" onClick={onDismiss}>Dismiss</button>
       </div>
     </div>
