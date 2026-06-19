@@ -21,17 +21,22 @@ export function Modal({
   return (
     <div
       onClick={onClose}
+      className="glass-scrim"
       style={{
-        position: "fixed", inset: 0, zIndex: 50, background: "rgba(11,12,14,0.42)",
+        position: "fixed", inset: 0, zIndex: 50,
         display: "flex", alignItems: "flex-start", justifyContent: "center", padding: "60px 20px", overflowY: "auto",
       }}
     >
       <div
         onClick={(e) => e.stopPropagation()}
-        className="card"
-        style={{ width, maxWidth: "100%", boxShadow: "var(--shadow-md)", display: "flex", flexDirection: "column", maxHeight: "calc(100vh - 120px)" }}
+        className="modal-enter"
+        style={{
+          width, maxWidth: "100%", background: "var(--panel)",
+          border: "1px solid var(--border)", borderRadius: 14, boxShadow: "var(--shadow-2)",
+          display: "flex", flexDirection: "column", maxHeight: "calc(100vh - 120px)",
+        }}
       >
-        <div className="row-between" style={{ padding: "16px 20px", borderBottom: "1px solid var(--border)" }}>
+        <div className="row-between" style={{ padding: "18px 22px", borderBottom: "1px solid var(--border)" }}>
           <span className="t-h2" style={{ fontSize: 15 }}>{title}</span>
           <button className="btn btn-secondary btn-sm" onClick={onClose}>Close</button>
         </div>

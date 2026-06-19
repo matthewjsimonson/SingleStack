@@ -243,6 +243,7 @@ export default function MessagingView() {
     border: "1px solid " + (on ? "var(--ac)" : "var(--border)"),
     background: on ? "var(--ac-fill, var(--fill))" : "transparent",
     color: on ? "var(--ac-text)" : "var(--ts)",
+    transition: "var(--motion)",
   });
   const fieldStyle: React.CSSProperties = { height: CTRL_H, boxSizing: "border-box", fontSize: 13, padding: "0 12px" };
 
@@ -281,7 +282,7 @@ export default function MessagingView() {
           }}>
             <div className="row gap-2">
               {FILTERS.map((f) => (
-                <button key={f.id} onClick={() => setFilter(f.id)} style={chipStyle(filter === f.id)}>
+                <button key={f.id} onClick={() => setFilter(f.id)} className="focus-glow" style={chipStyle(filter === f.id)}>
                   {f.label}
                 </button>
               ))}
@@ -289,7 +290,7 @@ export default function MessagingView() {
             <span style={{ width: 1, height: 18, background: "var(--border)", alignSelf: "center" }} aria-hidden />
             <div className="row gap-2">
               {STATUS_FILTERS.map((s) => (
-                <button key={s.id} onClick={() => setStatusFilter(s.id)} style={chipStyle(statusFilter === s.id)}>
+                <button key={s.id} onClick={() => setStatusFilter(s.id)} className="focus-glow" style={chipStyle(statusFilter === s.id)}>
                   {s.label}
                 </button>
               ))}
@@ -363,17 +364,7 @@ function InputRow({ input, grouped, onOpen }: { input: Input; grouped: boolean; 
   const when = fmtWhen(tsOf(input));
 
   return (
-    <button
-      onClick={onOpen}
-      onMouseEnter={(e) => { e.currentTarget.style.background = "var(--panel-2)"; }}
-      onMouseLeave={(e) => { e.currentTarget.style.background = "transparent"; }}
-      style={{
-        display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12, width: "100%",
-        textAlign: "left", cursor: "pointer", padding: "10px 14px",
-        borderTop: "1px solid var(--border)", background: "transparent",
-        transition: "background 0.1s ease",
-      }}
-    >
+    <button onClick={onOpen} className="board-row">
       {/* LEFT: status dot + title (ellipsis) */}
       <div className="row gap-2" style={{ alignItems: "center", flex: 1, minWidth: 0 }}>
         <span style={{ width: 7, height: 7, borderRadius: "50%", background: BUCKET_DOT[bucket], display: "inline-block", flexShrink: 0 }} />

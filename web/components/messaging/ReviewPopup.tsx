@@ -326,7 +326,7 @@ export default function ReviewPopup({
     <>
       <Modal open={open && !draftOpen} onClose={onClose} width={1180} title={
         <div className="row gap-2" style={{ alignItems: "center", flexWrap: "wrap" }}>
-          <span>{title}</span>
+          <span style={{ fontSize: 17, fontWeight: 680, letterSpacing: "-0.01em" }}>{title}</span>
           {input.kind === "release"
             ? <Chip tone="default">{input.row.stage ?? "release"}</Chip>
             : <Chip tone="accent">signal</Chip>}
@@ -342,13 +342,7 @@ export default function ReviewPopup({
             {NAV.map((n) => {
               const on = nav === n.id;
               return (
-                <button key={n.id} onClick={() => setNav(n.id)} style={{
-                  display: "block", width: "100%", textAlign: "left", cursor: "pointer",
-                  border: "none", borderLeft: `2px solid ${on ? "var(--ac)" : "transparent"}`,
-                  background: on ? "var(--ac-fill, var(--fill))" : "transparent",
-                  color: on ? "var(--ac-text)" : "var(--ts)", fontWeight: on ? 660 : 600,
-                  fontSize: 13, padding: "8px 10px", borderRadius: 6,
-                }}>
+                <button key={n.id} onClick={() => setNav(n.id)} className={on ? "nav-item on" : "nav-item"}>
                   {n.label}
                 </button>
               );
@@ -417,7 +411,7 @@ function AudienceBar({ personas, selected, onSelect, onNew }: {
       style={{
         alignItems: "center", flexWrap: "wrap",
         padding: "8px 12px", marginBottom: "var(--sp-4)",
-        border: "1px solid var(--border)", borderRadius: 8, background: "var(--panel-2)",
+        border: "1px solid var(--border)", borderRadius: 10, background: "var(--panel-2)", boxShadow: "var(--shadow-1)",
       }}
     >
       <span className="t-label" style={{ color: "var(--tm)", flexShrink: 0 }}>Audience</span>
@@ -580,7 +574,7 @@ function ReleaseOverview({ input, productName, changelog, ctxLoading }: {
         ) : (
           <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
             {changelog.map((c) => (
-              <div key={c.id} className="row gap-2" style={{ alignItems: "center", padding: "8px 12px", border: "1px solid var(--border)", borderRadius: 8, background: "var(--panel)" }}>
+              <div key={c.id} className="row gap-2" style={{ alignItems: "center", padding: "10px 13px", border: "1px solid var(--border)", borderRadius: 10, background: "var(--panel)", boxShadow: "var(--shadow-1)" }}>
                 <span style={{ fontSize: 13, fontWeight: 600, color: "var(--tp)", minWidth: 0, flex: 1 }}>{c.title}</span>
                 {c.change_type && <Chip tone="default">{CHANGE_LABEL[c.change_type] ?? c.change_type}</Chip>}
               </div>
@@ -666,7 +660,7 @@ function Sources({ buckets, ctxLoading }: { buckets: Record<Bucket, SourceItem[]
       ) : (
         <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
           {items.map((it) => (
-            <div key={it.id} style={{ padding: "11px 13px", border: "1px solid var(--border)", borderRadius: 8, background: "var(--panel)" }}>
+            <div key={it.id} className="lift-card" style={{ padding: "12px 14px", border: "1px solid var(--border)", borderRadius: 10, background: "var(--panel)", boxShadow: "var(--shadow-1)" }}>
               <div className="row-between" style={{ alignItems: "baseline", gap: 10 }}>
                 <span style={{ fontSize: 13.5, fontWeight: 600, color: "var(--tp)", minWidth: 0 }}>{it.title}</span>
                 {it.when && <span className="t-mono-xs" style={{ color: "var(--tm)", flexShrink: 0 }}>{it.when}</span>}
