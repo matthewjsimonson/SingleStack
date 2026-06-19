@@ -18,7 +18,7 @@ import { createClient } from "@/lib/supabase/client";
 import { useProductScope } from "@/lib/ProductContext";
 import { Chip, Empty, Banner } from "@/components/ui";
 import {
-  fetchOfficerKey,
+  fetchOfficerKey, fmtWhen,
   type ThemeRow, type ReleaseRow, type GroundingField,
 } from "@/lib/messaging";
 import type { RosterAgent } from "@/components/messaging/AgentPickerModal";
@@ -37,6 +37,35 @@ const BUCKET_DOT: Record<Bucket, string> = { needs: "var(--am-text)", draft: "va
 
 // Release stages that need messaging now (planned sorts after the others).
 const RELEASE_STAGE_RANK: Record<string, number> = { in_dev: 0, released: 1, planned: 2 };
+
+// Human label for a release stage chip.
+const STAGE_LABEL: Record<string, string> = { in_dev: "in dev", released: "released", planned: "planned" };
+const stageLabel = (s: string | null | undefined) => (s ? STAGE_LABEL[s] ?? s : "release");
+
+// The grouped-row buckets in triage order.
+const BUCKET_ORDER: Bucket[] = ["needs", "draft", "ratified"];
+
+// Status filter (a brief bucket, or "all").
+type StatusFilter = "all" | Bucket;
+
+// Sort modes. "needs" groups by bucket; the rest are flat lists.
+type SortMode = "needs" | "newest" | "oldest" | "az";
+const SORTS: { id: SortMode; label: string }[] = [
+  { id: "needs", label: "Needs first" },
+  { id: "newest", label: "Newest" },
+  { id: "oldest", label: "Oldest" },
+  { id: "az", label: "A–Z" },
+];
+
+// The display title of an input (release: "version name"; signal: title).
+const titleOf = (i: Input): string =>
+  i.kind === "release" ? `${i.row.version ? `${i.row.version} ` : ""}${i.row.name}` : i.row.title;
+
+// The recency timestamp an input sorts/reads by (release: target_date; signal:
+// brief updated_at — themes carry no observed_at on the board row).
+const tsOf = (i: Input): string | null =>
+  i.kind === "release" ? (i.row.target_date ?? i.brief?.updated_at ?? null) : (i.brief?.updated_at ?? null);
+const tsMs = (i: Input): number => { const t = tsOf(i); const n = t ? Date.parse(t) : NaN; return isNaN(n) ? 0 : n; };
 
 export default function MessagingView() {
   const supabase = createClient();
@@ -58,6 +87,9 @@ export default function MessagingView() {
   const [error, setError] = useState<string | null>(null);
 
   const [filter, setFilter] = useState<Filter>("all");
+  const [statusFilter, setStatusFilter] = useState<StatusFilter>("all");
+  const [search, setSearch] = useState("");
+  const [sort, setSort] = useState<SortMode>("needs");
   const [openKey, setOpenKey] = useState<string | null>(null); // `${kind}:${id}` of the open popup
 
   // ---- pick the active GTM record (scope-aware) ------------------------------
@@ -150,15 +182,42 @@ export default function MessagingView() {
 
   const keyOf = (i: Input) => `${i.kind}:${i.id}`;
 
+  // ---- filter + search (applied BEFORE grouping/sorting) ---------------------
   const filteredInputs = useMemo(() => {
-    const base = filter === "releases" ? allInputs.filter((i) => i.kind === "release")
-      : filter === "signals" ? allInputs.filter((i) => i.kind === "theme")
-      : allInputs;
-    // Needs-first, then by release stage urgency (signals interleave at rank 1).
-    const stateRank = (i: Input) => (i.brief ? (i.brief.status === "draft" ? 1 : 2) : 0);
+    const q = search.trim().toLowerCase();
+    return allInputs.filter((i) => {
+      if (filter === "releases" && i.kind !== "release") return false;
+      if (filter === "signals" && i.kind !== "theme") return false;
+      if (statusFilter !== "all" && bucketOf(i.brief) !== statusFilter) return false;
+      if (q && !titleOf(i).toLowerCase().includes(q)) return false;
+      return true;
+    });
+  }, [allInputs, filter, statusFilter, search]);
+
+  // ---- sort / group the filtered inputs --------------------------------------
+  // "needs" → grouped by bucket (Needs → Draft → Ratified), each group ordered by
+  // release-stage urgency then recency. Other sorts → a single flat list.
+  const sortedFlat = useMemo(() => {
+    const byNewest = (a: Input, b: Input) => tsMs(b) - tsMs(a);
+    const byOldest = (a: Input, b: Input) => tsMs(a) - tsMs(b);
+    const byAz = (a: Input, b: Input) => titleOf(a).localeCompare(titleOf(b), undefined, { sensitivity: "base" });
+    const arr = [...filteredInputs];
+    if (sort === "newest") return arr.sort(byNewest);
+    if (sort === "oldest") return arr.sort(byOldest);
+    if (sort === "az") return arr.sort(byAz);
+    return arr; // "needs" → handled by groups
+  }, [filteredInputs, sort]);
+
+  const groups = useMemo(() => {
     const stageRank = (i: Input) => i.kind === "release" ? (RELEASE_STAGE_RANK[i.row.stage ?? ""] ?? 3) : 1;
-    return [...base].sort((a, b) => stateRank(a) - stateRank(b) || stageRank(a) - stageRank(b));
-  }, [allInputs, filter]);
+    const within = (a: Input, b: Input) => stageRank(a) - stageRank(b) || tsMs(b) - tsMs(a);
+    return BUCKET_ORDER
+      .map((bucket) => ({
+        bucket,
+        items: filteredInputs.filter((i) => bucketOf(i.brief) === bucket).sort(within),
+      }))
+      .filter((g) => g.items.length > 0);
+  }, [filteredInputs]);
 
   const needsCount = useMemo(() => allInputs.filter((i) => !i.brief).length, [allInputs]);
 
@@ -170,6 +229,17 @@ export default function MessagingView() {
   const FILTERS: { id: Filter; label: string }[] = [
     { id: "all", label: "All" }, { id: "releases", label: "Releases" }, { id: "signals", label: "Signals" },
   ];
+  const STATUS_FILTERS: { id: StatusFilter; label: string }[] = [
+    { id: "all", label: "All" }, { id: "needs", label: "Needs messaging" },
+    { id: "draft", label: "Draft" }, { id: "ratified", label: "Ratified" },
+  ];
+
+  const chipStyle = (on: boolean) => ({
+    cursor: "pointer", fontSize: 11.5,
+    border: "1px solid " + (on ? "var(--ac)" : "var(--border)"),
+    background: on ? "var(--ac-fill, var(--fill))" : "transparent",
+    color: on ? "var(--ac-text)" : "var(--ts)",
+  });
 
   return (
     <div>
@@ -192,32 +262,68 @@ export default function MessagingView() {
 
       <Banner>{error}</Banner>
 
-      {/* filter + count */}
-      {!loading && allInputs.length > 0 && (
-        <div className="row-between" style={{ marginBottom: "var(--sp-4)", alignItems: "center", flexWrap: "wrap", gap: 10 }}>
-          <div className="row gap-2">
-            {FILTERS.map((f) => (
-              <button key={f.id} onClick={() => setFilter(f.id)} className="chip"
-                style={{ cursor: "pointer", fontSize: 11.5, border: "1px solid " + (filter === f.id ? "var(--ac)" : "var(--border)"), background: filter === f.id ? "var(--ac-fill, var(--fill))" : "transparent", color: filter === f.id ? "var(--ac-text)" : "var(--ts)" }}>
-                {f.label}
-              </button>
-            ))}
-          </div>
-          <span className="t-mono-xs" style={{ color: "var(--tm)" }}>{filteredInputs.length} input{filteredInputs.length === 1 ? "" : "s"}</span>
-        </div>
-      )}
-
       {loading ? (
         <div className="t-sub t-muted">Loading…</div>
       ) : allInputs.length === 0 ? (
         <Empty title="Nothing to message yet" hint="Releases (in dev or shipped) and gtm signal-themes show up here as inputs to mold messaging for." />
-      ) : filteredInputs.length === 0 ? (
-        <div className="t-sub t-muted" style={{ fontSize: 12.5 }}>No inputs match this filter.</div>
       ) : (
-        <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(300px, 1fr))", gap: "var(--sp-4)", alignItems: "start" }}>
-          {filteredInputs.map((i) => (
-            <InputCard key={keyOf(i)} input={i} onOpen={() => setOpenKey(keyOf(i))} />
-          ))}
+        <div>
+          {/* sticky triage toolbar: type + status filters, search, sort, count */}
+          <div style={{
+            position: "sticky", top: 0, zIndex: 2, background: "var(--panel)",
+            borderBottom: "1px solid var(--border)", paddingBottom: "var(--sp-3)", marginBottom: "var(--sp-2)",
+            display: "flex", flexWrap: "wrap", alignItems: "center", gap: 10,
+          }}>
+            <div className="row gap-2">
+              {FILTERS.map((f) => (
+                <button key={f.id} onClick={() => setFilter(f.id)} className="chip" style={chipStyle(filter === f.id)}>
+                  {f.label}
+                </button>
+              ))}
+            </div>
+            <span style={{ width: 1, height: 16, background: "var(--border)" }} aria-hidden />
+            <div className="row gap-2">
+              {STATUS_FILTERS.map((s) => (
+                <button key={s.id} onClick={() => setStatusFilter(s.id)} className="chip" style={chipStyle(statusFilter === s.id)}>
+                  {s.label}
+                </button>
+              ))}
+            </div>
+            <div className="row gap-2" style={{ marginLeft: "auto", alignItems: "center" }}>
+              <input
+                className="input" value={search} onChange={(e) => setSearch(e.target.value)}
+                placeholder="Search title…" style={{ width: 240 }}
+              />
+              <select className="select" value={sort} onChange={(e) => setSort(e.target.value as SortMode)}>
+                {SORTS.map((s) => <option key={s.id} value={s.id}>{s.label}</option>)}
+              </select>
+              <span className="t-mono-xs" style={{ color: "var(--tm)", flexShrink: 0 }}>
+                {filteredInputs.length} input{filteredInputs.length === 1 ? "" : "s"}
+              </span>
+            </div>
+          </div>
+
+          {filteredInputs.length === 0 ? (
+            <Empty title="No inputs match these filters." />
+          ) : sort === "needs" ? (
+            groups.map((g) => (
+              <div key={g.bucket} style={{ marginBottom: "var(--sp-4)" }}>
+                <div className="row gap-2" style={{ alignItems: "baseline", padding: "8px 14px 4px" }}>
+                  <span className="t-label">{BUCKET_LABEL[g.bucket]}</span>
+                  <span className="t-mono-xs" style={{ color: "var(--tm)" }}>· {g.items.length}</span>
+                </div>
+                {g.items.map((i) => (
+                  <InputRow key={keyOf(i)} input={i} grouped onOpen={() => setOpenKey(keyOf(i))} />
+                ))}
+              </div>
+            ))
+          ) : (
+            <div>
+              {sortedFlat.map((i) => (
+                <InputRow key={keyOf(i)} input={i} grouped={false} onOpen={() => setOpenKey(keyOf(i))} />
+              ))}
+            </div>
+          )}
         </div>
       )}
 
@@ -241,27 +347,40 @@ export default function MessagingView() {
   );
 }
 
-// ---- one input card on the board --------------------------------------------
-function InputCard({ input, onOpen }: { input: Input; onOpen: () => void }) {
-  const title = input.kind === "release"
-    ? `${input.row.version ? `${input.row.version} ` : ""}${input.row.name}`
-    : input.row.title;
-  const typeChip = input.kind === "release" ? (input.row.stage ?? "release") : "signal";
+// ---- one dense triage row ----------------------------------------------------
+// A full-width clickable row (~44px). LEFT: status dot + title. MIDDLE: a type
+// chip (release stage / "signal"), plus a status chip when flat (ungrouped) so
+// flat sorts still surface state. RIGHT: recency, right-aligned.
+function InputRow({ input, grouped, onOpen }: { input: Input; grouped: boolean; onOpen: () => void }) {
+  const title = titleOf(input);
+  const typeChip = input.kind === "release" ? stageLabel(input.row.stage) : "signal";
   const bucket = bucketOf(input.brief);
+  const when = fmtWhen(tsOf(input));
 
   return (
-    <button onClick={onOpen} className="card card-link" style={{
-      display: "flex", flexDirection: "column", gap: 10, textAlign: "left", cursor: "pointer",
-      padding: "14px 16px", border: "1px solid var(--border)", background: "var(--panel)", minHeight: 116,
-    }}>
-      <div className="row gap-2" style={{ alignItems: "center", flexWrap: "wrap" }}>
-        <Chip tone={input.kind === "release" ? "default" : "accent"}>{typeChip}</Chip>
-      </div>
-      <div style={{ fontSize: 14, fontWeight: 640, color: "var(--tp)", lineHeight: 1.35, flex: 1 }}>{title}</div>
-      <div className="row gap-2" style={{ alignItems: "center" }}>
+    <button
+      onClick={onOpen}
+      onMouseEnter={(e) => { e.currentTarget.style.background = "var(--panel-2)"; }}
+      onMouseLeave={(e) => { e.currentTarget.style.background = "transparent"; }}
+      style={{
+        display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12, width: "100%",
+        textAlign: "left", cursor: "pointer", padding: "10px 14px",
+        borderTop: "1px solid var(--border)", background: "transparent",
+        transition: "background 0.1s ease",
+      }}
+    >
+      {/* LEFT: status dot + title (ellipsis) */}
+      <div className="row gap-2" style={{ alignItems: "center", flex: 1, minWidth: 0 }}>
         <span style={{ width: 7, height: 7, borderRadius: "50%", background: BUCKET_DOT[bucket], display: "inline-block", flexShrink: 0 }} />
-        <span className="t-mono-xs" style={{ color: "var(--tm)" }}>{BUCKET_LABEL[bucket]}</span>
+        <span style={{ fontSize: 13.5, fontWeight: 600, color: "var(--tp)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{title}</span>
       </div>
+      {/* MIDDLE: type chip (+ status chip when flat) */}
+      <div className="row gap-2" style={{ alignItems: "center", flexShrink: 0 }}>
+        <Chip tone={input.kind === "release" ? "default" : "accent"}>{typeChip}</Chip>
+        {!grouped && <Chip>{BUCKET_LABEL[bucket]}</Chip>}
+      </div>
+      {/* RIGHT: recency */}
+      <span className="t-mono-xs" style={{ color: "var(--tm)", flexShrink: 0, textAlign: "right" }}>{when ?? ""}</span>
     </button>
   );
 }
