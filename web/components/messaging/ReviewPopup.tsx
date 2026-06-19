@@ -57,11 +57,10 @@ const CHANGE_LABEL: Record<string, string> = {
 };
 
 // The four pick-em items of the popup's left nav.
-type NavItem = "overview" | "sources" | "details" | "actions";
+type NavItem = "overview" | "sources" | "actions";
 const NAV: { id: NavItem; label: string }[] = [
   { id: "overview", label: "Overview" },
   { id: "sources", label: "Sources" },
-  { id: "details", label: "Supporting details" },
   { id: "actions", label: "Actions" },
 ];
 
@@ -366,8 +365,7 @@ export default function ReviewPopup({
               onNew={() => setNewPersonaOpen(true)}
             />
             {nav === "overview" && <Overview input={input} productName={productName} changelog={changelog} evidence={evidence} ctxLoading={ctxLoading} />}
-            {nav === "sources" && <Sources buckets={buckets} ctxLoading={ctxLoading} />}
-            {nav === "details" && <Details input={input} evidence={evidence} changelog={changelog} ctxLoading={ctxLoading} gtmName={gtmName} productName={productName} gtmFields={gtmFields} productFields={productFields} />}
+            {nav === "sources" && <Sources buckets={buckets} ctxLoading={ctxLoading} gtmName={gtmName} productName={productName} gtmFields={gtmFields} productFields={productFields} />}
             {nav === "actions" && (
               <Actions
                 input={input} brief={brief} isRatified={isRatified} saving={saving}
@@ -638,7 +636,10 @@ function ThemeOverview({ input, evidence, ctxLoading }: {
 }
 
 // ---- SOURCES — the five origins as a tabbed sub-interface --------------------
-function Sources({ buckets, ctxLoading }: { buckets: Record<Bucket, SourceItem[]>; ctxLoading: boolean }) {
+function Sources({ buckets, ctxLoading, gtmName, productName, gtmFields, productFields }: {
+  buckets: Record<Bucket, SourceItem[]>; ctxLoading: boolean;
+  gtmName: string | null; productName: string | null; gtmFields: GroundingField[]; productFields: GroundingField[];
+}) {
   // Default to the first bucket that actually has items (else the first bucket).
   const firstWithItems = useMemo(() => BUCKETS.find((bk) => buckets[bk.id].length > 0)?.id ?? BUCKETS[0].id, [buckets]);
   const [tab, setTab] = useState<Bucket>(firstWithItems);
@@ -673,58 +674,8 @@ function Sources({ buckets, ctxLoading }: { buckets: Record<Bucket, SourceItem[]
           ))}
         </div>
       )}
-    </div>
-  );
-}
-
-// ---- SUPPORTING DETAILS — deep context + grounded framework -----------------
-function Details({ input, evidence, changelog, ctxLoading, gtmName, productName, gtmFields, productFields }: {
-  input: Input; evidence: EvidenceSignal[]; changelog: ChangelogItem[]; ctxLoading: boolean;
-  gtmName: string | null; productName: string | null; gtmFields: GroundingField[]; productFields: GroundingField[];
-}) {
-  return (
-    <div className="stack-3">
-      {/* the deeper context — full evidence (signal) / full changelog (release) */}
-      {input.kind === "theme" ? (
-        <div>
-          <div className="t-label" style={{ color: "var(--tm)", marginBottom: 8 }}>Evidence</div>
-          {ctxLoading ? <div className="t-sub t-muted" style={{ fontSize: 12.5 }}>Loading evidence…</div>
-            : evidence.length === 0 ? <div className="t-sub t-muted" style={{ fontSize: 12.5 }}>No supporting signals linked.</div>
-            : (
-              <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
-                {evidence.map((s) => (
-                  <div key={s.id} style={{ padding: "9px 12px", border: "1px solid var(--border)", borderRadius: 8, background: "var(--panel)" }}>
-                    <div className="row-between" style={{ alignItems: "baseline", gap: 8 }}>
-                      <span style={{ fontSize: 13, fontWeight: 600, color: "var(--tp)", minWidth: 0 }}>{s.title}</span>
-                      {relTime(s.observed_at) && <span className="t-mono-xs" style={{ color: "var(--tm)", flexShrink: 0 }}>{relTime(s.observed_at)}</span>}
-                    </div>
-                    {s.why && <div className="t-sub" style={{ fontSize: 12, lineHeight: 1.5, color: "var(--tm)", marginTop: 3 }}>{s.why}</div>}
-                  </div>
-                ))}
-              </div>
-            )}
-        </div>
-      ) : (
-        <div>
-          <div className="t-label" style={{ color: "var(--tm)", marginBottom: 8 }}>What&apos;s in this release</div>
-          {ctxLoading ? <div className="t-sub t-muted" style={{ fontSize: 12.5 }}>Loading changelog…</div>
-            : changelog.length === 0 ? <div className="t-sub t-muted" style={{ fontSize: 12.5 }}>No changelog items linked.</div>
-            : (
-              <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
-                {changelog.map((c) => (
-                  <div key={c.id} className="row gap-2" style={{ alignItems: "center", padding: "8px 12px", border: "1px solid var(--border)", borderRadius: 8, background: "var(--panel)" }}>
-                    <span style={{ fontSize: 13, fontWeight: 600, color: "var(--tp)", minWidth: 0, flex: 1 }}>{c.title}</span>
-                    {c.change_type && <Chip tone="default">{CHANGE_LABEL[c.change_type] ?? c.change_type}</Chip>}
-                    {c.stage && <span className="t-mono-xs" style={{ color: "var(--tm)" }}>{c.stage}</span>}
-                  </div>
-                ))}
-              </div>
-            )}
-        </div>
-      )}
-
-      {/* "Grounded in <gtm> · <product>" framework reference (read-only) */}
-      <div style={{ borderTop: "1px solid var(--border)", paddingTop: 12 }}>
+      {/* The framework these sources are read against (context, not a source). */}
+      <div style={{ borderTop: "1px solid var(--border)", paddingTop: 12, marginTop: 4 }}>
         <div className="t-mono-xs" style={{ color: "var(--tm)", marginBottom: 8 }}>
           Grounded in {gtmName ?? "GTM record"}{productName ? ` · ${productName}` : ""}
         </div>
