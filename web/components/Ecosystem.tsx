@@ -290,29 +290,104 @@ export default function Ecosystem() {
 
       {/* The map (canvas). Click a node to pop out its coverage. */}
       <div className="card" style={{ padding: 8, overflow: "hidden" }}>
+          <style jsx>{`
+            /* Energy pulse gliding outward along a connection / cycle arc. */
+            @keyframes eco-flow-move { to { stroke-dashoffset: -240; } }
+            :global(.eco-flow) {
+              stroke-dashoffset: 0;
+              animation-name: eco-flow-move;
+              animation-timing-function: linear;
+              animation-iteration-count: infinite;
+            }
+            /* Gentle breathing of each node group. */
+            @keyframes eco-breathe {
+              0%, 100% { transform: scale(1); }
+              50% { transform: scale(1.03); }
+            }
+            @keyframes eco-breathe-gap {
+              0%, 100% { transform: scale(1); }
+              50% { transform: scale(1.045); }
+            }
+            :global(.eco-node) {
+              animation: eco-breathe 3.6s ease-in-out infinite;
+            }
+            :global(.eco-node-gap) {
+              animation: eco-breathe-gap 3.6s ease-in-out infinite;
+            }
+            /* Faint halo at rest; lifts on hover and when selected. */
+            :global(.eco-halo) {
+              opacity: 0.14;
+              transition: opacity 280ms ease;
+            }
+            :global(.eco-node-gap) :global(.eco-halo) { opacity: 0.2; }
+            :global(.eco-node:hover) :global(.eco-halo) { opacity: 0.34; }
+            :global(.eco-node-sel) :global(.eco-halo) { opacity: 0.4; }
+            /* A touch of scale-up on hover, smooth. */
+            :global(.eco-node) { transition: transform 200ms ease; }
+            :global(.eco-node):hover { animation-play-state: paused; transform: scale(1.06); }
+            /* Slowly rotating core ring. */
+            @keyframes eco-spin-rot { to { transform: rotate(360deg); } }
+            :global(.eco-spin) {
+              animation: eco-spin-rot linear infinite;
+            }
+            /* Calm core pulse. */
+            @keyframes eco-core { 0%, 100% { transform: scale(1); } 50% { transform: scale(1.018); } }
+            :global(.eco-core-pulse) {
+              animation: eco-core ease-in-out infinite;
+            }
+            @media (prefers-reduced-motion: reduce) {
+              :global(.eco-flow) { animation: none; stroke-dasharray: none; opacity: 0; }
+              :global(.eco-node), :global(.eco-node-gap), :global(.eco-spin), :global(.eco-core-pulse) { animation: none; }
+            }
+          `}</style>
           <svg viewBox={`0 0 ${VB.w} ${VB.h}`} style={{ width: "100%", height: "auto", display: "block" }} role="img" aria-label="Ecosystem coverage map">
             <defs>
               <marker id="eco-arrow" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M 0 1 L 9 5 L 0 9 z" style={{ fill: "var(--ac-text)" }} /></marker>
+              {/* Soft halos behind nodes — a faint glow in the area's state colour, never neon. */}
+              <filter id="eco-halo" x="-60%" y="-60%" width="220%" height="220%"><feGaussianBlur stdDeviation="4.5" /></filter>
+              <filter id="eco-halo-strong" x="-80%" y="-80%" width="260%" height="260%"><feGaussianBlur stdDeviation="7" /></filter>
             </defs>
             {lens === "all" && (
               <g>
                 <path d={cyclePath(true)} markerEnd="url(#eco-arrow)" style={{ fill: "none", stroke: "var(--ac-text)", strokeWidth: 1.5, opacity: 0.55 }} />
                 <path d={cyclePath(false)} markerStart="url(#eco-arrow)" style={{ fill: "none", stroke: "var(--tm)", strokeWidth: 1.5, opacity: 0.45 }} />
+                {/* Energy gliding between the two cores. */}
+                <path className="eco-flow" d={cyclePath(true)} style={{ fill: "none", stroke: "var(--ac-text)", strokeWidth: 2, opacity: 0.45, strokeLinecap: "round", strokeDasharray: "5 130", animationDuration: "5.5s" }} />
+                <path className="eco-flow" d={cyclePath(false)} style={{ fill: "none", stroke: "var(--ac-text)", strokeWidth: 2, opacity: 0.4, strokeLinecap: "round", strokeDasharray: "5 130", animationDuration: "6.2s", animationDelay: "-2s" }} />
                 <text x={480} y={232} textAnchor="middle" fontSize={10.5} fontWeight={700} style={{ fill: "var(--ac-text)" }}>builds fuel growth</text>
                 <text x={480} y={378} textAnchor="middle" fontSize={10.5} style={{ fill: "var(--tm)" }}>usage &amp; PQL signals</text>
               </g>
             )}
             {laidOut.map(({ c, nodes }) => (
               <g key={c.key}>
-                {nodes.map((n) => { const cov = covByKey.get(n.area.key); const isGap = (cov?.status ?? "gap") === "gap"; const t = nodeTone(cov?.status ?? "gap"); return <line key={`l-${n.area.key}`} x1={c.cx} y1={c.cy} x2={n.x} y2={n.y} strokeWidth={isGap ? 1.4 : 1} style={{ stroke: t.stroke, opacity: isGap ? 0.5 : 0.28 }} />; })}
-                <circle cx={c.cx} cy={c.cy} r={42} strokeWidth={c.engine ? 2 : 1.5} onClick={() => { setLens(c.key); setSelKey(null); }} style={{ cursor: "pointer", fill: c.engine ? "var(--ac-fill)" : "var(--well, #f3f3f5)", stroke: c.engine ? "var(--ac-text)" : "var(--border)" }} />
+                {nodes.map((n, i) => {
+                  const cov = covByKey.get(n.area.key); const status = cov?.status ?? "gap"; const isGap = status === "gap"; const t = nodeTone(status);
+                  // Pulse colour = node state colour at low opacity; gaps flow faster/more urgent.
+                  const flowCol = status === "covered" ? "var(--gn-text)" : status === "partial" ? "var(--am-text)" : "var(--rd-text)";
+                  return (
+                    <g key={`l-${n.area.key}`}>
+                      <line x1={c.cx} y1={c.cy} x2={n.x} y2={n.y} strokeWidth={isGap ? 1.4 : 1} style={{ stroke: t.stroke, opacity: isGap ? 0.5 : 0.28 }} />
+                      <line className="eco-flow" x1={c.cx} y1={c.cy} x2={n.x} y2={n.y} strokeWidth={isGap ? 2 : 1.6}
+                        style={{ stroke: flowCol, opacity: isGap ? 0.5 : 0.38, strokeLinecap: "round", strokeDasharray: "4 26", animationDuration: isGap ? "1.8s" : "2.8s", animationDelay: `${-(i * 0.35).toFixed(2)}s` }} />
+                    </g>
+                  );
+                })}
+                {/* Slowly rotating ticked ring around the core — a calm HUD signal. */}
+                <g className="eco-spin" style={{ transformOrigin: `${c.cx}px ${c.cy}px`, animationDuration: c.engine ? "42s" : "56s" }}>
+                  <circle cx={c.cx} cy={c.cy} r={c.engine ? 53 : 50} fill="none" strokeWidth={1} style={{ stroke: c.engine ? "var(--ac-text)" : "var(--border)", opacity: c.engine ? 0.35 : 0.45, strokeDasharray: "2 7" }} />
+                </g>
+                <circle className="eco-core-pulse" cx={c.cx} cy={c.cy} r={42} strokeWidth={c.engine ? 2 : 1.5} onClick={() => { setLens(c.key); setSelKey(null); }} style={{ transformOrigin: `${c.cx}px ${c.cy}px`, animationDuration: c.engine ? "4.2s" : "5s", cursor: "pointer", fill: c.engine ? "var(--ac-fill)" : "var(--well, #f3f3f5)", stroke: c.engine ? "var(--ac-text)" : "var(--border)" }} />
                 <text x={c.cx} y={c.cy - 2} textAnchor="middle" fontSize={14} fontWeight={760} style={{ pointerEvents: "none", fill: c.engine ? "var(--ac-text)" : "var(--tp)" }}>{c.coreLabel}</text>
                 <text x={c.cx} y={c.cy + 13} textAnchor="middle" fontSize={9} style={{ pointerEvents: "none", fill: "var(--tm)" }}>{c.coreRole}</text>
-                {nodes.map((n) => {
+                {nodes.map((n, i) => {
                   const cov = covByKey.get(n.area.key); const status = cov?.status ?? "gap"; const t = nodeTone(status);
                   const isSel = selKey === n.area.key; const isGap = status === "gap"; const R = n.area.engine ? 30 : 25;
+                  const haloCol = status === "covered" ? "var(--gn-text)" : status === "partial" ? "var(--am-text)" : "var(--rd-text)";
                   return (
-                    <g key={n.area.key} onClick={() => setSelKey(isSel ? null : n.area.key)} style={{ cursor: "pointer" }}>
+                    <g key={n.area.key} className={`eco-node${isGap ? " eco-node-gap" : ""}${isSel ? " eco-node-sel" : ""}`} onClick={() => setSelKey(isSel ? null : n.area.key)}
+                      style={{ cursor: "pointer", transformOrigin: `${n.x}px ${n.y}px`, animationDelay: `${-(i * 0.6).toFixed(2)}s` }}>
+                      {/* Soft halo glow — faint, in the area's state colour. Intensifies on hover/select via CSS. */}
+                      <circle className="eco-halo" cx={n.x} cy={n.y} r={R + 4} filter={`url(#eco-halo${isSel ? "-strong" : ""})`} style={{ fill: haloCol }} />
                       {isSel && <circle cx={n.x} cy={n.y} r={R + 5} strokeWidth={1.5} style={{ fill: "none", stroke: "var(--ac-text)" }} />}
                       <circle cx={n.x} cy={n.y} r={R} strokeWidth={t.sw} style={{ fill: t.fill, stroke: t.stroke }} />
                       {isGap && <text x={n.x} y={n.y + 5} textAnchor="middle" fontSize={17} fontWeight={800} style={{ pointerEvents: "none", fill: "var(--rd-text)" }}>!</text>}
