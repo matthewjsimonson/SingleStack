@@ -235,16 +235,16 @@ export default function MessagingView() {
   ];
 
   // One uniform control height/typography so the toolbar reads as a single row.
-  const CTRL_H = 30;
+  const CTRL_H = 34;
   const chipStyle = (on: boolean): React.CSSProperties => ({
-    cursor: "pointer", fontSize: 12.5, fontWeight: on ? 600 : 540,
-    height: CTRL_H, padding: "0 12px", borderRadius: 999, lineHeight: 1,
+    cursor: "pointer", fontSize: 13, fontWeight: on ? 600 : 540,
+    height: CTRL_H, boxSizing: "border-box", padding: "0 14px", borderRadius: 999, lineHeight: 1,
     display: "inline-flex", alignItems: "center", whiteSpace: "nowrap",
     border: "1px solid " + (on ? "var(--ac)" : "var(--border)"),
     background: on ? "var(--ac-fill, var(--fill))" : "transparent",
     color: on ? "var(--ac-text)" : "var(--ts)",
   });
-  const fieldStyle: React.CSSProperties = { height: CTRL_H, fontSize: 12.5, padding: "0 10px" };
+  const fieldStyle: React.CSSProperties = { height: CTRL_H, boxSizing: "border-box", fontSize: 13, padding: "0 12px" };
 
   return (
     <div>
@@ -276,7 +276,7 @@ export default function MessagingView() {
           {/* sticky triage toolbar: type + status filters, search, sort, count */}
           <div style={{
             position: "sticky", top: 0, zIndex: 2, background: "var(--panel)",
-            borderBottom: "1px solid var(--border)", paddingBottom: "var(--sp-3)", marginBottom: "var(--sp-2)",
+            borderBottom: "1px solid var(--border)", padding: "10px 0", marginBottom: "var(--sp-2)",
             display: "flex", flexWrap: "wrap", alignItems: "center", gap: 10,
           }}>
             <div className="row gap-2">

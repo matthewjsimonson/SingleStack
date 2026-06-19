@@ -364,8 +364,13 @@ export default function ReviewPopup({
               onSelect={setSelectedPersona}
               onNew={() => setNewPersonaOpen(true)}
             />
-            {nav === "overview" && <Overview input={input} productName={productName} changelog={changelog} evidence={evidence} ctxLoading={ctxLoading} />}
-            {nav === "sources" && <Sources buckets={buckets} ctxLoading={ctxLoading} gtmName={gtmName} productName={productName} gtmFields={gtmFields} productFields={productFields} />}
+            {nav === "overview" && (
+              <>
+                <Overview input={input} productName={productName} changelog={changelog} evidence={evidence} ctxLoading={ctxLoading} />
+                <GroundingBlock gtmName={gtmName} productName={productName} gtmFields={gtmFields} productFields={productFields} />
+              </>
+            )}
+            {nav === "sources" && <Sources buckets={buckets} ctxLoading={ctxLoading} />}
             {nav === "actions" && (
               <Actions
                 input={input} brief={brief} isRatified={isRatified} saving={saving}
@@ -636,10 +641,7 @@ function ThemeOverview({ input, evidence, ctxLoading }: {
 }
 
 // ---- SOURCES — the five origins as a tabbed sub-interface --------------------
-function Sources({ buckets, ctxLoading, gtmName, productName, gtmFields, productFields }: {
-  buckets: Record<Bucket, SourceItem[]>; ctxLoading: boolean;
-  gtmName: string | null; productName: string | null; gtmFields: GroundingField[]; productFields: GroundingField[];
-}) {
+function Sources({ buckets, ctxLoading }: { buckets: Record<Bucket, SourceItem[]>; ctxLoading: boolean }) {
   // Default to the first bucket that actually has items (else the first bucket).
   const firstWithItems = useMemo(() => BUCKETS.find((bk) => buckets[bk.id].length > 0)?.id ?? BUCKETS[0].id, [buckets]);
   const [tab, setTab] = useState<Bucket>(firstWithItems);
@@ -674,19 +676,16 @@ function Sources({ buckets, ctxLoading, gtmName, productName, gtmFields, product
           ))}
         </div>
       )}
-      {/* The framework these sources are read against (context, not a source). */}
-      <div style={{ borderTop: "1px solid var(--border)", paddingTop: 12, marginTop: 4 }}>
-        <div className="t-mono-xs" style={{ color: "var(--tm)", marginBottom: 8 }}>
-          Grounded in {gtmName ?? "GTM record"}{productName ? ` · ${productName}` : ""}
-        </div>
-        <GroundingList gtmFields={gtmFields} productFields={productFields} />
-      </div>
     </div>
   );
 }
 
-// The grounded framework fields — label + value, read-only (context only).
-function GroundingList({ gtmFields, productFields }: { gtmFields: GroundingField[]; productFields: GroundingField[] }) {
+// The framework the messaging is grounded in — readable, grouped, no table chrome.
+// Lives in Overview (it's context, not a source). Values render in primary ink so
+// they're actually readable; labels are quiet but legible.
+function GroundingBlock({ gtmName, productName, gtmFields, productFields }: {
+  gtmName: string | null; productName: string | null; gtmFields: GroundingField[]; productFields: GroundingField[];
+}) {
   const GTM_KEYS: [string, string][] = [
     ["category_pov", "Category POV"], ["positioning", "Positioning"], ["differentiation", "Differentiation"],
     ["value_prop", "Value prop"], ["pillars", "Pillars"],
@@ -702,35 +701,33 @@ function GroundingList({ gtmFields, productFields }: { gtmFields: GroundingField
       const v = (f?.value ?? "").trim();
       return v ? { label: f?.label || label, value: v } : null;
     }).filter((x): x is { label: string; value: string } => !!x);
-
   const gtm = pick(gtmFields, GTM_KEYS);
   const prod = pick(productFields, PROD_KEYS);
+  if (!gtm.length && !prod.length) return null;
 
-  if (!gtm.length && !prod.length) {
-    return <div className="t-sub t-muted" style={{ fontSize: 12 }}>No framework fields captured yet.</div>;
-  }
-
-  const Row = ({ label, value }: { label: string; value: string }) => (
-    <div style={{ display: "grid", gridTemplateColumns: "150px minmax(0,1fr)", gap: 10, padding: "5px 0", borderTop: "1px solid var(--border)" }}>
-      <span className="t-mono-xs" style={{ color: "var(--tm)" }}>{label}</span>
-      <span className="t-sub" style={{ fontSize: 12, color: "var(--ts)", lineHeight: 1.5, overflow: "hidden", display: "-webkit-box", WebkitLineClamp: 3, WebkitBoxOrient: "vertical" }}>{value}</span>
+  const Group = ({ title, items }: { title: string; items: { label: string; value: string }[] }) => (
+    <div>
+      <div style={{ fontSize: 11, fontWeight: 700, color: "var(--ts)", textTransform: "uppercase", letterSpacing: 0.5, marginBottom: 10 }}>{title}</div>
+      <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
+        {items.map((it) => (
+          <div key={it.label}>
+            <div style={{ fontSize: 11.5, fontWeight: 600, color: "var(--ts)", marginBottom: 3 }}>{it.label}</div>
+            <div style={{ fontSize: 13, lineHeight: 1.55, color: "var(--tp)", display: "-webkit-box", WebkitLineClamp: 4, WebkitBoxOrient: "vertical", overflow: "hidden" }}>{it.value}</div>
+          </div>
+        ))}
+      </div>
     </div>
   );
 
   return (
-    <div>
-      {gtm.length > 0 && (
-        <div style={{ marginBottom: prod.length ? 12 : 0 }}>
-          <div className="t-mono-xs" style={{ color: "var(--tm)", textTransform: "uppercase", letterSpacing: 0.4, marginBottom: 2 }}>GTM framework</div>
-          {gtm.map((r) => <Row key={r.label} {...r} />)}
-        </div>
-      )}
-      {prod.length > 0 && (
-        <div>
-          <div className="t-mono-xs" style={{ color: "var(--tm)", textTransform: "uppercase", letterSpacing: 0.4, marginBottom: 2 }}>Product record</div>
-          {prod.map((r) => <Row key={r.label} {...r} />)}
-        </div>
-      )}
+    <div style={{ borderTop: "1px solid var(--border)", paddingTop: 16, marginTop: 16 }}>
+      <div className="t-label" style={{ color: "var(--ts)", marginBottom: 14 }}>
+        Grounded in the framework{(gtmName || productName) ? ` — ${[gtmName, productName].filter(Boolean).join(" · ")}` : ""}
+      </div>
+      <div style={{ display: "flex", flexDirection: "column", gap: 18 }}>
+        {gtm.length > 0 && <Group title="GTM framework" items={gtm} />}
+        {prod.length > 0 && <Group title="Product record" items={prod} />}
+      </div>
     </div>
   );
 }
