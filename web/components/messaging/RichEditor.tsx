@@ -9,18 +9,13 @@ import { useEffect } from "react";
 import { useEditor, EditorContent, type Editor } from "@tiptap/react";
 import { BubbleMenu } from "@tiptap/react/menus";
 import StarterKit from "@tiptap/starter-kit";
-import { Markdown } from "tiptap-markdown";
 
 export type SelectionInfo = { text: string; from: number; to: number };
 
-// Serialize current editor content to markdown (the stored field value).
+// Serialize current editor content to HTML (the stored field value). Name kept
+// as editorMarkdown so existing callers don't break.
 export function editorMarkdown(editor: Editor | null): string {
-  if (!editor) return "";
-  // tiptap-markdown registers storage.markdown.getMarkdown() at runtime; it's not
-  // in the typed Storage interface, so reach for it through an unknown cast.
-  const store = editor.storage as unknown as { markdown?: { getMarkdown?: () => string } };
-  const md = store.markdown?.getMarkdown?.();
-  return typeof md === "string" ? md : editor.getText();
+  return editor ? editor.getHTML() : "";
 }
 
 const Toolbar = ({ editor }: { editor: Editor }) => {
@@ -59,7 +54,6 @@ export default function RichEditor({
     immediatelyRender: false, // SSR guard for Next 15
     extensions: [
       StarterKit,
-      Markdown.configure({ html: false, transformPastedText: true, transformCopiedText: true }),
     ],
     content: value || "",
     onSelectionUpdate: ({ editor }) => {
@@ -70,8 +64,7 @@ export default function RichEditor({
     },
   }, []);
 
-  // tiptap-markdown parses markdown when content is set as a string. Seed via
-  // setContent so switching tasks reloads the editor from the new field value.
+  // Seed via setContent so switching tasks reloads the editor from the new field value.
   useEffect(() => {
     if (!editor) return;
     editor.commands.setContent(value || "", { emitUpdate: false });
@@ -93,7 +86,7 @@ export default function RichEditor({
               const text = editor.state.doc.textBetween(from, to, " ").trim();
               if (text) onAgent?.({ text, from, to });
             }}>
-            ✦ Agent
+            Agent
           </button>
         </div>
       </BubbleMenu>

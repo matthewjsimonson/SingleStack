@@ -463,7 +463,7 @@ export default function MessagingView() {
                     </div>
                   </div>
                   <div className="row gap-2" style={{ flexShrink: 0 }}>
-                    <button className="btn btn-accent btn-sm" onClick={openDraft}>✦ Draft with AI</button>
+                    <button className="btn btn-accent btn-sm" onClick={openDraft}>Draft with AI</button>
                     <button className="btn btn-sm" disabled={saving || !dirty} onClick={save}>{saving ? "Saving…" : "Save"}</button>
                     <button className="btn btn-secondary btn-sm" disabled={saving || !selectedBrief || isRatified || dirty} onClick={ratify}>
                       {isRatified ? "Ratified" : "Ratify"}
@@ -482,7 +482,7 @@ export default function MessagingView() {
                 <div className="row-between" style={{ marginTop: 8, alignItems: "center", gap: 8, flexWrap: "wrap" }}>
                   <div className="row gap-2" style={{ alignItems: "center" }}>
                     <button className="btn btn-secondary btn-sm" onClick={() => (selection ? openAgentForSelection(selection) : openAgentForElement())}>
-                      {selection ? "✦ Agent on selection" : "✦ Agent on brief"}
+                      {selection ? "Agent on selection" : "Agent on brief"}
                     </button>
                     <span className="t-sub t-muted" style={{ fontSize: 11.5 }}>Highlight text in the editor for a targeted rewrite.</span>
                   </div>

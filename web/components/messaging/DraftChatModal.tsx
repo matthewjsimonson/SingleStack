@@ -68,7 +68,7 @@ export default function DraftChatModal({
     element_label: elementLabel,
     current_value: currentValue,
     brief,
-    task: `Synthesize a messaging update for the element "${elementLabel}". Refine the current value to reflect the brief; keep its voice and structure. Reply with the updated element text only.`,
+    task: "You are a senior messaging expert pairing with me on this. Respond in clean, natural prose. Do NOT use markdown tables, do NOT use decorative symbols (no asterisk-bullets dumps, no ✦/◆/▲), and do NOT invent jargon section headers. Give your take, then ask me one sharp question about where to push.",
   };
 
   async function send(text: string) {
@@ -93,7 +93,7 @@ export default function DraftChatModal({
   // Kick off the first synthesis automatically when the modal opens.
   useEffect(() => {
     if (open && agentKey && messages.length === 0 && !busy && !reply.typing) {
-      void send(`Draft a messaging update for "${elementLabel}" reflecting what has moved.`);
+      void send(`Let's shape the messaging for "${elementLabel}". Give me your first take in a few tight sentences, then ask me where to push.`);
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [open, agentKey]);
@@ -101,9 +101,9 @@ export default function DraftChatModal({
   const lastDraft = [...messages].reverse().find((m) => m.role === "assistant")?.content ?? null;
 
   return (
-    <Modal open={open} onClose={onClose} width={640} title={
+    <Modal open={open} onClose={onClose} width={900} title={
       <div className="row gap-2" style={{ alignItems: "center", flexWrap: "wrap" }}>
-        <span>✦ Draft with AI</span>
+        <span>Draft with AI</span>
         <span className="t-sub t-muted" style={{ fontSize: 12, fontWeight: 400 }}>· {elementLabel}</span>
         {/* agent switcher in the header */}
         <select className="select" value={agentKey ?? ""} onChange={(e) => onAgentChange(e.target.value)} style={{ marginLeft: 8, maxWidth: 220, fontSize: 12.5 }}>
@@ -117,11 +117,11 @@ export default function DraftChatModal({
     }>
       {error && <div className="banner banner-error" style={{ marginBottom: 12 }}>{error}</div>}
 
-      <div className="stack-3" style={{ maxHeight: "46vh", overflowY: "auto", marginBottom: 14 }}>
+      <div className="stack-3" style={{ maxHeight: "64vh", overflowY: "auto", marginBottom: 14 }}>
         {messages.map((m, i) => (
           <div key={i}>
             <div className="card card-pad" style={{ background: m.role === "assistant" ? "var(--panel-2)" : "var(--ac-fill, var(--fill))", marginLeft: m.role === "user" ? 32 : 0, marginRight: m.role === "assistant" ? 32 : 0 }}>
-              <div className="t-mono-xs t-muted" style={{ marginBottom: 3 }}>{m.role === "assistant" ? `✦ ${agentName}` : "You"}</div>
+              <div className="t-mono-xs t-muted" style={{ marginBottom: 3 }}>{m.role === "assistant" ? agentName : "You"}</div>
               {m.role === "assistant"
                 ? <Markdown className="t-sub" style={{ fontSize: 13, lineHeight: 1.55 }} text={m.content} />
                 : <div style={{ fontSize: 13, lineHeight: 1.55, whiteSpace: "pre-wrap" }}>{m.content}</div>}

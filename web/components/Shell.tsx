@@ -76,7 +76,7 @@ const GROUPS: Group[] = [
   {
     label: "Go-to-market",
     items: [
-      { label: "Workflow", href: "/gtm-flow" },
+      { label: "GTM", href: "/gtm-flow" },
       { label: "Campaigns", href: "/campaigns" },
       { label: "GTM Org", href: "/gtm-org" },
     ],
