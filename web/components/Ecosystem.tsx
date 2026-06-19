@@ -32,16 +32,16 @@ type Raw = { agents: Agent[]; connections: Conn[]; agentSkills: AgSkill[]; skill
 
 const harmonyTone = (h: Harmony) =>
   h === "healthy" ? { fill: "var(--gn-fill)", text: "var(--gn-text)", label: "Healthy" }
-  : h === "watch" ? { fill: "color-mix(in srgb, var(--am) 16%, transparent)", text: "var(--am)", label: "Watch" }
-  : { fill: "color-mix(in srgb, var(--rd) 14%, transparent)", text: "var(--rd)", label: "At risk" };
+  : h === "watch" ? { fill: "color-mix(in srgb, var(--am-text) 16%, transparent)", text: "var(--am-text)", label: "Watch" }
+  : { fill: "color-mix(in srgb, var(--rd-text) 14%, transparent)", text: "var(--rd-text)", label: "At risk" };
 const nodeTone = (s: AreaStatus) =>
   s === "covered" ? { fill: "var(--gn-fill)", stroke: "var(--gn-text)", sw: 1.5 }
-  : s === "partial" ? { fill: "color-mix(in srgb, var(--am) 20%, transparent)", stroke: "var(--am)", sw: 1.5 }
-  : { fill: "color-mix(in srgb, var(--rd) 16%, transparent)", stroke: "var(--rd)", sw: 2.75 };
+  : s === "partial" ? { fill: "color-mix(in srgb, var(--am-text) 20%, transparent)", stroke: "var(--am-text)", sw: 1.5 }
+  : { fill: "color-mix(in srgb, var(--rd-text) 16%, transparent)", stroke: "var(--rd-text)", sw: 2.75 };
 const chipTone = (s: AreaStatus) =>
   s === "covered" ? { fill: "var(--gn-fill)", text: "var(--gn-text)", label: "Covered" }
-  : s === "partial" ? { fill: "color-mix(in srgb, var(--am) 15%, transparent)", text: "var(--am)", label: "Partial" }
-  : { fill: "color-mix(in srgb, var(--rd) 13%, transparent)", text: "var(--rd)", label: "Gap" };
+  : s === "partial" ? { fill: "color-mix(in srgb, var(--am-text) 15%, transparent)", text: "var(--am-text)", label: "Partial" }
+  : { fill: "color-mix(in srgb, var(--rd-text) 13%, transparent)", text: "var(--rd-text)", label: "Gap" };
 const shortLabel = (l: string) => { const s = l.split(/ [&/]/)[0].trim(); return s.length > 15 ? s.slice(0, 14) + "…" : s; };
 
 // --- layout -----------------------------------------------------------------
@@ -161,7 +161,7 @@ export default function Ecosystem() {
 
           {/* Agent on the area */}
           <div className="row gap-2" style={{ alignItems: "center", flexWrap: "wrap", padding: "8px 0", borderTop: "1px solid var(--line-2, var(--border))" }}>
-            <span style={{ width: 8, height: 8, borderRadius: 999, flexShrink: 0, background: d.agents.length ? "var(--gn-text)" : "transparent", border: d.agents.length ? "none" : "1.5px solid var(--rd)" }} />
+            <span style={{ width: 8, height: 8, borderRadius: 999, flexShrink: 0, background: d.agents.length ? "var(--gn-text)" : "transparent", border: d.agents.length ? "none" : "1.5px solid var(--rd-text)" }} />
             <span style={{ fontSize: 12, fontWeight: 660 }}>Agent</span>
             <span className="t-sub t-muted" style={{ fontSize: 11.5 }}>{d.agents.length ? d.agents.join(", ") : "none on this area yet"}</span>
             {!d.agents.length && <button onClick={() => setCreating("agent")} className="btn btn-sm btn-secondary" style={{ fontSize: 10.5, marginLeft: "auto" }}>+ Put an agent</button>}
@@ -176,7 +176,7 @@ export default function Ecosystem() {
               const present = !!wf;
               const haveSkill = (name: string) => d.childSkills.some((s) => s.toLowerCase().includes(name.toLowerCase().split(" ")[0]));
               return (
-                <div key={pb.key} className="card card-pad" style={{ borderLeft: `3px solid ${present ? "var(--gn-text)" : "var(--rd)"}` }}>
+                <div key={pb.key} className="card card-pad" style={{ borderLeft: `3px solid ${present ? "var(--gn-text)" : "var(--rd-text)"}` }}>
                   <div className="row-between" style={{ alignItems: "flex-start", gap: 8 }}>
                     <div style={{ minWidth: 0, flex: 1 }}>
                       <div style={{ fontSize: 12.5, fontWeight: 660 }}>{pb.name}</div>
@@ -276,14 +276,14 @@ export default function Ecosystem() {
       {/* Toolbar: legend + the unattended trigger (pops the drawer). */}
       <div className="row-between" style={{ flexWrap: "wrap", gap: 8, alignItems: "center" }}>
         <div className="row gap-2" style={{ flexWrap: "wrap", alignItems: "center", fontSize: 10.5 }}>
-          {([["Covered", "var(--gn-text)"], ["Partial", "var(--am)"], ["Gap", "var(--rd)"]] as const).map(([lab, col]) => (
+          {([["Covered", "var(--gn-text)"], ["Partial", "var(--am-text)"], ["Gap", "var(--rd-text)"]] as const).map(([lab, col]) => (
             <span key={lab} className="row gap-1" style={{ alignItems: "center", gap: 4, color: "var(--tm)" }}>
               <span style={{ width: 9, height: 9, borderRadius: 999, background: col, flexShrink: 0 }} />{lab}
             </span>
           ))}
         </div>
         <button onClick={() => { setSelKey(null); setShowTodo(true); }} className="btn btn-sm"
-          style={{ fontSize: 11, fontWeight: 600, borderColor: health.counts.gap ? "var(--rd)" : "var(--border)", color: health.counts.gap ? "var(--rd)" : "var(--tp)" }}>
+          style={{ fontSize: 11, fontWeight: 600, borderColor: health.counts.gap ? "var(--rd-text)" : "var(--border)", color: health.counts.gap ? "var(--rd-text)" : "var(--tp)" }}>
           {health.counts.gap + health.counts.partial} unattended →
         </button>
       </div>
@@ -315,7 +315,7 @@ export default function Ecosystem() {
                     <g key={n.area.key} onClick={() => setSelKey(isSel ? null : n.area.key)} style={{ cursor: "pointer" }}>
                       {isSel && <circle cx={n.x} cy={n.y} r={R + 5} strokeWidth={1.5} style={{ fill: "none", stroke: "var(--ac-text)" }} />}
                       <circle cx={n.x} cy={n.y} r={R} strokeWidth={t.sw} style={{ fill: t.fill, stroke: t.stroke }} />
-                      {isGap && <text x={n.x} y={n.y + 5} textAnchor="middle" fontSize={17} fontWeight={800} style={{ pointerEvents: "none", fill: "var(--rd)" }}>!</text>}
+                      {isGap && <text x={n.x} y={n.y + 5} textAnchor="middle" fontSize={17} fontWeight={800} style={{ pointerEvents: "none", fill: "var(--rd-text)" }}>!</text>}
                       {n.area.engine && !isGap && <text x={n.x} y={n.y + 4} textAnchor="middle" fontSize={9} fontWeight={700} style={{ pointerEvents: "none", fill: "var(--ac-text)" }}>engine</text>}
                       <text x={n.x} y={n.y + R + 13} textAnchor="middle" fontSize={10} fontWeight={isGap ? 700 : 540} style={{ pointerEvents: "none", fill: "var(--tp)" }}>{shortLabel(n.area.label)}</text>
                     </g>
