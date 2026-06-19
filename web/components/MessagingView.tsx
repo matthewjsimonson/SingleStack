@@ -127,7 +127,7 @@ export default function MessagingView() {
         .select("id, title, summary, recommendation, conf_level, category, state, org_id, signal_ids")
         .in("category", ["gtm", "both"]).neq("state", "dormant"),
       supabase.from("messaging_artifacts")
-        .select("id, release_id, theme_id, body, status, updated_at, title"),
+        .select("id, release_id, theme_id, body, status, updated_at, title, org_id, persona_id"),
       supabase.from("agents").select("id, key, name, role").eq("is_active", true),
     ]);
     setReleases(((rl ?? []) as ReleaseRow[]).filter((r) => matches(r)));
@@ -234,12 +234,17 @@ export default function MessagingView() {
     { id: "draft", label: "Draft" }, { id: "ratified", label: "Ratified" },
   ];
 
-  const chipStyle = (on: boolean) => ({
-    cursor: "pointer", fontSize: 11.5,
+  // One uniform control height/typography so the toolbar reads as a single row.
+  const CTRL_H = 30;
+  const chipStyle = (on: boolean): React.CSSProperties => ({
+    cursor: "pointer", fontSize: 12.5, fontWeight: on ? 600 : 540,
+    height: CTRL_H, padding: "0 12px", borderRadius: 999, lineHeight: 1,
+    display: "inline-flex", alignItems: "center", whiteSpace: "nowrap",
     border: "1px solid " + (on ? "var(--ac)" : "var(--border)"),
     background: on ? "var(--ac-fill, var(--fill))" : "transparent",
     color: on ? "var(--ac-text)" : "var(--ts)",
   });
+  const fieldStyle: React.CSSProperties = { height: CTRL_H, fontSize: 12.5, padding: "0 10px" };
 
   return (
     <div>
@@ -276,15 +281,15 @@ export default function MessagingView() {
           }}>
             <div className="row gap-2">
               {FILTERS.map((f) => (
-                <button key={f.id} onClick={() => setFilter(f.id)} className="chip" style={chipStyle(filter === f.id)}>
+                <button key={f.id} onClick={() => setFilter(f.id)} style={chipStyle(filter === f.id)}>
                   {f.label}
                 </button>
               ))}
             </div>
-            <span style={{ width: 1, height: 16, background: "var(--border)" }} aria-hidden />
+            <span style={{ width: 1, height: 18, background: "var(--border)", alignSelf: "center" }} aria-hidden />
             <div className="row gap-2">
               {STATUS_FILTERS.map((s) => (
-                <button key={s.id} onClick={() => setStatusFilter(s.id)} className="chip" style={chipStyle(statusFilter === s.id)}>
+                <button key={s.id} onClick={() => setStatusFilter(s.id)} style={chipStyle(statusFilter === s.id)}>
                   {s.label}
                 </button>
               ))}
@@ -292,12 +297,12 @@ export default function MessagingView() {
             <div className="row gap-2" style={{ marginLeft: "auto", alignItems: "center" }}>
               <input
                 className="input" value={search} onChange={(e) => setSearch(e.target.value)}
-                placeholder="Search title…" style={{ width: 240 }}
+                placeholder="Search title…" style={{ ...fieldStyle, width: 240 }}
               />
-              <select className="select" value={sort} onChange={(e) => setSort(e.target.value as SortMode)}>
+              <select className="select" value={sort} onChange={(e) => setSort(e.target.value as SortMode)} style={fieldStyle}>
                 {SORTS.map((s) => <option key={s.id} value={s.id}>{s.label}</option>)}
               </select>
-              <span className="t-mono-xs" style={{ color: "var(--tm)", flexShrink: 0 }}>
+              <span className="t-mono-xs" style={{ color: "var(--tm)", flexShrink: 0, fontSize: 11.5 }}>
                 {filteredInputs.length} input{filteredInputs.length === 1 ? "" : "s"}
               </span>
             </div>

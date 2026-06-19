@@ -13,7 +13,7 @@ import { useEffect, useMemo, useState } from "react";
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { getOrgId } from "@/lib/org";
 import { Modal, Chip, SubTabs } from "@/components/ui";
-import { fmtWhen, buildGrounding, buildDraftContext, type GroundingField, type ReleaseRow, type ThemeRow } from "@/lib/messaging";
+import { fmtWhen, buildGrounding, buildDraftContext, type GroundingField, type Persona, type ReleaseRow, type ThemeRow } from "@/lib/messaging";
 import DraftChatModal from "@/components/messaging/DraftChatModal";
 import type { RosterAgent } from "@/components/messaging/AgentPickerModal";
 
@@ -26,6 +26,18 @@ export type Brief = {
   status: BriefStatus;
   updated_at: string | null;
   title: string | null;
+  org_id?: string | null;
+  persona_id?: string | null;
+};
+
+// A dynamic audience row loaded from the personas table (scoped to org/product).
+type PersonaRow = {
+  id: string;
+  name: string;
+  role: string | null;
+  industry: string | null;
+  description: string | null;
+  product_id: string | null;
 };
 export type Input =
   | { kind: "release"; id: string; row: ReleaseRow; brief: Brief | null }
@@ -115,6 +127,34 @@ export default function ReviewPopup({
   const [draftAgentKey, setDraftAgentKey] = useState<string | null>(null);
   const [seedMessage, setSeedMessage] = useState<string | null>(null);
 
+  // Audience — dynamic personas in scope + the one this brief is framed for.
+  const [personas, setPersonas] = useState<PersonaRow[]>([]);
+  const [selectedPersona, setSelectedPersona] = useState<PersonaRow | null>(null);
+  const [newPersonaOpen, setNewPersonaOpen] = useState(false);
+
+  // Load the personas in scope: product-specific (when a product is active) plus
+  // org-wide reusable ones. RLS scopes to the org; an empty list is fine.
+  async function loadPersonas() {
+    let q = supabase.from("personas").select("id, name, role, industry, description, product_id");
+    if (activeProductId) q = q.or(`product_id.is.null,product_id.eq.${activeProductId}`);
+    const { data } = await q.order("name");
+    return (data ?? []) as PersonaRow[];
+  }
+  useEffect(() => {
+    let alive = true;
+    if (!open) return;
+    (async () => {
+      const rows = await loadPersonas();
+      if (!alive) return;
+      setPersonas(rows);
+      // Default the selection to the brief's framed persona, else None (generic).
+      const briefPersonaId = input?.brief?.persona_id ?? null;
+      setSelectedPersona(briefPersonaId ? rows.find((p) => p.id === briefPersonaId) ?? null : null);
+    })();
+    return () => { alive = false; };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [supabase, open, activeProductId, input?.id, input?.brief?.persona_id]);
+
   // Reset the nav back to Overview each time a new input opens.
   useEffect(() => { if (open) { setNav("overview"); setError(null); } }, [open, input?.kind, input?.id]);
 
@@ -156,12 +196,20 @@ export default function ReviewPopup({
 
   // The grounding + draft context handed to the conversation (reused plumbing).
   const grounding = useMemo(() => buildGrounding(gtmFields, productFields), [gtmFields, productFields]);
+  // The persona (full row → compact type) that frames the draft. Feeds both the
+  // DraftChatModal seed and the ContextSidebar so drafts speak to this audience.
+  const personaForContext = useMemo<Persona | null>(
+    () => selectedPersona
+      ? { id: selectedPersona.id, name: selectedPersona.name, role: selectedPersona.role, industry: selectedPersona.industry, description: selectedPersona.description }
+      : null,
+    [selectedPersona],
+  );
   const draftContext = useMemo(() => {
     if (!input) return "";
     return input.kind === "release"
-      ? buildDraftContext({ kind: "release", row: input.row }, grounding)
-      : buildDraftContext({ kind: "theme", row: input.row }, grounding);
-  }, [input, grounding]);
+      ? buildDraftContext({ kind: "release", row: input.row }, grounding, personaForContext)
+      : buildDraftContext({ kind: "theme", row: input.row }, grounding, personaForContext);
+  }, [input, grounding, personaForContext]);
 
   // ---- bucket the theme's evidence into the FIVE origins ----------------------
   const buckets = useMemo<Record<Bucket, SourceItem[]>>(() => {
@@ -207,7 +255,7 @@ export default function ReviewPopup({
     try {
       if (input.brief) {
         const { error } = await supabase.from("messaging_artifacts")
-          .update({ body, updated_at: now, title }).eq("id", input.brief.id);
+          .update({ body, updated_at: now, title, persona_id: selectedPersona?.id ?? null }).eq("id", input.brief.id);
         if (error) throw error;
       } else {
         const orgId = input.row.org_id ?? (await getOrgId());
@@ -218,6 +266,7 @@ export default function ReviewPopup({
           theme_id: input.kind === "theme" ? input.id : null,
           gtm_record_id: gtmId || null,
           product_id: activeProductId,
+          persona_id: selectedPersona?.id ?? null,
           body, status: "draft", title,
         });
         if (error) throw error;
@@ -238,6 +287,28 @@ export default function ReviewPopup({
     setSaving(false);
     if (error) { setError(error.message || "Could not ratify."); return; }
     await onSaved();
+  }
+
+  // Create a new persona (dynamic, reusable), then reload + select it. The
+  // audience persists on the brief via persona_id when the brief is saved.
+  async function createPersona(fields: { name: string; role: string; industry: string; description: string }) {
+    const orgId = brief?.org_id ?? input?.row.org_id ?? (await getOrgId());
+    if (!orgId) { setError("Could not resolve your organization."); return; }
+    const { data, error } = await supabase.from("personas").insert({
+      org_id: orgId,
+      product_id: activeProductId ?? null,
+      gtm_record_id: gtmId || null,
+      name: fields.name,
+      role: fields.role || null,
+      industry: fields.industry || null,
+      description: fields.description || null,
+      source: "manual",
+    }).select("id, name, role, industry, description, product_id").single();
+    if (error || !data) { setError(error?.message || "Could not create the audience."); return; }
+    const rows = await loadPersonas();
+    setPersonas(rows);
+    setSelectedPersona((rows.find((p) => p.id === data.id) ?? data) as PersonaRow);
+    setNewPersonaOpen(false);
   }
 
   // Open the conversation seeded for a recommendation / starter / continuation.
@@ -287,6 +358,13 @@ export default function ReviewPopup({
 
           {/* RIGHT — content panel */}
           <div style={{ minWidth: 0 }}>
+            {/* Audience bar — frames the whole review for a dynamic persona. */}
+            <AudienceBar
+              personas={personas}
+              selected={selectedPersona}
+              onSelect={setSelectedPersona}
+              onNew={() => setNewPersonaOpen(true)}
+            />
             {nav === "overview" && <Overview input={input} productName={productName} changelog={changelog} evidence={evidence} ctxLoading={ctxLoading} />}
             {nav === "sources" && <Sources buckets={buckets} ctxLoading={ctxLoading} />}
             {nav === "details" && <Details input={input} evidence={evidence} changelog={changelog} ctxLoading={ctxLoading} gtmName={gtmName} productName={productName} gtmFields={gtmFields} productFields={productFields} />}
@@ -313,7 +391,98 @@ export default function ReviewPopup({
         onUseDraft={saveBrief}
         seedMessage={seedMessage}
       />
+
+      {/* + New audience — a compact form; on save it's reusable across inputs. */}
+      <NewPersonaModal open={newPersonaOpen} onClose={() => setNewPersonaOpen(false)} onSave={createPersona} />
     </>
+  );
+}
+
+// ---- AUDIENCE BAR — one slim row: who the messaging is framed for ------------
+function AudienceBar({ personas, selected, onSelect, onNew }: {
+  personas: PersonaRow[];
+  selected: PersonaRow | null;
+  onSelect: (p: PersonaRow | null) => void;
+  onNew: () => void;
+}) {
+  const chip = selected
+    ? `Framing for: ${selected.name}${selected.industry ? ` · ${selected.industry}` : ""}`
+    : null;
+  return (
+    <div
+      className="row gap-2"
+      style={{
+        alignItems: "center", flexWrap: "wrap",
+        padding: "8px 12px", marginBottom: "var(--sp-4)",
+        border: "1px solid var(--border)", borderRadius: 8, background: "var(--panel-2)",
+      }}
+    >
+      <span className="t-label" style={{ color: "var(--tm)", flexShrink: 0 }}>Audience</span>
+      <select
+        className="select"
+        style={{ maxWidth: 280 }}
+        value={selected?.id ?? ""}
+        onChange={(e) => onSelect(personas.find((p) => p.id === e.target.value) ?? null)}
+      >
+        <option value="">— None (generic)</option>
+        {personas.map((p) => (
+          <option key={p.id} value={p.id}>{p.name}{p.industry ? ` · ${p.industry}` : ""}</option>
+        ))}
+      </select>
+      {chip && <Chip tone="accent">{chip}</Chip>}
+      <button className="btn btn-secondary btn-sm" style={{ marginLeft: "auto" }} onClick={onNew}>+ New</button>
+    </div>
+  );
+}
+
+// ---- + NEW AUDIENCE — compact create form (name required) -------------------
+function NewPersonaModal({ open, onClose, onSave }: {
+  open: boolean;
+  onClose: () => void;
+  onSave: (f: { name: string; role: string; industry: string; description: string }) => void | Promise<void>;
+}) {
+  const [name, setName] = useState("");
+  const [role, setRole] = useState("");
+  const [industry, setIndustry] = useState("");
+  const [description, setDescription] = useState("");
+  const [busy, setBusy] = useState(false);
+
+  // Reset the form each time it opens.
+  useEffect(() => { if (open) { setName(""); setRole(""); setIndustry(""); setDescription(""); setBusy(false); } }, [open]);
+
+  const trimmed = name.trim();
+  async function submit() {
+    if (!trimmed) return;
+    setBusy(true);
+    await onSave({ name: trimmed, role: role.trim(), industry: industry.trim(), description: description.trim() });
+    setBusy(false);
+  }
+
+  return (
+    <Modal open={open} onClose={onClose} title="New audience" width={460}>
+      <div className="stack-3">
+        <div>
+          <div className="t-label" style={{ color: "var(--tm)", marginBottom: 4 }}>Name</div>
+          <input className="input" style={{ width: "100%" }} value={name} onChange={(e) => setName(e.target.value)} placeholder="Product Manager" />
+        </div>
+        <div>
+          <div className="t-label" style={{ color: "var(--tm)", marginBottom: 4 }}>Role</div>
+          <input className="input" style={{ width: "100%" }} value={role} onChange={(e) => setRole(e.target.value)} placeholder="Senior PM, platform team" />
+        </div>
+        <div>
+          <div className="t-label" style={{ color: "var(--tm)", marginBottom: 4 }}>Industry</div>
+          <input className="input" style={{ width: "100%" }} value={industry} onChange={(e) => setIndustry(e.target.value)} placeholder="SaaS" />
+        </div>
+        <div>
+          <div className="t-label" style={{ color: "var(--tm)", marginBottom: 4 }}>Description</div>
+          <textarea className="textarea" rows={4} style={{ width: "100%" }} value={description} onChange={(e) => setDescription(e.target.value)} placeholder="Their goals, pains, and the language they use." />
+        </div>
+        <div className="row gap-2" style={{ justifyContent: "flex-end" }}>
+          <button className="btn btn-secondary btn-sm" onClick={onClose}>Cancel</button>
+          <button className="btn btn-accent btn-sm" disabled={!trimmed || busy} onClick={submit}>Save audience</button>
+        </div>
+      </div>
+    </Modal>
   );
 }
 

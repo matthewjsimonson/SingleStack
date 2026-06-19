@@ -45,6 +45,28 @@ export type ReleaseRow = {
 // CONTEXT the AI drafts FROM — never edited on the messaging surface.
 export type GroundingField = { field_key: string; label: string; value: string | null; section: string | null };
 
+// A dynamic, customer-defined AUDIENCE the messaging is framed for. Selected at
+// draft time; reusable across inputs/products. Feeds the grounding so drafts
+// speak to this persona's goals, pains, and language.
+export type Persona = {
+  id: string;
+  name: string;
+  role?: string | null;
+  industry?: string | null;
+  description?: string | null;
+};
+
+// A compact audience block for the AI: who to frame the messaging for. Empty when
+// no persona is chosen (generic), so the draft context stays unchanged.
+export function buildAudience(persona: Persona | null): string {
+  if (!persona) return "";
+  const { name, role, industry, description } = persona;
+  return (
+    `Audience to frame for: ${name}${role ? `, ${role}` : ""}${industry ? ` (${industry})` : ""}.${description ? ` ${description}` : ""}\n` +
+    `Write the messaging specifically for this persona — their goals, pains, and language.`
+  );
+}
+
 // The most relevant framework fields to ground a messaging brief in. We pull a
 // compact subset so the officer drafts from the org's actual positioning, value
 // prop, buyer, and product facts rather than inventing them.
@@ -103,13 +125,16 @@ export function inputBrief(input: { kind: "release"; row: ReleaseRow } | { kind:
 export function buildDraftContext(
   input: { kind: "release"; row: ReleaseRow } | { kind: "theme"; row: ThemeRow },
   grounding: string,
+  persona: Persona | null = null,
 ): string {
+  const audience = buildAudience(persona);
   return [
     `MESSAGE THIS INPUT:`,
     inputBrief(input),
     ``,
     `GROUNDED IN THE FRAMEWORK (context — do not edit, draft FROM it):`,
     grounding,
+    ...(audience ? [``, audience] : []),
   ].join("\n");
 }
 
