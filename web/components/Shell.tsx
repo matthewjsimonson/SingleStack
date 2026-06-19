@@ -186,7 +186,7 @@ export default function Shell({
         </header>
         <main style={{ flex: 1, overflowY: "auto" }}>
           <ChromeSlots.Provider value={{ actionsSlot }}>
-            <div style={{ maxWidth: 1000, margin: "0 auto", width: "100%", padding: "20px 28px 64px" }}>{children}</div>
+            <div style={{ maxWidth: 1340, margin: "0 auto", width: "100%", padding: "20px 24px 64px" }}>{children}</div>
           </ChromeSlots.Provider>
         </main>
       </div>

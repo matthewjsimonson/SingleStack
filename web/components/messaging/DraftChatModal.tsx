@@ -26,6 +26,7 @@ export default function DraftChatModal({
   onAgentChange,
   onUseDraft,
   onBusyChange,
+  seedMessage,
 }: {
   open: boolean;
   onClose: () => void;
@@ -37,6 +38,9 @@ export default function DraftChatModal({
   onAgentChange: (key: string) => void;
   onUseDraft: (markdown: string) => void;
   onBusyChange?: (busy: boolean) => void;
+  // Optional first user turn to open the conversation with. When absent, falls
+  // back to the generic "shape the messaging for X" opener (unchanged behavior).
+  seedMessage?: string | null;
 }) {
   const supabase = createClient();
   const [messages, setMessages] = useState<Msg[]>([]);
@@ -93,7 +97,8 @@ export default function DraftChatModal({
   // Kick off the first synthesis automatically when the modal opens.
   useEffect(() => {
     if (open && agentKey && messages.length === 0 && !busy && !reply.typing) {
-      void send(`Let's shape the messaging for "${elementLabel}". Give me your first take in a few tight sentences, then ask me where to push.`);
+      void send(seedMessage?.trim()
+        || `Let's shape the messaging for "${elementLabel}". Give me your first take in a few tight sentences, then ask me where to push.`);
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [open, agentKey]);
