@@ -21,18 +21,16 @@ export function Modal({
   return (
     <div
       onClick={onClose}
-      className="glass-scrim"
       style={{
-        position: "fixed", inset: 0, zIndex: 50,
+        position: "fixed", inset: 0, zIndex: 50, background: "rgba(11,12,14,0.42)",
         display: "flex", alignItems: "flex-start", justifyContent: "center", padding: "60px 20px", overflowY: "auto",
       }}
     >
       <div
         onClick={(e) => e.stopPropagation()}
-        className="modal-enter"
         style={{
           width, maxWidth: "100%", background: "var(--panel)",
-          border: "1px solid var(--border)", borderRadius: 14, boxShadow: "var(--shadow-2)",
+          border: "1px solid var(--border)", borderRadius: 12, boxShadow: "var(--shadow-1)",
           display: "flex", flexDirection: "column", maxHeight: "calc(100vh - 120px)",
         }}
       >

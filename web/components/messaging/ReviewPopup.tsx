@@ -326,7 +326,7 @@ export default function ReviewPopup({
     <>
       <Modal open={open && !draftOpen} onClose={onClose} width={1180} title={
         <div className="row gap-2" style={{ alignItems: "center", flexWrap: "wrap" }}>
-          <span style={{ fontSize: 17, fontWeight: 680, letterSpacing: "-0.01em" }}>{title}</span>
+          <span className="t-h2">{title}</span>
           {input.kind === "release"
             ? <Chip tone="default">{input.row.stage ?? "release"}</Chip>
             : <Chip tone="accent">signal</Chip>}
@@ -507,7 +507,7 @@ function Overview({ input, productName, changelog, evidence, ctxLoading }: {
     <div className="stack-3">
       {/* header chips */}
       <div className="row gap-2" style={{ alignItems: "center", flexWrap: "wrap" }}>
-        <span className="t-h2" style={{ fontSize: 18 }}>{titleOf(input)}</span>
+        <span className="t-h2">{titleOf(input)}</span>
         {input.kind === "release" ? (
           <>
             <Chip tone="default">{input.row.stage ?? "release"}</Chip>
@@ -701,11 +701,11 @@ function GroundingBlock({ gtmName, productName, gtmFields, productFields }: {
 
   const Group = ({ title, items }: { title: string; items: { label: string; value: string }[] }) => (
     <div>
-      <div style={{ fontSize: 11, fontWeight: 700, color: "var(--ts)", textTransform: "uppercase", letterSpacing: 0.5, marginBottom: 10 }}>{title}</div>
+      <div className="t-label" style={{ color: "var(--ts)", marginBottom: 10 }}>{title}</div>
       <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
         {items.map((it) => (
           <div key={it.label}>
-            <div style={{ fontSize: 11.5, fontWeight: 600, color: "var(--ts)", marginBottom: 3 }}>{it.label}</div>
+            <div className="t-sub" style={{ color: "var(--ts)", fontWeight: 600, marginBottom: 3 }}>{it.label}</div>
             <div style={{ fontSize: 13, lineHeight: 1.55, color: "var(--tp)", display: "-webkit-box", WebkitLineClamp: 4, WebkitBoxOrient: "vertical", overflow: "hidden" }}>{it.value}</div>
           </div>
         ))}
