@@ -245,6 +245,25 @@ button { font-family: inherit; cursor: pointer; }
 .grid-cards { display: grid; gap: var(--sp-3); grid-template-columns: repeat(auto-fill, minmax(280px, 1fr)); }
 .stack-3 > * + * { margin-top: var(--sp-3); }
 
+/* ---- collapsible sidebar ------------------------------------------------- */
+/* Width lives in CSS (not inline styles) so the body[data-sb] attribute set by
+   the server can drive an animated collapse with no hydration flash. Shell sets
+   `inert` on the aside when collapsed so its links leave the tab/focus order. */
+.app-aside {
+  width: 240px;
+  min-width: 240px;
+  transition: width 0.2s ease, min-width 0.2s ease;
+  overflow: hidden;
+}
+body[data-sb="1"] .app-aside {
+  width: 0;
+  min-width: 0;
+  pointer-events: none;
+}
+@media (prefers-reduced-motion: reduce) {
+  .app-aside { transition: none; }
+}
+
 /* ---- banners ------------------------------------------------------------- */
 .banner { border-radius: var(--radius-sm); padding: 10px 13px; font-size: 13px; }
 .banner-error { background: var(--rd-fill); color: var(--rd-text); }

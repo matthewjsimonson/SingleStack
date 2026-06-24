@@ -13,7 +13,7 @@
 // Leads/PQL dropped as a surface (PQL stays a signal that feeds Messaging).
 import { createClient } from "@/lib/supabase/client";
 import { useRouter, usePathname } from "next/navigation";
-import { useState, type ReactNode } from "react";
+import { useState, useRef, useEffect, type ReactNode } from "react";
 import { ProductProvider, useProductScope } from "@/lib/ProductContext";
 import AgentLauncher from "@/components/AgentLauncher";
 import { ChromeSlots } from "@/components/PageBar";
@@ -100,6 +100,47 @@ export default function Shell({
   // becomes reactive (re-renders once the slot mounts). Tabs are NOT in the bar.
   const [actionsSlot, setActionsSlot] = useState<HTMLElement | null>(null);
 
+  // Sidebar collapse. The cookie + body[data-sb] attribute (set server-side in
+  // the root layout) own the actual width animation, so a one-frame React/SSR
+  // mismatch can't flash the width. This `collapsed` state only drives the
+  // toggle's icon/aria and the `inert` a11y effect below. Initialize from the
+  // attribute the server already rendered (SSR-guarded).
+  const [collapsed, setCollapsed] = useState<boolean>(() => {
+    if (typeof document === "undefined") return false;
+    return document.body.dataset.sb === "1";
+  });
+  const asideRef = useRef<HTMLElement>(null);
+
+  // When collapsed, take the (visually hidden) sidebar out of the tab/focus
+  // order entirely — `inert` is the accessible counterpart to width:0.
+  useEffect(() => {
+    if (asideRef.current) asideRef.current.inert = collapsed;
+  }, [collapsed]);
+
+  function toggleSidebar() {
+    setCollapsed((prev) => {
+      const next = !prev;
+      document.cookie = "sb=" + (next ? "1" : "0") + "; path=/; max-age=31536000; samesite=lax";
+      document.body.dataset.sb = next ? "1" : "0";
+      return next;
+    });
+  }
+
+  // Global shortcut: Cmd/Ctrl+\ toggles the sidebar from anywhere. Ignored while
+  // typing in a form field / contenteditable so it never eats a real backslash.
+  useEffect(() => {
+    function onKey(e: KeyboardEvent) {
+      if (!((e.metaKey || e.ctrlKey) && e.key === "\\")) return;
+      const t = e.target as HTMLElement | null;
+      const tag = t?.tagName;
+      if (tag === "INPUT" || tag === "TEXTAREA" || tag === "SELECT" || t?.isContentEditable) return;
+      e.preventDefault();
+      toggleSidebar();
+    }
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, []);
+
   async function signOut() {
     await supabase.auth.signOut();
     router.push("/login");
@@ -122,7 +163,7 @@ export default function Shell({
   return (
    <ProductProvider>
     <div style={{ display: "flex", height: "100vh", overflow: "hidden" }}>
-      <aside style={{ width: 240, minWidth: 240, background: "var(--sb)", color: "var(--sb-text)", display: "flex", flexDirection: "column", padding: "16px 0" }}>
+      <aside ref={asideRef} className="app-aside" style={{ background: "var(--sb)", color: "var(--sb-text)", display: "flex", flexDirection: "column", padding: "16px 0" }}>
         <div style={{ padding: "0 16px 18px", display: "flex", alignItems: "center", gap: 9 }}>
           <span style={{ width: 22, height: 22, borderRadius: 6, background: "var(--ac)", display: "inline-flex", alignItems: "center", justifyContent: "center", color: "#fff", fontWeight: 800, fontSize: 13 }}>S</span>
           <span style={{ color: "#fff", fontSize: 15, fontWeight: 680, letterSpacing: "-0.02em" }}>SingleStack</span>
@@ -169,7 +210,21 @@ export default function Shell({
       </aside>
 
       <div style={{ flex: 1, display: "flex", flexDirection: "column", overflow: "hidden" }}>
-        <header style={{ height: 52, minHeight: 52, background: "var(--panel)", borderBottom: "1px solid var(--border)", display: "flex", alignItems: "stretch", padding: "0 24px", gap: 4 }}>
+        <header style={{ height: 52, minHeight: 52, background: "var(--panel)", borderBottom: "1px solid var(--border)", display: "flex", alignItems: "center", padding: "0 24px", gap: 4 }}>
+          {/* Sidebar toggle — always visible (far-left), works at any collapse
+              state. Cmd/Ctrl+\ does the same from anywhere. */}
+          <button
+            type="button"
+            onClick={toggleSidebar}
+            aria-label="Toggle sidebar"
+            aria-expanded={!collapsed}
+            style={{ display: "inline-flex", alignItems: "center", justifyContent: "center", width: 30, height: 30, marginLeft: -6, marginRight: 8, borderRadius: 7, border: "1px solid transparent", background: "transparent", color: "var(--ts)", flexShrink: 0 }}
+          >
+            <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+              <rect x="3" y="3" width="18" height="18" rx="2" />
+              <line x1="9" y1="3" x2="9" y2="21" />
+            </svg>
+          </button>
           {/* Title = the route's breadcrumb trail — no duplicate <h1> in the body */}
           <div className="row" style={{ gap: 6, alignItems: "center", flexShrink: 0 }}>
             {trail.map((c, i) => (
@@ -187,7 +242,7 @@ export default function Shell({
         </header>
         <main style={{ flex: 1, overflowY: "auto" }}>
           <ChromeSlots.Provider value={{ actionsSlot }}>
-            <div style={{ maxWidth: 1340, margin: "0 auto", width: "100%", padding: "20px 24px 64px" }}>{children}</div>
+            <div style={{ maxWidth: 1760, margin: "0 auto", width: "100%", padding: "20px 24px 64px" }}>{children}</div>
           </ChromeSlots.Provider>
         </main>
       </div>

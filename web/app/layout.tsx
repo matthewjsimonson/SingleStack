@@ -1,4 +1,5 @@
 import type { Metadata } from "next";
+import { cookies } from "next/headers";
 import "./globals.css";
 
 export const metadata: Metadata = {
@@ -6,11 +7,15 @@ export const metadata: Metadata = {
   description: "AI-native record system — agents propose, humans ratify.",
 };
 
-export default function RootLayout({
+export default async function RootLayout({
   children,
 }: {
   children: React.ReactNode;
 }) {
+  // Sidebar collapsed state, read server-side from the "sb" cookie so the very
+  // first paint already reflects the user's choice — no hydration width flash.
+  // Default OPEN (cookie absent or != "1").
+  const collapsed = (await cookies()).get("sb")?.value === "1";
   return (
     <html lang="en">
       <head>
@@ -28,7 +33,7 @@ export default function RootLayout({
           rel="stylesheet"
         />
       </head>
-      <body>{children}</body>
+      <body data-sb={collapsed ? "1" : "0"}>{children}</body>
     </html>
   );
 }
