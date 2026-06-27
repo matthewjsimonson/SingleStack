@@ -137,13 +137,43 @@ Deno.serve(async (req: Request) => {
       // Battlecard-shaped sections: the profile IS the raw battlecard — facts a
       // rep's card gets refined from.
       suggestedSections = "who_they_are, positioning, their_strengths, their_weaknesses, how_we_win, how_we_lose, objections_they_create, pricing_posture, momentum, what_to_watch, strategic_implications";
+    } else {
+      // LANDSCAPE = the broad competitive profile: a living AGGREGATE of our
+      // battlecards + competitive signals + per-competitor themes + the matrix —
+      // how the MARKET IS MOVING and how WE COMPARE. Built ON the product & GTM
+      // records (already in `context`).
+      target = "our broad competitive positioning — how the market is moving and how we compare against it";
+      const { data: comps } = await supabase.from("competitors").select("id, name, relationship");
+      const { data: caps } = await supabase.from("capabilities").select("id, name");
+      const { data: scores } = await supabase.from("capability_scores").select("capability_id, competitor_id, score");
+      if (caps?.length && scores?.length && comps?.length) {
+        const sc = (capId: string, compId: string | null) => scores.find((s) => s.capability_id === capId && s.competitor_id === compId)?.score ?? 0;
+        const lead = caps.filter((cap) => comps.every((c) => sc(cap.id, c.id) < sc(cap.id, null)));
+        const lag = caps.filter((cap) => comps.some((c) => sc(cap.id, c.id) > sc(cap.id, null)));
+        context += `\nMATRIX ROLL-UP (tracking ${comps.length} rival${comps.length === 1 ? "" : "s"}): we lead on ${lead.map((c) => c.name).join(", ") || "—"}; exposed on ${lag.map((c) => c.name).join(", ") || "—"}.`;
+      }
+      const { data: bc } = await supabase.from("battlecard_items").select("kind, title, detail, competitor_id").order("created_at", { ascending: false }).limit(60);
+      if (bc?.length) {
+        const nm = (id: string | null) => comps?.find((c) => c.id === id)?.name ?? "general";
+        context += `\nOUR BATTLECARDS (aggregated — what we win/lose on across rivals):\n${bc.map((b) => `[${b.kind} · ${nm(b.competitor_id)}] ${b.title}${b.detail ? ` — ${b.detail}` : ""}`).join("\n")}`;
+      }
+      const { data: mvmt } = await supabase.from("signal_themes").select("title, summary, category, state, competitor_id").not("competitor_id", "is", null).neq("state", "fading").order("last_evidence_at", { ascending: false, nullsFirst: false }).limit(20);
+      if (mvmt?.length) {
+        const nm = (id: string | null) => comps?.find((c) => c.id === id)?.name ?? "market";
+        context += `\nHOW RIVALS ARE MOVING (synthesized themes):\n${mvmt.map((t) => `[${t.category}/${t.state} · ${nm(t.competitor_id)}] ${t.title} — ${t.summary ?? ""}`).join("\n")}`;
+      }
+      suggestedSections = "how_the_market_is_moving, how_we_compare, competitive_battlegrounds, our_wedge, search_focus, strategic_implications";
     }
 
     const system = [
-      `You maintain a HITL "Signal Profile" — a sharp, evidence-grounded record of ${target}. For a competitor, this profile is the RAW BATTLECARD: the complete, honest dossier of who they are vs us, which the analyst refines into battlecard items and the messenger turns into seller copy. It is meant to DICTATE product and GTM strategy, so be decisive and specific, never generic.`,
+      `You maintain a HITL "Signal Profile" — a sharp, evidence-grounded record of ${target}. It is meant to DICTATE product and GTM strategy, so be decisive and specific, never generic.`,
+      scope === "competitor"
+        ? "For a competitor, this profile is the RAW BATTLECARD: the complete, honest dossier of who they are vs us, which the analyst refines into battlecard items and the messenger turns into seller copy."
+        : "This is our COMPETITIVE LENS — NOT a restatement of the product & GTM records (those already hold what-we-are / how-we-sell; reference them, never copy them). Its job is to give an agent the CONTEXT to do competitive search & analysis well: how the MARKET is moving (from our battlecards + competitive signals + rivals' themes) and how WE COMPARE. The 'search_focus' section is the most important: POINT at WHERE TO LOOK — which specific product modules/features and which GTM segments/positioning the agent should focus competitive search and analysis on (cite the record fields/modules by name) so it finds the RIGHT rivals and compares on the RIGHT axes. 'competitive_battlegrounds' = the capabilities/segments actually contested; 'our_wedge' = the differentiation that wins, referencing (not restating) the records.",
       "Synthesize the INTERNAL and EXTERNAL signals below into a headline + sections. INTERNAL signals (what our own teams hear — deals, calls) and EXTERNAL signals (public: reviews, launches, pricing) are both evidence; weigh corroboration across them and note where they disagree.",
       `Use these section keys where supported (snake_case): ${suggestedSections}. Always include a 'strategic_implications' section spelling out what this means for product strategy and for GTM strategy. Only assert what the evidence supports; if thin, say so and keep it short.`,
-      input.current?.length ? "REFRESH the existing profile (provided): keep what still holds, update what changed, don't discard human edits wholesale." : "",
+      // Full & current — the user's standard: existence is not completeness.
+      "Make EVERY section FULL and CURRENT. Re-evaluate each against the CURRENT product & GTM records and the latest signals/battlecards, and UPDATE it whenever they've moved — never leave a thin, vague, or stale section just because it already has text." + (input.current?.length ? " You are REFRESHING the existing profile (provided): fold the new evidence into each section and keep what still holds, but don't preserve a stale section just because a human wrote it — improve it." : ""),
     ].filter(Boolean).join("\n");
 
     const userText = [
