@@ -409,9 +409,18 @@ Deno.serve(async (req: Request) => {
       origin: "external" as const,
       // A competitor-scoped source's harvest IS competitor intel: stamp the
       // first-class link (drives battlecard review, per-competitor synthesis,
-      // update alerts) and the competitive domain for the feeds/profiles.
+      // update alerts) and the competitive domain for the feeds/profiles. A
+      // market-lens source's harvest is MARKET intel: stamp domain=market + its
+      // segment (industry/persona from config) so it lands in /market and rolls
+      // up to /signals. (A source is competitor- OR market-scoped, not both.)
       competitor_id: source.competitor_id ?? null,
-      metadata: source.competitor_id ? { domain: "competitive", competitor_id: source.competitor_id, channel: source.label } : null,
+      metadata: source.competitor_id
+        ? { domain: "competitive", competitor_id: source.competitor_id, channel: source.label }
+        : source.market_lens
+          ? { domain: "market", lens: source.market_lens, channel: source.label,
+              industry: (source.config as { industry?: string } | null)?.industry,
+              persona: (source.config as { persona?: string } | null)?.persona }
+          : null,
     }));
     let firstSignalId: string | null = null;
     if (rows.length) {

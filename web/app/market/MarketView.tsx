@@ -16,6 +16,7 @@ import { LiveReply, useAliveReply, streamAgentChat } from "@/components/alive";
 import { Markdown } from "@/components/Markdown";
 import SourceManager from "@/components/SourceManager";
 import TrackingTopics from "@/components/TrackingTopics";
+import MarketSetup from "@/components/MarketSetup";
 
 type Meta = { domain?: string; lens?: string; industry?: string; persona?: string } | null;
 type Signal = { id: string; title: string; why: string | null; conf_label: string | null; conf_level: number | null; observed_at: string | null; origin: string; metadata: Meta };
@@ -48,17 +49,31 @@ export default function MarketView() {
   const [deepBusy, setDeepBusy] = useState(false);
   const reply = useAliveReply();
 
+  // The lenses come from OUR GTM record (industries / personas we actually sell
+  // to), not a generic seed — so the market view reflects who we serve.
+  const [recIndustries, setRecIndustries] = useState<string[]>([]);
+  const [recPersonas, setRecPersonas] = useState<string[]>([]);
+
   const load = useCallback(async () => {
     const { data } = await supabase.from("signals").select("id, title, why, conf_label, conf_level, observed_at, origin, metadata").order("observed_at", { ascending: false, nullsFirst: false });
     setSignals(((data ?? []) as Signal[]).filter((s) => signalDomain(s) === SIGNAL_DOMAIN.market));
     setAgentKey(await fetchAgentKey(supabase));
+    // GTM-record-driven lenses
+    const { data: gtm } = await supabase.from("gtm_records").select("id").order("created_at").limit(1).maybeSingle();
+    if (gtm) {
+      const { data: gf } = await supabase.from("record_fields").select("field_key, value").eq("gtm_record_id", gtm.id).in("field_key", ["industries", "primary_persona", "icp"]);
+      const split = (v?: string | null) => (v ?? "").split(/[,;\n·]+/).map((x) => x.trim()).filter((x) => x && x.length < 40);
+      setRecIndustries(split(gf?.find((f) => f.field_key === "industries")?.value));
+      setRecPersonas([...split(gf?.find((f) => f.field_key === "primary_persona")?.value), ...split(gf?.find((f) => f.field_key === "icp")?.value)]);
+    }
     setLoading(false);
   }, [supabase]);
   useEffect(() => { load(); }, [load]);
 
   const distinct = (k: "industry" | "persona") => Array.from(new Set(signals.map((s) => s.metadata?.[k]).filter((v): v is string => !!v)));
-  const industries = Array.from(new Set([...distinct("industry"), ...INDUSTRY_SEED]));
-  const personas = Array.from(new Set([...distinct("persona"), ...PERSONA_SEED]));
+  // Prefer record-driven lenses; fall back to the generic seed only if the GTM record has none.
+  const industries = Array.from(new Set([...distinct("industry"), ...recIndustries, ...(recIndustries.length ? [] : INDUSTRY_SEED)]));
+  const personas = Array.from(new Set([...distinct("persona"), ...recPersonas, ...(recPersonas.length ? [] : PERSONA_SEED)]));
 
   const feed = signals.filter((s) =>
     (fOrigin === "all" || s.origin === fOrigin) &&
@@ -117,6 +132,8 @@ export default function MarketView() {
 
       {/* Configurable ingestion: connect web-search / market sources (incl. MCP)
           and declare what to watch. Market signals feed BOTH strategy boards. */}
+      {/* Guided, alignment-aware setup — watches keyed to what we actually serve */}
+      <MarketSetup onDone={load} />
       <SourceManager title="Market sources" />
       <TrackingTopics category="market" suggestions={["Category & market-size shifts", "Buyer/persona behavior changes", "Regulatory or platform changes", "Emerging entrants & substitutes"]} />
       <div className="t-sub t-muted" style={{ fontSize: 11.5, margin: "0 0 var(--sp-4)" }}>Market signals flow into <strong>Product strategy</strong> and <strong>GTM strategy</strong> themes — synthesize there to fold them into your strategy.</div>
