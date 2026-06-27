@@ -120,7 +120,10 @@ Deno.serve(async (req: Request) => {
 
     const { data: fields, error: fErr } = await supabase.from("record_fields").select("id, field_key, label, section, value, position").eq(fieldFk, targetId).order("position", { ascending: true });
     if (fErr) throw new Error(`fields lookup failed: ${fErr.message}`);
-    const existing = fields ?? [];
+    // A section can be owned by another surface (e.g. "Messaging" lives on its own
+    // tab with its own Sweep) — never sweep it from here.
+    const excludeSection = (input as { exclude_section?: string }).exclude_section;
+    const existing = (fields ?? []).filter((f) => !excludeSection || f.section !== excludeSection);
     if (existing.length === 0) {
       return json({ proposal_id: null, changes_saved: 0, message: "This record has no fields yet — create it from a template first." });
     }

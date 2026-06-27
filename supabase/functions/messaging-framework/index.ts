@@ -133,13 +133,12 @@ Deno.serve(async (req: Request) => {
       return json({ error: "Your product & GTM records are too sparse to build messaging from. Fill them in (Sweep with AI), then come back." }, 422);
     }
 
-    // ---- existing framework sections (current values) ----
-    const { data: existingTabs } = await supabase.from("gtm_tabs").select("tab_key, body").eq("gtm_record_id", gtmId);
+    // ---- existing framework sections (now record_fields in the "Messaging" section) ----
+    const { data: msgFields } = await supabase.from("record_fields").select("id, field_key, value")
+      .eq("gtm_record_id", gtmId).eq("section", "Messaging");
+    const fieldByKey = new Map((msgFields ?? []).map((f) => [f.field_key, { id: f.id as string, value: (f.value as string | null) ?? "" }]));
     const currentByKey: Record<string, string> = {};
-    for (const t of existingTabs ?? []) {
-      const txt = (t.body as { text?: string } | null)?.text ?? "";
-      if (SECTIONS.some((s) => s.key === t.tab_key)) currentByKey[t.tab_key] = txt;
-    }
+    for (const s of SECTIONS) { const f = fieldByKey.get(s.key); if (f?.value) currentByKey[s.key] = f.value; }
 
     const system = [
       "You build a complete PMA-style MESSAGING & NARRATIVE FRAMEWORK (a 'messaging house' + strategic narrative) for a GTM record. Draft or refresh EVERY section listed so the framework is FULL and COMPLETE — a writer with no prior context could produce on-message content from it.",
@@ -181,11 +180,42 @@ Deno.serve(async (req: Request) => {
     if (message.stop_reason === "max_tokens") throw new Error("The framework build ran out of room before finishing. Try again, or narrow with a focus.");
     const out = JSON.parse(block.text) as { summary: string; sections: { key: string; label: string; proposed_value: string; changed: boolean }[] };
 
-    // Keep only known section keys, preserve framework order, drop empties.
+    // Keep only known sections that actually changed and carry content.
     const byKey = new Map((out.sections ?? []).map((s) => [s.key, s]));
-    const sections = SECTIONS.map((s) => byKey.get(s.key)).filter((s): s is NonNullable<typeof s> => !!s && !!s.proposed_value?.trim());
+    const changed = SECTIONS
+      .map((s) => ({ def: s, out: byKey.get(s.key) }))
+      .filter((x) => x.out && x.out.changed && x.out.proposed_value?.trim());
 
-    return json({ summary: out.summary ?? "", sections });
+    if (changed.length === 0) {
+      return json({ proposal_id: null, changes_saved: 0, message: "Your messaging framework already looks full and on-message — nothing to propose right now." });
+    }
+
+    // ---- persist as ONE proposal + its field changes (the same HITL review queue
+    // the rest of the record uses) — update_field when the section field exists,
+    // add_field (in the "Messaging" section) when it doesn't ----------------------
+    const { data: created, error: pErr } = await supabase.from("proposals").insert({
+      org_id: gtm.org_id, gtm_record_id: gtmId,
+      title: out.summary?.slice(0, 120) || "Messaging framework — full & current",
+      rationale: out.summary || "Swept the messaging framework from the product & GTM records and competitive evidence.",
+      conf_level: 0.7, conf_label: "Medium", proposed_by: "AI messaging",
+    }).select("id").single();
+    if (pErr) throw new Error(`could not create proposal: ${pErr.message}`);
+    const pid = created.id as string;
+
+    // deno-lint-ignore no-explicit-any
+    const rows: any[] = [];
+    for (const c of changed) {
+      const existing = fieldByKey.get(c.def.key);
+      if (existing) {
+        rows.push({ org_id: gtm.org_id, proposal_id: pid, change_kind: "update_field", record_field_id: existing.id, old_value: existing.value, field_key: null, label: null, section: null, proposed_value: c.out!.proposed_value });
+      } else {
+        rows.push({ org_id: gtm.org_id, proposal_id: pid, change_kind: "add_field", record_field_id: null, old_value: null, field_key: c.def.key, label: c.def.label, section: "Messaging", proposed_value: c.out!.proposed_value });
+      }
+    }
+    const { error: cErr } = await supabase.from("proposal_changes").insert(rows);
+    if (cErr) { await supabase.from("proposals").delete().eq("id", pid); throw new Error(`could not save changes: ${cErr.message}`); }
+
+    return json({ proposal_id: pid, changes_saved: rows.length, summary: out.summary ?? "" });
   } catch (e) {
     return json({ error: e instanceof Error ? e.message : String(e) }, 500);
   }

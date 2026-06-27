@@ -30,7 +30,7 @@ function guides(kind: TargetKind) {
   return { sectionBlurb, fieldHint };
 }
 
-export default function SectionedFields({ target }: { target: Target }) {
+export default function SectionedFields({ target, excludeSection }: { target: Target; excludeSection?: string }) {
   const supabase = createClient();
   const [fields, setFields] = useState<Field[]>([]);
   const [loading, setLoading] = useState(true);
@@ -167,7 +167,9 @@ export default function SectionedFields({ target }: { target: Target }) {
   // Filled narrative fields appear in the list; metric fields ALWAYS appear once
   // they exist (their data lives in record_metrics, not in value).
   const isMetric = (f: Field) => f.field_kind === "metric";
-  const filledFields = fields.filter((f) => isMetric(f) || (f.value && f.value.trim()));
+  // Another tab may own a section (e.g. the Messaging tab owns "Messaging") — keep it out here.
+  const inScope = (f: Field) => !excludeSection || (f.section || UNGROUPED) !== excludeSection;
+  const filledFields = fields.filter((f) => inScope(f) && (isMetric(f) || (f.value && f.value.trim())));
   const filledKeys = new Set(filledFields.map((f) => f.field_key));
 
   // group filled fields by section, preserving template order then first-seen

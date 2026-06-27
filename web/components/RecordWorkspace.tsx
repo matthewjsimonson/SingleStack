@@ -34,7 +34,7 @@ const SWEEP_PHASES = [
 ];
 const SWEEP_EST_S = 45; // typical full sweep; the bar eases and waits if it runs long
 
-export default function RecordWorkspace({ target, recordName }: { target: Target; recordName?: string }) {
+export default function RecordWorkspace({ target, recordName, excludeSection }: { target: Target; recordName?: string; excludeSection?: string }) {
   const supabase = createClient();
   const fk = fkCol(target);
 
@@ -96,6 +96,7 @@ export default function RecordWorkspace({ target, recordName }: { target: Target
     setImporting(true); setError(null); setImpNote(null);
     try {
       const body: Record<string, unknown> = target.kind === "product" ? { product_id: target.id } : { gtm_record_id: target.id };
+      if (excludeSection) body.exclude_section = excludeSection;
       if (src.mode === "url" && src.url.trim()) body.url = src.url.trim();
       else if (src.content.trim()) body.content = src.content.trim();
       if (src.guidance.trim()) body.guidance = src.guidance.trim();
@@ -181,7 +182,7 @@ export default function RecordWorkspace({ target, recordName }: { target: Target
         : <RecordAdvisors target={target} recordName={recordName} agents={agents} pendingByName={pendingByName} onRan={refresh} openReviewNonce={reviewNonce} />}
 
       {/* Structured content */}
-      <SectionedFields key={fieldsNonce} target={target} />
+      <SectionedFields key={fieldsNonce} target={target} excludeSection={excludeSection} />
 
       {/* Pending proposals live in the Advisors' side drawer (the "N waiting" pill).
           Only resolved proposals are logged here, as history. */}

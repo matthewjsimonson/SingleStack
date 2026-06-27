@@ -47,12 +47,12 @@ export default function GtmView({ gtmId }: { gtmId: string }) {
       <h1 className="t-page" style={{ marginBottom: "var(--sp-6)" }}>{gtm.name}</h1>
 
       <SubTabs<typeof view>
-        tabs={[{ key: "workspace", label: "Workspace" }, { key: "messaging", label: "Messaging" }]}
+        tabs={[{ key: "workspace", label: "Strategy & execution" }, { key: "messaging", label: "Messaging" }]}
         active={view} onChange={setView}
       />
 
-      {view === "workspace" && <RecordWorkspace target={{ kind: "gtm", id: gtmId }} recordName={gtm.name} />}
-      {view === "messaging" && <MessagingFramework gtmId={gtmId} />}
+      {view === "workspace" && <RecordWorkspace target={{ kind: "gtm", id: gtmId }} recordName={gtm.name} excludeSection="Messaging" />}
+      {view === "messaging" && <MessagingFramework gtmId={gtmId} recordName={gtm.name} />}
     </div>
   );
 }

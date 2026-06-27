@@ -1,44 +1,64 @@
 "use client";
 
-// MessagingFramework — the GTM record's messaging & narrative framework: a guided
-// PMA "messaging house" + strategic narrative (web/lib/messagingFramework.ts).
-// Each section is a gtm_tabs row. You can edit a section by hand, or "Build with AI"
-// to draft/complete the WHOLE framework grounded in your product + GTM records and
-// competitive — drafts are reviewed and edited before they land. This is the
-// upstream source of truth that content & campaigns derive from.
+// MessagingFramework — the GTM record's messaging & narrative framework, now FIRST
+// CLASS: each section is a record_field in the "Messaging" section, so it gets the
+// full record experience — Sweep (proposes into the review queue), hand-edit (the
+// human-ratify channel), and the SAME officer advisors + Propose + review queue the
+// rest of the record uses (RecordAdvisors). Guided as a PMA messaging house +
+// strategic narrative (lib/messagingFramework.ts). Upstream of content & campaigns.
 import { useEffect, useState, useCallback } from "react";
 import { createClient } from "@/lib/supabase/client";
-import { getOrgId } from "@/lib/org";
 import { Section, Banner, Modal } from "@/components/ui";
 import { Markdown } from "@/components/Markdown";
-import { MESSAGING_FRAMEWORK, FRAMEWORK_KEYS, type FrameworkSection } from "@/lib/messagingFramework";
+import RecordAdvisors from "@/components/RecordAdvisors";
+import { MESSAGING_FRAMEWORK, type FrameworkSection } from "@/lib/messagingFramework";
 
-type Tab = { id: string; tab_key: string; label: string; body: { text?: string } | null };
-type Draft = { key: string; label: string; proposed_value: string; changed: boolean };
+type Field = { id: string; field_key: string; label: string; value: string | null };
+type Agent = { id: string; key: string; name: string; role: string | null };
 
-export default function MessagingFramework({ gtmId }: { gtmId: string }) {
+export default function MessagingFramework({ gtmId, recordName }: { gtmId: string; recordName?: string }) {
   const supabase = createClient();
-  const [tabs, setTabs] = useState<Tab[]>([]);
+  const [fields, setFields] = useState<Field[]>([]);
+  const [agents, setAgents] = useState<Agent[]>([]);
+  const [proposals, setProposals] = useState<{ proposed_by: string; status: string }[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [reviewNonce, setReviewNonce] = useState(0); // bump to open the review drawer
 
   const [editingKey, setEditingKey] = useState<string | null>(null);
   const [draft, setDraft] = useState("");
   const [openGuidance, setOpenGuidance] = useState<Set<string>>(new Set());
 
-  // Sweep with AI — one optional source + Focus, sweeps the WHOLE framework (mirrors the record Sweep).
+  // Sweep with AI — one optional source + Focus, proposes the WHOLE framework into the review queue.
   const [swp, setSwp] = useState(false);
   const [src, setSrc] = useState({ mode: "paste" as "paste" | "url", content: "", url: "", guidance: "" });
   const [building, setBuilding] = useState(false);
   const [progress, setProgress] = useState(0);
   const [elapsed, setElapsed] = useState(0);
-  // review
-  const [drafts, setDrafts] = useState<Draft[] | null>(null);
-  const [summary, setSummary] = useState("");
-  const [edits, setEdits] = useState<Record<string, string>>({});
-  const [include, setInclude] = useState<Set<string>>(new Set());
-  const [applying, setApplying] = useState(false);
   const [notice, setNotice] = useState<string | null>(null);
+
+  const load = useCallback(async () => {
+    const sel = () => supabase.from("record_fields").select("id, field_key, label, value").eq("gtm_record_id", gtmId).eq("section", "Messaging").order("position");
+    const [{ data: ff }, { data: ags }, { data: props }] = await Promise.all([
+      sel(),
+      supabase.from("agents").select("id, key, name, role").eq("is_active", true).order("name"),
+      supabase.from("proposals").select("proposed_by, status").eq("gtm_record_id", gtmId),
+    ]);
+    // Ensure every framework section exists as a field (create empty rows for any missing).
+    const have = new Set((ff ?? []).map((f) => f.field_key));
+    const missing = MESSAGING_FRAMEWORK.filter((s) => !have.has(s.key));
+    if (missing.length) {
+      await supabase.rpc("human_add_fields", { p_rows: missing.map((s, i) => ({ gtm_record_id: gtmId, field_key: s.key, label: s.label, value: "", section: "Messaging", position: (ff?.length ?? 0) + i, field_kind: "narrative" })) });
+      const { data: ff2 } = await sel();
+      setFields(ff2 ?? []);
+    } else {
+      setFields(ff ?? []);
+    }
+    setAgents(ags ?? []);
+    setProposals(props ?? []);
+    setLoading(false);
+  }, [supabase, gtmId]);
+  useEffect(() => { load(); }, [load]);
 
   // Estimated progress while the sweep runs (client-side; the call returns once).
   useEffect(() => {
@@ -52,41 +72,21 @@ export default function MessagingFramework({ gtmId }: { gtmId: string }) {
     return () => clearInterval(id);
   }, [building]);
 
-  const load = useCallback(async () => {
-    const { data } = await supabase.from("gtm_tabs").select("id, tab_key, label, body").eq("gtm_record_id", gtmId).order("created_at");
-    setTabs(data ?? []);
-    setLoading(false);
-  }, [supabase, gtmId]);
-  useEffect(() => { load(); }, [load]);
-
-  const valueFor = (k: string) => tabs.find((t) => t.tab_key === k)?.body?.text ?? "";
-  const custom = tabs.filter((t) => !FRAMEWORK_KEYS.has(t.tab_key));
-  const complete = MESSAGING_FRAMEWORK.filter((s) => valueFor(s.key).trim()).length;
-
-  async function upsertSection(key: string, label: string, text: string) {
-    const existing = tabs.find((t) => t.tab_key === key);
-    if (existing) {
-      const { error } = await supabase.from("gtm_tabs").update({ body: { text } }).eq("id", existing.id);
-      if (error) throw error;
-    } else {
-      const orgId = await getOrgId();
-      if (!orgId) throw new Error("Could not resolve your organization.");
-      const { error } = await supabase.from("gtm_tabs").insert({ org_id: orgId, gtm_record_id: gtmId, tab_key: key, label, body: { text } });
-      if (error) throw error;
-    }
-  }
+  const fieldFor = (k: string) => fields.find((f) => f.field_key === k);
+  const complete = MESSAGING_FRAMEWORK.filter((s) => (fieldFor(s.key)?.value ?? "").trim()).length;
+  const pending = proposals.filter((p) => p.status === "pending");
+  const pendingByName = pending.reduce<Record<string, number>>((a, p) => { a[p.proposed_by] = (a[p.proposed_by] ?? 0) + 1; return a; }, {});
+  const refresh = useCallback(() => { load(); }, [load]);
 
   async function saveEdit(s: FrameworkSection) {
+    const f = fieldFor(s.key);
+    if (!f) return;
     setError(null);
-    try { await upsertSection(s.key, s.label, draft); setEditingKey(null); await load(); }
-    catch (e) { setError(e instanceof Error ? e.message : "Could not save."); }
-  }
-
-  // Delete a custom (non-framework) section — these aren't part of the framework.
-  async function deleteSection(ids: string[]) {
-    setError(null);
-    try { const { error } = await supabase.from("gtm_tabs").delete().in("id", ids); if (error) throw error; await load(); }
-    catch (e) { setError(e instanceof Error ? e.message : "Could not delete."); }
+    try {
+      const { error } = await supabase.rpc("human_set_field_value", { p_field: f.id, p_value: draft });
+      if (error) throw error;
+      setEditingKey(null); await load();
+    } catch (e) { setError(e instanceof Error ? e.message : "Could not save."); }
   }
 
   async function build() {
@@ -99,31 +99,12 @@ export default function MessagingFramework({ gtmId }: { gtmId: string }) {
       const { data, error } = await supabase.functions.invoke("messaging-framework", { body: b });
       if (error) throw error;
       if (data?.error) throw new Error(data.error);
-      const all = (data?.sections ?? []) as Draft[];
-      const changed = all.filter((d) => d.changed && d.proposed_value?.trim());
-      if (changed.length === 0) { setNotice("Your framework already looks full and on-message — nothing to change right now."); return; }
-      setSwp(false);
-      setSrc({ mode: src.mode, content: "", url: "", guidance: "" });
-      setDrafts(changed);
-      setSummary(data?.summary ?? "");
-      setEdits(Object.fromEntries(changed.map((d) => [d.key, d.proposed_value])));
-      setInclude(new Set(changed.map((d) => d.key)));
+      if (!data?.changes_saved) { setNotice(data?.message || "Your framework already looks full and on-message — nothing to propose right now."); return; }
+      setSwp(false); setSrc({ mode: src.mode, content: "", url: "", guidance: "" });
+      await load();
+      setReviewNonce((n) => n + 1); // open the proposal in the review drawer
     } catch (e) { setError(e instanceof Error ? e.message : "Sweep failed."); }
     finally { setBuilding(false); }
-  }
-
-  async function applyDrafts() {
-    if (!drafts) return;
-    setApplying(true); setError(null);
-    try {
-      for (const d of drafts) {
-        if (!include.has(d.key)) continue;
-        await upsertSection(d.key, d.label, edits[d.key] ?? d.proposed_value);
-      }
-      setDrafts(null); await load();
-      setNotice("Messaging framework updated.");
-    } catch (e) { setError(e instanceof Error ? e.message : "Could not apply."); }
-    finally { setApplying(false); }
   }
 
   if (loading) return <div className="t-sub t-muted">Loading…</div>;
@@ -132,21 +113,24 @@ export default function MessagingFramework({ gtmId }: { gtmId: string }) {
     <Section label="Messaging framework">
       <Banner>{error}</Banner>
 
-      {/* Header: completeness + AI build */}
+      {/* Header: completeness + Sweep */}
       <div className="card card-pad row-between" style={{ marginBottom: "var(--sp-4)", gap: 12, flexWrap: "wrap" }}>
         <div style={{ minWidth: 0 }}>
-          <div style={{ fontWeight: 640, fontSize: 13.5 }}>Your messaging & narrative framework <span className="t-mono-xs t-muted" style={{ fontWeight: 400 }}>— {complete}/{MESSAGING_FRAMEWORK.length} complete</span></div>
-          <div className="t-sub t-muted" style={{ fontSize: 12.5, marginTop: 2 }}>The PMA-style messaging house + strategic narrative — the upstream source of truth your content &amp; campaigns derive from. Edit a section by hand, or sweep the whole thing with AI from your records.</div>
+          <div style={{ fontWeight: 640, fontSize: 13.5 }}>Your messaging &amp; narrative framework <span className="t-mono-xs t-muted" style={{ fontWeight: 400 }}>— {complete}/{MESSAGING_FRAMEWORK.length} complete</span></div>
+          <div className="t-sub t-muted" style={{ fontSize: 12.5, marginTop: 2 }}>The PMA-style messaging house + strategic narrative — the upstream source of truth your content &amp; campaigns derive from. Edit a section by hand, sweep the whole thing with AI, or have your officers propose changes — every change lands in your review queue.</div>
         </div>
         <button className="btn btn-sm" onClick={() => { setNotice(null); setSwp(true); }} disabled={building} style={{ background: "var(--ac)", color: "#fff", flexShrink: 0 }}>✦ Sweep with AI</button>
       </div>
 
       {notice && <div className="banner" style={{ marginBottom: "var(--sp-3)" }}>{notice}</div>}
 
+      {/* The same officer advisors + Propose + review queue as the record */}
+      <RecordAdvisors target={{ kind: "gtm", id: gtmId }} recordName={recordName} agents={agents} pendingByName={pendingByName} onRan={refresh} openReviewNonce={reviewNonce} />
+
       {/* Framework sections */}
       <div className="stack-3">
         {MESSAGING_FRAMEWORK.map((s) => {
-          const val = valueFor(s.key);
+          const val = fieldFor(s.key)?.value ?? "";
           const guideOpen = openGuidance.has(s.key);
           return (
             <div key={s.key} className="card card-pad">
@@ -176,53 +160,16 @@ export default function MessagingFramework({ gtmId }: { gtmId: string }) {
               ) : val.trim() ? (
                 <Markdown className="t-body" style={{ lineHeight: 1.6 }} text={val} />
               ) : (
-                <div className="t-sub t-muted" style={{ fontSize: 12.5 }}>Empty — open the guide, write it by hand, or build the framework with AI.</div>
+                <div className="t-sub t-muted" style={{ fontSize: 12.5 }}>Empty — open the guide, write it by hand, or sweep the framework with AI.</div>
               )}
             </div>
           );
         })}
       </div>
 
-      {/* Custom (non-framework) sections — not part of the framework; deletable */}
-      {custom.length > 0 && (
-        <div style={{ marginTop: "var(--sp-5)" }}>
-          <div className="row-between" style={{ alignItems: "center", marginBottom: 8 }}>
-            <div>
-              <div className="t-label">Other sections</div>
-              <div className="t-sub t-muted" style={{ fontSize: 11.5 }}>Not part of the messaging framework — left over from earlier. Delete what you don&apos;t need.</div>
-            </div>
-            <button className="btn btn-secondary btn-sm" onClick={() => { if (confirm(`Delete all ${custom.length} other section${custom.length === 1 ? "" : "s"}? This can't be undone.`)) deleteSection(custom.map((t) => t.id)); }} style={{ color: "var(--rd-text, #b42318)" }}>Remove all</button>
-          </div>
-          <div className="stack-3">
-            {custom.map((t) => (
-              <div key={t.id} className="card card-pad">
-                <div className="row-between" style={{ alignItems: "baseline", marginBottom: 6 }}>
-                  <span className="t-label">{t.label}</span>
-                  <span className="row gap-2">
-                    {editingKey !== t.tab_key && <button className="btn btn-secondary btn-sm" onClick={() => { setEditingKey(t.tab_key); setDraft(t.body?.text ?? ""); }}>Edit</button>}
-                    <button className="btn btn-secondary btn-sm" onClick={() => { if (confirm(`Delete "${t.label}"? This can't be undone.`)) deleteSection([t.id]); }} style={{ color: "var(--rd-text, #b42318)" }}>Delete</button>
-                  </span>
-                </div>
-                {editingKey === t.tab_key ? (
-                  <div>
-                    <textarea className="textarea" rows={5} autoFocus value={draft} onChange={(e) => setDraft(e.target.value)} style={{ marginBottom: 8 }} />
-                    <div className="row gap-2">
-                      <button className="btn btn-sm" onClick={async () => { setError(null); try { await upsertSection(t.tab_key, t.label, draft); setEditingKey(null); await load(); } catch (e) { setError(e instanceof Error ? e.message : "Could not save."); } }}>Save</button>
-                      <button className="btn btn-secondary btn-sm" onClick={() => setEditingKey(null)}>Cancel</button>
-                    </div>
-                  </div>
-                ) : t.body?.text?.trim()
-                  ? <Markdown className="t-body" style={{ lineHeight: 1.6 }} text={t.body.text} />
-                  : <div className="t-sub t-muted">Empty.</div>}
-              </div>
-            ))}
-          </div>
-        </div>
-      )}
-
-      {/* Sweep with AI — one optional source + Focus, sweeps the whole framework */}
+      {/* Sweep with AI — one optional source + Focus, proposes the whole framework */}
       <Modal open={swp} onClose={() => setSwp(false)} title="Sweep the messaging framework with AI" width={620}>
-        <div className="t-sub t-muted" style={{ fontSize: 12.5, marginBottom: 12 }}>Re-evaluates <strong>every</strong> section and proposes a full, on-message framework — positioning, narrative, value prop, pillars, persona messaging, tone, proof, elevator pitch — grounded in your product &amp; GTM records and competitive evidence. Add an optional source (e.g. a messaging brief) for extra grounding. Drafts land in a <strong>review</strong> step; nothing is saved until you apply.</div>
+        <div className="t-sub t-muted" style={{ fontSize: 12.5, marginBottom: 12 }}>Re-evaluates <strong>every</strong> section and proposes a full, on-message framework — positioning, narrative, value prop, pillars, persona messaging, tone, proof, elevator pitch — grounded in your product &amp; GTM records and competitive evidence. Add an optional source (e.g. a messaging brief) for extra grounding. It lands in your <strong>review queue</strong>; nothing is applied until you accept it.</div>
         <div className="t-label" style={{ marginBottom: 6 }}>Optional source <span className="t-muted" style={{ fontWeight: 400, textTransform: "none", letterSpacing: 0 }}>— extra grounding; not required</span></div>
         <div className="row gap-2" style={{ marginBottom: 10 }}>
           <button type="button" className={`btn btn-sm ${src.mode === "paste" ? "" : "btn-secondary"}`} onClick={() => setSrc({ ...src, mode: "paste" })}>Paste text</button>
@@ -246,28 +193,8 @@ export default function MessagingFramework({ gtmId }: { gtmId: string }) {
         )}
 
         <div className="row gap-2" style={{ marginTop: 12 }}>
-          <button className="btn" disabled={building} onClick={build}>{building ? "Sweeping…" : "✦ Sweep the framework → review"}</button>
+          <button className="btn" disabled={building} onClick={build}>{building ? "Sweeping…" : "✦ Sweep the framework → review queue"}</button>
           <button className="btn btn-secondary" disabled={building} onClick={() => setSwp(false)}>Close</button>
-        </div>
-      </Modal>
-
-      {/* AI review — edit before it lands */}
-      <Modal open={drafts !== null} onClose={() => setDrafts(null)} title="Review the AI-swept framework" width={760}>
-        <div className="t-sub t-muted" style={{ fontSize: 12.5, marginBottom: 12 }}>{summary || "Drafted from your product & GTM records and competitive evidence."} Edit anything before it lands; uncheck a section to skip it. Nothing is saved until you apply.</div>
-        <div className="stack-3" style={{ maxHeight: "56vh", overflowY: "auto", marginBottom: 12 }}>
-          {(drafts ?? []).map((d) => (
-            <div key={d.key} className="card card-pad" style={{ borderLeft: include.has(d.key) ? "3px solid var(--ac)" : "3px solid var(--border)" }}>
-              <label className="row gap-2" style={{ alignItems: "center", marginBottom: 8, cursor: "pointer" }}>
-                <input type="checkbox" checked={include.has(d.key)} onChange={() => setInclude((p) => { const n = new Set(p); n.has(d.key) ? n.delete(d.key) : n.add(d.key); return n; })} />
-                <span className="t-label">{d.label}</span>
-              </label>
-              <textarea className="textarea" rows={6} value={edits[d.key] ?? d.proposed_value} onChange={(e) => setEdits((p) => ({ ...p, [d.key]: e.target.value }))} disabled={!include.has(d.key)} />
-            </div>
-          ))}
-        </div>
-        <div className="row gap-2">
-          <button className="btn" onClick={applyDrafts} disabled={applying || include.size === 0}>{applying ? "Applying…" : `Apply ${include.size} section${include.size === 1 ? "" : "s"}`}</button>
-          <button className="btn btn-secondary" onClick={() => setDrafts(null)}>Cancel</button>
         </div>
       </Modal>
     </Section>
