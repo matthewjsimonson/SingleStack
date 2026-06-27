@@ -106,9 +106,9 @@ export default function MessagingFramework({ gtmId }: { gtmId: string }) {
       <div className="card card-pad row-between" style={{ marginBottom: "var(--sp-4)", gap: 12, flexWrap: "wrap" }}>
         <div style={{ minWidth: 0 }}>
           <div style={{ fontWeight: 640, fontSize: 13.5 }}>Your messaging & narrative framework <span className="t-mono-xs t-muted" style={{ fontWeight: 400 }}>— {complete}/{MESSAGING_FRAMEWORK.length} complete</span></div>
-          <div className="t-sub t-muted" style={{ fontSize: 12.5, marginTop: 2 }}>The PMA-style messaging house + strategic narrative — the upstream source of truth your content &amp; campaigns derive from. Edit a section by hand, or build the whole thing with AI from your records.</div>
+          <div className="t-sub t-muted" style={{ fontSize: 12.5, marginTop: 2 }}>The PMA-style messaging house + strategic narrative — the upstream source of truth your content &amp; campaigns derive from. Edit a section by hand, or sweep the whole thing with AI from your records.</div>
         </div>
-        <button className="btn btn-sm" onClick={build} disabled={building} style={{ background: "var(--ac)", color: "#fff", flexShrink: 0 }}>{building ? "Building…" : "✦ Build with AI"}</button>
+        <button className="btn btn-sm" onClick={build} disabled={building} style={{ background: "var(--ac)", color: "#fff", flexShrink: 0 }}>{building ? "Sweeping…" : "✦ Sweep with AI"}</button>
       </div>
 
       {notice && <div className="banner" style={{ marginBottom: "var(--sp-3)" }}>{notice}</div>}
@@ -182,7 +182,7 @@ export default function MessagingFramework({ gtmId }: { gtmId: string }) {
       )}
 
       {/* AI review — edit before it lands */}
-      <Modal open={drafts !== null} onClose={() => setDrafts(null)} title="Review the AI-built framework" width={760}>
+      <Modal open={drafts !== null} onClose={() => setDrafts(null)} title="Review the AI-swept framework" width={760}>
         <div className="t-sub t-muted" style={{ fontSize: 12.5, marginBottom: 12 }}>{summary || "Drafted from your product & GTM records and competitive evidence."} Edit anything before it lands; uncheck a section to skip it. Nothing is saved until you apply.</div>
         <div className="stack-3" style={{ maxHeight: "56vh", overflowY: "auto", marginBottom: 12 }}>
           {(drafts ?? []).map((d) => (
