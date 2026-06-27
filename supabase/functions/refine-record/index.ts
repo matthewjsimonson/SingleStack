@@ -80,6 +80,12 @@ Deno.serve(async (req: Request) => {
     const { data: fields } = await supabase.from("record_fields").select("field_key, label, section, value")
       .eq(isProduct ? "product_id" : "gtm_record_id", target.id).order("position");
     const fieldText = (fields ?? []).map((f) => `[${f.section ?? "Details"}] ${f.field_key} · ${f.label}: ${f.value ?? "(empty)"}`).join("\n");
+    // Refinement updates fields that ALREADY HOLD content — the editable set is the
+    // FILLED fields of THIS record. This is the hard boundary that keeps product
+    // refinement on the product record and GTM on the GTM record (a record only
+    // owns its own fields), and keeps "refine" a true-update, not field invention.
+    const editable = (fields ?? []).filter((f) => (f.value ?? "").trim());
+    const editableText = editable.map((f) => `[${f.section ?? "Details"}] ${f.field_key} · ${f.label}`).join("\n");
 
     // For a PRODUCT record, the real surface area is its Modules → Features — read
     // them so refinements are grounded in what the product actually does, not just
@@ -111,10 +117,10 @@ Deno.serve(async (req: Request) => {
     const intText = (int ?? []).map((s) => `(${s.conf_label ?? "?"}) ${s.title}${s.why ? " — " + s.why : ""}`).join("\n");
 
     const system = [
-      `You are refining the ${isProduct ? "PRODUCT" : "GTM"} record "${rec.data.name}" in conversation with its owner. You have the full record${isProduct ? " (including its modules & features)" : ""}, the org's active intelligence themes, and recent external (marketplace) + internal (company) signals.`,
-      "Your job is to drive this record toward FULL, COMPLETE, and ACCURATE: (1) surface where it's stale, vague, or contradicted by what's happening; AND (2) surface the most important EMPTY or thin fields and propose grounded values to COMPLETE the record — a blank field marked '(empty)' is a gap to fill, not something to leave. Every suggestion carries a rationale citing the theme/signal (or the user's own words) that motivates it. Honest and conservative: never invent market facts beyond the provided intelligence; if a field genuinely can't be grounded yet, say so rather than guess.",
-      "Field discipline (so the record stays clean): for ANY field that already exists in THE RECORD list, ALWAYS reuse its EXACT field_key, label, and section — never mint a near-duplicate key. Only create a new snake_case key when nothing in the record fits, and give it the right section. proposed_value = the full new text of the field (not a diff); when updating, preserve what's still true and improve from there.",
-      "Conversational rules: tight replies (2-5 sentences) — discuss, then suggest. Attach suggestions ONLY when concrete (suggestions: [] otherwise). Let the user steer — answer what they ask; otherwise volunteer the highest-value gap or staleness first.",
+      `You are refining the ${isProduct ? "PRODUCT" : "GTM"} record "${rec.data.name}" with its owner. ${isProduct ? "This record describes what the product IS and how it's built — overview, capabilities, technical, product strategy. Market positioning, messaging, differentiation, competitive landscape, buyer/ICP, GTM motion and pricing live on the GTM record — NEVER propose those here." : "This record describes how the product is SOLD — positioning, messaging, differentiation, buyer/ICP, GTM motion, pricing. What the product is and how it's built lives on the PRODUCT record — NEVER propose those here."} You also have the org's active intelligence themes and recent external (marketplace) + internal (company) signals as grounding.`,
+      "SCOPE — refinement improves fields that ALREADY HOLD content. Propose changes ONLY to the EDITABLE FIELDS listed below (the existing, filled fields of THIS record), using each field's EXACT field_key, label, and section. Do NOT invent new fields, do NOT propose fields shown '(empty)', and do NOT propose anything that belongs on the other record. (Filling blank fields and adding new ones is initial setup/import, not refinement.)",
+      "A refinement is a TRUE UPDATE: take the field's CURRENT value, fold in the additional/new information (from the signals or what the owner tells you), and write ONE clean, current, and COMPLETE replacement — preserve everything still true, integrate what's new, drop nothing of value, and never merely append or restate. proposed_value = that full new field text. If a field is already clean, current, and complete, leave it alone and say so. Every suggestion carries a rationale citing the theme/signal (or the owner's words) that motivates it; never invent facts beyond the provided intelligence.",
+      "Conversational rules: tight replies (2-5 sentences) — discuss, then suggest. Attach suggestions ONLY when you have a concrete true-update (suggestions: [] otherwise). Let the user steer — answer what they ask; otherwise lead with the filled field whose content is most stale or incomplete vs the intelligence.",
     ].join("\n\n");
 
     const convo = transcript.map((t) => ({ role: t.role === "a" ? "user" as const : "assistant" as const, content: t.text }));
@@ -127,12 +133,15 @@ Deno.serve(async (req: Request) => {
       system: [{ type: "text", text: system, cache_control: { type: "ephemeral" } }],
       messages: [
         { role: "user", content: [
-          `THE RECORD:\n${fieldText || "(no fields yet)"}`,
+          `THE RECORD (for context):\n${fieldText || "(no fields yet)"}`,
+          editableText
+            ? `EDITABLE FIELDS — propose true-updates ONLY to these (existing & filled on this record):\n${editableText}`
+            : "EDITABLE FIELDS: none — this record has no filled fields yet, so there's nothing to refine. Tell the owner to populate it via setup/import first.",
           modulesText ? `MODULES & FEATURES (what the product actually does):\n${modulesText}` : "",
           themeText ? `ACTIVE INTELLIGENCE THEMES:\n${themeText}` : "",
           extText ? `RECENT MARKETPLACE SIGNALS (external):\n${extText}` : "",
           intText ? `RECENT COMPANY SIGNALS (internal):\n${intText}` : "",
-          "Open the conversation: the single most important refinement this record needs right now, given the intelligence — or an honest 'this record holds up' if it does.",
+          "Open the conversation: the single most important TRUE-UPDATE among the editable (filled) fields, given the intelligence — or an honest 'this record holds up' if every filled field is already clean, current, and complete.",
         ].filter(Boolean).join("\n\n") },
         ...convo,
       ],

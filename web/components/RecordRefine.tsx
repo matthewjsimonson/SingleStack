@@ -55,7 +55,11 @@ export default function RecordRefine({ target, recordName, onApplied, onClose }:
     setBusy(true); setError(null);
     try {
       const data = await invoke(history.map((t) => ({ role: t.role, text: t.text })));
-      setChat([...history, { role: "q", text: data.reply, suggestions: (data.suggestions ?? []).map((s) => ({ ...s })) }]);
+      // Refinement = true-update of an existing FILLED field of THIS record. Keep
+      // only suggestions that target one — the hard guarantee that product refine
+      // stays on the product record (and GTM on GTM), and never invents a field.
+      const valid = (data.suggestions ?? []).filter((s) => fields.some((f) => f.field_key === s.field_key && (f.value ?? "").trim()));
+      setChat([...history, { role: "q", text: data.reply, suggestions: valid.map((s) => ({ ...s })) }]);
     } catch (e) { setError(e instanceof Error ? e.message : "The refiner stalled."); }
     finally { setBusy(false); }
   }
