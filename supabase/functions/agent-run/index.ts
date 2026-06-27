@@ -23,6 +23,7 @@
 import Anthropic from "npm:@anthropic-ai/sdk@0.69.0";
 import { createClient, type SupabaseClient } from "npm:@supabase/supabase-js@2";
 import { resolveModelPolicy } from "../_shared/ai_policy.ts";
+import { FIELD_WRITING_RULES } from "../_shared/field_writing.ts";
 
 const DEFAULT_MODEL = "claude-opus-4-8";
 const MAX_STEPS = 8; // bounded agent loop — stability over open-endedness
@@ -306,6 +307,7 @@ Deno.serve(async (req: Request) => {
     canPropose
       ? "When you identify a concrete improvement to the record you're grounded in, draft it with propose_change — it goes to the record's review queue for the human to accept; you never apply changes yourself. Propose only when the operator wants a change or you've found a clear, well-grounded one; otherwise just answer."
       : "You are in ADVISORY mode — no record is open, so you cannot and should not propose changes. Answer the question directly and usefully from your cornerstone expertise and the grounding tools. Do NOT hunt for a product/GTM record, do NOT try to find an id to act on, and do NOT apologize for what you can't do or offer to open a record. If a change would help, describe it in plain language; the operator can open the relevant record and ask you to draft it there.",
+    canPropose ? FIELD_WRITING_RULES : "",
     "",
     "YOUR CORNERSTONE SKILLS — your always-on lens (titles only; load a full playbook with read_skill(skill_key) before leaning on it):",
     skillCatalog,

@@ -24,6 +24,7 @@
 import Anthropic from "npm:@anthropic-ai/sdk@0.69.0";
 import { createClient, type SupabaseClient } from "npm:@supabase/supabase-js@2";
 import { resolveModelPolicy } from "../_shared/ai_policy.ts";
+import { FIELD_WRITING_RULES } from "../_shared/field_writing.ts";
 
 const MODEL = "claude-opus-4-8";
 const PRICING: Record<string, { input: number; output: number }> = {
@@ -164,6 +165,7 @@ Deno.serve(async (req: Request) => {
         `\nTHE SKILL FOR THIS TASK — apply it:\n## ${childSkill.name}\n${childSkill.instructions ?? ""}`,
         step.instruction ? `\nSTEP INSTRUCTION: ${step.instruction}` : "",
         "\nGATE CONTRACT (non-negotiable output rules): you are turning RATIFIED battlecard items into competitive copy — a battlecard summary, a positioning angle (talk_track), and objection/counter responses. Every claim must trace to a ratified item or the GTM record — introduce nothing new. Objection responses address the [objection] items directly. Pitch it for HOWEVER this org goes to market — read the GTM record's motion and write copy usable in that motion (an in-product comparison, a landing page, a sales conversation, a partner brief — whatever fits); make NO assumption that there is a sales rep. Keep it tight, confident, and usable verbatim. rationale = one paragraph on how you used the facts; conf_level 0..1.",
+        "\n" + FIELD_WRITING_RULES,
       ].filter(Boolean).join("\n"),
       messages: [{ role: "user", content: prompt }],
       output_config: { effort: pol.effort, format: { type: "json_schema", schema: SCHEMA } },

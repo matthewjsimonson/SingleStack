@@ -22,6 +22,7 @@
 import Anthropic from "npm:@anthropic-ai/sdk@0.69.0";
 import { createClient, type SupabaseClient } from "npm:@supabase/supabase-js@2";
 import { resolveModelPolicy } from "../_shared/ai_policy.ts";
+import { FIELD_WRITING_RULES } from "../_shared/field_writing.ts";
 const DEFAULT_CLAUDE_MODEL = "claude-opus-4-8";
 const DEFAULT_TOP_K = 6;
 
@@ -244,6 +245,7 @@ Deno.serve(async (req: Request) => {
       "emit an `add_field` change with a snake_case `field_key` and a human `label`.",
       "Only propose changes you can justify from the record or the intelligence.",
       "`conf_level` is 0..1.",
+      FIELD_WRITING_RULES,
       skillsBlock,
     ].join("\n");
 
