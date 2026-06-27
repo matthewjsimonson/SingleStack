@@ -143,7 +143,7 @@ export default function SkillTailorChat({ skillId, skillName, onApplied, onClose
         </div>
 
         <form onSubmit={send} style={{ padding: "12px 20px", borderTop: "1px solid var(--border)" }} className="row gap-2">
-          <input className="input" style={{ flex: 1 }} value={answer} onChange={(e) => setAnswer(e.target.value)} placeholder="Steer the tailoring — e.g. 'lean into our PLG motion' or 'tighten the procedure'…" disabled={busy} />
+          <input className="input" style={{ flex: 1 }} value={answer} onChange={(e) => setAnswer(e.target.value)} placeholder="Steer the tailoring — e.g. 'fit it to how we go to market' or 'tighten the procedure'…" disabled={busy} />
           <button className="btn" type="submit" disabled={busy || !answer.trim()}>Send</button>
         </form>
       </aside>
