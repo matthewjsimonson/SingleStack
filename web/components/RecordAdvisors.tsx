@@ -4,7 +4,7 @@
 // a Product record is advised by the CPO + Chief Engineering agents; a GTM record
 // by the CRO + CCO. You can ASK each officer (a context-grounded chat), and run a
 // single JOINT PROPOSE where the pair draft one change to the record together.
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { EXEC_BY_KEY, type Exec } from "@/lib/team";
 import AgentDrawer, { type AgentContext } from "@/components/AgentDrawer";
 import ProposeDrawer from "@/components/ProposeDrawer";
@@ -18,16 +18,20 @@ const AREA_TEAM: Record<Target["kind"], string[]> = { product: ["cpo", "ceng"], 
 function initials(name: string) { return name.replace(/[^a-zA-Z ]/g, "").split(" ").filter(Boolean).slice(0, 2).map((w) => w[0]).join("").toUpperCase() || "AI"; }
 
 export default function RecordAdvisors({
-  target, recordName, agents, pendingByName, onRan,
+  target, recordName, agents, pendingByName, onRan, openReviewNonce,
 }: {
   target: Target;
   recordName?: string;
   agents: AgentRow[];
   pendingByName: Record<string, number>;
   onRan: () => void;
+  openReviewNonce?: number; // bump to pop the review drawer open (e.g. after a sweep)
 }) {
   const [openExec, setOpenExec] = useState<Exec | null>(null);
   const [propose, setPropose] = useState<null | "run" | "review">(null);
+
+  // A sweep just landed a proposal → open the review drawer straight on it.
+  useEffect(() => { if (openReviewNonce) setPropose("review"); }, [openReviewNonce]);
 
   // The area's officers that actually exist in this org; fall back to whatever
   // active agents exist so the surface is never empty.

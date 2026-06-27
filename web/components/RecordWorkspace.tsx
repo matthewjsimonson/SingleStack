@@ -43,7 +43,7 @@ export default function RecordWorkspace({ target, recordName }: { target: Target
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [fieldsNonce, setFieldsNonce] = useState(0); // bump to refresh SectionedFields after accept
-  // "Set up with AI" — import existing content into the review queue.
+  // "Sweep with AI" — re-evaluate the whole record into the review queue.
   const [imp, setImp] = useState(false);
   const [src, setSrc] = useState({ mode: "paste" as "paste" | "url", content: "", url: "", guidance: "" });
   const [importing, setImporting] = useState(false);
@@ -54,6 +54,8 @@ export default function RecordWorkspace({ target, recordName }: { target: Target
   // Refine with AI — the HITL chat: marketplace + company-grounded refinements,
   // each an editable proposition through the proposals trail.
   const [refining, setRefining] = useState(false);
+  // Bumped after a successful sweep to auto-open the review drawer on the new proposal.
+  const [reviewNonce, setReviewNonce] = useState(0);
 
   const load = useCallback(async () => {
     const [{ data: ags }, { data: props }] = await Promise.all([
@@ -86,9 +88,10 @@ export default function RecordWorkspace({ target, recordName }: { target: Target
   // since an accept changes field values, re-mount the content panels.
   const refresh = useCallback(() => { load(); setFieldsNonce((n) => n + 1); }, [load]);
 
-  // Set up with AI = fill the blanks. Source is OPTIONAL — it fills this record's
-  // EMPTY fields from what's known (the record + modules/features + signals); a
-  // paste/URL is extra grounding when you have it.
+  // Sweep with AI = re-evaluate the WHOLE record (every field) and propose what
+  // makes it full & current. Source is OPTIONAL extra grounding (the record +
+  // modules/features + signals are always used). On success the proposal opens
+  // straight in the review drawer — no hunting for it afterward.
   async function runImport() {
     setImporting(true); setError(null); setImpNote(null);
     try {
@@ -100,13 +103,16 @@ export default function RecordWorkspace({ target, recordName }: { target: Target
       if (error) throw error;
       if (data?.error) throw new Error(data.error);
       if (!data?.changes_saved) {
-        setImpNote(data?.message || "Nothing could be grounded for the blank fields yet.");
+        // Nothing to improve — keep the modal open and say so.
+        setImpNote(data?.message || "The record already looks full and current — nothing to propose right now.");
       } else {
-        setImpNote(`Proposed ${data.changes_saved} field improvement${data.changes_saved === 1 ? "" : "s"} (gaps, thin, or stale) — review them in Advisors (the “waiting” pill).`);
+        // Got a proposal: close this modal and open it in the review drawer.
         setSrc({ mode: src.mode, content: "", url: "", guidance: "" });
+        setImp(false);
         refresh();
+        setReviewNonce((n) => n + 1);
       }
-    } catch (e) { setError(e instanceof Error ? e.message : "Set up failed."); }
+    } catch (e) { setError(e instanceof Error ? e.message : "Sweep failed."); }
     finally { setImporting(false); }
   }
 
@@ -118,14 +124,14 @@ export default function RecordWorkspace({ target, recordName }: { target: Target
     <div>
       <Banner>{error}</Banner>
 
-      {/* Set up with AI = whole-record completeness sweep · Refine = a chat, field by field */}
+      {/* Sweep with AI = whole-record completeness sweep · Refine = a chat, field by field */}
       <div className="card card-pad row-between" style={{ marginBottom: "var(--sp-4)", gap: 12, flexWrap: "wrap" }}>
         <div style={{ minWidth: 0 }}>
-          <div style={{ fontWeight: 640, fontSize: 13.5 }}>Set up with AI <span className="t-mono-xs t-muted" style={{ fontWeight: 400 }}>— full &amp; current</span></div>
-          <div className="t-sub t-muted" style={{ fontSize: 12.5, marginTop: 2 }}>Sweeps the <strong>whole</strong> record and proposes whatever makes every field full and current — fills gaps, completes thin fields, refreshes stale ones (not just the empty ones). Grounded in your modules &amp; features + signals, optionally a doc/URL. Lands in your review queue.</div>
+          <div style={{ fontWeight: 640, fontSize: 13.5 }}>Sweep with AI <span className="t-mono-xs t-muted" style={{ fontWeight: 400 }}>— full &amp; current</span></div>
+          <div className="t-sub t-muted" style={{ fontSize: 12.5, marginTop: 2 }}>Re-evaluates the <strong>whole</strong> record and proposes whatever makes every field full and current — fills gaps, completes thin fields, refreshes stale ones (not just the empty ones). Grounded in your modules &amp; features + signals, optionally a doc/URL. The proposal opens straight in your review queue.</div>
         </div>
         <span className="row gap-2" style={{ flexShrink: 0 }}>
-          <button className="btn btn-sm" onClick={() => { setImpNote(null); setImp(true); }} style={{ background: "var(--ac)", color: "#fff" }} title="Make the whole record full and current in one pass — fills, completes, and refreshes every field (a source is optional)">Set up with AI</button>
+          <button className="btn btn-sm" onClick={() => { setImpNote(null); setImp(true); }} style={{ background: "var(--ac)", color: "#fff" }} title="Re-evaluate the whole record in one pass — fills, completes, and refreshes every field (a source is optional)">Sweep with AI</button>
           <button className="btn btn-secondary btn-sm" onClick={() => setRefining(true)}
             title="A chat to work fields one at a time — you steer the true-update, grounded in your signals, edited before it lands">✦ Refine with AI</button>
         </span>
@@ -133,7 +139,7 @@ export default function RecordWorkspace({ target, recordName }: { target: Target
 
       {refining && <RecordRefine target={target} recordName={recordName} onApplied={refresh} onClose={() => setRefining(false)} />}
 
-      <Modal open={imp} onClose={() => setImp(false)} title="Set up with AI — make it full & current" width={620}>
+      <Modal open={imp} onClose={() => setImp(false)} title="Sweep with AI — make it full & current" width={620}>
         <div className="t-sub t-muted" style={{ fontSize: 12.5, marginBottom: 12 }}>Sweeps <strong>every</strong> field and proposes what it takes to make the record full and current — fills gaps, completes thin fields, refreshes stale ones — grounded in the record itself, its modules &amp; features, and your signals. Add an optional source for extra grounding. Proposals land in your <strong>review queue</strong>; nothing is applied until you accept it.</div>
         <div className="t-label" style={{ marginBottom: 6 }}>Optional source <span className="t-muted" style={{ fontWeight: 400, textTransform: "none", letterSpacing: 0 }}>— extra grounding; not required</span></div>
         <div className="row gap-2" style={{ marginBottom: 10 }}>
@@ -172,7 +178,7 @@ export default function RecordWorkspace({ target, recordName }: { target: Target
 
       {/* Advisors — the agents that live on this record, aligned to its area */}
       {loading ? <div className="t-sub t-muted" style={{ marginBottom: "var(--sp-6)" }}>Loading…</div>
-        : <RecordAdvisors target={target} recordName={recordName} agents={agents} pendingByName={pendingByName} onRan={refresh} />}
+        : <RecordAdvisors target={target} recordName={recordName} agents={agents} pendingByName={pendingByName} onRan={refresh} openReviewNonce={reviewNonce} />}
 
       {/* Structured content */}
       <SectionedFields key={fieldsNonce} target={target} />

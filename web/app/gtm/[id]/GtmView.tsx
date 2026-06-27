@@ -5,18 +5,19 @@
 //   • Workspace (run agents / fields / proposals)
 //   • Messaging tabs (gtm_tabs) — the messaging surfaces: hero, personas,
 //     positioning, objections, battlecards — each an editable section
-//   • Signals — the evidence backing this record
+// Raw signals do NOT live here: they're the org's intelligence stream, refined
+// into proposals (the review queue) and themes — the record shows the refined
+// truth, not the raw evidence. Browse signals at /signals.
 import { useEffect, useState, useCallback } from "react";
 import { createClient } from "@/lib/supabase/client";
 import { getOrgId } from "@/lib/org";
 import RecordWorkspace from "@/components/RecordWorkspace";
-import { Section, Chip, Confidence, Empty, Banner, BackLink, SubTabs } from "@/components/ui";
+import { Section, Chip, Empty, Banner, BackLink, SubTabs } from "@/components/ui";
 import { Markdown } from "@/components/Markdown";
 
 type Gtm = { id: string; name: string; product_id: string };
 type Product = { id: string; name: string };
 type Tab = { id: string; tab_key: string; label: string; body: { text?: string } | null };
-type Signal = { id: string; title: string; why: string | null; conf_label: string | null; conf_level: number | null; observed_at: string | null };
 
 // Common GTM messaging surfaces, offered as quick-add templates.
 const TAB_TEMPLATES = ["Hero", "Personas", "Positioning", "Objections", "Battlecard", "Proof points"];
@@ -26,12 +27,11 @@ export default function GtmView({ gtmId }: { gtmId: string }) {
   const [gtm, setGtm] = useState<Gtm | null>(null);
   const [product, setProduct] = useState<Product | null>(null);
   const [tabs, setTabs] = useState<Tab[]>([]);
-  const [signals, setSignals] = useState<Signal[]>([]);
   const [loading, setLoading] = useState(true);
   const [notFound, setNotFound] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  const [view, setView] = useState<"workspace" | "messaging" | "signals">("workspace"); // top-level tabs — no long scroll
+  const [view, setView] = useState<"workspace" | "messaging">("workspace"); // top-level tabs — no long scroll
   const [activeTab, setActiveTab] = useState<string | null>(null);
   const [editing, setEditing] = useState(false);
   const [draft, setDraft] = useState("");
@@ -41,12 +41,11 @@ export default function GtmView({ gtmId }: { gtmId: string }) {
   const load = useCallback(async () => {
     const { data: g } = await supabase.from("gtm_records").select("id, name, product_id").eq("id", gtmId).maybeSingle();
     if (!g) { setNotFound(true); setLoading(false); return; }
-    const [{ data: p }, { data: t }, { data: sig }] = await Promise.all([
+    const [{ data: p }, { data: t }] = await Promise.all([
       supabase.from("product_records").select("id, name").eq("id", g.product_id).maybeSingle(),
       supabase.from("gtm_tabs").select("id, tab_key, label, body").eq("gtm_record_id", gtmId).order("created_at"),
-      supabase.from("signals").select("id, title, why, conf_label, conf_level, observed_at").eq("gtm_record_id", gtmId).order("observed_at", { ascending: false }),
     ]);
-    setGtm(g); setProduct(p); setTabs(t ?? []); setSignals(sig ?? []);
+    setGtm(g); setProduct(p); setTabs(t ?? []);
     setActiveTab((cur) => cur ?? (t && t.length ? t[0].id : null));
     setLoading(false);
   }, [supabase, gtmId]);
@@ -95,7 +94,7 @@ export default function GtmView({ gtmId }: { gtmId: string }) {
       <Banner>{error}</Banner>
 
       <SubTabs<typeof view>
-        tabs={[{ key: "workspace", label: "Workspace" }, { key: "messaging", label: `Messaging${tabs.length ? ` · ${tabs.length}` : ""}` }, { key: "signals", label: `Signals${signals.length ? ` · ${signals.length}` : ""}` }]}
+        tabs={[{ key: "workspace", label: "Workspace" }, { key: "messaging", label: `Messaging${tabs.length ? ` · ${tabs.length}` : ""}` }]}
         active={view} onChange={setView}
       />
 
@@ -163,28 +162,6 @@ export default function GtmView({ gtmId }: { gtmId: string }) {
             </div>
           </div>
         ) : null}
-      </Section>
-      )}
-
-      {/* Signals */}
-      {view === "signals" && (
-      <Section label="Signals">
-        {signals.length === 0 ? (
-          <div className="t-sub t-muted">No signals yet. Signals are the internal &amp; external evidence (observations, data points) that back this record and inform agents.</div>
-        ) : (
-          <div className="stack-3">
-            {signals.map((s) => (
-              <div key={s.id} className="card card-pad">
-                <div className="row-between" style={{ gap: 12, marginBottom: 5, alignItems: "flex-start" }}>
-                  <span style={{ fontSize: 14.5, fontWeight: 620 }}>{s.title}</span>
-                  <Confidence label={s.conf_label} level={s.conf_level} />
-                </div>
-                {s.why && <p className="t-sub" style={{ lineHeight: 1.5 }}>{s.why}</p>}
-                {s.observed_at && <div className="t-mono-xs" style={{ marginTop: 6 }}>{new Date(s.observed_at).toLocaleDateString()}</div>}
-              </div>
-            ))}
-          </div>
-        )}
       </Section>
       )}
     </div>
