@@ -113,7 +113,7 @@ export default function CompetitiveSetup({ onDone, productId }: { onDone: () => 
   const [savedRun, setSavedRun] = useState<{ comps: CompCand[]; at: number; transcript?: { role: "q" | "a"; text: string }[]; picture?: string; context?: typeof ctx } | null>(null);
   // Controls: how many questions the interview may ask, and how many rivals a
   // run returns. The user owns both.
-  const [maxQuestions, setMaxQuestions] = useState(4);
+  const [maxQuestions, setMaxQuestions] = useState(6);
   const [targetMatches, setTargetMatches] = useState(8);
   const [savedComps, setSavedComps] = useState<{ id: string; name: string; website: string | null; linkedin: string | null }[]>([]);
   // step 3 — capabilities
@@ -572,6 +572,16 @@ export default function CompetitiveSetup({ onDone, productId }: { onDone: () => 
     setRunId(null); setSavedRun(null);
   }
 
+  // Clear the interview answers + synthesized picture so a fresh, fuller profile
+  // can be built from scratch (the records base stays). Discards the open run so
+  // the old answers don't auto-restore. The user then re-runs "Set up profile".
+  async function clearProfile() {
+    setChat([]); setAnswer(""); setPicture(""); setChatDone(false);
+    setReady(null); setReadyDelta(null); setGaps(""); setCoverage([]); setChatWhy(null);
+    await clearSavedRun("discarded");
+    setProfileNote("Cleared — run “✦ Set up profile with AI” to build a fresh, fuller profile from your records + a few sharp questions.");
+  }
+
   async function confirmCompetitors() {
     const keep = comps.filter((c) => c.keep && c.name.trim());
     if (!keep.length) { setError("Keep at least one competitor (or add your own)."); return; }
@@ -770,7 +780,10 @@ export default function CompetitiveSetup({ onDone, productId }: { onDone: () => 
           <div>
             <div className="row-between" style={{ marginBottom: 6 }}>
               <span className="t-label" style={{ color: "var(--tm)" }}>Your profile — scroll sideways for more →</span>
-              <button className="btn btn-secondary btn-sm" onClick={() => setEditCtx(true)}>✎ Edit</button>
+              <span className="row gap-2">
+                {(chat.length > 0 || picture) && <button className="btn btn-secondary btn-sm" onClick={clearProfile} title="Clear the interview answers and synthesized picture, then rebuild a fresh profile from your records">↺ Clear &amp; rebuild</button>}
+                <button className="btn btn-secondary btn-sm" onClick={() => setEditCtx(true)}>✎ Edit</button>
+              </span>
             </div>
             {marketCtx || picture ? (
               <div style={{ display: "flex", gap: "var(--sp-3)", overflowX: "auto", scrollSnapType: "x mandatory", paddingBottom: 8, WebkitOverflowScrolling: "touch" }}>
@@ -868,7 +881,7 @@ export default function CompetitiveSetup({ onDone, productId }: { onDone: () => 
               <label className="row gap-2" style={{ alignItems: "center" }}>
                 <span className="t-mono-xs">max questions</span>
                 <select className="select" value={maxQuestions} onChange={(e) => setMaxQuestions(Number(e.target.value))} style={{ padding: "2px 6px", fontSize: 12, height: "auto", width: "auto" }}>
-                  <option value={0}>0 — records only</option><option value={2}>2</option><option value={4}>4</option><option value={6}>6</option>
+                  <option value={0}>0 — records only</option><option value={4}>4</option><option value={6}>6</option><option value={8}>8</option><option value={10}>10</option>
                 </select>
               </label>
               <label className="row gap-2" style={{ alignItems: "center" }}>

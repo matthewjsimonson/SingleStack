@@ -59,15 +59,24 @@ const COMPETITORS_SCHEMA = {
 // The placement dimensions — the SAME axes a competitor search/placement uses.
 // Each carries a weight; readiness is COMPUTED from per-dimension coverage, not
 // guessed. This is the scoring + check system: auditable, reproducible.
+// The placement dimensions — the axes a competitor search actually clusters on.
+// Beyond what/who/positioning, RIVALS cluster by the jobs they do, the wedge that
+// wins, how they price, and their motion — so those are first-class here. Each
+// maps to a canonical record field where one exists (so answers also complete the
+// record), and carries a weight; readiness is COMPUTED from coverage, not guessed.
 const DIMENSIONS = [
-  { key: "product",      label: "What it is",              weight: 2 },
-  { key: "features",     label: "Features / capabilities", weight: 2 },
-  { key: "personas",     label: "Buyer personas",          weight: 2 },
-  { key: "industries",   label: "Industries / verticals",  weight: 1.5 },
-  { key: "segment",      label: "Segment (SMB/mid/ent)",   weight: 1 },
-  { key: "positioning",  label: "Positioning / category",  weight: 2 },
-  { key: "known_rivals", label: "Known rivals",            weight: 1.5 },
-  { key: "deal_loss",    label: "Who they lose to",        weight: 1 },
+  { key: "product",         label: "What it is",                  weight: 2 },
+  { key: "features",        label: "Features / capabilities",     weight: 2 },
+  { key: "use_cases",       label: "Use cases / jobs-to-be-done", weight: 1.5 },
+  { key: "personas",        label: "Buyer personas",              weight: 2 },
+  { key: "industries",      label: "Industries / verticals",      weight: 1.5 },
+  { key: "segment",         label: "Segment (SMB/mid/ent)",       weight: 1 },
+  { key: "positioning",     label: "Positioning / category",      weight: 2 },
+  { key: "differentiation", label: "Differentiation / wedge",     weight: 1.5 },
+  { key: "pricing",         label: "Pricing & packaging",         weight: 1 },
+  { key: "gtm_motion",      label: "GTM motion (PLG/sales-led)",  weight: 1 },
+  { key: "known_rivals",    label: "Known rivals",                weight: 1.5 },
+  { key: "deal_loss",       label: "Who they lose to",            weight: 1 },
 ] as const;
 const DIM_KEYS = DIMENSIONS.map((d) => d.key);
 const STATUS_SCORE: Record<string, number> = { covered: 1, partial: 0.5, missing: 0, not_applicable: 0 };
@@ -227,22 +236,24 @@ Deno.serve(async (req: Request) => {
     const transcriptText = transcript.map((t) => `${t.role === "q" ? "AI asked" : "User answered"}: ${t.text}`).join("\n");
 
     if (step === "interview") {
-      const budget = Math.max(0, Math.min(8, Math.round(Number((body as { max_questions?: number }).max_questions) || 4)));
+      const budget = Math.max(0, Math.min(10, Math.round(Number((body as { max_questions?: number }).max_questions) || 6)));
       const asked = transcript.filter((t) => t.role === "q").length;
-      const pol = await resolveModelPolicy(supabase, { task: "setup_competitive_interview", fallback: { model: MODEL, effort: "low" } });
+      const pol = await resolveModelPolicy(supabase, { task: "setup_competitive_interview", fallback: { model: MODEL, effort: "medium" } });
       const resp = (await anthropic.messages.create({
         model: pol.model, max_tokens: 4000,
         output_config: { effort: pol.effort, format: { type: "json_schema", schema: INTERVIEW_SCHEMA } },
-        system: `You are the competitive-intelligence intake SCORER. Assess COVERAGE of each placement dimension from the records + interview, then choose the next question. You do NOT invent a readiness number — you report each dimension's status WITH EVIDENCE; the system computes the score.
+        system: `You are SingleStack's competitive-profile interviewer. Your job: build a COMPLETE profile that lets a search find the RIGHT competitors — by LAYERING a few sharp questions ON TOP of what the records already answer. The records are the BASE; you fill only what they leave thin or missing. You also report each dimension's status WITH EVIDENCE; the system computes readiness (don't invent a number).
+
+THE PROFILE = (what the records answer) + (what your questions add). Never re-ask what the records already establish — that wastes the user's time and makes the tool feel pointless. Conversely, do NOT leave a high-value gap unasked just because it's awkward; an incomplete profile finds the wrong rivals.
 
 Assess EVERY dimension (one coverage entry each): ${DIMENSIONS.map((d) => `${d.key} (${d.label})`).join(", ")}.
-For each: status = covered (records or an answer clearly establish it) / partial (hinted but thin) / missing (genuinely absent) / not_applicable (the company's STAGE can't have it). source = records / answer / none. note = the actual evidence, TERSE (max ~140 chars) — a short paraphrase of what the records/answers said, or why it's n/a. Keep every string short; do not pad. BE STRICT: a vague mention is 'partial', not 'covered'; never mark 'covered' unless the records genuinely say it.
+For each: status = covered (records or an answer clearly establish it) / partial (hinted but thin) / missing (genuinely absent) / not_applicable (the company's STAGE genuinely can't have it). source = records / answer / none. note = the actual evidence, TERSE (≤140 chars). BE STRICT: a vague mention is 'partial', not 'covered'.
 
-GOVERNANCE — read the records FIRST and DEFER hard: the GTM + product records usually establish product, personas, positioning, ICP. A dimension the records cover is 'covered' (source=records) — never re-ask it.
+WHY THESE DIMENSIONS — rivals cluster on more than what/who: the JOBS the product is hired for (functional substitutes), the WEDGE that wins deals, how it's PRICED & packaged, and its GTM MOTION (PLG vs sales-led vs partner) all decide who a buyer actually evaluates it against. These are usually the records' weakest spots, so they're often where the highest-value questions are.
 
-MATURITY — infer stage (exploring=pre-launch / early=first deals / scaling=repeatable / established=mature). Mark deal_loss not_applicable for exploring/pre-revenue; for young companies favor intended buyer, the alternative they replace, and the wedge.
+MATURITY — infer stage (exploring=pre-launch / early=first deals / scaling=repeatable / established=mature). Mark deal_loss/known_rivals not_applicable only for genuinely pre-market companies; for young companies favor the intended buyer, the jobs/alternative they replace, the wedge, and pricing intent.
 
-NEXT QUESTION — next_dimension = the highest-WEIGHT dimension still 'missing' or 'partial' and worth asking at this stage; write one concrete, conversational question for it (known rivals anchor the search, so prioritize them early when missing). If nothing is worth asking, next_dimension='' and question=''. One question at a time.`,
+NEXT QUESTION — target the highest-WEIGHT dimension still 'missing' OR 'partial' that's worth asking at this stage (known rivals anchor the search — prioritize them early when missing). Write ONE specific, conversational question that pulls a CONCRETE answer — name the kind of detail you want (e.g. for pricing: "per-seat, usage, or platform fee — and what tier do most buyers land on?"; for motion: "self-serve signup, sales-led, or partner?"). Sharpen a 'partial' as readily as you fill a 'missing'. If every weighted dimension is at least solidly covered, next_dimension='' and question=''. One question at a time.`,
         messages: [{ role: "user", content: [
           records ? `THE RECORDS (everything already known):\n${records}` : "THE RECORDS: (none yet)",
           transcriptText ? `INTERVIEW SO FAR:\n${transcriptText}` : "INTERVIEW SO FAR: (not started)",
