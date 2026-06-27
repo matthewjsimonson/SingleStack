@@ -21,7 +21,7 @@ import { signalDomain, SIGNAL_DOMAIN } from "@/lib/signals";
 import { useProductScope } from "@/lib/ProductContext";
 import { standUpCompetitiveAgents } from "@/lib/standUpCompetitive";
 
-type Competitor = { id: string; name: string; relationship: string; website: string | null; notes: string | null; product_id: string | null };
+type Competitor = { id: string; name: string; relationship: string; website: string | null; linkedin: string | null; notes: string | null; product_id: string | null; setup: { step?: number; finalized_at?: string | null } | null };
 type Capability = { id: string; name: string; category: string | null };
 type Score = { id: string; capability_id: string; competitor_id: string | null; score: number; scored_by: string | null; evidence_at: string | null };
 type Card = { id: string; competitor_id: string | null; kind: string; title: string; detail: string | null; proposed_by: string | null; signal_ids: string[] | null; updated_at: string | null; audience: string | null };
@@ -53,7 +53,7 @@ export default function CompetitiveView() {
 
   const load = useCallback(async () => {
     const [{ data: comp }, { data: caps }, { data: scs }, { data: cds }, { data: sigs }, { data: ths }] = await Promise.all([
-      supabase.from("competitors").select("id, name, relationship, website, notes, product_id").order("position").order("created_at"),
+      supabase.from("competitors").select("id, name, relationship, website, linkedin, notes, product_id, setup").order("position").order("created_at"),
       supabase.from("capabilities").select("id, name, category").order("position").order("created_at"),
       supabase.from("capability_scores").select("id, capability_id, competitor_id, score, scored_by, evidence_at"),
       supabase.from("battlecard_items").select("id, competitor_id, kind, title, detail, proposed_by, signal_ids, updated_at, audience").order("position").order("created_at"),
@@ -709,6 +709,14 @@ function Competitors({ competitors, cards, overview, capabilities, scores, compS
         const theyLead = capabilities.filter((c) => scope && scoreOf(c.id, scope) > scoreOf(c.id, null));
         return (
           <div className="stack-3">
+            {/* Identity — carried over from discovery (website + LinkedIn). The
+                per-competitor Finalize flow reuses these to stand up monitoring. */}
+            {(selected?.website || selected?.linkedin) && (
+              <div className="row gap-2" style={{ flexWrap: "wrap", alignItems: "center" }}>
+                {selected?.website && <a className="chip" href={selected.website.startsWith("http") ? selected.website : `https://${selected.website}`} target="_blank" rel="noreferrer">🌐 {selected.website.replace(/^https?:\/\//, "").replace(/\/$/, "")}</a>}
+                {selected?.linkedin && <a className="chip" href={selected.linkedin.startsWith("http") ? selected.linkedin : `https://${selected.linkedin}`} target="_blank" rel="noreferrer">📣 LinkedIn</a>}
+              </div>
+            )}
             {/* deep overview — editable */}
             <div className="card card-pad" style={{ background: "var(--panel-2)" }}>
               <div className="row-between" style={{ marginBottom: editNotes ? 8 : 4 }}>

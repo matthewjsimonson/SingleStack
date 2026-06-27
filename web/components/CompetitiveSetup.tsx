@@ -481,13 +481,18 @@ export default function CompetitiveSetup({ onDone, productId }: { onDone: () => 
       const { data, error } = await supabase.from("competitors").insert(keep.map((c, i) => ({
         org_id: orgId, name: c.name.trim(), relationship: ["adjacent", "watching"].includes(c.relationship) ? c.relationship : "direct",
         website: c.website.trim() || null,
+        // Carry the discovered LinkedIn URL onto the competitor itself — the
+        // per-competitor Finalize flow (and its monitors) reuse it instead of
+        // re-finding it. Previously it was only spent on sources and discarded.
+        linkedin: c.linkedin.trim() || null,
         // The pulled overview IS the record: who they are, then the match rationale.
         notes: [c.overview, c.why, c.overlap ? `Overlap: ${c.overlap}` : "", c.match < 100 ? `Match at setup: ${c.match}%` : ""].filter(Boolean).join("\n") || null,
         position: i, product_id: productId ?? null,
-      }))).select("id, name, website");
+      }))).select("id, name, website, linkedin");
       if (error) throw error;
-      // carry the confirmed LinkedIn URLs (not a competitors column — they live on the sources)
-      const withLi = (data ?? []).map((d) => ({ ...d, linkedin: keep.find((k) => k.name.trim() === d.name)?.linkedin.trim() || null }));
+      // LinkedIn now persists on the competitor row; keep the same shape for the
+      // monitoring step (it reads c.linkedin to seed jobs/posts sources).
+      const withLi = (data ?? []).map((d) => ({ ...d, linkedin: d.linkedin ?? (keep.find((k) => k.name.trim() === d.name)?.linkedin.trim() || null) }));
       setSavedComps(withLi);
       void clearSavedRun("confirmed");
       // LEGIT monitoring only: a kind is on ONLY when its confirmed link exists —
