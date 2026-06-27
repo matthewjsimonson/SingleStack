@@ -134,8 +134,8 @@ Deno.serve(async (req: Request) => {
       if (compThemes?.length) {
         context += `\nTHEIR SYNTHESIZED THEMES:\n${compThemes.map((t) => `[${t.category}/${t.state} · conf ${(t.conf_level ?? 0).toFixed(2)}] ${t.title} — ${t.summary ?? ""}`).join("\n")}`;
       }
-      // Battlecard-shaped sections: the profile IS the raw battlecard — facts a
-      // rep's card gets refined from.
+      // Battlecard-shaped sections: the profile IS the raw battlecard — facts the
+      // refined battlecard gets built from.
       suggestedSections = "who_they_are, positioning, their_strengths, their_weaknesses, how_we_win, how_we_lose, objections_they_create, pricing_posture, momentum, what_to_watch, strategic_implications";
     } else {
       // LANDSCAPE = the broad competitive profile: a living AGGREGATE of our
@@ -168,9 +168,9 @@ Deno.serve(async (req: Request) => {
     const system = [
       `You maintain a HITL "Signal Profile" — a sharp, evidence-grounded record of ${target}. It is meant to DICTATE product and GTM strategy, so be decisive and specific, never generic.`,
       scope === "competitor"
-        ? "For a competitor, this profile is the RAW BATTLECARD: the complete, honest dossier of who they are vs us, which the analyst refines into battlecard items and the messenger turns into seller copy."
+        ? "For a competitor, this profile is the RAW BATTLECARD: the complete, honest dossier of who they are vs us, which the analyst refines into battlecard items and the messenger turns into GTM-ready copy for whatever motion the GTM record describes."
         : "This is our COMPETITIVE LENS — NOT a restatement of the product & GTM records (those already hold what-we-are / how-we-sell; reference them, never copy them). Its job is to give an agent the CONTEXT to do competitive search & analysis well: how the MARKET is moving (from our battlecards + competitive signals + rivals' themes) and how WE COMPARE. The 'search_focus' section is the most important: POINT at WHERE TO LOOK — which specific product modules/features and which GTM segments/positioning the agent should focus competitive search and analysis on (cite the record fields/modules by name) so it finds the RIGHT rivals and compares on the RIGHT axes. 'competitive_battlegrounds' = the capabilities/segments actually contested; 'our_wedge' = the differentiation that wins, referencing (not restating) the records.",
-      "Synthesize the INTERNAL and EXTERNAL signals below into a headline + sections. INTERNAL signals (what our own teams hear — deals, calls) and EXTERNAL signals (public: reviews, launches, pricing) are both evidence; weigh corroboration across them and note where they disagree.",
+      "Synthesize the INTERNAL and EXTERNAL signals below into a headline + sections. INTERNAL signals (what our own teams hear in the field) and EXTERNAL signals (public: reviews, launches, pricing) are both evidence; weigh corroboration across them and note where they disagree.",
       `Use these section keys where supported (snake_case): ${suggestedSections}. Always include a 'strategic_implications' section spelling out what this means for product strategy and for GTM strategy. Only assert what the evidence supports; if thin, say so and keep it short.`,
       // Full & current — the user's standard: existence is not completeness.
       "Make EVERY section FULL and CURRENT. Re-evaluate each against the CURRENT product & GTM records and the latest signals/battlecards, and UPDATE it whenever they've moved — never leave a thin, vague, or stale section just because it already has text." + (input.current?.length ? " You are REFRESHING the existing profile (provided): fold the new evidence into each section and keep what still holds, but don't preserve a stale section just because a human wrote it — improve it." : ""),

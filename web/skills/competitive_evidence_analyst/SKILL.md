@@ -2,7 +2,7 @@
 key: competitive_evidence_analyst
 name: Competitive evidence analyst
 category: general
-description: Turns a competitor's signals and matrix deltas into evidence-backed items — each a one-line point + 2–3 factual sentences + citation, nothing invented. A general analysis skill specialized by tailoring — for a product agent the items surface strength/weakness that should shape strategy; for a GTM agent they become win/lose/objection/trap items a rep can defend. Use after competitive signals or scores change, before any copy is written.
+description: Turns a competitor's signals and matrix deltas into evidence-backed items — each a one-line point + 2–3 factual sentences + citation, nothing invented. A general analysis skill specialized by tailoring — for a product agent the items surface strength/weakness that should shape strategy; for a GTM agent they become win/lose/objection/trap items the GTM team can defend. Use after competitive signals or scores change, before any copy is written.
 agents: cro, cpo
 cornerstone: false
 areas: product, gtm, competitive, signals
@@ -13,7 +13,7 @@ Build the FACTS layer for one competitor — strengths, gaps, proof points — s
 
 ## When to use
 - Competitive signals or `capability_scores` changed for a rival.
-- Before any product-strategy read or seller copy is built on competitive claims.
+- Before any product-strategy read or competitive copy is built on competitive claims.
 
 **Tailored per agent:** product → "where they out-build us and what that means for strategy"; GTM → win / lose / objection / trap items. **Don't use** to write persuasive copy (→ Competitive messenger) or to score the matrix (→ Capability evidence scoring).
 

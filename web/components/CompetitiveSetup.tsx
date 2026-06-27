@@ -834,19 +834,19 @@ export default function CompetitiveSetup({ onDone, productId }: { onDone: () => 
               <label className="field"><span className="t-label">Product — what it is</span>
                 <textarea className="textarea" rows={2} value={ctx.product} onChange={ctxSet("product")} placeholder="What the product is and the problem it solves" /></label>
               <label className="field"><span className="t-label">Features / modules <span className="t-muted" style={{ fontWeight: 400, textTransform: "none", letterSpacing: 0 }}>— drives capability-overlap matching</span></span>
-                <textarea className="textarea" rows={2} value={ctx.features} onChange={ctxSet("features")} placeholder="e.g. battlecards; signal synthesis; capability matrix; agent workflows" /></label>
+                <textarea className="textarea" rows={2} value={ctx.features} onChange={ctxSet("features")} placeholder="List your actual modules / features — these drive capability-overlap matching" /></label>
               <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "var(--sp-3)" }}>
                 <label className="field"><span className="t-label">Who you sell to — personas</span>
-                  <input className="input" value={ctx.who} onChange={ctxSet("who")} placeholder="e.g. Heads of Product, PMMs" /></label>
+                  <input className="input" value={ctx.who} onChange={ctxSet("who")} placeholder="The buyers / users you actually serve" /></label>
                 <label className="field"><span className="t-label">Industries / verticals</span>
-                  <input className="input" value={ctx.industries} onChange={ctxSet("industries")} placeholder="e.g. B2B SaaS, fintech" /></label>
+                  <input className="input" value={ctx.industries} onChange={ctxSet("industries")} placeholder="The industries / verticals you actually serve" /></label>
               </div>
               <label className="field"><span className="t-label">How you position — against what</span>
                 <input className="input" value={ctx.positioning} onChange={ctxSet("positioning")} placeholder="The category you claim and what you replace" /></label>
               <label className="field"><span className="t-label">Known competitors <span className="t-muted" style={{ fontWeight: 400, textTransform: "none", letterSpacing: 0 }}>— name them; they anchor the search</span></span>
-                <input className="input" value={ctx.competitors} onChange={ctxSet("competitors")} placeholder="e.g. Crayon, Klue, Productboard" /></label>
+                <input className="input" value={ctx.competitors} onChange={ctxSet("competitors")} placeholder="Name the rivals you already know — they anchor the search" /></label>
               <label className="field"><span className="t-label">Anything else</span>
-                <input className="input" value={ctx.more} onChange={ctxSet("more")} placeholder="e.g. also watch the open-source alternatives" /></label>
+                <input className="input" value={ctx.more} onChange={ctxSet("more")} placeholder="e.g. also watch open-source or adjacent alternatives" /></label>
               <div className="row gap-2"><button className="btn btn-sm" onClick={() => { setEditCtx(false); void persistContextToRecords(); }}>Done</button></div>
             </div>
           </Modal>

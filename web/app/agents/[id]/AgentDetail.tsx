@@ -908,7 +908,7 @@ function ConnRow({ c, onRemove, reload, setError }: { c: Connection; onRemove: (
           <label className="field"><span className="t-label">What to watch / prioritize / ignore</span>
             <textarea className="textarea" rows={2} value={guidance} onChange={(e) => setGuidance(e.target.value)} placeholder="e.g. Focus on pricing & competitive signals; weight escalating themes; ignore low-confidence noise." /></label>
           <label className="field"><span className="t-label">Point at specifics (one per line)</span>
-            <textarea className="textarea" rows={2} value={targets} onChange={(e) => setTargets(e.target.value)} placeholder={"theme: Pricing friction\ncompetitor: Crayon\ncapability area: orchestration"} /></label>
+            <textarea className="textarea" rows={2} value={targets} onChange={(e) => setTargets(e.target.value)} placeholder={"theme: Pricing friction\ncompetitor: a rival's name\ncapability area: a capability you track"} /></label>
           <button className="btn btn-sm" onClick={save} disabled={busy}>{busy ? "Saving…" : "Save curation"}</button>
         </div>
       )}

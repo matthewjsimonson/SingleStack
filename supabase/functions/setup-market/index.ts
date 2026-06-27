@@ -104,7 +104,7 @@ Deno.serve(async (req: Request) => {
     const existing = (have ?? []).map((s) => s.label).join("; ");
 
     const system = [
-      "You design a FOCUSED set of market-intelligence watches for a B2B product. Market intel is industry × persona — but a product serves a RANGE of segments, and a market signal only matters if it touches a segment WE ACTUALLY SERVE WITH A REAL CAPABILITY.",
+      "You design a FOCUSED set of market-intelligence watches for a product. Market intel is industry × persona — but a product serves a RANGE of segments, and a market signal only matters if it touches a segment WE ACTUALLY SERVE WITH A REAL CAPABILITY.",
       "So DO NOT propose generic industry/persona news. Key every watch off the INTERSECTION of (the industries/personas in our GTM record) and (the modules/features that serve them). For EACH watch: name the specific segment (value), name WHICH of our modules/features/capabilities serves it (serves), and write guidance that aims the search at shifts affecting OUR offering for that segment — regulation, buying behavior, budget, substitutes, persona tooling/job changes — while ignoring generic noise.",
       `Be RUTHLESSLY focused: propose at most ${targetCount} watches — the segments that are core ICP AND capability-backed. If we list 15 industries, watch the few that matter most; say what you left out in 'note'. A few aligned watches beat broad coverage that floods the feed.`,
       "Lenses: 'industry' (a vertical we serve), 'persona' (a buyer/user we serve), 'analyst' (category coverage e.g. Gartner/Forrester for our category), 'tech' (category/platform shifts that change what buyers expect). kinds = which live search-backed sources fit (press, social, reviews, web_search).",

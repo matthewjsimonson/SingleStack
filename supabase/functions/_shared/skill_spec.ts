@@ -23,16 +23,20 @@ export const SKILL_QBAR = [
 ].join("\n");
 
 // A child skill at the bar (description + body) — the gold standard for child output.
-export const CHILD_EXEMPLAR = `description: Produces a rep-usable battlecard for one named competitor — win lines, a discovery trap, objection→response pairs, and proof, each tied to a ratified fact or a matrix delta. Use when a competitor recurs in deals, after their signals/scores shift, or when reps lack a current line. Not for the fact-finding (use Competitive evidence analyst) or scoring the matrix (use Capability evidence scoring).
+// NOTE: motion-agnostic. The exemplar must NOT assume a sales motion — SingleStack
+// serves self-serve, product-led, sales-assisted, and partner-led orgs alike; the
+// GTM record's MOTION decides who consumes the copy and where. Keep it concrete
+// without baking in a buyer, industry, or motion.
+export const CHILD_EXEMPLAR = `description: Produces a competitive battlecard for one named competitor — win lines, a discovery trap, objection→response pairs, and proof, each tied to a ratified fact or a matrix delta, pitched for whatever GTM motion the record describes. Use when a competitor recurs against you, after their signals/scores shift, or when the GTM team lacks a current line. Not for the fact-finding (use Competitive evidence analyst) or scoring the matrix (use Capability evidence scoring).
 ---
 # Competitive battlecard
 
-Give a rep what to say to win a live deal against one named competitor — specific, current, and defensible under push-back.
+Give the GTM team what to say to win against one named competitor — specific, current, and defensible under push-back, usable in whatever motion the GTM record describes (an in-product comparison, a landing page, a sales conversation, a partner brief).
 
 ## When to use
-- A competitor keeps appearing in deals or losses.
+- A competitor keeps appearing against you (in losses, comparisons, or churn).
 - Their capability scores or signals just moved.
-- Reps are improvising against a named alternative.
+- The GTM team lacks a current line against a named alternative.
 
 **Don't use for:** building/curating the facts (→ Competitive evidence analyst) or scoring capabilities (→ Capability evidence scoring). A battlecard consumes **ratified** items; it never invents them.
 
@@ -40,7 +44,7 @@ Give a rep what to say to win a live deal against one named competitor — speci
 - Ratified competitive items for the competitor (the facts layer).
 - \`capability_scores\` vs the competitor (lead / parity / trail).
 - \`signals\` where \`competitor_id = X\` and per-competitor \`signal_themes\`.
-- GTM record fields \`differentiation\`, \`proof_points\`; reviews (G2), product detail (DeepWiki).
+- GTM record fields \`differentiation\`, \`proof_points\`, and the **GTM motion** (it decides who consumes this and where); reviews (G2), product detail (DeepWiki).
 
 ## Procedure — build in this order
 1. **Wins** (matrix delta ≥ +1, ≥1 cited signal): one line framed as the buyer's outcome. Skip cells without cited evidence.
@@ -51,14 +55,15 @@ Give a rep what to say to win a live deal against one named competitor — speci
 ## Output
 A card: **Summary** · **Win lines** (3–5) · **Trap** (1) · **Objection→Response** (2–3, each with proof) · **Sources** (the ratified items each line rests on). Proposed for ratification.
 
-## Worked example (vs Crayon)
-> **Win:** "We keep your *own* positioning current, not just a feed of rival moves" — matrix 'living product+GTM record' 3 vs 0; signal S-220.
+## Worked example
+> **Win:** "We keep your *own* positioning current, not just a feed of rival moves" — matrix 'living record' 3 vs 0; signal S-220.
 > **Trap:** "How does competitive intel reach your own messaging today — who updates it, how often?"
-> **Objection:** "Crayon has more integrations" → true today → "and they stop at intel; we turn it into ratified record changes" → proof: 28 ratified updates/wk.
+> **Objection:** "They have more integrations" → true today → "and they stop at intel; we turn it into ratified record changes" → proof: 28 ratified updates/wk.
 
 ## Reject / push back if
 - Any line lacks a ratified item or cited signal.
 - A parity cell is sold as a win, or a strength is denied rather than reframed.
+- The copy assumes a motion the GTM record doesn't describe (e.g. "what a rep says" when the org is self-serve).
 - New facts appear that aren't in the ratified set.
 - Superlatives ("crush", "best-in-class") with no proof.`;
 

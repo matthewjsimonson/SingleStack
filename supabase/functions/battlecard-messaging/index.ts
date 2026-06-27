@@ -3,9 +3,11 @@
 //
 // Plain English: reads the RATIFIED battlecard items for a competitor (the
 // analyst's facts, already human-approved) plus the GTM record's positioning,
-// messaging, and buyer fields, and drafts the seller-facing Battlecard section
-// — summary, talk track, objection responses — in the org's voice. Generative
-// by design: its job is PERSUASION, but built strictly on the analyst's facts.
+// messaging, and buyer fields, and drafts the competitive Battlecard section
+// — summary, positioning angle, objection/counter responses — in the org's
+// voice, adapted to whatever GTM motion the record describes (self-serve,
+// product-led, sales-assisted, partner-led, …). Generative by design: its job
+// is PERSUASION, but built strictly on the analyst's facts.
 // It introduces no new claims; if a point isn't in the ratified items or the
 // GTM record, it doesn't get said.
 //
@@ -35,7 +37,7 @@ const CORS = {
 const json = (b: unknown, s = 200) => new Response(JSON.stringify(b), { status: s, headers: { ...CORS, "content-type": "application/json" } });
 
 const SECTION = "Battlecard";
-// The seller-facing fields this agent owns on the GTM record.
+// The battlecard fields this agent owns on the GTM record.
 const FIELDS: { key: string; label: string }[] = [
   { key: "battlecard_summary", label: "Battlecard summary" },
   { key: "talk_track", label: "Talk track" },
@@ -151,7 +153,7 @@ Deno.serve(async (req: Request) => {
       `COMPETITOR: ${comp.name} (${comp.relationship})`,
       `RATIFIED BATTLECARD ITEMS (your only source of claims):\n${items.map((i) => `- [${i.kind}] ${i.title}${i.detail ? " — " + i.detail : ""}`).join("\n")}`,
       voice.length ? `GTM RECORD (our voice — positioning, messaging, buyer):\n${voice.map((f) => `${f.label}: ${f.value}`).join("\n")}` : "",
-      `Draft these seller-facing fields: ${FIELDS.map((f) => `${f.key} (${f.label})`).join("; ")}. Frame for ${comp.name} specifically.`,
+      `Draft these battlecard fields: ${FIELDS.map((f) => `${f.key} (${f.label})`).join("; ")}. Frame for ${comp.name} specifically, and pitch it for HOWEVER this org goes to market (read the GTM record's motion above) — assume no sales rep unless the record says so.`,
     ].filter(Boolean).join("\n\n");
 
     const resp = await anthropic.messages.create({
@@ -161,7 +163,7 @@ Deno.serve(async (req: Request) => {
         cornerstones.length ? `\nYOUR CORNERSTONE SKILLS (always on):\n${cornerstones.map((s) => `## ${s.name}\n${s.instructions ?? ""}`).join("\n\n")}` : "",
         `\nTHE SKILL FOR THIS TASK — apply it:\n## ${childSkill.name}\n${childSkill.instructions ?? ""}`,
         step.instruction ? `\nSTEP INSTRUCTION: ${step.instruction}` : "",
-        "\nGATE CONTRACT (non-negotiable output rules): you are turning RATIFIED battlecard items into seller-facing copy — a battlecard summary, a talk track, and objection responses. Every claim must trace to a ratified item or the GTM record — introduce nothing new. Objection responses address the [objection] items directly. Write for a rep mid-call: tight, confident, usable verbatim. rationale = one paragraph on how you used the facts; conf_level 0..1.",
+        "\nGATE CONTRACT (non-negotiable output rules): you are turning RATIFIED battlecard items into competitive copy — a battlecard summary, a positioning angle (talk_track), and objection/counter responses. Every claim must trace to a ratified item or the GTM record — introduce nothing new. Objection responses address the [objection] items directly. Pitch it for HOWEVER this org goes to market — read the GTM record's motion and write copy usable in that motion (an in-product comparison, a landing page, a sales conversation, a partner brief — whatever fits); make NO assumption that there is a sales rep. Keep it tight, confident, and usable verbatim. rationale = one paragraph on how you used the facts; conf_level 0..1.",
       ].filter(Boolean).join("\n"),
       messages: [{ role: "user", content: prompt }],
       output_config: { effort: pol.effort, format: { type: "json_schema", schema: SCHEMA } },

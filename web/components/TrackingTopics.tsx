@@ -67,8 +67,8 @@ export default function TrackingTopics({ category, suggestions = [] }: {
         </div>
         <div className="row gap-2">
           <input className="input" value={text} onChange={(e) => setText(e.target.value)} style={{ flex: 1 }}
-            placeholder={category === "competitive" ? "e.g. Track GovDash pricing and packaging changes"
-              : category === "market" ? "e.g. Watch AI-native procurement category narrative"
+            placeholder={category === "competitive" ? "e.g. Track a rival's pricing and packaging changes"
+              : category === "market" ? "e.g. Watch your category's narrative and entrants"
               : "e.g. Flag recurring onboarding friction from support + usage"} />
           <select className="select" value={focus} onChange={(e) => setFocus(e.target.value as "" | "product" | "gtm")} style={{ width: 130 }}>
             <option value="">Org-wide</option><option value="product">Product</option><option value="gtm">GTM</option>

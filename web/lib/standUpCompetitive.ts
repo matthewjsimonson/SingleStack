@@ -36,7 +36,7 @@ export async function standUpCompetitiveAgents(supabase: SupabaseClient): Promis
   const { data: have } = await supabase.from("workflows").select("name");
   const names = new Set((have ?? []).map((w) => w.name));
   const defs = [
-    { name: "Competitive battlecard pair", description: "Step 1: the analyst proposes evidence-cited battlecard items (through review). Step 2: the messenger drafts seller copy from the ratified items (through proposals).",
+    { name: "Competitive battlecard pair", description: "Step 1: the analyst proposes evidence-cited battlecard items (through review). Step 2: the messenger drafts competitive copy from the ratified items (through proposals).",
       steps: [
         { id: uid(), agent_id: agent.id, skill_id: skillId["competitive_evidence_analyst"], signals: "both", instruction: "Work one named competitor at a time. Propose only what the evidence supports." },
         { id: uid(), agent_id: agent.id, skill_id: skillId["competitive_messenger"], signals: "none", instruction: "Draft from ratified items only — never re-introduce rejected claims." },

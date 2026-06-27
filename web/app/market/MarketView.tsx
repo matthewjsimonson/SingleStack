@@ -21,9 +21,6 @@ import MarketSetup from "@/components/MarketSetup";
 type Meta = { domain?: string; lens?: string; industry?: string; persona?: string } | null;
 type Signal = { id: string; title: string; why: string | null; conf_label: string | null; conf_level: number | null; observed_at: string | null; origin: string; metadata: Meta };
 
-const INDUSTRY_SEED = ["SaaS", "Fintech", "Healthcare", "E-commerce", "Manufacturing", "Media", "Public sector", "Security"];
-const PERSONA_SEED = ["Product leader", "Engineering leader", "Marketing leader", "Sales leader", "Executive buyer", "End user", "Analyst"];
-
 function ago(iso: string | null) {
   if (!iso) return "";
   const s = (Date.now() - new Date(iso).getTime()) / 1000;
@@ -71,9 +68,11 @@ export default function MarketView() {
   useEffect(() => { load(); }, [load]);
 
   const distinct = (k: "industry" | "persona") => Array.from(new Set(signals.map((s) => s.metadata?.[k]).filter((v): v is string => !!v)));
-  // Prefer record-driven lenses; fall back to the generic seed only if the GTM record has none.
-  const industries = Array.from(new Set([...distinct("industry"), ...recIndustries, ...(recIndustries.length ? [] : INDUSTRY_SEED)]));
-  const personas = Array.from(new Set([...distinct("persona"), ...recPersonas, ...(recPersonas.length ? [] : PERSONA_SEED)]));
+  // Lenses come ONLY from this org's own data — the GTM record's industries/personas
+  // and whatever the existing signals are tagged with. No generic seed: the platform
+  // makes no assumption about who you serve; you define that in your GTM record.
+  const industries = Array.from(new Set([...distinct("industry"), ...recIndustries]));
+  const personas = Array.from(new Set([...distinct("persona"), ...recPersonas]));
 
   const feed = signals.filter((s) =>
     (fOrigin === "all" || s.origin === fOrigin) &&

@@ -140,11 +140,11 @@ export const GTM_AREAS: Area[] = [
   },
   {
     key: "competitive", label: "Competitive", circle: "gtm",
-    blurb: "Win competitive deals — evidence-cited battlecards + seller copy.",
+    blurb: "Win competitively — evidence-cited battlecards + competitive copy.",
     connAreas: ["gtm", "competitive"], record: "Battlecard", flywheel: "Convert", href: "/competitive",
     tasks: [
       { key: "analyze_rivals", label: "Analyze rivals (evidence-cited battlecard items)" },
-      { key: "draft_seller_copy", label: "Draft seller copy (talk track, objections)" },
+      { key: "draft_seller_copy", label: "Draft competitive copy (positioning, objections)" },
     ],
   },
   {
