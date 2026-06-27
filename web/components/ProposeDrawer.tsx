@@ -12,11 +12,27 @@ import { Chip, Confidence } from "@/components/ui";
 import { PulseDots, streamStructured } from "@/components/alive";
 
 type Advisor = { key: string; name: string; short: string; accent: string };
-type Change = { label: string; kind: "add" | "update"; proposed_value: string };
+type Change = {
+  label: string; kind: "add" | "update"; proposed_value: string;
+  // Identity + drift detection: which field this targets, the value it was drafted
+  // against (old_value), and the field's CURRENT value — so the queue can flag a
+  // change that's stale (the record moved) or that collides with a sibling.
+  fieldIdent: string | null; oldValue: string | null; currentValue: string | null;
+};
 type Pending = {
   id: string; title: string; rationale: string | null; conf_label: string | null;
   conf_level: number | null; proposed_by: string; created_at: string; changes: Change[];
 };
+
+// Relative "drafted Xh ago" — full timestamp on hover. (Client-only Date use.)
+function ago(iso: string): string {
+  const s = Math.floor((Date.now() - new Date(iso).getTime()) / 1000);
+  if (s < 60) return "just now";
+  const m = Math.floor(s / 60); if (m < 60) return `${m}m ago`;
+  const h = Math.floor(m / 60); if (h < 24) return `${h}h ago`;
+  const d = Math.floor(h / 24); if (d < 7) return `${d}d ago`;
+  return new Date(iso).toLocaleDateString();
+}
 
 export default function ProposeDrawer({ open, onClose, mode, target, advisors, onDone }: {
   open: boolean;
@@ -43,13 +59,21 @@ export default function ProposeDrawer({ open, onClose, mode, target, advisors, o
   const loadPending = useCallback(async () => {
     const { data } = await supabase
       .from("proposals")
-      .select("id, title, rationale, conf_label, conf_level, proposed_by, created_at, proposal_changes ( change_kind, label, proposed_value, record_field_id, record_fields ( label ) )")
+      .select("id, title, rationale, conf_label, conf_level, proposed_by, created_at, proposal_changes ( change_kind, label, proposed_value, record_field_id, field_key, old_value, record_fields ( label, value ) )")
       .eq(idKey, target.id).eq("status", "pending").order("created_at", { ascending: false });
     // deno-lint-ignore no-explicit-any
     const list: Pending[] = (data ?? []).map((p: any) => ({
       id: p.id, title: p.title, rationale: p.rationale, conf_label: p.conf_label, conf_level: p.conf_level, proposed_by: p.proposed_by, created_at: p.created_at,
       // deno-lint-ignore no-explicit-any
-      changes: (p.proposal_changes ?? []).map((c: any) => ({ label: c.label ?? c.record_fields?.label ?? "Field", kind: c.change_kind === "add_field" ? "add" : "update", proposed_value: c.proposed_value })),
+      changes: (p.proposal_changes ?? []).map((c: any) => ({
+        label: c.label ?? c.record_fields?.label ?? "Field",
+        kind: c.change_kind === "add_field" ? "add" : "update",
+        proposed_value: c.proposed_value,
+        // A field's identity: the existing field id (update) or add:<key> (new field).
+        fieldIdent: c.record_field_id ?? (c.field_key ? `add:${c.field_key}` : null),
+        oldValue: c.old_value ?? null,
+        currentValue: c.record_fields?.value ?? null,
+      })),
     }));
     setPending(list); setLoaded(true);
   }, [supabase, idKey, target.id]);
@@ -101,6 +125,15 @@ export default function ProposeDrawer({ open, onClose, mode, target, advisors, o
   if (!open) return null;
   const names = advisors.map((a) => a.name.split(" ").slice(-1)[0]).join(" + ");
   const shown = mode === "run" ? pending.filter((p) => freshIds.has(p.id)) : pending; // run = only this session's drafts
+  // Conflict awareness, computed across ALL pending proposals on this record:
+  //  • overlap — two+ pending proposals edit the SAME field; accepting one makes the
+  //    other(s) conflict on accept (the DB refuses the loser). Warn before that.
+  //  • stale  — an update drafted against a value the field no longer holds (a human
+  //    edit or an already-accepted proposal moved it); accepting it will be refused.
+  const identCount = new Map<string, number>();
+  for (const p of pending) for (const c of p.changes) if (c.fieldIdent) identCount.set(c.fieldIdent, (identCount.get(c.fieldIdent) ?? 0) + 1);
+  const isOverlap = (c: Change) => !!c.fieldIdent && (identCount.get(c.fieldIdent) ?? 0) > 1;
+  const isStale = (c: Change) => c.kind === "update" && (c.currentValue ?? "").trim() !== (c.oldValue ?? "").trim();
   return (
     <>
       <div onClick={onClose} style={{ position: "fixed", inset: 0, background: "rgba(11,12,14,0.32)", zIndex: 50 }} />
@@ -146,15 +179,32 @@ export default function ProposeDrawer({ open, onClose, mode, target, advisors, o
                   <div style={{ fontSize: 15, fontWeight: 660, lineHeight: 1.35 }}>{p.title}</div>
                   <Confidence label={p.conf_label} level={p.conf_level} />
                 </div>
+                {/* When it was drafted — relative, full date on hover. */}
+                <div className="t-mono-xs t-muted" style={{ marginBottom: p.rationale ? 6 : 10 }} title={new Date(p.created_at).toLocaleString()}>Drafted {ago(p.created_at)}</div>
                 {p.rationale && <p className="t-sub" style={{ fontSize: 13, lineHeight: 1.6, marginBottom: 12 }}>{p.rationale}</p>}
+
+                {/* Conflict awareness BEFORE you accept: stale (record moved) or
+                    overlapping a sibling on the same field. */}
+                {p.changes.some(isStale) && (
+                  <div className="banner" style={{ background: "var(--am-fill)", color: "var(--am-text)", marginBottom: 10, fontSize: 12 }}>
+                    ⚠ The record changed since this was drafted — accepting will be refused (conflicted). Reject it and re-draft against the current value.
+                  </div>
+                )}
+                {!p.changes.some(isStale) && p.changes.some(isOverlap) && (
+                  <div className="banner" style={{ marginBottom: 10, fontSize: 12 }}>
+                    ⚠ Another pending proposal also edits a field below — accept only ONE; the other will then conflict and be refused. Compare them before deciding.
+                  </div>
+                )}
 
                 {p.changes.length > 0 && (
                   <div className="stack-2" style={{ marginBottom: 12 }}>
                     {p.changes.map((c, i) => (
-                      <div key={i} style={{ borderLeft: "2px solid var(--border)", paddingLeft: 10 }}>
-                        <div className="row gap-2" style={{ marginBottom: 2, alignItems: "center" }}>
+                      <div key={i} style={{ borderLeft: `2px solid ${isStale(c) ? "var(--am-text)" : isOverlap(c) ? "var(--vl)" : "var(--border)"}`, paddingLeft: 10 }}>
+                        <div className="row gap-2" style={{ marginBottom: 2, alignItems: "center", flexWrap: "wrap" }}>
                           <Chip tone={c.kind === "add" ? "green" : "accent"}>{c.kind === "add" ? "New field" : "Update"}</Chip>
                           <span style={{ fontSize: 12.5, fontWeight: 620 }}>{c.label}</span>
+                          {isStale(c) && <Chip tone="amber">field moved since drafted</Chip>}
+                          {!isStale(c) && isOverlap(c) && <Chip tone="violet">also in another proposal</Chip>}
                         </div>
                         <div className="t-sub" style={{ fontSize: 12, lineHeight: 1.5, whiteSpace: "pre-wrap" }}>{c.proposed_value}</div>
                       </div>

@@ -129,7 +129,10 @@ export default function RecordWorkspace({ target, recordName }: { target: Target
               <div key={p.id} className="card" style={{ padding: "12px 16px" }}>
                 <div className="row-between">
                   <span className="t-body">{p.title}</span>
-                  <Chip tone={p.status === "accepted" ? "green" : p.status === "conflicted" ? "amber" : "default"}>{p.status}</Chip>
+                  <span className="row gap-2" style={{ alignItems: "center" }}>
+                    <span className="t-mono-xs t-muted" title={new Date(p.created_at).toLocaleString()}>{new Date(p.created_at).toLocaleDateString()}</span>
+                    <Chip tone={p.status === "accepted" ? "green" : p.status === "conflicted" ? "amber" : "default"}>{p.status}</Chip>
+                  </span>
                 </div>
               </div>
             ))}
