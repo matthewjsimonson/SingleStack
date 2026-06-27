@@ -82,6 +82,13 @@ export default function MessagingFramework({ gtmId }: { gtmId: string }) {
     catch (e) { setError(e instanceof Error ? e.message : "Could not save."); }
   }
 
+  // Delete a custom (non-framework) section — these aren't part of the framework.
+  async function deleteSection(ids: string[]) {
+    setError(null);
+    try { const { error } = await supabase.from("gtm_tabs").delete().in("id", ids); if (error) throw error; await load(); }
+    catch (e) { setError(e instanceof Error ? e.message : "Could not delete."); }
+  }
+
   async function build() {
     setBuilding(true); setError(null); setNotice(null);
     try {
@@ -176,16 +183,25 @@ export default function MessagingFramework({ gtmId }: { gtmId: string }) {
         })}
       </div>
 
-      {/* Custom (non-framework) sections, preserved */}
+      {/* Custom (non-framework) sections — not part of the framework; deletable */}
       {custom.length > 0 && (
         <div style={{ marginTop: "var(--sp-5)" }}>
-          <div className="t-label" style={{ marginBottom: 8 }}>Other sections</div>
+          <div className="row-between" style={{ alignItems: "center", marginBottom: 8 }}>
+            <div>
+              <div className="t-label">Other sections</div>
+              <div className="t-sub t-muted" style={{ fontSize: 11.5 }}>Not part of the messaging framework — left over from earlier. Delete what you don&apos;t need.</div>
+            </div>
+            <button className="btn btn-secondary btn-sm" onClick={() => { if (confirm(`Delete all ${custom.length} other section${custom.length === 1 ? "" : "s"}? This can't be undone.`)) deleteSection(custom.map((t) => t.id)); }} style={{ color: "var(--rd-text, #b42318)" }}>Remove all</button>
+          </div>
           <div className="stack-3">
             {custom.map((t) => (
               <div key={t.id} className="card card-pad">
                 <div className="row-between" style={{ alignItems: "baseline", marginBottom: 6 }}>
                   <span className="t-label">{t.label}</span>
-                  {editingKey !== t.tab_key && <button className="btn btn-secondary btn-sm" onClick={() => { setEditingKey(t.tab_key); setDraft(t.body?.text ?? ""); }}>Edit</button>}
+                  <span className="row gap-2">
+                    {editingKey !== t.tab_key && <button className="btn btn-secondary btn-sm" onClick={() => { setEditingKey(t.tab_key); setDraft(t.body?.text ?? ""); }}>Edit</button>}
+                    <button className="btn btn-secondary btn-sm" onClick={() => { if (confirm(`Delete "${t.label}"? This can't be undone.`)) deleteSection([t.id]); }} style={{ color: "var(--rd-text, #b42318)" }}>Delete</button>
+                  </span>
                 </div>
                 {editingKey === t.tab_key ? (
                   <div>
