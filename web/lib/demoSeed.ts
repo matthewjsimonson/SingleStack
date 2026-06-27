@@ -68,11 +68,14 @@ export async function loadDemoData(supabase: SupabaseClient, orgId: string): Pro
   await step("product fields", async () => {
     if (await count("record_fields", "product_id", pid)) return "exist";
     const { error } = await supabase.rpc("human_add_fields", { p_rows: [
-      ["overview", "Overview", "SingleStack is an AI operating layer for product & go-to-market teams: a single, living system of record where executive agents keep your product and messaging current as the market moves — and nothing changes without a human ratifying it.", 0],
-      ["target_market", "Target market", "Series A–C B2B software companies (20–200 people) where product and GTM drift apart and no one owns keeping them aligned.", 1],
-      ["value_prop", "Value proposition", "Your strategy stays current automatically. Agents watch signals, propose sharp updates, and you ratify — so the record and messaging never go stale, and you can leverage new frontier-model capabilities as they ship.", 2],
-      ["positioning", "Positioning", "Not a roadmapping tool (Aha!), not a competitive-intel feed (Crayon/Klue), not call analytics (Gong) — a living system of record that unifies product + GTM and proposes change, human-in-the-loop.", 3],
-      ["key_metrics", "Key metrics", "Design partners: 6 · Weekly active operators: 41 · Proposals ratified/wk: 28", 4],
+      ["what_it_is", "What it is", "SingleStack is a product-led growth (PLG) platform that runs the entire PLG loop in one system — sense → decide → build → sell → learn — for product managers AND go-to-market teams. Its first-class Build module lets PMs use AI to legitimately prototype: turn a decision into a real, working prototype, then ship it. AI agents move the work; humans ratify every change.", 0],
+      ["category", "Category", "Product-led growth (PLG) platform", 1],
+      ["target_market", "Target market", "Series A–C B2B software companies (20–200 people) building product-led, where PMs and GTM need to move from signal → shipped → sold without tool-hopping.", 2],
+      ["value_prop", "Value proposition", "Take an idea all the way through the PLG loop without leaving one system: sense the market, decide what to build, actually BUILD it with AI prototyping, sell it (usage → PQLs → GTM), and learn from the outcome — agents propose, you ratify.", 3],
+      ["core_capabilities", "Core capabilities", "AI prototyping / build; signal sensing & synthesis; product & GTM strategy; messaging & battlecards; PQL scoring; outcome learning; agent orchestration; human-in-the-loop governance.", 4],
+      ["differentiated_capabilities", "Differentiated capabilities", "A FIRST-CLASS Build module where PMs genuinely prototype with AI — most tools stop at docs or strategy; SingleStack closes sense → build → sell → learn in one loop.", 5],
+      ["positioning", "Positioning", "Not a competitive-intel feed (Crayon/Klue), not a roadmapping tool (Aha!), not a strategy doc — a PLG platform spanning sense → decide → build → sell → learn, with real AI prototyping in the Build module.", 6],
+      ["key_metrics", "Key metrics", "Design partners: 6 · Weekly active operators: 41 · Prototypes shipped/wk: 12", 7],
     ].map(([field_key, label, value, position]) => ({ org_id: orgId, product_id: pid, field_key, label, value, position })) });
     if (error) throw error; return "created";
   });
@@ -81,10 +84,12 @@ export async function loadDemoData(supabase: SupabaseClient, orgId: string): Pro
   await step("modules", async () => {
     if (await count("modules", "product_id", pid)) return "exist";
     const modDefs = [
-      { name: "Intelligence", description: "Signals, themes, and the honest-confidence engine that turns evidence into durable patterns.", features: ["Signal capture", "Theme reconciliation", "Honest confidence"] },
-      { name: "Agents", description: "Executive agents with tailorable skills, area connections, and workflows.", features: ["Skill library", "Roster orchestration", "Recursive skill evolution"] },
-      { name: "Frontier", description: "Frontier-model & platform capabilities the agents act on in their own domains.", features: ["Capability radar", "Capability-triggered workflows"] },
-      { name: "Records", description: "Living product & GTM records that move only when a human ratifies a proposal.", features: ["Structured fields", "Proposals & ratification", "Revision history"] },
+      { name: "Sense", description: "Signals from the market and inside the company, synthesized into durable themes with honest confidence — competitive, market, and frontier intel.", features: ["Signal capture", "Theme synthesis", "Competitive & market intel", "Frontier-capability radar"] },
+      { name: "Decide", description: "Turn themes into product & GTM strategy — what to build and why, prioritized against objectives.", features: ["Strategy boards", "Theme → initiative", "Prioritization"] },
+      { name: "Build", description: "The first-class build motor: PMs use AI to legitimately prototype — turn a decision into a real, working prototype, then ship it.", features: ["AI prototyping (prompt-to-app)", "Specs & build items", "Ship to release"] },
+      { name: "Sell", description: "Messaging, battlecards, and product-qualified leads — usage signals scored into who's ready to buy.", features: ["Messaging & battlecards", "PQL scoring", "Accounts → usage → leads"] },
+      { name: "Learn", description: "Ship → outcome → signal: measure what shipped and feed the result back into the loop.", features: ["Outcomes", "Outcome → signal", "Closed-loop learning"] },
+      { name: "Agents", description: "Executive AI agents with tailorable skills and workflows that run the loop end to end; humans ratify every change.", features: ["Skill library", "Workflows", "Human-in-the-loop governance"] },
     ];
     for (const m of modDefs) {
       const { data: mod, error } = await supabase.from("modules").insert({ org_id: orgId, product_id: pid, name: m.name, description: m.description }).select("id").single();
@@ -114,8 +119,8 @@ export async function loadDemoData(supabase: SupabaseClient, orgId: string): Pro
     const { data: exCap } = await supabase.from("capabilities").select("id").limit(1);
     if (exCap && exCap.length) return "exist";
     const CAPS = [
-      "Unified product + GTM record", "Competitive intelligence", "Agent orchestration",
-      "Roadmapping & delivery", "Signal synthesis", "Human-in-the-loop governance", "Frontier-capability leverage",
+      "AI prototyping / build", "Signal sensing & synthesis", "Product & GTM strategy",
+      "Messaging & battlecards", "PQL scoring & PLG motion", "Outcome learning", "Agent orchestration", "Human-in-the-loop governance",
     ];
     const { data: created, error } = await supabase.from("capabilities").insert(CAPS.map((name, i) => ({ org_id: orgId, name, position: i }))).select("id, name");
     if (error) throw error;
@@ -191,13 +196,15 @@ export async function loadDemoData(supabase: SupabaseClient, orgId: string): Pro
   if (gtmId) await step("gtm fields", async () => {
     if (await count("record_fields", "gtm_record_id", gtmId!)) return "exist";
     const { error } = await supabase.rpc("human_add_fields", { p_rows: [
-      ["hero", "Hero", "Your strategy, kept current by agents you control.", 0],
-      ["personas", "Personas", "Heads of Product, founders, and RevOps leads at scaling B2B software companies.", 1],
-      ["positioning", "Positioning", "A living system of record — not a doc, not a dashboard. It proposes change; you ratify.", 2],
-      ["objections", "Objections", "“Is this just another AI wrapper?” — No: humans ratify every change; nothing moves on its own.", 3],
-      ["value_prop", "Value proposition", "Your product & GTM strategy stays current automatically — agents propose sharp updates from live signals, and you ratify. The record and the messaging never go stale.", 4],
-      ["pillars", "Message pillars", "1) Living system of record (not a doc/dashboard). 2) Human-in-the-loop governance — nothing moves unratified. 3) Unifies product + GTM in one record. 4) Leverages new frontier-model capability as it ships.", 5],
-      ["proof_points", "Proof points", "6 design partners · 41 weekly active operators · 28 proposals ratified/week · every change carries an auditable trail.", 6],
+      ["hero", "Hero", "Run the whole product-led growth loop — sense, decide, build, sell, learn — in one place.", 0],
+      ["personas", "Personas", "Heads of Product and founder-PMs (who prototype with the Build module) and GTM leads at scaling B2B software companies.", 1],
+      ["primary_persona", "Primary persona", "The product manager at a product-led B2B company who needs to go from a market signal to a real, working prototype to a shipped, sold feature — without leaving one system.", 2],
+      ["positioning", "Positioning", "A PLG platform that closes the loop from market signal → working prototype → revenue — not a strategy doc, not a competitive-intel feed.", 3],
+      ["objections", "Objections", "“Is this just another AI wrapper?” — No: humans ratify every change, and the Build module produces real, working prototypes, not just docs.", 4],
+      ["value_prop", "Value proposition", "Idea to shipped, sold, and measured without leaving one system: AI prototypes the build, agents move the work, you ratify.", 5],
+      ["pillars", "Message pillars", "1) The whole PLG loop in one system (sense → decide → build → sell → learn). 2) A first-class Build module — real AI prototyping, not just docs. 3) Human-in-the-loop — nothing ships unratified. 4) Serves PMs AND GTM.", 6],
+      ["gtm_motion", "GTM motion", "Product-led: the product itself (especially hands-on AI prototyping in the Build module) is the wedge; usage → PQLs → assisted GTM. The message leads with “build it for real,” backed by working-prototype proof.", 7],
+      ["proof_points", "Proof points", "6 design partners · 41 weekly active operators · 12 prototypes shipped/week · every change carries an auditable, ratified trail.", 8],
     ].map(([field_key, label, value, position]) => ({ org_id: orgId, gtm_record_id: gtmId, field_key, label, value, position })) });
     if (error) throw error; return "created";
   });
