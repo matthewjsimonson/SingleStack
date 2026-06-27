@@ -13,6 +13,7 @@ import { PulseDots, streamStructured } from "@/components/alive";
 
 type Advisor = { key: string; name: string; short: string; accent: string };
 type Change = {
+  id: string;                          // proposal_changes.id — so HITL edits can persist
   label: string; kind: "add" | "update"; proposed_value: string;
   // Identity + drift detection: which field this targets, the value it was drafted
   // against (old_value), and the field's CURRENT value — so the queue can flag a
@@ -51,6 +52,7 @@ export default function ProposeDrawer({ open, onClose, mode, target, advisors, o
   const [notice, setNotice] = useState<string | null>(null);
   const [acting, setActing] = useState<string | null>(null);
   const [confirmClear, setConfirmClear] = useState(false);
+  const [edits, setEdits] = useState<Record<string, string>>({}); // change.id -> HITL-edited value
   const [freshIds, setFreshIds] = useState<Set<string>>(new Set()); // proposals drafted in THIS session (run mode shows only these)
   const traceRef = useRef<HTMLDivElement>(null);
   const started = useRef(false);
@@ -60,13 +62,14 @@ export default function ProposeDrawer({ open, onClose, mode, target, advisors, o
   const loadPending = useCallback(async () => {
     const { data } = await supabase
       .from("proposals")
-      .select("id, title, rationale, conf_label, conf_level, proposed_by, created_at, proposal_changes ( change_kind, label, proposed_value, record_field_id, field_key, old_value, record_fields ( label, value ) )")
+      .select("id, title, rationale, conf_label, conf_level, proposed_by, created_at, proposal_changes ( id, change_kind, label, proposed_value, record_field_id, field_key, old_value, record_fields ( label, value ) )")
       .eq(idKey, target.id).eq("status", "pending").order("created_at", { ascending: false });
     // deno-lint-ignore no-explicit-any
     const list: Pending[] = (data ?? []).map((p: any) => ({
       id: p.id, title: p.title, rationale: p.rationale, conf_label: p.conf_label, conf_level: p.conf_level, proposed_by: p.proposed_by, created_at: p.created_at,
       // deno-lint-ignore no-explicit-any
       changes: (p.proposal_changes ?? []).map((c: any) => ({
+        id: c.id,
         label: c.label ?? c.record_fields?.label ?? "Field",
         kind: c.change_kind === "add_field" ? "add" : "update",
         proposed_value: c.proposed_value,
@@ -97,7 +100,7 @@ export default function ProposeDrawer({ open, onClose, mode, target, advisors, o
 
   // On open: load what's waiting, and (run mode) kick off a fresh proposal once.
   useEffect(() => {
-    if (!open) { started.current = false; setThinking(""); setBusy(false); setError(null); setPending([]); setLoaded(false); setFreshIds(new Set()); return; }
+    if (!open) { started.current = false; setThinking(""); setBusy(false); setError(null); setPending([]); setLoaded(false); setFreshIds(new Set()); setEdits({}); setConfirmClear(false); return; }
     loadPending();
     if (mode === "run" && !started.current) { started.current = true; run(); }
   }, [open, mode, loadPending, run]);
@@ -105,6 +108,14 @@ export default function ProposeDrawer({ open, onClose, mode, target, advisors, o
 
   async function accept(id: string) {
     setActing(id); setError(null); setNotice(null);
+    // Persist any HITL edits to this proposal's changes FIRST, so accept applies the
+    // edited values — a proposal that wasn't 100% right becomes a good update.
+    const p = pending.find((x) => x.id === id);
+    const dirty = (p?.changes ?? []).filter((c) => edits[c.id] !== undefined && edits[c.id] !== c.proposed_value);
+    for (const c of dirty) {
+      const { error: uErr } = await supabase.from("proposal_changes").update({ proposed_value: edits[c.id] }).eq("id", c.id);
+      if (uErr) { setError(uErr.message); setActing(null); return; }
+    }
     const { data: result, error } = await supabase.rpc("accept_proposal", { p_proposal: id, p_ratifier: "web" });
     if (error) { setError(error.message); setActing(null); return; }
     if (result === "conflicted") setNotice("The record changed since this was drafted, so nothing was applied — it's flagged as conflicted. Re-run against the current value.");
@@ -219,15 +230,23 @@ export default function ProposeDrawer({ open, onClose, mode, target, advisors, o
                           <span style={{ fontSize: 12.5, fontWeight: 620 }}>{c.label}</span>
                           {isStale(c) && <Chip tone="amber">field moved since drafted</Chip>}
                           {!isStale(c) && isOverlap(c) && <Chip tone="violet">also in another proposal</Chip>}
+                          {edits[c.id] !== undefined && edits[c.id] !== c.proposed_value && <Chip tone="accent">edited</Chip>}
                         </div>
-                        <div className="t-sub" style={{ fontSize: 12, lineHeight: 1.5, whiteSpace: "pre-wrap" }}>{c.proposed_value}</div>
+                        {/* Editable before accepting — a not-quite-right proposal can be
+                            made into a good update by hand, then accepted. */}
+                        <textarea className="textarea" disabled={acting === p.id}
+                          rows={Math.max(2, Math.min(10, Math.ceil((edits[c.id] ?? c.proposed_value ?? "").length / 80)))}
+                          value={edits[c.id] ?? c.proposed_value ?? ""}
+                          onChange={(e) => setEdits((m) => ({ ...m, [c.id]: e.target.value }))}
+                          style={{ fontSize: 12, lineHeight: 1.5 }} />
                       </div>
                     ))}
                   </div>
                 )}
 
                 <div className="row gap-2" style={{ alignItems: "center" }}>
-                  <button className="btn btn-success btn-sm" disabled={acting === p.id} onClick={() => accept(p.id)}>{acting === p.id ? "…" : "Accept"}</button>
+                  <button className="btn btn-success btn-sm" disabled={acting === p.id} onClick={() => accept(p.id)}
+                    title="Apply this proposal to the record — including any edits you made above">{acting === p.id ? "…" : (p.changes.some((c) => edits[c.id] !== undefined && edits[c.id] !== c.proposed_value) ? "Accept with edits" : "Accept")}</button>
                   <button className="btn btn-secondary btn-sm" disabled={acting === p.id} onClick={() => reject(p.id)} style={{ color: "var(--rd-text)" }}>Reject</button>
                   <button className="btn btn-secondary btn-sm" disabled={acting === p.id} onClick={() => hide(p.id)} title="Delete this proposal entirely">Hide</button>
                   <span className="t-mono-xs" style={{ marginLeft: "auto" }}>{p.proposed_by}</span>
@@ -243,7 +262,7 @@ export default function ProposeDrawer({ open, onClose, mode, target, advisors, o
           {mode === "review" && pending.length > 0 && (
             confirmClear ? (
               <span className="row gap-2" style={{ marginLeft: "auto", alignItems: "center" }}>
-                <span className="t-mono-xs t-muted">Delete {pending.length}? (won&rsquo;t affect learning)</span>
+                <span className="t-mono-xs t-muted">Delete {pending.length} pending? Records &amp; learning untouched.</span>
                 <button className="btn btn-sm" disabled={acting === "__all__"} onClick={clearAll} style={{ color: "var(--rd-text)" }}>{acting === "__all__" ? "Clearing…" : "Confirm"}</button>
                 <button className="btn btn-secondary btn-sm" onClick={() => setConfirmClear(false)}>Cancel</button>
               </span>
