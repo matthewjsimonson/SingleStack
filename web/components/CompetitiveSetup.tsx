@@ -181,7 +181,7 @@ export default function CompetitiveSetup({ onDone, productId }: { onDone: () => 
   }, []);
   useEffect(() => {
     (async () => {
-      let prodLine = "", whoLine = "", posLine = "", problemLine = "";
+      let prodLine = "", whoLine = "", posLine = "", problemLine = "", industriesLine = "", competitorsLine = "";
       // Product record: the REAL template keys (what_it_is / who_its_for /
       // problem / category), with the legacy seed keys (overview / value_prop)
       // as fallback — not just value_prop, which products don't carry.
@@ -209,13 +209,17 @@ export default function CompetitiveSetup({ onDone, productId }: { onDone: () => 
       const { data: g } = await supabase.from("gtm_records").select("id, name").order("created_at").limit(1).maybeSingle();
       if (g) {
         const { data: fs } = await supabase.from("record_fields").select("field_key, value").eq("gtm_record_id", g.id)
-          .in("field_key", ["personas", "primary_persona", "icp", "positioning", "category_pov", "differentiation"]);
+          .in("field_key", ["personas", "primary_persona", "icp", "positioning", "category_pov", "differentiation", "industries", "key_competitors"]);
         const f = (k: string) => fs?.find((x) => x.field_key === k)?.value ?? null;
         const personas = f("personas") ?? f("primary_persona") ?? f("icp");
         const positioning = f("positioning") ?? f("category_pov");
         setGtm({ name: g.name, personas, positioning });
         if (personas && !whoLine) whoLine = personas;
         if (positioning) posLine = positioning;
+        // Industries (verticals) and key competitors now have canonical GTM fields,
+        // so they pre-fill from the record and survive a competitive-board clear.
+        industriesLine = f("industries") ?? "";
+        competitorsLine = f("key_competitors") ?? "";
       } else setGtm(null);
       // The full dump: EVERY field on both records + every module, labeled —
       // the complete picture the records can paint on their own.
@@ -239,10 +243,10 @@ export default function CompetitiveSetup({ onDone, productId }: { onDone: () => 
         product: cur.product.trim() ? cur.product : [prodLine, problemLine].filter(Boolean).join(" "),
         features: cur.features.trim() ? cur.features : featLine,
         who: cur.who.trim() ? cur.who : whoLine,
-        industries: cur.industries, // no canonical record field yet — the human owns this one
+        industries: cur.industries.trim() ? cur.industries : industriesLine,
         positioning: cur.positioning.trim() ? cur.positioning : posLine,
         more: cur.more,
-        competitors: cur.competitors,
+        competitors: cur.competitors.trim() ? cur.competitors : competitorsLine,
       }));
     })();
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -261,6 +265,33 @@ export default function CompetitiveSetup({ onDone, productId }: { onDone: () => 
       if (runId) await supabase.from("competitive_setup_runs").update(row).eq("id", runId);
       else { const { data } = await supabase.from("competitive_setup_runs").insert(row).select("id").single(); if (data) setRunId(data.id); }
     } catch { /* best-effort */ }
+  }
+
+  // Durably persist the human-owned market context (industries + the named
+  // competitors) onto the GTM RECORD — not just the competitive_setup_run. These
+  // are the user's own inputs about their own market, so they go through the
+  // sanctioned human edit channel (human_set_field_value / human_add_fields), NOT
+  // the proposal gate. This is the fix for "industries & competitors revert to
+  // nothing": they now live on the record, pre-fill from it, and survive a
+  // competitive-board clear. Best-effort; the wizard never fails on this.
+  async function persistContextToRecords() {
+    try {
+      const { data: g } = await supabase.from("gtm_records").select("id").order("created_at").limit(1).maybeSingle();
+      if (!g) return;
+      const { data: rf } = await supabase.from("record_fields").select("id, field_key").eq("gtm_record_id", g.id).in("field_key", ["industries", "key_competitors"]);
+      const want: [string, string, string][] = [
+        ["industries", "Industries / verticals", ctx.industries.trim()],
+        ["key_competitors", "Key competitors", ctx.competitors.trim()],
+      ];
+      const adds: Record<string, unknown>[] = [];
+      for (const [field_key, label, value] of want) {
+        if (!value) continue;                                  // never clobber a filled field with a blank
+        const ex = rf?.find((x) => x.field_key === field_key);
+        if (ex) await supabase.rpc("human_set_field_value", { p_field: ex.id, p_value: value });
+        else adds.push({ gtm_record_id: g.id, field_key, label, value, section: "Market" });
+      }
+      if (adds.length) await supabase.rpc("human_add_fields", { p_rows: adds });
+    } catch { /* best-effort — the human edit channel is allowed; failures shouldn't block setup */ }
   }
 
   // Save context as it changes (debounced) — so industries/competitors and the
@@ -420,9 +451,10 @@ export default function CompetitiveSetup({ onDone, productId }: { onDone: () => 
       if (prodRec) await queue("product_id", prodRec.id, "Setup learnings → product record", [
         ["what_it_is", "What it is", d.product], ["core_capabilities", "Core capabilities", d.features],
       ]);
-      // GTM record — how it's SOLD.
+      // GTM record — how it's SOLD. (industries is written durably via
+      // persistContextToRecords, so it's not re-proposed here.)
       if (g) await queue("gtm_record_id", g.id, "Setup learnings → GTM record", [
-        ["personas", "Personas", d.who], ["industries", "Industries / verticals", d.industries], ["positioning", "Positioning", d.positioning],
+        ["personas", "Personas", d.who], ["positioning", "Positioning", d.positioning],
       ]);
       if (queued) setProfileNote(`Queued ${queued} record update${queued === 1 ? "" : "s"} from your answers (product + GTM) — review and accept in each record's proposal drawer. Nothing is written until you do.`);
     } catch { /* best-effort: the wizard flow never fails on record persistence */ }
@@ -432,6 +464,7 @@ export default function CompetitiveSetup({ onDone, productId }: { onDone: () => 
   async function findCompetitors() {
     setBusy("comps"); setError(null); setSearchUsage(null); setSearchSecs(0);
     await persistRun({});   // save context first — a search interruption can't lose it
+    void persistContextToRecords();   // and durably onto the GTM record (industries + competitors)
     const t0 = Date.now();
     const tick = setInterval(() => setSearchSecs(Math.round((Date.now() - t0) / 1000)), 1000);
     try {
@@ -724,7 +757,7 @@ export default function CompetitiveSetup({ onDone, productId }: { onDone: () => 
                 <input className="input" value={ctx.competitors} onChange={ctxSet("competitors")} placeholder="e.g. Crayon, Klue, Productboard" /></label>
               <label className="field"><span className="t-label">Anything else</span>
                 <input className="input" value={ctx.more} onChange={ctxSet("more")} placeholder="e.g. also watch the open-source alternatives" /></label>
-              <div className="row gap-2"><button className="btn btn-sm" onClick={() => setEditCtx(false)}>Done</button></div>
+              <div className="row gap-2"><button className="btn btn-sm" onClick={() => { setEditCtx(false); void persistContextToRecords(); }}>Done</button></div>
             </div>
           </Modal>
           {searchStep !== null ? (
