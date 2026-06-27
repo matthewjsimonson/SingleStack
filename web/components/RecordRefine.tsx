@@ -98,6 +98,8 @@ export default function RecordRefine({ target, recordName, onApplied, onClose }:
         old_value: existing?.value ?? null,
         field_key: existing ? null : sug.field_key,
         label: existing ? null : sug.label,
+        // Carry the section so an added field lands in its right group, not ungrouped.
+        section: existing ? null : sug.section,
         proposed_value: sug.proposed_value,
       });
       if (cErr) { await supabase.from("proposals").delete().eq("id", prop.id); throw cErr; }

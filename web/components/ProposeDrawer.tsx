@@ -50,6 +50,7 @@ export default function ProposeDrawer({ open, onClose, mode, target, advisors, o
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
   const [acting, setActing] = useState<string | null>(null);
+  const [confirmClear, setConfirmClear] = useState(false);
   const [freshIds, setFreshIds] = useState<Set<string>>(new Set()); // proposals drafted in THIS session (run mode shows only these)
   const traceRef = useRef<HTMLDivElement>(null);
   const started = useRef(false);
@@ -120,6 +121,19 @@ export default function ProposeDrawer({ open, onClose, mode, target, advisors, o
     const { error } = await supabase.from("proposals").delete().eq("id", id); // hide = remove the record
     if (error) { setError(error.message); setActing(null); return; }
     await loadPending(); onDone(); setActing(null);
+  }
+  // Bulk clear — DELETE every pending proposal on this record. Deletion (like Hide)
+  // is a clean removal: it is NOT a rejection and does NOT feed the learn loop (that
+  // loop learns only from the Signals → Review queue / intel_updates, never from
+  // record proposals). So this clears the queue without teaching the agents anything.
+  async function clearAll() {
+    setActing("__all__"); setError(null);
+    const ids = pending.map((p) => p.id);
+    if (ids.length) {
+      const { error } = await supabase.from("proposals").delete().in("id", ids);
+      if (error) { setError(error.message); setActing(null); return; }
+    }
+    setConfirmClear(false); await loadPending(); onDone(); setActing(null);
   }
 
   if (!open) return null;
@@ -223,9 +237,21 @@ export default function ProposeDrawer({ open, onClose, mode, target, advisors, o
           </div>
         </div>
 
-        {/* footer — draft another proposal any time */}
-        <div className="row gap-2" style={{ padding: "12px 20px", borderTop: "1px solid var(--border)" }}>
+        {/* footer — draft another proposal, or clear the whole queue (review mode) */}
+        <div className="row gap-2" style={{ padding: "12px 20px", borderTop: "1px solid var(--border)", alignItems: "center" }}>
           <button className="btn btn-accent btn-sm" disabled={busy} onClick={run}>{busy ? "Working…" : "✦ New proposal"}</button>
+          {mode === "review" && pending.length > 0 && (
+            confirmClear ? (
+              <span className="row gap-2" style={{ marginLeft: "auto", alignItems: "center" }}>
+                <span className="t-mono-xs t-muted">Delete {pending.length}? (won&rsquo;t affect learning)</span>
+                <button className="btn btn-sm" disabled={acting === "__all__"} onClick={clearAll} style={{ color: "var(--rd-text)" }}>{acting === "__all__" ? "Clearing…" : "Confirm"}</button>
+                <button className="btn btn-secondary btn-sm" onClick={() => setConfirmClear(false)}>Cancel</button>
+              </span>
+            ) : (
+              <button className="btn btn-secondary btn-sm" style={{ marginLeft: "auto" }} onClick={() => setConfirmClear(true)}
+                title="Delete every pending proposal on this record. A clean removal — not a rejection, and it does not feed the agents' learn loop.">⌫ Clear all pending</button>
+            )
+          )}
         </div>
       </aside>
     </>

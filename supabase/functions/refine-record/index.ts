@@ -81,6 +81,25 @@ Deno.serve(async (req: Request) => {
       .eq(isProduct ? "product_id" : "gtm_record_id", target.id).order("position");
     const fieldText = (fields ?? []).map((f) => `[${f.section ?? "Details"}] ${f.field_key} · ${f.label}: ${f.value ?? "(empty)"}`).join("\n");
 
+    // For a PRODUCT record, the real surface area is its Modules → Features — read
+    // them so refinements are grounded in what the product actually does, not just
+    // the narrative fields. (Mirrors the competitive-setup grounding.)
+    let modulesText = "";
+    if (isProduct) {
+      const { data: mods } = await supabase.from("modules").select("id, name, description").eq("product_id", target.id).order("position").order("created_at");
+      const modIds = (mods ?? []).map((m) => m.id);
+      const { data: feats } = modIds.length
+        ? await supabase.from("features").select("module_id, name, description").in("module_id", modIds)
+        : { data: [] as { module_id: string; name: string; description: string | null }[] };
+      const byMod: Record<string, string[]> = {};
+      for (const ft of feats ?? []) (byMod[ft.module_id] ??= []).push(ft.description ? `${ft.name} (${ft.description})` : ft.name);
+      modulesText = (mods ?? []).map((m) => {
+        const fl = byMod[m.id] ?? [];
+        const head = m.description ? `${m.name} — ${m.description}` : m.name;
+        return fl.length ? `${head} · features: ${fl.join(", ")}` : head;
+      }).join("\n");
+    }
+
     // ---- the grounding: marketplace + company ---------------------------------
     const [{ data: themes }, { data: ext }, { data: int }] = await Promise.all([
       supabase.from("signal_themes").select("title, summary, recommendation, category, state, conf_level").neq("state", "fading").order("last_evidence_at", { ascending: false, nullsFirst: false }).limit(10),
@@ -92,9 +111,10 @@ Deno.serve(async (req: Request) => {
     const intText = (int ?? []).map((s) => `(${s.conf_label ?? "?"}) ${s.title}${s.why ? " — " + s.why : ""}`).join("\n");
 
     const system = [
-      `You are refining the ${isProduct ? "PRODUCT" : "GTM"} record "${rec.data.name}" in conversation with its owner. You have the full record, the org's active intelligence themes, and recent external (marketplace) + internal (company) signals.`,
-      "Your job: surface where the record is stale, vague, or contradicted by what's happening — and propose concrete field-level refinements. Every suggestion must carry a rationale citing the theme/signal (or the user's own words) that motivates it. Honest and conservative: if the record is fine, say so; never invent market facts beyond the provided intelligence.",
-      "Conversational rules: tight replies (2-5 sentences) — discuss, then suggest. Attach suggestions ONLY when concrete (suggestions: [] otherwise). For an existing field use its exact field_key/label/section; for a genuinely new field use a snake_case key and the section it belongs in. proposed_value = the full new text of the field (not a diff). Let the user steer — answer what they ask; volunteer the most important staleness first.",
+      `You are refining the ${isProduct ? "PRODUCT" : "GTM"} record "${rec.data.name}" in conversation with its owner. You have the full record${isProduct ? " (including its modules & features)" : ""}, the org's active intelligence themes, and recent external (marketplace) + internal (company) signals.`,
+      "Your job is to drive this record toward FULL, COMPLETE, and ACCURATE: (1) surface where it's stale, vague, or contradicted by what's happening; AND (2) surface the most important EMPTY or thin fields and propose grounded values to COMPLETE the record — a blank field marked '(empty)' is a gap to fill, not something to leave. Every suggestion carries a rationale citing the theme/signal (or the user's own words) that motivates it. Honest and conservative: never invent market facts beyond the provided intelligence; if a field genuinely can't be grounded yet, say so rather than guess.",
+      "Field discipline (so the record stays clean): for ANY field that already exists in THE RECORD list, ALWAYS reuse its EXACT field_key, label, and section — never mint a near-duplicate key. Only create a new snake_case key when nothing in the record fits, and give it the right section. proposed_value = the full new text of the field (not a diff); when updating, preserve what's still true and improve from there.",
+      "Conversational rules: tight replies (2-5 sentences) — discuss, then suggest. Attach suggestions ONLY when concrete (suggestions: [] otherwise). Let the user steer — answer what they ask; otherwise volunteer the highest-value gap or staleness first.",
     ].join("\n\n");
 
     const convo = transcript.map((t) => ({ role: t.role === "a" ? "user" as const : "assistant" as const, content: t.text }));
@@ -108,6 +128,7 @@ Deno.serve(async (req: Request) => {
       messages: [
         { role: "user", content: [
           `THE RECORD:\n${fieldText || "(no fields yet)"}`,
+          modulesText ? `MODULES & FEATURES (what the product actually does):\n${modulesText}` : "",
           themeText ? `ACTIVE INTELLIGENCE THEMES:\n${themeText}` : "",
           extText ? `RECENT MARKETPLACE SIGNALS (external):\n${extText}` : "",
           intText ? `RECENT COMPANY SIGNALS (internal):\n${intText}` : "",
