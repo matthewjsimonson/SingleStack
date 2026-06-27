@@ -207,25 +207,38 @@ export default function CompetitiveSetup({ onDone, productId }: { onDone: () => 
       // Product record: the REAL template keys (what_it_is / who_its_for /
       // problem / category), with the legacy seed keys (overview / value_prop)
       // as fallback — not just value_prop, which products don't carry.
-      let featLine = "";
+      let featLine = "", modulesText = "";
       const { data: p } = await supabase.from("product_records").select("id, name").order("created_at").limit(1).maybeSingle();
       if (p) {
         const [{ data: fs }, { data: mods }] = await Promise.all([
           supabase.from("record_fields").select("field_key, value").eq("product_id", p.id)
             .in("field_key", ["what_it_is", "who_its_for", "problem", "category", "value_prop", "overview", "core_capabilities", "differentiated_capabilities", "strategic_intent"]),
-          supabase.from("modules").select("name, description").eq("product_id", p.id).order("created_at").limit(12),
+          supabase.from("modules").select("id, name, description").eq("product_id", p.id).order("position").order("created_at"),
         ]);
+        // The SPECIFIC features under each module (Modules → Features) — the real
+        // product detail the search needs. Previously only module NAMES were read,
+        // which is why the profile listed no actual features. Pull them, grouped.
+        const modIds = (mods ?? []).map((m) => m.id);
+        const { data: feats } = modIds.length
+          ? await supabase.from("features").select("module_id, name, description").in("module_id", modIds).order("created_at")
+          : { data: [] as { module_id: string; name: string; description: string | null }[] };
+        const featsByMod: Record<string, { name: string; description: string | null }[]> = {};
+        for (const ft of feats ?? []) (featsByMod[ft.module_id] ??= []).push(ft);
+        const moduleLines = (mods ?? []).map((m) => {
+          const fl = (featsByMod[m.id] ?? []).map((ft) => ft.description ? `${ft.name} (${ft.description})` : ft.name);
+          const head = m.description ? `${m.name} — ${m.description}` : m.name;
+          return fl.length ? `${head} · features: ${fl.join(", ")}` : head;
+        });
+        modulesText = moduleLines.join("\n");                  // full, for the records dump
         const f = (k: string) => fs?.find((x) => x.field_key === k)?.value ?? null;
         const what = f("what_it_is") ?? f("value_prop") ?? f("overview");
         setProd({ name: p.name, value_prop: what });
         prodLine = `${p.name}${what ? ` — ${what}` : ""}${f("category") ? ` (category: ${f("category")})` : ""}${f("strategic_intent") ? `. Strategic intent: ${f("strategic_intent")}` : ""}`;
         if (f("who_its_for")) whoLine = f("who_its_for") as string;
         if (f("problem")) problemLine = `Problem it solves: ${f("problem")}`;
-        // Features/modules: what the product actually DOES — the strongest
-        // signal for capability overlap when matching competitors.
-        const modBits = (mods ?? []).map((m) => m.description ? `${m.name} (${m.description})` : m.name);
+        // Features window = every module WITH its features + the capability fields.
         const capBits = [f("core_capabilities"), f("differentiated_capabilities")].filter(Boolean) as string[];
-        featLine = [...modBits, ...capBits].join("; ");
+        featLine = [...moduleLines, ...capBits].join("; ");
       } else setProd(null);
       // GTM record: personas/icp (who we sell to) + positioning (against what).
       const { data: g } = await supabase.from("gtm_records").select("id, name").order("created_at").limit(1).maybeSingle();
@@ -260,8 +273,9 @@ export default function CompetitiveSetup({ onDone, productId }: { onDone: () => 
         dump.push(`PRODUCT RECORD: ${p.name}`);
         const { data: allPf } = await supabase.from("record_fields").select("label, value").eq("product_id", p.id).order("position");
         for (const f of allPf ?? []) if (f.value?.trim()) dump.push(`${f.label}: ${f.value}`);
-        const { data: allMods } = await supabase.from("modules").select("name, description").eq("product_id", p.id).order("created_at");
-        if (allMods?.length) dump.push(`MODULES/FEATURES: ${allMods.map((m) => m.description ? `${m.name} — ${m.description}` : m.name).join("; ")}`);
+        // Modules WITH their specific features (built above) — the concrete surface
+        // area the search compares against, not just module headings.
+        if (modulesText.trim()) dump.push(`MODULES & FEATURES:\n${modulesText}`);
       }
       if (g) {
         dump.push(`\nGTM RECORD: ${g.name}`);
