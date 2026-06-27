@@ -20,6 +20,20 @@ const fkCol = (t: Target) => (t.kind === "product" ? "product_id" : "gtm_record_
 
 import RecordRefine from "@/components/RecordRefine";
 
+// "Make it full & current" runs as ONE edge call that returns when the whole
+// sweep is done — there are no server-sent progress events. So this is an honest
+// CLIENT-SIDE estimate: staged phases + an eased bar that approaches (never
+// reaches) 100% on a typical-duration curve, then snaps to done when the call
+// actually returns. The ETA is labelled "~" and gracefully holds if it overruns.
+const SWEEP_PHASES = [
+  "Reading the whole record",
+  "Reading modules & features",
+  "Reading your signals",
+  "Drafting field updates — full & current",
+  "Saving proposals to your review queue",
+];
+const SWEEP_EST_S = 45; // typical full sweep; the bar eases and waits if it runs long
+
 export default function RecordWorkspace({ target, recordName }: { target: Target; recordName?: string }) {
   const supabase = createClient();
   const fk = fkCol(target);
@@ -34,6 +48,9 @@ export default function RecordWorkspace({ target, recordName }: { target: Target
   const [src, setSrc] = useState({ mode: "paste" as "paste" | "url", content: "", url: "", guidance: "" });
   const [importing, setImporting] = useState(false);
   const [impNote, setImpNote] = useState<string | null>(null);
+  // Estimated-progress UI for the sweep (client-side; see SWEEP_PHASES note).
+  const [progress, setProgress] = useState(0);
+  const [elapsed, setElapsed] = useState(0);
   // Refine with AI — the HITL chat: marketplace + company-grounded refinements,
   // each an editable proposition through the proposals trail.
   const [refining, setRefining] = useState(false);
@@ -49,6 +66,21 @@ export default function RecordWorkspace({ target, recordName }: { target: Target
   }, [supabase, fk, target.id]);
 
   useEffect(() => { load(); }, [load]);
+
+  // Tick the estimated progress while the sweep runs. Eases toward ~96% on a
+  // (1 - e^-t) curve so it reaches ~90% around the typical duration and keeps
+  // inching after — it never claims "done" until the call actually returns.
+  useEffect(() => {
+    if (!importing) { setProgress(0); setElapsed(0); return; }
+    const started = Date.now();
+    const id = setInterval(() => {
+      const s = (Date.now() - started) / 1000;
+      setElapsed(s);
+      setProgress(Math.min(96, 96 * (1 - Math.exp(-s / (SWEEP_EST_S / 3)))));
+    }, 200);
+    return () => clearInterval(id);
+  }, [importing]);
+  const phaseIdx = progress < 12 ? 0 : progress < 30 ? 1 : progress < 50 ? 2 : progress < 80 ? 3 : 4;
 
   // Drawer actions (accept / reject / hide) call this: refresh proposal counts and,
   // since an accept changes field values, re-mount the content panels.
@@ -113,7 +145,29 @@ export default function RecordWorkspace({ target, recordName }: { target: Target
           : <label className="field"><span className="t-label">Public URL <span className="t-muted" style={{ fontWeight: 400 }}>— optional</span></span><input className="input" value={src.url} onChange={(e) => setSrc({ ...src, url: e.target.value })} placeholder="https://yourcompany.com/product" /></label>}
         <label className="field"><span className="t-label">Focus <span className="t-muted" style={{ fontWeight: 400 }}>— optional</span></span><input className="input" value={src.guidance} onChange={(e) => setSrc({ ...src, guidance: e.target.value })} placeholder="e.g. prioritize the Technical and Positioning fields" /></label>
         {impNote && <div className="banner" style={{ marginBottom: 12 }}>{impNote}</div>}
-        <div className="row gap-2"><button className="btn" disabled={importing} onClick={runImport}>{importing ? "Making it full & current…" : "✦ Make it full & current → review queue"}</button><button className="btn btn-secondary" onClick={() => setImp(false)}>Close</button></div>
+
+        {importing && (
+          <div className="card card-pad" style={{ marginBottom: 12, borderLeft: "3px solid var(--ac)" }}>
+            <div className="row-between" style={{ alignItems: "baseline", marginBottom: 8 }}>
+              <span className="t-label" style={{ color: "var(--tm)" }}>{SWEEP_PHASES[phaseIdx]}…</span>
+              <span className="t-mono-xs t-muted">{elapsed < SWEEP_EST_S ? `~${Math.max(1, Math.ceil(SWEEP_EST_S - elapsed))}s left` : "Wrapping up…"}</span>
+            </div>
+            <div style={{ height: 6, borderRadius: 99, background: "var(--fill)", overflow: "hidden" }}>
+              <div style={{ height: "100%", width: `${progress}%`, background: "var(--ac)", borderRadius: 99, transition: "width 0.2s linear" }} />
+            </div>
+            <div className="stack-1" style={{ marginTop: 10 }}>
+              {SWEEP_PHASES.map((p, i) => (
+                <div key={i} className={i === phaseIdx ? "t-sub" : "t-muted"} style={{ fontSize: 12, display: "flex", gap: 8, alignItems: "center", opacity: i <= phaseIdx ? 1 : 0.45 }}>
+                  <span style={{ width: 12, display: "inline-block", fontWeight: 700 }}>{i < phaseIdx ? "✓" : i === phaseIdx ? "→" : "·"}</span>
+                  <span>{p}</span>
+                </div>
+              ))}
+            </div>
+            <div className="t-sub t-muted" style={{ fontSize: 11, marginTop: 8 }}>Elapsed {Math.floor(elapsed)}s · the time shown is an estimate — a full sweep can run longer when grounding is rich. Safe to leave this open.</div>
+          </div>
+        )}
+
+        <div className="row gap-2"><button className="btn" disabled={importing} onClick={runImport}>{importing ? "Making it full & current…" : "✦ Make it full & current → review queue"}</button><button className="btn btn-secondary" disabled={importing} onClick={() => setImp(false)}>Close</button></div>
       </Modal>
 
       {/* Advisors — the agents that live on this record, aligned to its area */}
