@@ -70,7 +70,7 @@ export default function RecordWorkspace({ target, recordName }: { target: Target
       if (!data?.changes_saved) {
         setImpNote(data?.message || "Nothing could be grounded for the blank fields yet.");
       } else {
-        setImpNote(`Proposed ${data.changes_saved} field${data.changes_saved === 1 ? "" : "s"} to fill — review them in Advisors (the “waiting” pill).`);
+        setImpNote(`Proposed ${data.changes_saved} field improvement${data.changes_saved === 1 ? "" : "s"} (gaps, thin, or stale) — review them in Advisors (the “waiting” pill).`);
         setSrc({ mode: src.mode, content: "", url: "", guidance: "" });
         refresh();
       }
@@ -86,23 +86,23 @@ export default function RecordWorkspace({ target, recordName }: { target: Target
     <div>
       <Banner>{error}</Banner>
 
-      {/* Set up with AI = fill the blanks · Refine with AI = update what's filled */}
+      {/* Set up with AI = whole-record completeness sweep · Refine = a chat, field by field */}
       <div className="card card-pad row-between" style={{ marginBottom: "var(--sp-4)", gap: 12, flexWrap: "wrap" }}>
         <div style={{ minWidth: 0 }}>
-          <div style={{ fontWeight: 640, fontSize: 13.5 }}>Set up with AI <span className="t-mono-xs t-muted" style={{ fontWeight: 400 }}>— fill the blanks</span></div>
-          <div className="t-sub t-muted" style={{ fontSize: 12.5, marginTop: 2 }}>Completes this record&rsquo;s <strong>empty</strong> fields, in order — grounded in what&rsquo;s known (the record, modules &amp; features, your signals), optionally a doc/URL you add. Lands in your review queue.</div>
+          <div style={{ fontWeight: 640, fontSize: 13.5 }}>Set up with AI <span className="t-mono-xs t-muted" style={{ fontWeight: 400 }}>— full &amp; current</span></div>
+          <div className="t-sub t-muted" style={{ fontSize: 12.5, marginTop: 2 }}>Sweeps the <strong>whole</strong> record and proposes whatever makes every field full and current — fills gaps, completes thin fields, refreshes stale ones (not just the empty ones). Grounded in your modules &amp; features + signals, optionally a doc/URL. Lands in your review queue.</div>
         </div>
         <span className="row gap-2" style={{ flexShrink: 0 }}>
-          <button className="btn btn-sm" onClick={() => { setImpNote(null); setImp(true); }} style={{ background: "var(--ac)", color: "#fff" }} title="Fill this record's empty fields, grounded in what's known (a source is optional)">Set up with AI</button>
+          <button className="btn btn-sm" onClick={() => { setImpNote(null); setImp(true); }} style={{ background: "var(--ac)", color: "#fff" }} title="Make the whole record full and current in one pass — fills, completes, and refreshes every field (a source is optional)">Set up with AI</button>
           <button className="btn btn-secondary btn-sm" onClick={() => setRefining(true)}
-            title="Update fields that ALREADY have content — a true-update grounded in your marketplace + company signals, edited before it lands">✦ Refine with AI</button>
+            title="A chat to work fields one at a time — you steer the true-update, grounded in your signals, edited before it lands">✦ Refine with AI</button>
         </span>
       </div>
 
       {refining && <RecordRefine target={target} recordName={recordName} onApplied={refresh} onClose={() => setRefining(false)} />}
 
-      <Modal open={imp} onClose={() => setImp(false)} title="Set up with AI — fill the blanks" width={620}>
-        <div className="t-sub t-muted" style={{ fontSize: 12.5, marginBottom: 12 }}>Fills this record&rsquo;s <strong>empty</strong> fields, in order — grounded in the record itself, its modules &amp; features, and your signals. Add an optional source (a brief, your site) for extra grounding. Proposals land in your <strong>review queue</strong>; nothing is applied until you accept it.</div>
+      <Modal open={imp} onClose={() => setImp(false)} title="Set up with AI — make it full & current" width={620}>
+        <div className="t-sub t-muted" style={{ fontSize: 12.5, marginBottom: 12 }}>Sweeps <strong>every</strong> field and proposes what it takes to make the record full and current — fills gaps, completes thin fields, refreshes stale ones — grounded in the record itself, its modules &amp; features, and your signals. Add an optional source for extra grounding. Proposals land in your <strong>review queue</strong>; nothing is applied until you accept it.</div>
         <div className="t-label" style={{ marginBottom: 6 }}>Optional source <span className="t-muted" style={{ fontWeight: 400, textTransform: "none", letterSpacing: 0 }}>— extra grounding; not required</span></div>
         <div className="row gap-2" style={{ marginBottom: 10 }}>
           <button type="button" className={`btn btn-sm ${src.mode === "paste" ? "" : "btn-secondary"}`} onClick={() => setSrc({ ...src, mode: "paste" })}>Paste text</button>
@@ -113,7 +113,7 @@ export default function RecordWorkspace({ target, recordName }: { target: Target
           : <label className="field"><span className="t-label">Public URL <span className="t-muted" style={{ fontWeight: 400 }}>— optional</span></span><input className="input" value={src.url} onChange={(e) => setSrc({ ...src, url: e.target.value })} placeholder="https://yourcompany.com/product" /></label>}
         <label className="field"><span className="t-label">Focus <span className="t-muted" style={{ fontWeight: 400 }}>— optional</span></span><input className="input" value={src.guidance} onChange={(e) => setSrc({ ...src, guidance: e.target.value })} placeholder="e.g. prioritize the Technical and Positioning fields" /></label>
         {impNote && <div className="banner" style={{ marginBottom: 12 }}>{impNote}</div>}
-        <div className="row gap-2"><button className="btn" disabled={importing} onClick={runImport}>{importing ? "Filling the blanks…" : "✦ Fill the blanks → review queue"}</button><button className="btn btn-secondary" onClick={() => setImp(false)}>Close</button></div>
+        <div className="row gap-2"><button className="btn" disabled={importing} onClick={runImport}>{importing ? "Making it full & current…" : "✦ Make it full & current → review queue"}</button><button className="btn btn-secondary" onClick={() => setImp(false)}>Close</button></div>
       </Modal>
 
       {/* Advisors — the agents that live on this record, aligned to its area */}
