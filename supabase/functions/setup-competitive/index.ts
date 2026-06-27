@@ -109,9 +109,45 @@ const PICTURE_SCHEMA = {
     positioning: { type: "string" },  // category claim / what it replaces
     more: { type: "string" },         // anything else competitive-relevant ("" if none)
     known_competitors: { type: "string" }, // rivals the user NAMED in records/interview ("" if none)
+    // The FULL record fill: every canonical product/GTM field the records + interview
+    // legitimately support, so setup leaves a complete product & GTM record (not just
+    // the search context). Only real canonical keys; only what's grounded; omit the rest.
+    record_updates: {
+      type: "array",
+      items: {
+        type: "object", additionalProperties: false,
+        properties: {
+          scope: { type: "string", enum: ["product", "gtm"] },
+          field_key: { type: "string" },
+          value: { type: "string" },
+        },
+        required: ["scope", "field_key", "value"],
+      },
+    },
   },
-  required: ["picture", "product", "features", "who", "industries", "positioning", "more", "known_competitors"],
+  required: ["picture", "product", "features", "who", "industries", "positioning", "more", "known_competitors", "record_updates"],
 };
+
+// The canonical record fields setup may fill, by scope. The model is held to THESE
+// keys (anything else is dropped client-side) so updates land on real template
+// fields, never an invented one. Mirrors lib/templates.ts.
+const RECORD_FIELD_CATALOG = `PRODUCT record fields (scope "product"):
+- what_it_is: a clear one-paragraph description of the product
+- problem: the core problem it solves and why it matters now
+- category: the market category it competes in
+- strategic_intent: the bet — where this product takes the company
+- core_capabilities: the handful of things the product does best
+- differentiated_capabilities: capabilities competitors can't easily match
+GTM record fields (scope "gtm"):
+- primary_persona: the main person you sell to — role, goals, pains
+- icp: the ideal customer profile — the accounts it's built for and how to qualify them
+- positioning: how it's positioned vs the alternatives a buyer is weighing
+- category_pov: your point of view on where the category is going and why now
+- differentiation: the defensible wedge — why you win when you win
+- value_prop: the core promise in one or two sentences
+- gtm_motion: the motion that fits (PLG, sales-led, partner) and why
+- pricing_model: how it's packaged and priced, and how that shapes the motion
+- win_themes: the recurring reasons you win`;
 
 const CAPABILITIES_SCHEMA = {
   type: "object", additionalProperties: false,
@@ -254,7 +290,11 @@ NEXT QUESTION — next_dimension = the highest-WEIGHT dimension still 'missing' 
       const resp = (await anthropic.messages.create({
         model: pol.model, max_tokens: 4000,
         output_config: { effort: pol.effort, format: { type: "json_schema", schema: PICTURE_SCHEMA } },
-        system: "Synthesize the records + interview into the FULL PICTURE of this product and its market — the brief a competitive researcher needs to find exactly the right rivals. picture = 1-2 tight paragraphs: what it is, who buys it (personas + industries + segment), how it positions and what it replaces, the features that win deals, and any deal-loss/competitor hints from the interview. The structured fields = the same content, distilled. known_competitors = every rival the user NAMED in the records or interview (comma-separated; empty string if none) — these seed and anchor the search. Ground every claim in the records/transcript — no embellishment.",
+        system: `Synthesize the records + interview into the FULL PICTURE of this product and its market — the brief a competitive researcher needs to find exactly the right rivals, AND a complete fill of the product & GTM records. picture = 1-2 tight paragraphs: what it is, who buys it (personas + industries + segment), how it positions and what it replaces, the features that win deals, and any deal-loss/competitor hints from the interview. The structured fields = the same content, distilled. known_competitors = every rival the user NAMED in the records or interview (comma-separated; empty string if none) — these seed and anchor the search.
+
+record_updates = the COMPLETE record fill. For EACH canonical field below that the records + interview legitimately support, emit { scope, field_key, value } with a crisp, record-ready value. This is how setup leaves a full, complete product & GTM record — the interview asks about product strategy, GTM motion, pricing, and positioning precisely so these get filled. Rules: use ONLY these exact field_keys; ground every value in the records/transcript (NO embellishment, no guessing); OMIT a field entirely if there's nothing real to say; prefer the user's own words. If a field already appears in THE RECORDS, only include it when the interview genuinely adds or sharpens it.
+
+${RECORD_FIELD_CATALOG}`,
         messages: [{ role: "user", content: [
           records ? `THE RECORDS:\n${records}` : "THE RECORDS: (none)",
           transcriptText ? `THE INTERVIEW:\n${transcriptText}` : "",

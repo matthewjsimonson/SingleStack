@@ -24,12 +24,27 @@ type CapCand = { name: string; category: string; why: string; keep: boolean };
 const MONITOR_KINDS = [
   ["website", "Website"], ["press", "Press & news"], ["linkedin_jobs", "LinkedIn jobs"], ["linkedin_posts", "LinkedIn posts"],
 ] as const;
-// Which template SECTION a setup-learned field belongs to, used only when the
-// field doesn't already exist on the record (a template-seeded record already
-// has these, so we update in place). Keeps an auto-added field grouped correctly.
-const FIELD_SECTION: Record<string, string> = {
-  what_it_is: "Overview", core_capabilities: "Capabilities",
-  primary_persona: "Buyer", positioning: "Positioning",
+// The canonical record fields the setup may fill, with their record scope, label,
+// and template section. The picture step is held to these keys server-side; the
+// client validates against this map too, so a stray/invented key from the model
+// is dropped rather than orphaning a field on the record. Mirrors lib/templates.ts.
+const RECORD_FIELD_META: Record<string, { label: string; section: string; scope: "product" | "gtm" }> = {
+  what_it_is: { label: "What it is", section: "Overview", scope: "product" },
+  problem: { label: "Problem it solves", section: "Overview", scope: "product" },
+  category: { label: "Category", section: "Overview", scope: "product" },
+  strategic_intent: { label: "Strategic intent", section: "Overview", scope: "product" },
+  core_capabilities: { label: "Core capabilities", section: "Capabilities", scope: "product" },
+  differentiated_capabilities: { label: "Differentiated capabilities", section: "Capabilities", scope: "product" },
+  primary_persona: { label: "Primary persona", section: "Buyer", scope: "gtm" },
+  icp: { label: "Ideal customer profile", section: "Buyer", scope: "gtm" },
+  industries: { label: "Industries / verticals", section: "Buyer", scope: "gtm" },
+  positioning: { label: "Positioning", section: "Positioning", scope: "gtm" },
+  category_pov: { label: "Category POV", section: "Positioning", scope: "gtm" },
+  differentiation: { label: "Differentiation", section: "Positioning", scope: "gtm" },
+  value_prop: { label: "Value proposition", section: "Messaging", scope: "gtm" },
+  gtm_motion: { label: "GTM motion", section: "Motion", scope: "gtm" },
+  pricing_model: { label: "Pricing model", section: "Motion", scope: "gtm" },
+  win_themes: { label: "Win themes", section: "Motion", scope: "gtm" },
 };
 
 export default function CompetitiveSetup({ onDone, productId }: { onDone: () => void; productId?: string | null }) {
@@ -411,50 +426,61 @@ export default function CompetitiveSetup({ onDone, productId }: { onDone: () => 
         competitors: (data.known_competitors || "").trim() || cur.competitors,
       }));
       setChatDone(true);
-      // HOLD what the interview surfaced: queue a proposal on the GTM record so
-      // the answers update the PROFILE (personas / industries / positioning),
-      // not just this session. Through the gate — you accept it in the drawer.
-      if (history.length > 0) void persistInterview(data);
+      // Fill the FULL product & GTM record from what the interview surfaced —
+      // empty fields auto-apply; differences to already-filled fields are proposed.
+      if (history.length > 0) void applyRecordUpdates((data.record_updates ?? []) as { scope?: string; field_key?: string; value?: string }[]);
     } catch (e) { setError(e instanceof Error ? e.message : "Could not paint the picture."); }
     finally { setChatBusy(false); }
   }
   const [profileNote, setProfileNote] = useState<string | null>(null);
-  // Round out BOTH records from what the drill-down surfaced, routed to the RIGHT
-  // canonical field on the RIGHT record (product = what it IS; gtm = how it's
-  // SOLD). EMPTY fields auto-apply through the human edit channel — the basic
-  // areas that should just be filled. A field that already holds curated content
-  // is NEVER clobbered: a differing value lands as a proposal you accept in the
-  // record's drawer. So setup fills the blanks for you and only asks before
-  // changing something you already wrote.
-  async function persistInterview(d: { product?: string; features?: string; who?: string; industries?: string; positioning?: string }) {
+  // Fill the FULL product & GTM record from what the interview surfaced. The
+  // picture step returns record_updates over the canonical field set (product
+  // strategy, GTM motion, pricing, positioning, …); each is routed to the RIGHT
+  // field on the RIGHT record. EMPTY fields auto-apply through the human edit
+  // channel — so answering the questions leaves a complete record. A field that
+  // already holds curated content is NEVER clobbered: a differing value lands as
+  // a proposal you accept in the record's drawer. Invalid/invented keys are
+  // dropped (validated against RECORD_FIELD_META).
+  async function applyRecordUpdates(updates: { scope?: string; field_key?: string; value?: string }[]) {
     try {
+      if (!Array.isArray(updates) || !updates.length) return;
       const orgId = await getOrgId(); if (!orgId) return;
       const [{ data: prodRec }, { data: g }] = await Promise.all([
         supabase.from("product_records").select("id").order("created_at").limit(1).maybeSingle(),
         supabase.from("gtm_records").select("id").order("created_at").limit(1).maybeSingle(),
       ]);
+      const recordId: Record<"product" | "gtm", string | undefined> = { product: prodRec?.id, gtm: g?.id };
+      const byScope: Record<"product" | "gtm", { field_key: string; value: string; label: string; section: string }[]> = { product: [], gtm: [] };
+      for (const u of updates) {
+        const meta = u.field_key ? RECORD_FIELD_META[u.field_key] : undefined;
+        if (!meta || meta.scope !== u.scope) continue;             // only canonical, correctly-scoped keys
+        const v = (u.value ?? "").trim(); if (!v) continue;
+        byScope[meta.scope].push({ field_key: u.field_key!, value: v, label: meta.label, section: meta.section });
+      }
       let applied = 0, queued = 0;
-      const reconcile = async (recordCol: "product_id" | "gtm_record_id", recordId: string, title: string, want: [string, string, string | undefined][]) => {
-        const { data: rf } = await supabase.from("record_fields").select("id, field_key, value").eq(recordCol, recordId);
+      for (const scope of ["product", "gtm"] as const) {
+        const rid = recordId[scope]; const items = byScope[scope];
+        if (!rid || !items.length) continue;
+        const col = scope === "product" ? "product_id" : "gtm_record_id";
+        const { data: rf } = await supabase.from("record_fields").select("id, field_key, value").eq(col, rid);
         const adds: Record<string, unknown>[] = [];
         const propose: { id: string; old: string | null; value: string }[] = [];
-        for (const [k, label, raw] of want) {
-          const v = raw?.trim(); if (!v) continue;
-          const ex = rf?.find((f) => f.field_key === k);
+        for (const it of items) {
+          const ex = rf?.find((f) => f.field_key === it.field_key);
           const existing = (ex?.value ?? "").trim();
-          if (existing === v) continue;                              // already current
-          if (!existing) {                                           // empty or absent → auto-apply
-            if (ex) { await supabase.rpc("human_set_field_value", { p_field: ex.id, p_value: v }); applied++; }
-            else adds.push({ [recordCol]: recordId, field_key: k, label, value: v, section: FIELD_SECTION[k] ?? null });
-          } else if (ex) {                                           // filled + different → propose, don't clobber
-            propose.push({ id: ex.id, old: ex.value, value: v });
+          if (existing === it.value) continue;                     // already current
+          if (!existing) {                                         // empty or absent → auto-apply
+            if (ex) { await supabase.rpc("human_set_field_value", { p_field: ex.id, p_value: it.value }); applied++; }
+            else adds.push({ [col]: rid, field_key: it.field_key, label: it.label, value: it.value, section: it.section });
+          } else if (ex) {                                         // filled + different → propose, don't clobber
+            propose.push({ id: ex.id, old: ex.value, value: it.value });
           }
         }
         if (adds.length) { await supabase.rpc("human_add_fields", { p_rows: adds }); applied += adds.length; }
         if (propose.length) {
           const { data: prop } = await supabase.from("proposals").insert({
-            org_id: orgId, [recordCol]: recordId, title,
-            rationale: "The competitive-setup drill-down surfaced detail that differs from what this field already holds. Accept to update it — your current wording stands until you do.",
+            org_id: orgId, [col]: rid, title: `Setup learnings → ${scope === "product" ? "product" : "GTM"} record`,
+            rationale: "The guided-setup interview surfaced detail that differs from what this field already holds. Accept to update it — your current wording stands until you do.",
             proposed_by: "Setup interview", status: "pending",
           }).select("id").single();
           if (prop) {
@@ -465,20 +491,10 @@ export default function CompetitiveSetup({ onDone, productId }: { onDone: () => 
             queued += propose.length;
           }
         }
-      };
-      // Product record — what it IS.
-      if (prodRec) await reconcile("product_id", prodRec.id, "Setup learnings → product record", [
-        ["what_it_is", "What it is", d.product], ["core_capabilities", "Core capabilities", d.features],
-      ]);
-      // GTM record — how it's SOLD. who → the canonical primary_persona (NOT a
-      // non-template "personas" key, which orphaned). industries + competitors are
-      // written durably by persistContextToRecords.
-      if (g) await reconcile("gtm_record_id", g.id, "Setup learnings → GTM record", [
-        ["primary_persona", "Primary persona", d.who], ["positioning", "Positioning", d.positioning],
-      ]);
+      }
       if (applied || queued) {
         const bits = [applied ? `${applied} field${applied === 1 ? "" : "s"} filled automatically` : "", queued ? `${queued} change${queued === 1 ? "" : "s"} to already-filled fields await review` : ""].filter(Boolean).join(" · ");
-        setProfileNote(`Records updated from your answers — ${bits}.${queued ? " The proposals are in each record's drawer." : ""}`);
+        setProfileNote(`Product & GTM records updated from your answers — ${bits}.${queued ? " The proposals are in each record's drawer." : ""}`);
       }
     } catch { /* best-effort: the wizard flow never fails on record persistence */ }
   }
