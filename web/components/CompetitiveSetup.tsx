@@ -203,7 +203,7 @@ export default function CompetitiveSetup({ onDone, productId }: { onDone: () => 
   }, []);
   useEffect(() => {
     (async () => {
-      let prodLine = "", whoLine = "", posLine = "", problemLine = "", industriesLine = "", competitorsLine = "";
+      let prodLine = "", whoLine = "", posLine = "", problemLine = "", industriesLine = "", competitorsLine = "", moreLine = "";
       // Product record: the REAL template keys (what_it_is / who_its_for /
       // problem / category), with the legacy seed keys (overview / value_prop)
       // as fallback — not just value_prop, which products don't carry.
@@ -212,13 +212,13 @@ export default function CompetitiveSetup({ onDone, productId }: { onDone: () => 
       if (p) {
         const [{ data: fs }, { data: mods }] = await Promise.all([
           supabase.from("record_fields").select("field_key, value").eq("product_id", p.id)
-            .in("field_key", ["what_it_is", "who_its_for", "problem", "category", "value_prop", "overview", "core_capabilities", "differentiated_capabilities"]),
+            .in("field_key", ["what_it_is", "who_its_for", "problem", "category", "value_prop", "overview", "core_capabilities", "differentiated_capabilities", "strategic_intent"]),
           supabase.from("modules").select("name, description").eq("product_id", p.id).order("created_at").limit(12),
         ]);
         const f = (k: string) => fs?.find((x) => x.field_key === k)?.value ?? null;
         const what = f("what_it_is") ?? f("value_prop") ?? f("overview");
         setProd({ name: p.name, value_prop: what });
-        prodLine = `${p.name}${what ? ` — ${what}` : ""}${f("category") ? ` (category: ${f("category")})` : ""}`;
+        prodLine = `${p.name}${what ? ` — ${what}` : ""}${f("category") ? ` (category: ${f("category")})` : ""}${f("strategic_intent") ? `. Strategic intent: ${f("strategic_intent")}` : ""}`;
         if (f("who_its_for")) whoLine = f("who_its_for") as string;
         if (f("problem")) problemLine = `Problem it solves: ${f("problem")}`;
         // Features/modules: what the product actually DOES — the strongest
@@ -231,17 +231,27 @@ export default function CompetitiveSetup({ onDone, productId }: { onDone: () => 
       const { data: g } = await supabase.from("gtm_records").select("id, name").order("created_at").limit(1).maybeSingle();
       if (g) {
         const { data: fs } = await supabase.from("record_fields").select("field_key, value").eq("gtm_record_id", g.id)
-          .in("field_key", ["personas", "primary_persona", "icp", "positioning", "category_pov", "differentiation", "industries", "key_competitors"]);
+          .in("field_key", ["personas", "primary_persona", "icp", "positioning", "category_pov", "differentiation", "industries", "key_competitors", "value_prop", "win_themes", "gtm_motion", "pricing_model"]);
         const f = (k: string) => fs?.find((x) => x.field_key === k)?.value ?? null;
         const personas = f("personas") ?? f("primary_persona") ?? f("icp");
         const positioning = f("positioning") ?? f("category_pov");
         setGtm({ name: g.name, personas, positioning });
-        if (personas && !whoLine) whoLine = personas;
-        if (positioning) posLine = positioning;
-        // Industries (verticals) and key competitors now have canonical GTM fields,
-        // so they pre-fill from the record and survive a competitive-board clear.
+        // Richer profile: COMBINE the related GTM fields so each window (and the
+        // search) reflects the depth of the record, not one thin line.
+        whoLine = [whoLine, f("primary_persona"), f("icp")].filter(Boolean).join(" · ") || whoLine;
+        posLine = [f("positioning"), f("category_pov"), f("differentiation")].filter(Boolean).join(" · ") || posLine;
+        // Industries (verticals) and key competitors have canonical GTM fields, so
+        // they pre-fill from the record and survive a competitive-board clear.
         industriesLine = f("industries") ?? "";
         competitorsLine = f("key_competitors") ?? "";
+        // The "Also" window carries our motion/pricing/win-themes — strong signal
+        // for who actually competes with us and how.
+        moreLine = [
+          f("value_prop") && `Value prop: ${f("value_prop")}`,
+          f("win_themes") && `Win themes: ${f("win_themes")}`,
+          f("gtm_motion") && `GTM motion: ${f("gtm_motion")}`,
+          f("pricing_model") && `Pricing: ${f("pricing_model")}`,
+        ].filter(Boolean).join(" · ");
       } else setGtm(null);
       // The full dump: EVERY field on both records + every module, labeled —
       // the complete picture the records can paint on their own.
@@ -267,7 +277,7 @@ export default function CompetitiveSetup({ onDone, productId }: { onDone: () => 
         who: cur.who.trim() ? cur.who : whoLine,
         industries: cur.industries.trim() ? cur.industries : industriesLine,
         positioning: cur.positioning.trim() ? cur.positioning : posLine,
-        more: cur.more,
+        more: cur.more.trim() ? cur.more : moreLine,
         competitors: cur.competitors.trim() ? cur.competitors : competitorsLine,
       }));
     })();
@@ -337,6 +347,10 @@ export default function CompetitiveSetup({ onDone, productId }: { onDone: () => 
     ctx.positioning.trim() ? `How we position / against what: ${ctx.positioning.trim()}` : "",
     ctx.competitors.trim() ? `KNOWN COMPETITORS (user-named — verify these first, then search beyond them): ${ctx.competitors.trim()}` : "",
     ctx.more.trim() ? `Also: ${ctx.more.trim()}` : "",
+    // Ground the search in the FULL product & GTM records — the real depth lives
+    // there (strategy, motion, pricing, technical, differentiation), not in the
+    // distilled fields above. Without this the search reasons off thin summaries.
+    recordsDump.trim() ? `\nOUR FULL PRODUCT & GTM RECORDS (the authoritative detail — weigh these heavily):\n${recordsDump.trim()}` : "",
   ].filter(Boolean).join("\n");
 
   // invoke with REAL errors: a non-2xx from the function carries its message in
@@ -852,7 +866,7 @@ export default function CompetitiveSetup({ onDone, productId }: { onDone: () => 
               <span className="t-mono-xs t-muted">— the interview defers to your records and stops at the budget.</span>
             </div>
             <div className="row gap-2">
-              <button className="btn btn-secondary btn-sm" disabled={maxQuestions === 0} onClick={openChat} title={maxQuestions === 0 ? "Set max questions above 0 to drill down" : undefined}>{chat.length ? "✦ Continue the drill-down" : "✦ Drill down with AI"}</button>
+              <button className="btn btn-secondary btn-sm" disabled={maxQuestions === 0} onClick={openChat} title={maxQuestions === 0 ? "Set max questions above 0 to set up the profile" : "AI interviews you to build (or sharpen) your profile, then fills your product & GTM records"}>{picture ? "✦ Refine profile with AI" : chat.length ? "✦ Continue setting up the profile" : "✦ Set up profile with AI"}</button>
               <button className="btn btn-sm" disabled={!marketCtx} onClick={findCompetitors}
                 title={picture ? "Search from the confirmed full picture" : "You can search now, or drill down first for a sharper match"}>
                 {savedRun?.comps?.length ? `✦ New search (${targetMatches} matches)` : `✦ Find my competitors (${targetMatches})`}
@@ -869,7 +883,7 @@ export default function CompetitiveSetup({ onDone, productId }: { onDone: () => 
               <div onClick={() => setChatOpen(false)} style={{ position: "fixed", inset: 0, background: "rgba(11,12,14,0.32)", zIndex: 40 }} />
               <aside style={{ position: "fixed", top: 0, right: 0, height: "100vh", width: 520, maxWidth: "94vw", background: "var(--panel)", borderLeft: "1px solid var(--border)", boxShadow: "var(--shadow-md)", zIndex: 41, display: "flex", flexDirection: "column" }}>
                 <div style={{ padding: "16px 20px", borderBottom: "1px solid var(--border)" }} className="row-between">
-                  <span className="t-h2" style={{ fontSize: 15 }}>Drill down — so the search gets specific</span>
+                  <span className="t-h2" style={{ fontSize: 15 }}>{picture ? "Refine your profile" : "Set up your profile"} — so the search gets specific</span>
                   <button className="btn btn-secondary btn-sm" onClick={() => setChatOpen(false)}>Close</button>
                 </div>
                 {ready !== null && (
