@@ -15,6 +15,7 @@ import CapabilityCellDrawer, { type Cell } from "@/components/CapabilityCellDraw
 import CompetitiveGrid from "@/components/CompetitiveGrid";
 import SignalProfile from "@/components/SignalProfile";
 import CompetitiveSetup from "@/components/CompetitiveSetup";
+import CompetitorFinalize from "@/components/CompetitorFinalize";
 import ProfileReadiness from "@/components/ProfileReadiness";
 import BattlecardItemDrawer, { type CardItem } from "@/components/BattlecardItemDrawer";
 import { signalDomain, SIGNAL_DOMAIN } from "@/lib/signals";
@@ -693,6 +694,8 @@ function Competitors({ competitors, cards, overview, capabilities, scores, compS
         </button>
         <div className="row gap-2"><span className="t-h2" style={{ fontSize: 15 }}>{selected?.name}</span>{selected && <Chip tone={relTone(selected.relationship)}>{selected.relationship}</Chip>}</div>
       </div>
+
+      {selected && <CompetitorFinalize competitor={selected} capabilitiesCount={capabilities.length} onChanged={reload} />}
 
       <div className="card" style={{ overflow: "hidden" }}>
         <div className="row" style={{ gap: 4, padding: "8px 8px 0", borderBottom: "1px solid var(--border)", flexWrap: "wrap" }}>
