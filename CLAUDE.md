@@ -1,4 +1,7 @@
 
+## What SingleStack is (don't mischaracterize)
+A **product-led growth (PLG) platform**, not "a product marketing platform." It spans the whole PLG loop — sense → decide → **build** → sell → learn — for both product managers and GTM. The **Build module is first-class**: product managers use AI to **legitimately prototype** (real, working prototypes), not just draft docs. Marketing/GTM artifacts are one surface among several, not the product's identity.
+
 ## Branch rule (non-negotiable)
 ALL work happens on `develop` only. Never push to, sync, or create any other branch (not main, not claude/*) unless the user explicitly says so in that message. Enforced by .git/hooks/pre-push.
 
