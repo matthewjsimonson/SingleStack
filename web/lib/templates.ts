@@ -52,62 +52,43 @@ export const PRODUCT_TEMPLATE: TemplateSection[] = [
 ];
 
 // ---- GTM RECORD: how the product goes to market ----------------------------
-// 12 CORNERSTONE fields — the strategic INPUTS an AI needs to reason about GTM
-// and drive the loop (signals → strategy → battlecards/content/enablement).
-// Deliberately excludes:
-//   • AI-generated OUTPUTS (tagline, elevator pitch, battlecard summary) — derived
-//     from these inputs, not entered.
-//   • Things that are their own ENTITIES with dedicated screens (competitors →
-//     /competitive, campaigns → /campaigns) — not duplicated as record text.
-//   • DUPLICATES (narrative ≈ category POV; vision lives on the product record).
-//   • PROOF/metrics — now live, sourced metric fields, not static prose.
-//   • loss_themes — better captured as win-loss SIGNALS in the living loop.
+// The GTM record is GO-TO-MARKET STRATEGY & OPERATIONS — how we go to market:
+// who we serve, the motion, the tools & frontier-model leverage, the processes
+// and handoffs, the execution strategy, and pricing. It is NOT the messaging.
+//
+// Positioning, strategic narrative, value prop, pillars, persona messaging, tone,
+// proof, and the elevator pitch live in the MESSAGING FRAMEWORK (the Messaging
+// tab — gtm_tabs / lib/messagingFramework.ts), the upstream source of truth that
+// content & campaigns derive from. The two are split by UPDATE TRIGGER: you SWEEP
+// the GTM record as new tools/strategies/functionality land; you BUILD the
+// messaging framework as signals (win/loss, market, competitive) and product
+// updates come in. The audience (ICP, industries, personas) is defined ONCE here
+// and the framework REFERENCES it — not duplicated.
 export const GTM_TEMPLATE: TemplateSection[] = [
   {
-    section: "Positioning",
-    blurb: "Where you sit and why you win — the strategic frame.",
-    fields: [
-      { key: "category_pov", label: "Category POV", placeholder: "Your point of view on where the category is going and why now." },
-      { key: "positioning", label: "Positioning", placeholder: "How it's positioned vs. the alternatives a buyer is weighing." },
-      { key: "differentiation", label: "Differentiation", placeholder: "The defensible wedge — why you win when you win." },
-    ],
-  },
-  {
-    section: "Messaging",
-    blurb: "The core promise and the themes everything ladders to.",
-    fields: [
-      { key: "value_prop", label: "Value proposition", placeholder: "The core promise in one or two sentences." },
-      { key: "pillars", label: "Message pillars", placeholder: "The 2–4 themes all messaging ladders up to." },
-    ],
-  },
-  {
-    section: "Buyer",
-    blurb: "Who it's for and the people who decide. Add a field per persona — champion, economic buyer, user, etc.",
+    section: "Audience",
+    blurb: "Who we serve — the foundation the messaging framework references (defined once, here). Add a field per persona with '+ Field'.",
     fields: [
       { key: "icp", label: "Ideal customer profile", placeholder: "The accounts this is built for — and how to qualify them." },
       { key: "industries", label: "Industries / verticals", placeholder: "The verticals you serve — key to who you actually compete with." },
-      { key: "primary_persona", label: "Primary persona", placeholder: "The main person you speak to: role, goals, pains. Add more personas with '+ Field' (economic buyer, end user, …)." },
+      { key: "primary_persona", label: "Primary persona", placeholder: "The main person you serve: role, goals, pains. Add more personas with '+ Field' (economic buyer, end user, …)." },
     ],
   },
   {
     section: "Motion",
-    blurb: "How you win and how you reach and price the buyer.",
+    blurb: "How you go to market and how you price.",
     fields: [
-      { key: "win_themes", label: "Win themes", placeholder: "The recurring reasons you win — the engine for battlecards & content." },
-      { key: "gtm_motion", label: "GTM motion", placeholder: "How you message and convince — the core narrative, the claims and proof you lead with, how you talk about yourself to win the buyer (and the channel/motion behind it)." },
-      { key: "pricing_model", label: "Pricing model", placeholder: "How it's packaged and priced — and how that shapes the motion." },
+      { key: "gtm_motion", label: "GTM motion", placeholder: "How you go to market — the motion (self-serve, product-led, sales-assisted, partner-led), the channels you reach buyers through, and where this sits in the loop." },
+      { key: "pricing_model", label: "Pricing & packaging", placeholder: "How it's packaged and priced — and how that shapes the motion." },
     ],
   },
   {
-    // Seller-facing copy DERIVED from ratified battlecard items (Competitive
-    // module). The messaging agent drafts these; the items are the facts, this
-    // is what we SAY. Human-editable like any field.
-    section: "Battlecard",
-    blurb: "What sellers say against competitors — built on the ratified battlecard facts.",
+    section: "Operating model",
+    blurb: "The tools, processes, and execution that run go-to-market — updated as new functionality, strategies, and tools become available.",
     fields: [
-      { key: "battlecard_summary", label: "Battlecard summary", placeholder: "The one-paragraph competitive story a rep leads with." },
-      { key: "talk_track", label: "Talk track", placeholder: "The flow of a competitive conversation — openers, proof, close." },
-      { key: "objection_responses", label: "Objection responses", placeholder: "Verbatim-usable responses to the objections we hear." },
+      { key: "gtm_tools", label: "Tools & frontier-model leverage", placeholder: "The tools and frontier models you use to run GTM — what each does and where it fits in the work." },
+      { key: "gtm_workflows", label: "Processes & handoffs", placeholder: "The operating cadence and handoffs — how work moves between people, agents, and tools from idea to launch to measurement." },
+      { key: "execution_strategy", label: "Execution strategy", placeholder: "How you actually run GTM — the plays, the channel/campaign strategy, and how execution is prioritized and sequenced." },
     ],
   },
 ];

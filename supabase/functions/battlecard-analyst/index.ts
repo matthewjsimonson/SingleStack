@@ -26,6 +26,7 @@
 import Anthropic from "npm:@anthropic-ai/sdk@0.69.0";
 import { createClient, type SupabaseClient } from "npm:@supabase/supabase-js@2";
 import { resolveModelPolicy } from "../_shared/ai_policy.ts";
+import { loadMessaging } from "../_shared/messaging.ts";
 
 const MODEL = "claude-opus-4-8";
 const PRICING: Record<string, { input: number; output: number }> = {
@@ -174,14 +175,11 @@ Deno.serve(async (req: Request) => {
     const { data: gtmRec } = await supabase.from("gtm_records").select("id").order("created_at").limit(1).maybeSingle();
     if (gtmRec) {
       const { data: gf } = await supabase.from("record_fields").select("field_key, value").eq("gtm_record_id", gtmRec.id)
-        .in("field_key", ["positioning", "differentiation", "category_pov", "value_prop", "win_themes", "pillars", "icp"]);
+        .in("field_key", ["icp"]);
       const g = (k: string) => gf?.find((f) => f.field_key === k)?.value;
+      const messaging = await loadMessaging(supabase, gtmRec.id); // positioning/differentiation/pillars/win-themes live in the framework
       ourPositioning = [
-        g("positioning") && `How we position: ${g("positioning")}`,
-        g("differentiation") && `Our differentiation: ${g("differentiation")}`,
-        g("category_pov") && `Our category POV: ${g("category_pov")}`,
-        g("win_themes") && `Our win themes: ${g("win_themes")}`,
-        g("pillars") && `Our message pillars: ${g("pillars")}`,
+        messaging && `OUR MESSAGING (from the messaging framework):\n${messaging}`,
         g("icp") && `Our ICP: ${g("icp")}`,
       ].filter(Boolean).join("\n");
     }

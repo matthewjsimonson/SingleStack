@@ -88,9 +88,12 @@ Deno.serve(async (req: Request) => {
     if (!gtm) return json({ error: "GTM record not found" }, 404);
 
     // ---- grounding: GTM record fields, product record fields, competitive ----
+    // The GTM record holds STRATEGY & OPS (audience, motion, operating model) — the
+    // messaging house itself is what this function WRITES, so it grounds in the
+    // strategy + product truth + competitive, not in pre-existing messaging fields.
     const { data: gf } = await supabase.from("record_fields").select("label, field_key, value")
       .eq("gtm_record_id", gtmId)
-      .in("field_key", ["positioning", "category_pov", "differentiation", "value_prop", "pillars", "icp", "industries", "primary_persona", "win_themes", "gtm_motion"]);
+      .in("field_key", ["icp", "industries", "primary_persona", "gtm_motion", "pricing_model", "gtm_tools", "gtm_workflows", "execution_strategy"]);
     const gtmText = (gf ?? []).filter((f) => (f.value ?? "").trim()).map((f) => `• ${f.label}: ${f.value}`).join("\n");
 
     let productText = "";
@@ -131,7 +134,7 @@ Deno.serve(async (req: Request) => {
     const userText = [
       `GTM RECORD: ${gtm.name ?? "(unnamed)"}`,
       productText ? `\nPRODUCT TRUTH (what it is / capabilities):\n${productText}` : "",
-      gtmText ? `\nGTM TRUTH (positioning / value / personas / motion):\n${gtmText}` : "",
+      gtmText ? `\nGTM STRATEGY (who we serve / how we go to market / operating model):\n${gtmText}` : "",
       bcText ? `\nCOMPETITIVE (ratified battlecard items):\n${bcText}` : "",
       themeText ? `\nACTIVE THEMES:\n${themeText}` : "",
       "\nFRAMEWORK SECTIONS TO BUILD (write each to its guidance):",

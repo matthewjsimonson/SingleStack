@@ -17,6 +17,7 @@
 import Anthropic from "npm:@anthropic-ai/sdk@0.69.0";
 import { createClient, type SupabaseClient } from "npm:@supabase/supabase-js@2";
 import { logUsage } from "../_shared/ai_usage.ts";
+import { loadMessagingMap } from "../_shared/messaging.ts";
 import { resolveModelPolicy } from "../_shared/ai_policy.ts";
 
 const MODEL = "claude-opus-4-8";
@@ -91,9 +92,11 @@ Deno.serve(async (req: Request) => {
     let industries = "", personas = "", positioning = "", icp = "";
     const { data: gtm } = await supabase.from("gtm_records").select("id").order("created_at").limit(1).maybeSingle();
     if (gtm) {
-      const { data: gf } = await supabase.from("record_fields").select("field_key, value").eq("gtm_record_id", gtm.id).in("field_key", ["industries", "primary_persona", "icp", "positioning", "category_pov"]);
+      const { data: gf } = await supabase.from("record_fields").select("field_key, value").eq("gtm_record_id", gtm.id).in("field_key", ["industries", "primary_persona", "icp"]);
       const g = (k: string) => gf?.find((x) => x.field_key === k)?.value ?? "";
-      industries = g("industries"); personas = g("primary_persona"); icp = g("icp"); positioning = g("positioning") || g("category_pov");
+      industries = g("industries"); personas = g("primary_persona"); icp = g("icp");
+      const msg = await loadMessagingMap(supabase, gtm.id); // positioning now lives in the messaging framework
+      positioning = msg["positioning_statement"] || msg["strategic_narrative"] || "";
     }
     if (!modulesText && !whatItIs && !industries) {
       return json({ error: "Your product & GTM records are too sparse to align market watches. Fill them in (Set up with AI), then come back." }, 422);
