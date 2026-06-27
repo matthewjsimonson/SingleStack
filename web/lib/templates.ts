@@ -94,7 +94,7 @@ export const GTM_TEMPLATE: TemplateSection[] = [
     blurb: "How you win and how you reach and price the buyer.",
     fields: [
       { key: "win_themes", label: "Win themes", placeholder: "The recurring reasons you win — the engine for battlecards & content." },
-      { key: "gtm_motion", label: "GTM motion", placeholder: "PLG, sales-led, partner — the motion that fits, and why." },
+      { key: "gtm_motion", label: "GTM motion", placeholder: "How you message and convince — the core narrative, the claims and proof you lead with, how you talk about yourself to win the buyer (and the channel/motion behind it)." },
       { key: "pricing_model", label: "Pricing model", placeholder: "How it's packaged and priced — and how that shapes the motion." },
     ],
   },
