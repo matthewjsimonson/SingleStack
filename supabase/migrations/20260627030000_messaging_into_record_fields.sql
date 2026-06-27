@@ -14,6 +14,11 @@
 -- "Other sections" were not real). Migration runs as superuser → write-gate exempt.
 -- ============================================================================
 
+-- The record_fields value write-gate fires on INSERT too, and the migration role
+-- on Supabase is not a true superuser — so open the human-edit channel (the gate's
+-- sanctioned path) for this transaction. Revisions record with proposal_id = NULL.
+select set_config('app.human_edit', 'on', true);
+
 with mapping(k, lbl, pos) as (
   values
     ('positioning_statement', 'Positioning statement',        1),
@@ -40,3 +45,5 @@ where coalesce(btrim(gt.body->>'text'), '') <> ''
 -- gtm_tabs is deprecated (messaging now lives in record_fields). Clear it — the
 -- framework content is migrated above; the leftover custom sections were not real.
 delete from gtm_tabs;
+
+select set_config('app.human_edit', '', true);
