@@ -103,13 +103,15 @@ async function fetchViaWebSearch(key: string, source: any, pol: { model: string;
   let messages: any[] = [{ role: "user", content: user }];
   let text = "";
   const usage = { input_tokens: 0, output_tokens: 0, cache_read_input_tokens: 0, cache_creation_input_tokens: 0 };
-  for (let i = 0; i < 5; i++) {
+  // Bounded so a pull completes inside the edge wall-clock: at most 3 turns of up
+  // to 4 searches each. More than this risks a timeout the user reads as "hung".
+  for (let i = 0; i < 3; i++) {
     const resp = (await anthropic.messages.create({
       model: pol.model,
       max_tokens: 4000,
       thinking: { type: "adaptive" },
       output_config: { effort: pol.effort },
-      tools: [{ type: "web_search_20260209", name: "web_search", max_uses: 6 }],
+      tools: [{ type: "web_search_20260209", name: "web_search", max_uses: 4 }],
       system: [{ type: "text", text: sys }],
       messages,
       // deno-lint-ignore no-explicit-any
@@ -284,7 +286,9 @@ Deno.serve(async (req: Request) => {
       fetched.push({ label, url, text });
     };
 
-    const pullPol = await resolveModelPolicy(supabase, { task: "connector_pull", fallback: { model: MODEL, effort: "high" } });
+    // medium effort keeps a search-backed pull inside the wall-clock; the fetch is
+    // research, not deep reasoning, so this trades little quality for reliability.
+    const pullPol = await resolveModelPolicy(supabase, { task: "connector_pull", fallback: { model: MODEL, effort: "medium" } });
     if (isMcp && mcpConn) {
       // Pull through the attached MCP server (server-side tool use), aimed by the
       // source's targets/guidance. The briefing is screened as UNTRUSTED below.

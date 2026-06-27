@@ -24,6 +24,22 @@ import { standUpCompetitiveAgents } from "@/lib/standUpCompetitive";
 
 type Comp = { id: string; name: string; website: string | null; linkedin: string | null; notes: string | null; setup: { step?: number; finalized_at?: string | null } | null };
 type Wf = { id: string; name: string; steps: { agent_id?: string; skill_id?: string | null }[] };
+type Pull = { id: string; label: string; state: "pulling" | "ok" | "error"; startedAt: number; msg?: string };
+
+// supabase.functions.invoke hides a non-2xx function's real error behind a
+// generic "non-2xx status code". Dig the actual message out of the response body
+// (the function always returns { error }) so the user sees WHY a pull failed.
+async function fnError(error: unknown, data: unknown): Promise<string | null> {
+  if (data && typeof data === "object" && (data as { error?: string }).error) return (data as { error: string }).error;
+  if (!error) return null;
+  const ctx = (error as { context?: Response }).context;
+  if (ctx && typeof ctx.json === "function") {
+    const body = (await ctx.clone().json().catch(() => null)) as { error?: string } | null;
+    if (body?.error) return body.error;
+    if (ctx.status === 504 || ctx.status === 546) return "The pull ran past the server time limit — try again; it usually completes on a retry.";
+  }
+  return error instanceof Error ? error.message : "pull failed";
+}
 
 // The monitor kinds we can stand up from a competitor's URLs. press is name-
 // anchored (web search), so it needs no link; the others need their URL.
@@ -52,7 +68,8 @@ export default function CompetitorFinalize({ competitor, capabilitiesCount, onCh
 
   // step 2 — monitoring
   const [picks, setPicks] = useState<Set<string>>(new Set());
-  const [pullLog, setPullLog] = useState<{ text: string; ok?: boolean }[]>([]);
+  const [pulls, setPulls] = useState<Pull[]>([]);
+  const [, setNowTick] = useState(0); // drives the live elapsed-seconds readout
   const [existingKinds, setExistingKinds] = useState<Set<string>>(new Set());
 
   // steps 4–5 — the agent workflows
@@ -77,6 +94,13 @@ export default function CompetitorFinalize({ competitor, capabilitiesCount, onCh
   useEffect(() => {
     setPicks(new Set(MONITORS.filter((m) => !existingKinds.has(m.kind) && (m.needs === null || (m.needs === "website" ? website : linkedin).trim())).map((m) => m.kind)));
   }, [existingKinds, website, linkedin]);
+  // Tick once a second while any pull is in flight, so the elapsed readout moves
+  // and the user can see it's working (search-backed pulls take a while).
+  useEffect(() => {
+    if (!pulls.some((p) => p.state === "pulling")) return;
+    const t = setInterval(() => setNowTick((n) => n + 1), 1000);
+    return () => clearInterval(t);
+  }, [pulls]);
 
   async function patchSetup(patch: Record<string, unknown>) {
     const next = { ...(competitor.setup ?? {}), ...patch };
@@ -100,7 +124,7 @@ export default function CompetitorFinalize({ competitor, capabilitiesCount, onCh
   // ---- step 2: stand up monitors + first pull -----------------------------
   function toggle(kind: string) { setPicks((p) => { const n = new Set(p); n.has(kind) ? n.delete(kind) : n.add(kind); return n; }); }
   async function standUpSignals() {
-    setBusy("signals"); setError(null); setNote(null); setPullLog([]);
+    setBusy("signals"); setError(null); setNote(null); setPulls([]);
     try {
       const orgId = await getOrgId(); if (!orgId) throw new Error("Could not resolve your organization.");
       const li = linkedin.trim().replace(/\/+$/, "");
@@ -120,24 +144,30 @@ export default function CompetitorFinalize({ competitor, capabilitiesCount, onCh
         if (error) throw error;
         created = data ?? [];
       }
-      // Ignite the first pull on each live source so signals land NOW, not on the
-      // next scheduled run — the whole point is to leave with evidence.
+      if (!created.length) { setNote("No new monitors to add — they already exist. Continue to build the overview."); return; }
+      // Ignite the first pull on each source NOW (concurrently — a slow search-
+      // backed pull must not block the others) so signals land before the daily
+      // cadence. Each shows live elapsed time and its real outcome.
       const { data: s } = await supabase.auth.getSession();
       const token = s.session?.access_token;
-      for (const src of created) {
-        setPullLog((l) => [...l, { text: `Pulling ${src.label}…` }]);
+      const startedAt = Date.now();
+      setPulls(created.map((c) => ({ id: c.id, label: c.label, state: "pulling", startedAt })));
+      const settle = (id: string, patch: Partial<Pull>) => setPulls((ps) => ps.map((p) => (p.id === id ? { ...p, ...patch } : p)));
+      let ok = 0, landed = 0;
+      await Promise.all(created.map(async (src) => {
         try {
           const { data, error } = await supabase.functions.invoke("connector-runner", { body: { source_id: src.id }, headers: token ? { Authorization: `Bearer ${token}` } : undefined });
-          if (error) throw error;
-          if ((data as { error?: string })?.error) throw new Error((data as { error?: string }).error);
+          const err = await fnError(error, data);
+          if (err) throw new Error(err);
           const d = data as { created?: number; fetched?: number };
-          setPullLog((l) => [...l.slice(0, -1), { text: `${src.label} — fetched ${d.fetched ?? 0} → ${d.created ?? 0} signal${d.created === 1 ? "" : "s"} landed`, ok: true }]);
+          ok++; landed += d.created ?? 0;
+          settle(src.id, { state: "ok", msg: `fetched ${d.fetched ?? 0} → ${d.created ?? 0} signal${d.created === 1 ? "" : "s"} landed` });
         } catch (e) {
-          setPullLog((l) => [...l.slice(0, -1), { text: `${src.label} — ${e instanceof Error ? e.message : "pull failed"}`, ok: false }]);
+          settle(src.id, { state: "error", msg: e instanceof Error ? e.message : "pull failed" });
         }
-      }
+      }));
       await loadExisting(); onChanged();
-      setNote(created.length ? `Stood up ${created.length} monitor${created.length === 1 ? "" : "s"} on ${competitor.name}. They pull daily — review what landed under the Signals tab.` : "No new monitors to add — they already exist. Continue to build the overview.");
+      setNote(`${ok}/${created.length} monitor${created.length === 1 ? "" : "s"} pulled · ${landed} signal${landed === 1 ? "" : "s"} landed on ${competitor.name}. They re-pull daily — see the Signals tab.`);
     } catch (e) { setError(e instanceof Error ? e.message : "Could not stand up monitoring."); }
     finally { setBusy(null); }
   }
@@ -281,9 +311,19 @@ export default function CompetitorFinalize({ competitor, capabilitiesCount, onCh
                 );
               })}
             </div>
-            {pullLog.length > 0 && (
-              <div className="card card-pad" style={{ background: "var(--panel-2)", padding: "8px 10px" }}>
-                {pullLog.map((l, i) => <div key={i} className="t-mono-xs" style={{ color: l.ok === false ? "var(--rd-text)" : l.ok ? "var(--gn-text)" : "var(--tm)" }}>{l.ok === false ? "✕ " : l.ok ? "✓ " : "… "}{l.text}</div>)}
+            {pulls.length > 0 && (
+              <div className="card card-pad stack-2" style={{ background: "var(--panel-2)", padding: "8px 10px" }}>
+                {pulls.map((p) => {
+                  const secs = Math.max(0, Math.round((Date.now() - p.startedAt) / 1000));
+                  return (
+                    <div key={p.id} className="row-between" style={{ gap: 10, alignItems: "baseline" }}>
+                      <span className="t-mono-xs" style={{ color: p.state === "error" ? "var(--rd-text)" : p.state === "ok" ? "var(--gn-text)" : "var(--tm)" }}>
+                        {p.state === "pulling" ? "… " : p.state === "ok" ? "✓ " : "✕ "}{p.label}{p.msg ? ` — ${p.msg}` : ""}
+                      </span>
+                      {p.state === "pulling" && <span className="t-mono-xs t-muted" style={{ flexShrink: 0 }}>{secs}s</span>}
+                    </div>
+                  );
+                })}
               </div>
             )}
             <div className="row gap-2">

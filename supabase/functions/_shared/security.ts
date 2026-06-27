@@ -106,16 +106,32 @@ export function htmlToText(html: string): string {
 
 // ---- SSRF-guarded fetch ----------------------------------------------------
 export async function fetchTextSafe(rawUrl: string): Promise<{ url: string; text: string }> {
-  const u = assertSafeUrl(rawUrl);
+  let u = assertSafeUrl(rawUrl);
   const ctrl = new AbortController();
   const t = setTimeout(() => ctrl.abort(), SECURITY.FETCH_TIMEOUT_MS);
   try {
-    const res = await fetch(u.toString(), {
-      redirect: "manual",                       // off-policy redirects are refused, not followed
+    // Follow redirects MANUALLY, re-validating every hop through the SSRF guard
+    // (https-only, public host). This handles the everyday hops a real site
+    // issues — apex→www, http→https, / → /home — which a competitor's URL almost
+    // always has, WITHOUT ever following a redirect that points somewhere unsafe
+    // (each Location is re-asserted; an off-policy target still throws).
+    let res = await fetch(u.toString(), {
+      redirect: "manual",
       signal: ctrl.signal,
       headers: { "user-agent": "SingleStackConnector/1.0 (+read-only)", "accept": "text/html,application/json,text/plain" },
     });
-    if (res.status >= 300 && res.status < 400) throw new Error(`Refusing redirect from ${u.hostname} (status ${res.status})`);
+    for (let hop = 0; res.status >= 300 && res.status < 400; hop++) {
+      const loc = res.headers.get("location");
+      if (!loc) throw new Error(`Redirect with no Location from ${u.hostname} (status ${res.status})`);
+      if (hop >= 5) throw new Error(`Too many redirects from ${u.hostname}`);
+      try { await res.body?.cancel(); } catch { /* ignore */ }
+      u = assertSafeUrl(new URL(loc, u).toString());   // re-validate the hop — throws if unsafe
+      res = await fetch(u.toString(), {
+        redirect: "manual",
+        signal: ctrl.signal,
+        headers: { "user-agent": "SingleStackConnector/1.0 (+read-only)", "accept": "text/html,application/json,text/plain" },
+      });
+    }
     if (!res.ok) throw new Error(`Fetch failed (${res.status}) for ${u.hostname}`);
     const reader = res.body?.getReader();
     let received = 0; const chunks: Uint8Array[] = [];
