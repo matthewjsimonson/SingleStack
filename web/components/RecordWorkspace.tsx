@@ -54,25 +54,27 @@ export default function RecordWorkspace({ target, recordName }: { target: Target
   // since an accept changes field values, re-mount the content panels.
   const refresh = useCallback(() => { load(); setFieldsNonce((n) => n + 1); }, [load]);
 
+  // Set up with AI = fill the blanks. Source is OPTIONAL — it fills this record's
+  // EMPTY fields from what's known (the record + modules/features + signals); a
+  // paste/URL is extra grounding when you have it.
   async function runImport() {
-    const hasInput = src.mode === "url" ? src.url.trim() : src.content.trim();
-    if (!hasInput) { setError(src.mode === "url" ? "Enter a public URL." : "Paste some content."); return; }
     setImporting(true); setError(null); setImpNote(null);
     try {
       const body: Record<string, unknown> = target.kind === "product" ? { product_id: target.id } : { gtm_record_id: target.id };
-      if (src.mode === "url") body.url = src.url.trim(); else body.content = src.content.trim();
+      if (src.mode === "url" && src.url.trim()) body.url = src.url.trim();
+      else if (src.content.trim()) body.content = src.content.trim();
       if (src.guidance.trim()) body.guidance = src.guidance.trim();
       const { data, error } = await supabase.functions.invoke("import-record", { body });
       if (error) throw error;
       if (data?.error) throw new Error(data.error);
       if (!data?.changes_saved) {
-        setImpNote(data?.message || "Nothing groundable was found to propose — try a richer source.");
+        setImpNote(data?.message || "Nothing could be grounded for the blank fields yet.");
       } else {
-        setImpNote(`Proposed ${data.changes_saved} field${data.changes_saved === 1 ? "" : "s"} — review them in Advisors (the “waiting” pill).`);
+        setImpNote(`Proposed ${data.changes_saved} field${data.changes_saved === 1 ? "" : "s"} to fill — review them in Advisors (the “waiting” pill).`);
         setSrc({ mode: src.mode, content: "", url: "", guidance: "" });
         refresh();
       }
-    } catch (e) { setError(e instanceof Error ? e.message : "Import failed."); }
+    } catch (e) { setError(e instanceof Error ? e.message : "Set up failed."); }
     finally { setImporting(false); }
   }
 
@@ -84,33 +86,34 @@ export default function RecordWorkspace({ target, recordName }: { target: Target
     <div>
       <Banner>{error}</Banner>
 
-      {/* Set up with AI — import existing content into the review queue */}
+      {/* Set up with AI = fill the blanks · Refine with AI = update what's filled */}
       <div className="card card-pad row-between" style={{ marginBottom: "var(--sp-4)", gap: 12, flexWrap: "wrap" }}>
         <div style={{ minWidth: 0 }}>
-          <div style={{ fontWeight: 640, fontSize: 13.5 }}>Set up with AI</div>
-          <div className="t-sub t-muted" style={{ fontSize: 12.5, marginTop: 2 }}>Already have this written down? Import a doc or a public URL — AI drafts fields into your review queue; you accept what&rsquo;s right.</div>
+          <div style={{ fontWeight: 640, fontSize: 13.5 }}>Set up with AI <span className="t-mono-xs t-muted" style={{ fontWeight: 400 }}>— fill the blanks</span></div>
+          <div className="t-sub t-muted" style={{ fontSize: 12.5, marginTop: 2 }}>Completes this record&rsquo;s <strong>empty</strong> fields, in order — grounded in what&rsquo;s known (the record, modules &amp; features, your signals), optionally a doc/URL you add. Lands in your review queue.</div>
         </div>
         <span className="row gap-2" style={{ flexShrink: 0 }}>
-          <button className="btn btn-sm" onClick={() => { setImpNote(null); setImp(true); }} style={{ background: "var(--ac)", color: "#fff" }}>Set up with AI</button>
+          <button className="btn btn-sm" onClick={() => { setImpNote(null); setImp(true); }} style={{ background: "var(--ac)", color: "#fff" }} title="Fill this record's empty fields, grounded in what's known (a source is optional)">Set up with AI</button>
           <button className="btn btn-secondary btn-sm" onClick={() => setRefining(true)}
-            title="A chat that reads this record plus your marketplace + company signals, and proposes refinements you edit before they land">✦ Refine with AI</button>
+            title="Update fields that ALREADY have content — a true-update grounded in your marketplace + company signals, edited before it lands">✦ Refine with AI</button>
         </span>
       </div>
 
       {refining && <RecordRefine target={target} recordName={recordName} onApplied={refresh} onClose={() => setRefining(false)} />}
 
-      <Modal open={imp} onClose={() => setImp(false)} title="Set up this record with AI" width={620}>
-        <div className="t-sub t-muted" style={{ fontSize: 12.5, marginBottom: 12 }}>Paste content you already have (a brief, a doc, your website/positioning copy) or point at a public URL. AI proposes fields into your <strong>review queue</strong> — nothing is applied until you accept it. Imported content is treated as untrusted and screened.</div>
+      <Modal open={imp} onClose={() => setImp(false)} title="Set up with AI — fill the blanks" width={620}>
+        <div className="t-sub t-muted" style={{ fontSize: 12.5, marginBottom: 12 }}>Fills this record&rsquo;s <strong>empty</strong> fields, in order — grounded in the record itself, its modules &amp; features, and your signals. Add an optional source (a brief, your site) for extra grounding. Proposals land in your <strong>review queue</strong>; nothing is applied until you accept it.</div>
+        <div className="t-label" style={{ marginBottom: 6 }}>Optional source <span className="t-muted" style={{ fontWeight: 400, textTransform: "none", letterSpacing: 0 }}>— extra grounding; not required</span></div>
         <div className="row gap-2" style={{ marginBottom: 10 }}>
           <button type="button" className={`btn btn-sm ${src.mode === "paste" ? "" : "btn-secondary"}`} onClick={() => setSrc({ ...src, mode: "paste" })}>Paste text</button>
           <button type="button" className={`btn btn-sm ${src.mode === "url" ? "" : "btn-secondary"}`} onClick={() => setSrc({ ...src, mode: "url" })}>From a URL</button>
         </div>
         {src.mode === "paste"
-          ? <label className="field"><span className="t-label">Source content</span><textarea className="textarea" rows={8} value={src.content} onChange={(e) => setSrc({ ...src, content: e.target.value })} placeholder="Paste your overview, positioning, value prop, ICP — whatever you have." /></label>
-          : <label className="field"><span className="t-label">Public URL</span><input className="input" value={src.url} onChange={(e) => setSrc({ ...src, url: e.target.value })} placeholder="https://yourcompany.com/product" /></label>}
-        <label className="field"><span className="t-label">Focus <span className="t-muted" style={{ fontWeight: 400 }}>— optional</span></span><input className="input" value={src.guidance} onChange={(e) => setSrc({ ...src, guidance: e.target.value })} placeholder="e.g. emphasize positioning and ICP; ignore pricing" /></label>
+          ? <label className="field"><span className="t-label">Source content <span className="t-muted" style={{ fontWeight: 400 }}>— optional</span></span><textarea className="textarea" rows={6} value={src.content} onChange={(e) => setSrc({ ...src, content: e.target.value })} placeholder="Optional — paste a brief, positioning, value prop, ICP… or leave blank to fill from what's already known." /></label>
+          : <label className="field"><span className="t-label">Public URL <span className="t-muted" style={{ fontWeight: 400 }}>— optional</span></span><input className="input" value={src.url} onChange={(e) => setSrc({ ...src, url: e.target.value })} placeholder="https://yourcompany.com/product" /></label>}
+        <label className="field"><span className="t-label">Focus <span className="t-muted" style={{ fontWeight: 400 }}>— optional</span></span><input className="input" value={src.guidance} onChange={(e) => setSrc({ ...src, guidance: e.target.value })} placeholder="e.g. prioritize the Technical and Positioning fields" /></label>
         {impNote && <div className="banner" style={{ marginBottom: 12 }}>{impNote}</div>}
-        <div className="row gap-2"><button className="btn" disabled={importing} onClick={runImport}>{importing ? "Reading & drafting…" : "Import → review queue"}</button><button className="btn btn-secondary" onClick={() => setImp(false)}>Close</button></div>
+        <div className="row gap-2"><button className="btn" disabled={importing} onClick={runImport}>{importing ? "Filling the blanks…" : "✦ Fill the blanks → review queue"}</button><button className="btn btn-secondary" onClick={() => setImp(false)}>Close</button></div>
       </Modal>
 
       {/* Advisors — the agents that live on this record, aligned to its area */}

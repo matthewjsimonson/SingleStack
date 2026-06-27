@@ -39,8 +39,8 @@ export default function RecordAdvisors({
 
   const context: AgentContext = { area: target.kind === "gtm" ? "gtm" : "products", record_type: target.kind, record_id: target.id, record_name: recordName };
   const intro = target.kind === "product"
-    ? "Your product advisors — they read this record, watch your signals, and (together) propose sharper positioning, modules & roadmap."
-    : "Your go-to-market advisors — they read this record, watch your signals, and (together) propose sharper messaging, personas & positioning.";
+    ? "Your product advisors. Ask one for advice on a question; or have them Propose the change this record needs from your signals."
+    : "Your go-to-market advisors. Ask one for advice on a question; or have them Propose the change this record needs from your signals.";
   const totalPending = Object.values(pendingByName).reduce((a, b) => a + b, 0);
 
   return (
@@ -105,7 +105,7 @@ function ProposeBar({ advisors, pending, onPropose, onReview }: { advisors: Exec
           </div>
           <div style={{ minWidth: 0 }}>
             <div style={{ fontSize: 14, fontWeight: 660 }}>Joint proposal</div>
-            <div className="t-sub t-muted" style={{ fontSize: 12 }}>{names} draft one change together — runs in a side panel, with their reasoning.</div>
+            <div className="t-sub t-muted" style={{ fontSize: 12 }}>{names} proactively draft the one change your signals call for — with their reasoning.</div>
           </div>
         </div>
         <div className="row gap-2" style={{ alignItems: "center" }}>
