@@ -8,7 +8,7 @@
 // LinkedIn posts / press, daily) per competitor and igniting the first pulls,
 // so the matrix starts filling from EVIDENCE through the review gate — not by
 // hand-typing numbers.
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { createClient } from "@/lib/supabase/client";
 import { getOrgId } from "@/lib/org";
 import { Chip, Banner, Modal } from "@/components/ui";
@@ -202,8 +202,7 @@ export default function CompetitiveSetup({ onDone, productId }: { onDone: () => 
     })();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
-  useEffect(() => {
-    (async () => {
+  const loadFromRecords = useCallback(async (force = false) => {
       let prodLine = "", whoLine = "", posLine = "", problemLine = "", industriesLine = "", competitorsLine = "", moreLine = "";
       // Product record: the REAL template keys (what_it_is / who_its_for /
       // problem / category), with the legacy seed keys (overview / value_prop)
@@ -287,18 +286,26 @@ export default function CompetitiveSetup({ onDone, productId }: { onDone: () => 
       setRecordsDump(dump.join("\n"));
       // Pre-fill the EDITABLE fields from the records — the human can adjust,
       // add, or rewrite everything before anything runs. Never overwrite typing.
-      setCtx((cur) => ({
-        product: cur.product.trim() ? cur.product : [prodLine, problemLine].filter(Boolean).join(" "),
-        features: cur.features.trim() ? cur.features : featLine,
-        who: cur.who.trim() ? cur.who : whoLine,
-        industries: cur.industries.trim() ? cur.industries : industriesLine,
-        positioning: cur.positioning.trim() ? cur.positioning : posLine,
-        more: cur.more.trim() ? cur.more : moreLine,
-        competitors: cur.competitors.trim() ? cur.competitors : competitorsLine,
-      }));
-    })();
+      // Force (Clear & rebuild) overwrites the windows with the CURRENT records,
+      // discarding any picture/interview enrichments; on mount we only fill empties
+      // so we never clobber what the user is typing.
+      const derived = {
+        product: [prodLine, problemLine].filter(Boolean).join(" "),
+        features: featLine, who: whoLine, industries: industriesLine,
+        positioning: posLine, more: moreLine, competitors: competitorsLine,
+      };
+      setCtx((cur) => force ? { ...cur, ...derived } : {
+        product: cur.product.trim() ? cur.product : derived.product,
+        features: cur.features.trim() ? cur.features : derived.features,
+        who: cur.who.trim() ? cur.who : derived.who,
+        industries: cur.industries.trim() ? cur.industries : derived.industries,
+        positioning: cur.positioning.trim() ? cur.positioning : derived.positioning,
+        more: cur.more.trim() ? cur.more : derived.more,
+        competitors: cur.competitors.trim() ? cur.competitors : derived.competitors,
+      });
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  }, [supabase]);
+  useEffect(() => { void loadFromRecords(false); }, [loadFromRecords]);
 
   // Persist the run — upsert into the governed layer so matches survive.
   async function persistRun(patch: { comps?: CompCand[]; transcript?: { role: "q" | "a"; text: string }[]; picture?: string }) {
@@ -581,7 +588,8 @@ export default function CompetitiveSetup({ onDone, productId }: { onDone: () => 
     setChat([]); setAnswer(""); setPicture(""); setChatDone(false);
     setReady(null); setReadyDelta(null); setGaps(""); setCoverage([]); setChatWhy(null);
     await clearSavedRun("discarded");
-    setProfileNote("Cleared — run “✦ Set up profile with AI” to build a fresh, fuller profile from your records + a few sharp questions.");
+    await loadFromRecords(true);   // reset the profile windows to the CURRENT records (drop picture enrichments)
+    setProfileNote("Cleared — the profile is reset to your records. Run “✦ Set up profile with AI” to layer a fresh, fuller profile on top.");
   }
 
   async function confirmCompetitors() {
