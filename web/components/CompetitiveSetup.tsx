@@ -42,6 +42,7 @@ const RECORD_FIELD_META: Record<string, { label: string; section: string; scope:
   category_pov: { label: "Category POV", section: "Positioning", scope: "gtm" },
   differentiation: { label: "Differentiation", section: "Positioning", scope: "gtm" },
   value_prop: { label: "Value proposition", section: "Messaging", scope: "gtm" },
+  pillars: { label: "Message pillars", section: "Messaging", scope: "gtm" },
   gtm_motion: { label: "GTM motion", section: "Motion", scope: "gtm" },
   pricing_model: { label: "Pricing model", section: "Motion", scope: "gtm" },
   win_themes: { label: "Win themes", section: "Motion", scope: "gtm" },
@@ -244,7 +245,7 @@ export default function CompetitiveSetup({ onDone, productId }: { onDone: () => 
       const { data: g } = await supabase.from("gtm_records").select("id, name").order("created_at").limit(1).maybeSingle();
       if (g) {
         const { data: fs } = await supabase.from("record_fields").select("field_key, value").eq("gtm_record_id", g.id)
-          .in("field_key", ["personas", "primary_persona", "icp", "positioning", "category_pov", "differentiation", "industries", "key_competitors", "value_prop", "win_themes", "gtm_motion", "pricing_model"]);
+          .in("field_key", ["personas", "primary_persona", "icp", "positioning", "category_pov", "differentiation", "industries", "key_competitors", "value_prop", "pillars", "win_themes", "gtm_motion", "pricing_model"]);
         const f = (k: string) => fs?.find((x) => x.field_key === k)?.value ?? null;
         const personas = f("personas") ?? f("primary_persona") ?? f("icp");
         const positioning = f("positioning") ?? f("category_pov");
@@ -261,8 +262,9 @@ export default function CompetitiveSetup({ onDone, productId }: { onDone: () => 
         // for who actually competes with us and how.
         moreLine = [
           f("value_prop") && `Value prop: ${f("value_prop")}`,
+          f("pillars") && `Message pillars: ${f("pillars")}`,
           f("win_themes") && `Win themes: ${f("win_themes")}`,
-          f("gtm_motion") && `GTM motion: ${f("gtm_motion")}`,
+          f("gtm_motion") && `GTM motion (how they message): ${f("gtm_motion")}`,
           f("pricing_model") && `Pricing: ${f("pricing_model")}`,
         ].filter(Boolean).join(" · ");
       } else setGtm(null);

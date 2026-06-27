@@ -74,7 +74,10 @@ const DIMENSIONS = [
   { key: "positioning",     label: "Positioning / category",      weight: 2 },
   { key: "differentiation", label: "Differentiation / wedge",     weight: 1.5 },
   { key: "pricing",         label: "Pricing & packaging",         weight: 1 },
-  { key: "gtm_motion",      label: "GTM motion (PLG/sales-led)",  weight: 1 },
+  // GTM motion here = how they MESSAGE & convince — value prop, the narrative,
+  // the claims/proof they lead with (channel is a minor part). The strongest
+  // dimension for matching rivals who talk to the same buyer the same way.
+  { key: "gtm_motion",      label: "GTM motion — messaging & narrative", weight: 2 },
   { key: "known_rivals",    label: "Known rivals",                weight: 1.5 },
   { key: "deal_loss",       label: "Who they lose to",            weight: 1 },
 ] as const;
@@ -154,7 +157,8 @@ GTM record fields (scope "gtm"):
 - category_pov: your point of view on where the category is going and why now
 - differentiation: the defensible wedge — why you win when you win
 - value_prop: the core promise in one or two sentences
-- gtm_motion: the motion that fits (PLG, sales-led, partner) and why
+- pillars: the 2-4 message pillars all messaging ladders up to
+- gtm_motion: how they go to market AND message — the narrative, the claims and proof they lead with, how they talk about themselves to convince a buyer (and the channel/motion)
 - pricing_model: how it's packaged and priced, and how that shapes the motion
 - win_themes: the recurring reasons you win`;
 
@@ -249,11 +253,11 @@ THE PROFILE = (what the records answer) + (what your questions add). Never re-as
 Assess EVERY dimension (one coverage entry each): ${DIMENSIONS.map((d) => `${d.key} (${d.label})`).join(", ")}.
 For each: status = covered (records or an answer clearly establish it) / partial (hinted but thin) / missing (genuinely absent) / not_applicable (the company's STAGE genuinely can't have it). source = records / answer / none. note = the actual evidence, TERSE (≤140 chars). BE STRICT: a vague mention is 'partial', not 'covered'.
 
-WHY THESE DIMENSIONS — rivals cluster on more than what/who: the JOBS the product is hired for (functional substitutes), the WEDGE that wins deals, how it's PRICED & packaged, and its GTM MOTION (PLG vs sales-led vs partner) all decide who a buyer actually evaluates it against. These are usually the records' weakest spots, so they're often where the highest-value questions are.
+WHY THESE DIMENSIONS — rivals cluster on more than what/who: the JOBS the product is hired for (functional substitutes), the WEDGE that wins deals, how it's PRICED & packaged, and its GTM MOTION — meaning how they MESSAGE and convince: the value prop, the narrative, the claims and proof they lead with, how they talk about themselves to win the buyer (not merely the sales channel). Two products that pitch the same story to the same buyer are direct rivals even if built differently. These are usually the records' weakest spots, so they're often where the highest-value questions are.
 
 MATURITY — infer stage (exploring=pre-launch / early=first deals / scaling=repeatable / established=mature). Mark deal_loss/known_rivals not_applicable only for genuinely pre-market companies; for young companies favor the intended buyer, the jobs/alternative they replace, the wedge, and pricing intent.
 
-NEXT QUESTION — target the highest-WEIGHT dimension still 'missing' OR 'partial' that's worth asking at this stage (known rivals anchor the search — prioritize them early when missing). Write ONE specific, conversational question that pulls a CONCRETE answer — name the kind of detail you want (e.g. for pricing: "per-seat, usage, or platform fee — and what tier do most buyers land on?"; for motion: "self-serve signup, sales-led, or partner?"). Sharpen a 'partial' as readily as you fill a 'missing'. If every weighted dimension is at least solidly covered, next_dimension='' and question=''. One question at a time.`,
+NEXT QUESTION — target the highest-WEIGHT dimension still 'missing' OR 'partial' that's worth asking at this stage (known rivals anchor the search — prioritize them early when missing). Write ONE specific, conversational question that pulls a CONCRETE answer — name the kind of detail you want (e.g. for pricing: "per-seat, usage, or platform fee — and what tier do most buyers land on?"; for GTM motion: "what's the core message and story you lead with to convince a buyer — the claims and the proof behind them?"). Sharpen a 'partial' as readily as you fill a 'missing'. If every weighted dimension is at least solidly covered, next_dimension='' and question=''. One question at a time.`,
         messages: [{ role: "user", content: [
           records ? `THE RECORDS (everything already known):\n${records}` : "THE RECORDS: (none yet)",
           transcriptText ? `INTERVIEW SO FAR:\n${transcriptText}` : "INTERVIEW SO FAR: (not started)",
