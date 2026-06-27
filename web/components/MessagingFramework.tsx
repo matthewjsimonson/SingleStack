@@ -26,14 +26,31 @@ export default function MessagingFramework({ gtmId }: { gtmId: string }) {
   const [draft, setDraft] = useState("");
   const [openGuidance, setOpenGuidance] = useState<Set<string>>(new Set());
 
-  // AI build → review
+  // Sweep with AI — one optional source + Focus, sweeps the WHOLE framework (mirrors the record Sweep).
+  const [swp, setSwp] = useState(false);
+  const [src, setSrc] = useState({ mode: "paste" as "paste" | "url", content: "", url: "", guidance: "" });
   const [building, setBuilding] = useState(false);
+  const [progress, setProgress] = useState(0);
+  const [elapsed, setElapsed] = useState(0);
+  // review
   const [drafts, setDrafts] = useState<Draft[] | null>(null);
   const [summary, setSummary] = useState("");
   const [edits, setEdits] = useState<Record<string, string>>({});
   const [include, setInclude] = useState<Set<string>>(new Set());
   const [applying, setApplying] = useState(false);
   const [notice, setNotice] = useState<string | null>(null);
+
+  // Estimated progress while the sweep runs (client-side; the call returns once).
+  useEffect(() => {
+    if (!building) { setProgress(0); setElapsed(0); return; }
+    const started = Date.now();
+    const id = setInterval(() => {
+      const s = (Date.now() - started) / 1000;
+      setElapsed(s);
+      setProgress(Math.min(96, 96 * (1 - Math.exp(-s / 14))));
+    }, 200);
+    return () => clearInterval(id);
+  }, [building]);
 
   const load = useCallback(async () => {
     const { data } = await supabase.from("gtm_tabs").select("id, tab_key, label, body").eq("gtm_record_id", gtmId).order("created_at");
@@ -68,17 +85,23 @@ export default function MessagingFramework({ gtmId }: { gtmId: string }) {
   async function build() {
     setBuilding(true); setError(null); setNotice(null);
     try {
-      const { data, error } = await supabase.functions.invoke("messaging-framework", { body: { gtm_record_id: gtmId } });
+      const b: Record<string, unknown> = { gtm_record_id: gtmId };
+      if (src.mode === "url" && src.url.trim()) b.url = src.url.trim();
+      else if (src.content.trim()) b.content = src.content.trim();
+      if (src.guidance.trim()) b.guidance = src.guidance.trim();
+      const { data, error } = await supabase.functions.invoke("messaging-framework", { body: b });
       if (error) throw error;
       if (data?.error) throw new Error(data.error);
       const all = (data?.sections ?? []) as Draft[];
       const changed = all.filter((d) => d.changed && d.proposed_value?.trim());
       if (changed.length === 0) { setNotice("Your framework already looks full and on-message — nothing to change right now."); return; }
+      setSwp(false);
+      setSrc({ mode: src.mode, content: "", url: "", guidance: "" });
       setDrafts(changed);
       setSummary(data?.summary ?? "");
       setEdits(Object.fromEntries(changed.map((d) => [d.key, d.proposed_value])));
       setInclude(new Set(changed.map((d) => d.key)));
-    } catch (e) { setError(e instanceof Error ? e.message : "Build failed."); }
+    } catch (e) { setError(e instanceof Error ? e.message : "Sweep failed."); }
     finally { setBuilding(false); }
   }
 
@@ -108,7 +131,7 @@ export default function MessagingFramework({ gtmId }: { gtmId: string }) {
           <div style={{ fontWeight: 640, fontSize: 13.5 }}>Your messaging & narrative framework <span className="t-mono-xs t-muted" style={{ fontWeight: 400 }}>— {complete}/{MESSAGING_FRAMEWORK.length} complete</span></div>
           <div className="t-sub t-muted" style={{ fontSize: 12.5, marginTop: 2 }}>The PMA-style messaging house + strategic narrative — the upstream source of truth your content &amp; campaigns derive from. Edit a section by hand, or sweep the whole thing with AI from your records.</div>
         </div>
-        <button className="btn btn-sm" onClick={build} disabled={building} style={{ background: "var(--ac)", color: "#fff", flexShrink: 0 }}>{building ? "Sweeping…" : "✦ Sweep with AI"}</button>
+        <button className="btn btn-sm" onClick={() => { setNotice(null); setSwp(true); }} disabled={building} style={{ background: "var(--ac)", color: "#fff", flexShrink: 0 }}>✦ Sweep with AI</button>
       </div>
 
       {notice && <div className="banner" style={{ marginBottom: "var(--sp-3)" }}>{notice}</div>}
@@ -180,6 +203,37 @@ export default function MessagingFramework({ gtmId }: { gtmId: string }) {
           </div>
         </div>
       )}
+
+      {/* Sweep with AI — one optional source + Focus, sweeps the whole framework */}
+      <Modal open={swp} onClose={() => setSwp(false)} title="Sweep the messaging framework with AI" width={620}>
+        <div className="t-sub t-muted" style={{ fontSize: 12.5, marginBottom: 12 }}>Re-evaluates <strong>every</strong> section and proposes a full, on-message framework — positioning, narrative, value prop, pillars, persona messaging, tone, proof, elevator pitch — grounded in your product &amp; GTM records and competitive evidence. Add an optional source (e.g. a messaging brief) for extra grounding. Drafts land in a <strong>review</strong> step; nothing is saved until you apply.</div>
+        <div className="t-label" style={{ marginBottom: 6 }}>Optional source <span className="t-muted" style={{ fontWeight: 400, textTransform: "none", letterSpacing: 0 }}>— extra grounding; not required</span></div>
+        <div className="row gap-2" style={{ marginBottom: 10 }}>
+          <button type="button" className={`btn btn-sm ${src.mode === "paste" ? "" : "btn-secondary"}`} onClick={() => setSrc({ ...src, mode: "paste" })}>Paste text</button>
+          <button type="button" className={`btn btn-sm ${src.mode === "url" ? "" : "btn-secondary"}`} onClick={() => setSrc({ ...src, mode: "url" })}>From a URL</button>
+        </div>
+        {src.mode === "paste"
+          ? <label className="field"><span className="t-label">Source content <span className="t-muted" style={{ fontWeight: 400 }}>— optional</span></span><textarea className="textarea" rows={6} value={src.content} onChange={(e) => setSrc({ ...src, content: e.target.value })} placeholder="Optional — paste a messaging brief, positioning doc, narrative… or leave blank to build from your records." /></label>
+          : <label className="field"><span className="t-label">Public URL <span className="t-muted" style={{ fontWeight: 400 }}>— optional</span></span><input className="input" value={src.url} onChange={(e) => setSrc({ ...src, url: e.target.value })} placeholder="https://yourcompany.com/about" /></label>}
+        <label className="field"><span className="t-label">Focus <span className="t-muted" style={{ fontWeight: 400 }}>— optional</span></span><input className="input" value={src.guidance} onChange={(e) => setSrc({ ...src, guidance: e.target.value })} placeholder="e.g. lead the narrative on governed AI; sharpen the pillars" /></label>
+
+        {building && (
+          <div className="card card-pad" style={{ margin: "12px 0", borderLeft: "3px solid var(--ac)" }}>
+            <div className="row-between" style={{ alignItems: "baseline", marginBottom: 8 }}>
+              <span className="t-label" style={{ color: "var(--tm)" }}>Sweeping the messaging framework…</span>
+              <span className="t-mono-xs t-muted">{elapsed < 40 ? `~${Math.max(1, Math.ceil(40 - elapsed))}s left` : "Wrapping up…"}</span>
+            </div>
+            <div style={{ height: 6, borderRadius: 99, background: "var(--fill)", overflow: "hidden" }}>
+              <div style={{ height: "100%", width: `${progress}%`, background: "var(--ac)", borderRadius: 99, transition: "width 0.2s linear" }} />
+            </div>
+          </div>
+        )}
+
+        <div className="row gap-2" style={{ marginTop: 12 }}>
+          <button className="btn" disabled={building} onClick={build}>{building ? "Sweeping…" : "✦ Sweep the framework → review"}</button>
+          <button className="btn btn-secondary" disabled={building} onClick={() => setSwp(false)}>Close</button>
+        </div>
+      </Modal>
 
       {/* AI review — edit before it lands */}
       <Modal open={drafts !== null} onClose={() => setDrafts(null)} title="Review the AI-swept framework" width={760}>
