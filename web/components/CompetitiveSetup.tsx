@@ -24,6 +24,13 @@ type CapCand = { name: string; category: string; why: string; keep: boolean };
 const MONITOR_KINDS = [
   ["website", "Website"], ["press", "Press & news"], ["linkedin_jobs", "LinkedIn jobs"], ["linkedin_posts", "LinkedIn posts"],
 ] as const;
+// Which template SECTION a setup-learned field belongs to, used only when the
+// field doesn't already exist on the record (a template-seeded record already
+// has these, so we update in place). Keeps an auto-added field grouped correctly.
+const FIELD_SECTION: Record<string, string> = {
+  what_it_is: "Overview", core_capabilities: "Capabilities",
+  primary_persona: "Buyer", positioning: "Positioning",
+};
 
 export default function CompetitiveSetup({ onDone, productId }: { onDone: () => void; productId?: string | null }) {
   const supabase = createClient();
@@ -279,16 +286,16 @@ export default function CompetitiveSetup({ onDone, productId }: { onDone: () => 
       const { data: g } = await supabase.from("gtm_records").select("id").order("created_at").limit(1).maybeSingle();
       if (!g) return;
       const { data: rf } = await supabase.from("record_fields").select("id, field_key").eq("gtm_record_id", g.id).in("field_key", ["industries", "key_competitors"]);
-      const want: [string, string, string][] = [
-        ["industries", "Industries / verticals", ctx.industries.trim()],
-        ["key_competitors", "Key competitors", ctx.competitors.trim()],
+      const want: [string, string, string, string][] = [
+        ["industries", "Industries / verticals", ctx.industries.trim(), "Buyer"],
+        ["key_competitors", "Key competitors", ctx.competitors.trim(), "Positioning"],
       ];
       const adds: Record<string, unknown>[] = [];
-      for (const [field_key, label, value] of want) {
+      for (const [field_key, label, value, section] of want) {
         if (!value) continue;                                  // never clobber a filled field with a blank
         const ex = rf?.find((x) => x.field_key === field_key);
         if (ex) await supabase.rpc("human_set_field_value", { p_field: ex.id, p_value: value });
-        else adds.push({ gtm_record_id: g.id, field_key, label, value, section: "Market" });
+        else adds.push({ gtm_record_id: g.id, field_key, label, value, section });
       }
       if (adds.length) await supabase.rpc("human_add_fields", { p_rows: adds });
     } catch { /* best-effort — the human edit channel is allowed; failures shouldn't block setup */ }
@@ -412,11 +419,13 @@ export default function CompetitiveSetup({ onDone, productId }: { onDone: () => 
     finally { setChatBusy(false); }
   }
   const [profileNote, setProfileNote] = useState<string | null>(null);
-  // Round out BOTH records from what the drill-down surfaced. Each field is
-  // routed to its rightful record (product = what it IS; gtm = how it's SOLD),
-  // and only proposed when it ADDS to or differs from what the record holds.
-  // Everything lands as a pending proposal — HITL, accepted in the record's
-  // drawer — never written silently.
+  // Round out BOTH records from what the drill-down surfaced, routed to the RIGHT
+  // canonical field on the RIGHT record (product = what it IS; gtm = how it's
+  // SOLD). EMPTY fields auto-apply through the human edit channel — the basic
+  // areas that should just be filled. A field that already holds curated content
+  // is NEVER clobbered: a differing value lands as a proposal you accept in the
+  // record's drawer. So setup fills the blanks for you and only asks before
+  // changing something you already wrote.
   async function persistInterview(d: { product?: string; features?: string; who?: string; industries?: string; positioning?: string }) {
     try {
       const orgId = await getOrgId(); if (!orgId) return;
@@ -424,39 +433,53 @@ export default function CompetitiveSetup({ onDone, productId }: { onDone: () => 
         supabase.from("product_records").select("id").order("created_at").limit(1).maybeSingle(),
         supabase.from("gtm_records").select("id").order("created_at").limit(1).maybeSingle(),
       ]);
-      let queued = 0;
-      const queue = async (recordCol: "product_id" | "gtm_record_id", recordId: string, title: string, want: [string, string, string | undefined][]) => {
+      let applied = 0, queued = 0;
+      const reconcile = async (recordCol: "product_id" | "gtm_record_id", recordId: string, title: string, want: [string, string, string | undefined][]) => {
         const { data: rf } = await supabase.from("record_fields").select("id, field_key, value").eq(recordCol, recordId);
-        const changes = want.filter(([k, , v]) => v?.trim() && v.trim() !== (rf?.find((f) => f.field_key === k)?.value ?? "").trim());
-        if (!changes.length) return;
-        const { data: prop, error: pErr } = await supabase.from("proposals").insert({
-          org_id: orgId, [recordCol]: recordId, title,
-          rationale: "The competitive-setup drill-down surfaced detail beyond what the record carried. Accepting keeps the record current — and future setups start from it.",
-          proposed_by: "Setup interview", status: "pending",
-        }).select("id").single();
-        if (pErr || !prop) return;
-        await supabase.from("proposal_changes").insert(changes.map(([k, label, v]) => {
+        const adds: Record<string, unknown>[] = [];
+        const propose: { id: string; old: string | null; value: string }[] = [];
+        for (const [k, label, raw] of want) {
+          const v = raw?.trim(); if (!v) continue;
           const ex = rf?.find((f) => f.field_key === k);
-          return {
-            org_id: orgId, proposal_id: prop.id,
-            change_kind: ex ? "update_field" : "add_field",
-            record_field_id: ex?.id ?? null, old_value: ex?.value ?? null,
-            field_key: ex ? null : k, label: ex ? null : label,
-            proposed_value: v!.trim(),
-          };
-        }));
-        queued += changes.length;
+          const existing = (ex?.value ?? "").trim();
+          if (existing === v) continue;                              // already current
+          if (!existing) {                                           // empty or absent → auto-apply
+            if (ex) { await supabase.rpc("human_set_field_value", { p_field: ex.id, p_value: v }); applied++; }
+            else adds.push({ [recordCol]: recordId, field_key: k, label, value: v, section: FIELD_SECTION[k] ?? null });
+          } else if (ex) {                                           // filled + different → propose, don't clobber
+            propose.push({ id: ex.id, old: ex.value, value: v });
+          }
+        }
+        if (adds.length) { await supabase.rpc("human_add_fields", { p_rows: adds }); applied += adds.length; }
+        if (propose.length) {
+          const { data: prop } = await supabase.from("proposals").insert({
+            org_id: orgId, [recordCol]: recordId, title,
+            rationale: "The competitive-setup drill-down surfaced detail that differs from what this field already holds. Accept to update it — your current wording stands until you do.",
+            proposed_by: "Setup interview", status: "pending",
+          }).select("id").single();
+          if (prop) {
+            await supabase.from("proposal_changes").insert(propose.map((c) => ({
+              org_id: orgId, proposal_id: prop.id, change_kind: "update_field",
+              record_field_id: c.id, old_value: c.old, field_key: null, label: null, proposed_value: c.value,
+            })));
+            queued += propose.length;
+          }
+        }
       };
       // Product record — what it IS.
-      if (prodRec) await queue("product_id", prodRec.id, "Setup learnings → product record", [
+      if (prodRec) await reconcile("product_id", prodRec.id, "Setup learnings → product record", [
         ["what_it_is", "What it is", d.product], ["core_capabilities", "Core capabilities", d.features],
       ]);
-      // GTM record — how it's SOLD. (industries is written durably via
-      // persistContextToRecords, so it's not re-proposed here.)
-      if (g) await queue("gtm_record_id", g.id, "Setup learnings → GTM record", [
-        ["personas", "Personas", d.who], ["positioning", "Positioning", d.positioning],
+      // GTM record — how it's SOLD. who → the canonical primary_persona (NOT a
+      // non-template "personas" key, which orphaned). industries + competitors are
+      // written durably by persistContextToRecords.
+      if (g) await reconcile("gtm_record_id", g.id, "Setup learnings → GTM record", [
+        ["primary_persona", "Primary persona", d.who], ["positioning", "Positioning", d.positioning],
       ]);
-      if (queued) setProfileNote(`Queued ${queued} record update${queued === 1 ? "" : "s"} from your answers (product + GTM) — review and accept in each record's proposal drawer. Nothing is written until you do.`);
+      if (applied || queued) {
+        const bits = [applied ? `${applied} field${applied === 1 ? "" : "s"} filled automatically` : "", queued ? `${queued} change${queued === 1 ? "" : "s"} to already-filled fields await review` : ""].filter(Boolean).join(" · ");
+        setProfileNote(`Records updated from your answers — ${bits}.${queued ? " The proposals are in each record's drawer." : ""}`);
+      }
     } catch { /* best-effort: the wizard flow never fails on record persistence */ }
   }
 
