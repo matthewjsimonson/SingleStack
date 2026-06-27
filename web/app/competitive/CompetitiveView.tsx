@@ -80,23 +80,47 @@ export default function CompetitiveView() {
   return (
     <div>
       <SubTabs<Tab>
-        tabs={[{ key: "dashboard", label: "Dashboard" }, { key: "profile", label: "Signal profile" }, { key: "competitors", label: "Competitors" }, { key: "feed", label: "Signal feed" }]}
+        tabs={[{ key: "dashboard", label: "Dashboard" }, { key: "profile", label: "Competitive profile" }, { key: "competitors", label: "Competitors" }, { key: "feed", label: "Signal feed" }]}
         active={tab} onChange={setTab}
       />
       <Banner>{error}</Banner>
 
       {loading ? <div className="t-sub t-muted">Loading…</div>
-        : tab === "dashboard" ? <Dashboard competitors={scopedCompetitors} capabilities={capabilities} scores={scores} compSignals={compSignals} themes={themes} overview={overview} reload={load} setError={setError} newProductId={scopedProductId} />
-        : tab === "profile" ? <SignalProfile scope="landscape" />
+        : tab === "dashboard" ? <Dashboard competitors={scopedCompetitors} capabilities={capabilities} scores={scores} compSignals={compSignals} themes={themes} overview={overview} reload={load} setError={setError} />
+        : tab === "profile" ? <ProfileTab productId={scopedProductId} reload={load} />
         : tab === "competitors" ? <Competitors competitors={scopedCompetitors} cards={cards} overview={overview} capabilities={capabilities} scores={scores} compSignals={compSignals} themes={themes} newProductId={scopedProductId} reload={load} setError={setError} />
         : <Feed signals={signals} competitors={scopedCompetitors} reload={load} />}
     </div>
   );
 }
 
+// ---------- Competitive profile: our broad positioning + the deliberate setup ----------
+// This tab IS the competitive profile — the broad read of how the market is moving and
+// how we compare (synthesized from battlecards + competitive signals, on top of the GTM
+// & product records). The deliberate "set up / re-analyze" (the wizard — find rivals,
+// design the matrix, build the profile) is invoked from HERE, not the dashboard, because
+// you only call on it for a big positioning update.
+function ProfileTab({ productId, reload }: { productId: string | null; reload: () => void }) {
+  const [setup, setSetup] = useState(false);
+  if (setup) return <CompetitiveSetup productId={productId} onDone={() => { setSetup(false); reload(); }} />;
+  return (
+    <div>
+      <div className="card card-pad row-between" style={{ marginBottom: "var(--sp-4)", gap: 12, flexWrap: "wrap" }}>
+        <div style={{ minWidth: 0 }}>
+          <div style={{ fontWeight: 660, fontSize: 14 }}>Competitive profile</div>
+          <div className="t-sub t-muted" style={{ fontSize: 12.5, marginTop: 2 }}>Your broad positioning — how the market is moving and how you compare, synthesized from your battlecards + competitive signals on top of your GTM &amp; product records. This is what drives the competitor search, the comparison, and your battlecards.</div>
+        </div>
+        <button className="btn btn-sm" onClick={() => setSetup(true)} style={{ background: "var(--ac)", color: "#fff", flexShrink: 0 }}
+          title="A deliberate re-analysis of your competitive positioning — find rivals, design the matrix, and rebuild the profile from your records. Use for a big positioning update.">✦ Set up / re-analyze profile</button>
+      </div>
+      <SignalProfile scope="landscape" />
+    </div>
+  );
+}
+
 // ---------- Dashboard: capability heat-map + metrics ----------
-function Dashboard({ competitors, capabilities, scores, compSignals, themes, overview, reload, setError, newProductId }: {
-  competitors: Competitor[]; capabilities: Capability[]; scores: Score[]; compSignals: Signal[]; themes: Theme[]; overview: { name: string; overview: string | null; valueProp: string | null } | null; reload: () => void; setError: (s: string | null) => void; newProductId?: string | null;
+function Dashboard({ competitors, capabilities, scores, compSignals, themes, overview, reload, setError }: {
+  competitors: Competitor[]; capabilities: Capability[]; scores: Score[]; compSignals: Signal[]; themes: Theme[]; overview: { name: string; overview: string | null; valueProp: string | null } | null; reload: () => void; setError: (s: string | null) => void;
 }) {
   const supabase = createClient();
   const [addingCap, setAddingCap] = useState(false);
@@ -105,11 +129,9 @@ function Dashboard({ competitors, capabilities, scores, compSignals, themes, ove
   const [openMetric, setOpenMetric] = useState<"gaps" | "moves" | null>(null);
   const [matrixView, setMatrixView] = useState<"matrix" | "grid">("matrix");
 
-  // Guided setup: the front door. Auto-opens for an empty module; always
-  // reachable from the header so you can expand the board later.
+  // The dashboard is the CONTROL PANEL — no setup lives here. A brand-new module
+  // (nothing tracked yet) nudges to the Competitive profile tab, where setup lives.
   const empty = competitors.length === 0 && capabilities.length === 0;
-  const [setupOpen, setSetupOpen] = useState(empty);
-  useEffect(() => { if (empty) setSetupOpen(true); }, [empty]);
 
   // Evidence drawer: click a player on the grid → the work behind its position
   // (per-cell provenance, GTM themes, recent signals) in a side panel.
@@ -172,8 +194,13 @@ function Dashboard({ competitors, capabilities, scores, compSignals, themes, ove
     [recent, "Moves · 30d", recent > 0, "moves"],
   ];
 
-  if (setupOpen) {
-    return <CompetitiveSetup productId={newProductId} onDone={() => { setSetupOpen(false); reload(); }} />;
+  if (empty) {
+    return (
+      <div className="card card-pad" style={{ textAlign: "center", padding: "var(--sp-6)" }}>
+        <div style={{ fontWeight: 660, fontSize: 14, marginBottom: 4 }}>No competitive profile yet</div>
+        <div className="t-sub t-muted" style={{ fontSize: 12.5, maxWidth: 480, margin: "0 auto" }}>Build it on the <strong>Competitive profile</strong> tab — find your rivals, design the comparison, and set your positioning from your records. This control panel fills with insights, tasks, and actions once you have competitors tracked.</div>
+      </div>
+    );
   }
 
   return (
@@ -189,7 +216,6 @@ function Dashboard({ competitors, capabilities, scores, compSignals, themes, ove
             ))}
           </div>
           {!addingCap && <button className="btn btn-secondary btn-sm" onClick={() => setAddingCap(true)}>+ Capability</button>}
-          <button className="btn btn-secondary btn-sm" onClick={() => setSetupOpen(true)} title="Guided, AI-assisted setup — find rivals, design the matrix, stand up monitoring">✦ Guided setup</button>
           {handSetCount > 0 && (
             <button className="btn btn-secondary btn-sm" onClick={() => setConfirmClear(true)}
               title="Delete every score that was NOT derived from evidence (hand-set + demo data). ✦ evidence-scored cells survive.">
