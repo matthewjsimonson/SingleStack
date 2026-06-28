@@ -278,8 +278,10 @@ export default function SignalProfile({ scope, competitorId, competitorName, vec
               {busy === "battlecard" ? "Filling…" : "→ Fill the battlecard"}
             </button>
           )}
-          <button className="btn btn-secondary btn-sm" onClick={pushToStrategy} disabled={busy === "push" || dirty} title={dirty ? "Save first" : "Derive product + GTM strategy themes from this profile"}>{busy === "push" ? "Pushing…" : dirty ? "Save to push to strategy" : "→ Push to strategy"}</button>
-          <button className="btn btn-secondary btn-sm" onClick={clearProfile} disabled={busy === "clear" || (fields.length === 0 && !headline.trim())} title="Wipe every section so the profile rebuilds fresh" style={{ color: "var(--rd-text, #b42318)" }}>{busy === "clear" ? "Clearing…" : "Clear"}</button>
+          {scope === "competitor" && (
+            <button className="btn btn-secondary btn-sm" onClick={pushToStrategy} disabled={busy === "push" || dirty} title={dirty ? "Save first" : "Derive product + GTM strategy themes from this profile"}>{busy === "push" ? "Pushing…" : dirty ? "Save to push to strategy" : "→ Push to strategy"}</button>
+          )}
+          <button className="btn btn-secondary btn-sm" onClick={clearProfile} disabled={busy === "clear" || (fields.length === 0 && !headline.trim())} title="Wipe every node so the profile rebuilds fresh" style={{ color: "var(--rd-text, #b42318)" }}>{busy === "clear" ? "Clearing…" : "Clear"}</button>
           <button className="btn btn-sm" onClick={save} disabled={busy === "save" || !dirty}>{busy === "save" ? "Saving…" : dirty ? "Save" : "Saved"}</button>
         </div>
       </div>
@@ -287,8 +289,10 @@ export default function SignalProfile({ scope, competitorId, competitorName, vec
       <Banner>{error}</Banner>
       {note && <div className="banner" style={{ marginBottom: 12 }}>{note}</div>}
 
-      <label className="field"><span className="t-label">Headline <span className="t-muted" style={{ fontWeight: 400 }}>— where we sit, in one line</span></span>
-        <input className="input" value={headline} onChange={(e) => { setHeadline(e.target.value); setDirty(true); }} placeholder="e.g. We lead on explainability for mid-market; exposed on price vs Acme." /></label>
+      {scope === "competitor" && (
+        <label className="field"><span className="t-label">Headline <span className="t-muted" style={{ fontWeight: 400 }}>— where we sit, in one line</span></span>
+          <input className="input" value={headline} onChange={(e) => { setHeadline(e.target.value); setDirty(true); }} placeholder="e.g. We lead on explainability for mid-market; exposed on price vs Acme." /></label>
+      )}
 
       {scope === "landscape" && (
         <div style={{ margin: "var(--sp-3) 0" }}>
