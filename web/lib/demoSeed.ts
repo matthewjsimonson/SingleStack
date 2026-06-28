@@ -103,14 +103,13 @@ export async function loadDemoData(supabase: SupabaseClient, orgId: string): Pro
     const { data: ex } = await supabase.from("competitors").select("id").eq("name", "Productboard").maybeSingle();
     if (ex) return "exist";
     const { error } = await supabase.from("competitors").insert([
-      { org_id: orgId, name: "Productboard", relationship: "direct", website: "https://www.productboard.com", notes: "Product management platform; its Spark AI runs agentic competitive research and builds battlecards. Overlaps on product strategy + CI, but isn't a unified product+GTM record." },
-      { org_id: orgId, name: "Crayon", relationship: "direct", website: "https://www.crayon.co", notes: "Competitive intelligence platform monitoring 100+ data types; its Sparks AI generates SWOTs and talk tracks. Strong on CI; not a living system of record." },
-      { org_id: orgId, name: "Klue", relationship: "direct", website: "https://klue.com", notes: "Competitive enablement: collects competitor intel and pushes battlecards to sales. CI→sales focus, not product + GTM as one record." },
-      { org_id: orgId, name: "Aha!", relationship: "adjacent", website: "https://www.aha.io", notes: "Roadmapping with ML-based prioritization. Strong roadmap; weak on live market intelligence and GTM." },
-      { org_id: orgId, name: "Gong", relationship: "adjacent", website: "https://www.gong.io", notes: "Revenue intelligence from call data; surfaces competitor mentions and deal risk. A GTM signal source, not a system of record." },
-      { org_id: orgId, name: "Signum.AI", relationship: "adjacent", website: "https://signum.ai", notes: "AI competitive intelligence consolidating external signals (hiring, launches, social). A signal feed, not a ratified record." },
+      { org_id: orgId, name: "Productboard", relationship: "adjacent", website: "https://www.productboard.com", notes: "Product management & roadmapping with an AI product agent (Spark). Strong on the DECIDE leg — product-side only, doesn't build, and isn't a unified product+GTM record." },
+      { org_id: orgId, name: "Lovable", relationship: "adjacent", website: "https://lovable.dev", notes: "AI app builder — prompt to full-stack prototype. Owns the BUILD leg, but the prototype has no memory of the strategy, signals, or GTM behind it. A tool the Build module orchestrates." },
+      { org_id: orgId, name: "Cursor", relationship: "adjacent", website: "https://cursor.com", notes: "AI coding environment for developers. Owns the BUILD leg; code-only, no product/GTM context. A BYO build tool to embed or hand off to." },
+      { org_id: orgId, name: "Notion", relationship: "adjacent", website: "https://www.notion.so", notes: "Connected AI workspace — flexible and generic. No native product↔GTM ontology, no sensing, no governed AI." },
+      { org_id: orgId, name: "Pendo", relationship: "adjacent", website: "https://www.pendo.io", notes: "Product analytics & in-app guidance. Owns the LEARN leg (usage telemetry) — a signal source, not a system of record." },
     ]);
-    if (error) throw error; return "+6";
+    if (error) throw error; return "+5";
   });
 
   // ---- Competitive capability heat-map: functionality vectors × competitors ----
@@ -118,23 +117,23 @@ export async function loadDemoData(supabase: SupabaseClient, orgId: string): Pro
     const { data: exCap } = await supabase.from("capabilities").select("id").limit(1);
     if (exCap && exCap.length) return "exist";
     const CAPS = [
-      "AI prototyping / build", "Signal sensing & synthesis", "Product & GTM strategy",
-      "Messaging & battlecards", "PQL scoring & PLG motion", "Outcome learning", "Agent orchestration", "Human-in-the-loop governance",
+      "Unified product + GTM record", "AI build / prototyping", "Signal sensing & synthesis",
+      "Product & GTM strategy", "PLG analytics & PQLs", "Human-in-the-loop governance", "Frontier-capability leverage",
     ];
     const { data: created, error } = await supabase.from("capabilities").insert(CAPS.map((name, i) => ({ org_id: orgId, name, position: i }))).select("id, name");
     if (error) throw error;
     const capId = (n: string) => created!.find((c) => c.name === n)!.id;
     const { data: comps } = await supabase.from("competitors").select("id, name");
     const compId = (n: string) => comps?.find((c) => c.name === n)?.id ?? null;
-    // score 0..3 (— / Partial / Good / Strong). null competitor = "Us".
+    // score 0..3 (— / Partial / Good / Strong). null competitor = "Us". Each rival
+    // owns one leg of the loop; we span it on a governed, unified record.
     const S: Record<string, Record<string, number>> = {
-      "Us": { "Unified product + GTM record": 3, "Competitive intelligence": 2, "Agent orchestration": 3, "Roadmapping & delivery": 2, "Signal synthesis": 3, "Human-in-the-loop governance": 3, "Frontier-capability leverage": 3 },
-      "Productboard": { "Unified product + GTM record": 1, "Competitive intelligence": 2, "Agent orchestration": 1, "Roadmapping & delivery": 3, "Signal synthesis": 1, "Human-in-the-loop governance": 1, "Frontier-capability leverage": 1 },
-      "Crayon": { "Competitive intelligence": 3, "Signal synthesis": 2, "Roadmapping & delivery": 0, "Unified product + GTM record": 0, "Agent orchestration": 1, "Human-in-the-loop governance": 1, "Frontier-capability leverage": 1 },
-      "Klue": { "Competitive intelligence": 3, "Signal synthesis": 1, "Roadmapping & delivery": 0, "Unified product + GTM record": 0, "Agent orchestration": 0, "Human-in-the-loop governance": 1, "Frontier-capability leverage": 0 },
-      "Aha!": { "Roadmapping & delivery": 3, "Unified product + GTM record": 1, "Competitive intelligence": 0, "Agent orchestration": 0, "Signal synthesis": 1, "Human-in-the-loop governance": 1, "Frontier-capability leverage": 0 },
-      "Gong": { "Competitive intelligence": 1, "Signal synthesis": 2, "Roadmapping & delivery": 0, "Unified product + GTM record": 0, "Agent orchestration": 1, "Human-in-the-loop governance": 0, "Frontier-capability leverage": 1 },
-      "Signum.AI": { "Competitive intelligence": 2, "Signal synthesis": 2, "Roadmapping & delivery": 0, "Unified product + GTM record": 0, "Agent orchestration": 1, "Human-in-the-loop governance": 0, "Frontier-capability leverage": 1 },
+      "Us":           { "Unified product + GTM record": 3, "AI build / prototyping": 2, "Signal sensing & synthesis": 3, "Product & GTM strategy": 3, "PLG analytics & PQLs": 2, "Human-in-the-loop governance": 3, "Frontier-capability leverage": 3 },
+      "Productboard": { "Unified product + GTM record": 1, "AI build / prototyping": 0, "Signal sensing & synthesis": 1, "Product & GTM strategy": 3, "PLG analytics & PQLs": 1, "Human-in-the-loop governance": 1, "Frontier-capability leverage": 1 },
+      "Lovable":      { "Unified product + GTM record": 0, "AI build / prototyping": 3, "Signal sensing & synthesis": 0, "Product & GTM strategy": 0, "PLG analytics & PQLs": 0, "Human-in-the-loop governance": 0, "Frontier-capability leverage": 2 },
+      "Cursor":       { "Unified product + GTM record": 0, "AI build / prototyping": 3, "Signal sensing & synthesis": 0, "Product & GTM strategy": 0, "PLG analytics & PQLs": 0, "Human-in-the-loop governance": 0, "Frontier-capability leverage": 2 },
+      "Notion":       { "Unified product + GTM record": 1, "AI build / prototyping": 0, "Signal sensing & synthesis": 0, "Product & GTM strategy": 1, "PLG analytics & PQLs": 0, "Human-in-the-loop governance": 0, "Frontier-capability leverage": 1 },
+      "Pendo":        { "Unified product + GTM record": 0, "AI build / prototyping": 0, "Signal sensing & synthesis": 1, "Product & GTM strategy": 1, "PLG analytics & PQLs": 3, "Human-in-the-loop governance": 0, "Frontier-capability leverage": 1 },
     };
     const rows: Record<string, unknown>[] = [];
     for (const [who, scores] of Object.entries(S)) {
@@ -151,9 +150,9 @@ export async function loadDemoData(supabase: SupabaseClient, orgId: string): Pro
     const { count: c } = await supabase.from("signals").select("id", { count: "exact", head: true }).eq("metadata->>domain", "competitive");
     if (c) return "exist";
     const { error } = await supabase.from("signals").insert([
-      ["Crayon ships Sparks AI: auto-SWOT + talk tracks", "Competitor deepening AI on CI — raises the bar on automated competitive analysis.", 0.7, "High", 18],
-      ["Productboard's Spark adds agentic competitive research", "Direct overlap with our competitive intel; watch their battlecard automation.", 0.68, "Medium", 36],
-      ["Klue expanding into win/loss analytics", "Moving down-funnel toward revenue intelligence; adjacent encroachment.", 0.55, "Medium", 70],
+      ["Lovable crosses $40M ARR — AI app builders make PM prototyping real", "AI build tools prove PMs can prototype for real — validates the first-class Build module.", 0.72, "High", 18],
+      ["Productboard ships Spark, an AI product agent", "Adjacent move on the decide leg — an assistant atop roadmapping, not a unified product+GTM record.", 0.66, "Medium", 36],
+      ["Enterprise buyers require human-in-the-loop sign-off on AI", "Procurement now asks for audit trails + human ratification on AI changes — a strength to lead with.", 0.68, "High", 70],
     ].map(([title, why, conf_level, conf_label, h]) => ({ org_id: orgId, scope: "org", category: "gtm", title, why, conf_level, conf_label, observed_at: iso(h as number), metadata: { domain: "competitive" } })));
     if (error) throw error; return "+3";
   });
@@ -166,16 +165,14 @@ export async function loadDemoData(supabase: SupabaseClient, orgId: string): Pro
     const cid = (n: string) => comps?.find((x) => x.name === n)?.id ?? null;
     const cards: [string, string, string, string][] = [
       // [competitor, kind, title, detail]
-      ["Productboard", "win", "We unify product AND GTM in one ratified record", "Spark builds battlecards, but the truth still lives in scattered docs. We keep product + messaging in one place that only moves when a human ratifies — so it never drifts."],
-      ["Productboard", "lose", "They own roadmapping depth", "If the buyer's core need is roadmap prioritization and delivery, they're deeper there. Reframe to the unified record + GTM, where they're thin."],
-      ["Productboard", "objection", "“Doesn't Spark already do competitive AI?”", "Spark automates CI research; it doesn't keep your product+GTM record current with human-in-the-loop ratification. Different job — surfacing intel vs. owning ratified change."],
-      ["Productboard", "proof", "HITL governance is auditable", "Every change is a ratified proposal with a full trail — exactly what procurement now asks about."],
-      ["Crayon", "win", "A living record, not a CI feed", "Crayon monitors the market; we turn that monitoring into ratified change in your product + GTM record. Intel → governed action, not just a dashboard."],
-      ["Crayon", "lose", "Breadth of CI sources", "Crayon tracks 100+ data types. If the buyer just wants the widest net, acknowledge it — then pivot to who actually owns acting on the intel."],
-      ["Crayon", "trap", "Ask: who owns acting on the intel?", "CI tools surface signals; nobody owns turning them into ratified product/GTM updates. That ownership gap is our wedge — set it early."],
-      ["Klue", "win", "Beyond sales enablement", "Klue pushes battlecards to sales; we keep the whole product+GTM record current. Battlecards are one output of our system, not the system."],
-      ["Klue", "objection", "“We already have battlecards in Klue.”", "Great — and they're static until someone updates them. Ours stay current from live signals, human-ratified, so reps never quote a stale card."],
-      ["Gong", "win", "Gong is a signal source; we're the system of record", "We can ingest Gong-style signals; Gong can't keep your product + GTM record current. Position as complementary — feed us, we govern the change."],
+      ["Productboard", "win", "One record for product AND GTM", "Spark assists roadmapping, but the truth still lives in scattered docs. We hold product + GTM in one record that only moves when a human ratifies — so it never drifts."],
+      ["Productboard", "lose", "Roadmapping depth", "If the only need is roadmap prioritization and delivery, they're deeper there. Reframe to the unified record + real build + GTM."],
+      ["Productboard", "proof", "Human-ratified, auditable change", "Every change is a ratified proposal with a full trail — exactly what procurement now asks about."],
+      ["Lovable", "win", "Build stays connected to the why", "Lovable generates a prototype with no memory of the strategy, signals, or GTM behind it. We build on the record, so the artifact stays tied to the decision that drove it."],
+      ["Lovable", "trap", "Ask: where does the prototype's rationale live?", "Build tools produce code; nobody keeps it tied to the signal, the strategy, and the GTM. That connection is the wedge — set it early."],
+      ["Cursor", "win", "BYO build tool, governed record", "Cursor is a great coding tool — we orchestrate around it. Build there or in-app; the record and the human-ratified governance are ours."],
+      ["Notion", "win", "Opinionated for the PLG loop", "Notion can model anything but understands nothing about sense → build → sell → learn. We're purpose-built for that loop, with governed AI."],
+      ["Pendo", "win", "A signal source, not the system of record", "We ingest usage signals; Pendo can't keep your product + GTM record current. Complementary — feed us, we govern the change."],
     ];
     const rows = cards.flatMap(([name, kind, title, detail], i) => { const id = cid(name); return id ? [{ org_id: orgId, competitor_id: id, kind, title, detail, position: i }] : []; });
     if (rows.length) { const { error } = await supabase.from("battlecard_items").insert(rows); if (error) throw error; }
@@ -195,16 +192,19 @@ export async function loadDemoData(supabase: SupabaseClient, orgId: string): Pro
   if (gtmId) await step("gtm fields", async () => {
     if (await count("record_fields", "gtm_record_id", gtmId!)) return "exist";
     const { error } = await supabase.rpc("human_add_fields", { p_rows: [
-      ["hero", "Hero", "Run the whole product-led growth loop — sense, decide, build, sell, learn — in one place.", 0],
-      ["personas", "Personas", "Heads of Product and founder-PMs (who prototype with the Build module) and GTM leads at scaling B2B software companies.", 1],
-      ["primary_persona", "Primary persona", "The product manager at a product-led B2B company who needs to go from a market signal to a real, working prototype to a shipped, sold feature — without leaving one system.", 2],
-      ["positioning", "Positioning", "A PLG platform that closes the loop from market signal → working prototype → revenue — not a strategy doc, not a competitive-intel feed.", 3],
-      ["objections", "Objections", "“Is this just another AI wrapper?” — No: humans ratify every change, and the Build module produces real, working prototypes, not just docs.", 4],
-      ["value_prop", "Value proposition", "Idea to shipped, sold, and measured without leaving one system: AI prototypes the build, agents move the work, you ratify.", 5],
-      ["pillars", "Message pillars", "1) The whole PLG loop in one system (sense → decide → build → sell → learn). 2) A first-class Build module — real AI prototyping, not just docs. 3) Human-in-the-loop — nothing ships unratified. 4) Serves PMs AND GTM.", 6],
-      ["gtm_motion", "GTM motion", "Product-led: the product itself (especially hands-on AI prototyping in the Build module) is the wedge; usage → PQLs → assisted GTM. The message leads with “build it for real,” backed by working-prototype proof.", 7],
-      ["proof_points", "Proof points", "6 design partners · 41 weekly active operators · 12 prototypes shipped/week · every change carries an auditable, ratified trail.", 8],
-    ].map(([field_key, label, value, position]) => ({ org_id: orgId, gtm_record_id: gtmId, field_key, label, value, position })) });
+      // Audience + Motion = GTM strategy (the Strategy & execution tab)
+      ["primary_persona", "Primary persona", "The product manager at a product-led B2B company who needs to go from a market signal to a real, working prototype to a shipped, sold feature — without leaving one system.", "Audience", 0],
+      ["icp", "Ideal customer profile", "Scaling B2B software companies (Series A–C, 20–200 people) building product-led, where PMs and GTM need to move from signal → shipped → sold without tool-hopping.", "Audience", 1],
+      ["industries", "Industries / verticals", "B2B software / SaaS.", "Audience", 2],
+      ["gtm_motion", "GTM motion", "Product-led: hands-on AI prototyping in the Build module is the wedge; usage → PQLs → assisted GTM. Lead with 'build it for real,' backed by working-prototype proof.", "Motion", 3],
+      // Messaging framework (the Messaging tab)
+      ["positioning_statement", "Positioning statement", "For product and GTM teams at PLG companies, SingleStack is the living system of record for both product and go-to-market, where teams also build for real — the whole loop (sense → decide → build → sell → learn) on one record, every AI change human-ratified.", "Messaging", 4],
+      ["value_proposition", "Value proposition", "Take an idea all the way through the PLG loop on one living record — AI does the work, humans ratify every change, nothing drifts.", "Messaging", 5],
+      ["pillar_1", "Messaging pillar 1", "One record for product + GTM — always current, the shared source of truth.", "Messaging", 6],
+      ["pillar_2", "Messaging pillar 2", "Build is first-class — real AI prototyping on the record with your own coding tools, not just docs.", "Messaging", 7],
+      ["pillar_3", "Messaging pillar 3", "Human-ratified AI — every change is a reviewable, auditable proposal you approve.", "Messaging", 8],
+      ["proof_points", "Proof points", "6 design partners · 41 weekly active operators · 12 prototypes shipped/week · every change carries an auditable, ratified trail.", "Messaging", 9],
+    ].map(([field_key, label, value, section, position]) => ({ org_id: orgId, gtm_record_id: gtmId, field_key, label, value, section, position })) });
     if (error) throw error; return "created";
   });
 
@@ -226,7 +226,7 @@ export async function loadDemoData(supabase: SupabaseClient, orgId: string): Pro
     if (c) return "exist";
     const { error } = await supabase.from("signals").insert([
       ["Analysts reframing “AI copilots” as “AI operating layers”", "industry", "Analyst commentary is shifting the category from assistants to systems of record — our exact framing.", 0.62, "Medium", 30],
-      ["CI teams adopting AI daily (Crayon 2025 report)", "analysts", "~60% of competitive-intelligence teams now use AI tools daily, up ~25% YoY — buyers expect AI-native intel.", 0.7, "High", 54],
+      ["AI app builders make real prototyping mainstream", "analysts", "Tools like Lovable and Cursor mean PMs can build for real — the premise behind a first-class Build module.", 0.7, "High", 54],
       ["Buyers now expect human-in-the-loop governance", "persona", "Procurement increasingly asks how AI-driven changes are reviewed and audited — a strength to lead with.", 0.72, "High", 80],
     ].map(([title, lens, why, conf_level, conf_label, h]) => ({ org_id: orgId, scope: "org", category: "product", title, why, conf_level, conf_label, observed_at: iso(h as number), metadata: { domain: "market", lens } })));
     if (error) throw error; return "+3";
@@ -415,13 +415,13 @@ export async function loadDemoData(supabase: SupabaseClient, orgId: string): Pro
   // ---- Durable themes ----
   await step("themes", async () => {
     const defs = [
-      { category: "product", state: "escalating", momentum: "accelerating", conf_level: 0.86, title: "Buyers expect built-in agent orchestration", summary: "Demand is shifting from single assistants to multi-agent orchestration; analysts and competitor moves (Productboard Spark, Crayon Sparks) corroborate.", recommendation: "Make orchestration a first-class, demoable capability; evolve engineering & product skills to leverage new platform features." },
+      { category: "product", state: "escalating", momentum: "accelerating", conf_level: 0.86, title: "Buyers expect built-in agent orchestration", summary: "Demand is shifting from single assistants to multi-agent orchestration; analyst commentary and adjacent product moves corroborate.", recommendation: "Make orchestration a first-class, demoable capability; evolve engineering & product skills to leverage new platform features." },
       { category: "gtm", state: "active", momentum: "steady", conf_level: 0.7, title: "Pricing & “AI wrapper” objections create demo-to-trial friction", summary: "Two recurring post-demo blockers: unclear pricing and skepticism that we're 'just a wrapper'.", recommendation: "Lead messaging with human-in-the-loop control; clarify pricing tiers on the hero path." },
       { category: "product", state: "escalating", momentum: "accelerating", conf_level: 0.78, title: "Frontier capabilities reset table stakes each quarter", summary: "New model capabilities (orchestration, memory, long context) keep changing what's expected of an 'AI operating layer'.", recommendation: "Continuously evolve agent skills to leverage new capabilities; treat capability releases as signals every officer acts on." },
       { category: "gtm", state: "active", momentum: "accelerating", conf_level: 0.62, title: "Human-in-the-loop governance is becoming a buying criterion", summary: "Procurement increasingly asks how AI changes are reviewed and audited — our ratification model is a differentiator if we lead with it.", recommendation: "Put HITL governance on the hero and in the security one-pager." },
       { category: "product", state: "active", momentum: "steady", conf_level: 0.5, title: "Mobile is an underserved surface", summary: "Demo-to-trial drop-off concentrates on mobile; the hero CTA underperforms there.", recommendation: "Ship a mobile-first hero variant; measure trial starts." },
       { category: "gtm", state: "emerging", momentum: "accelerating", conf_level: 0.34, title: "“Operating layer” category language is forming", summary: "Analysts beginning to reframe copilots as operating layers — early, thin, but trending our way.", recommendation: "Watch; seed the language in content, don't bet the positioning yet." },
-      { category: "product", state: "fading", momentum: "fading", conf_level: 0.42, title: "Standalone roadmapping as a wedge", summary: "Leading with roadmapping (vs Aha!) is losing steam; buyers want the unified record, not another roadmap tool.", recommendation: "De-emphasize roadmapping-first messaging." },
+      { category: "product", state: "fading", momentum: "fading", conf_level: 0.42, title: "Standalone roadmapping as a wedge", summary: "Leading with roadmapping is losing steam; buyers want the unified record where they also build, not another roadmap tool.", recommendation: "De-emphasize roadmapping-first messaging." },
       { category: "gtm", state: "active", momentum: "steady", conf_level: 0.9, title: "Win/loss cites unclear pricing as top stall", summary: "Across recent deals, pricing clarity is the most-cited reason for stalls — high confidence, well corroborated.", recommendation: "Publish transparent tiers; add a pricing FAQ to the demo follow-up." },
     ];
     // Top up by title so re-running adds the spread themes instead of bailing.
@@ -511,9 +511,9 @@ export async function loadDemoData(supabase: SupabaseClient, orgId: string): Pro
 export async function clearDemoIntel(supabase: any): Promise<{ message: string }> {
   const SIGNAL_TITLES = [
     // competitive
-    "Crayon ships Sparks AI: auto-SWOT + talk tracks",
-    "Productboard's Spark adds agentic competitive research",
-    "Klue expanding into win/loss analytics",
+    "Lovable crosses $40M ARR — AI app builders make PM prototyping real",
+    "Productboard ships Spark, an AI product agent",
+    "Enterprise buyers require human-in-the-loop sign-off on AI",
     // gtm record
     "Prospects bounce on the pricing page after the demo",
     "“Is it just an AI wrapper?” keeps surfacing",
@@ -521,7 +521,7 @@ export async function clearDemoIntel(supabase: any): Promise<{ message: string }
     "Demo-to-trial drop-off on mobile",
     // market
     "Analysts reframing “AI copilots” as “AI operating layers”",
-    "CI teams adopting AI daily (Crayon 2025 report)",
+    "AI app builders make real prototyping mainstream",
     "Buyers now expect human-in-the-loop governance",
     // frontier capabilities
     "Claude tool orchestration", "Claude long-term memory", "Claude computer use",
@@ -539,16 +539,15 @@ export async function clearDemoIntel(supabase: any): Promise<{ message: string }
     "Win/loss cites unclear pricing as top stall",
   ];
   const CARD_TITLES = [
-    "We unify product AND GTM in one ratified record", "They own roadmapping depth",
-    "“Doesn't Spark already do competitive AI?”", "HITL governance is auditable",
-    "A living record, not a CI feed", "Breadth of CI sources",
-    "Ask: who owns acting on the intel?", "Beyond sales enablement",
-    "“We already have battlecards in Klue.”", "Gong is a signal source; we're the system of record",
+    "One record for product AND GTM", "Roadmapping depth", "Human-ratified, auditable change",
+    "Build stays connected to the why", "Ask: where does the prototype's rationale live?",
+    "BYO build tool, governed record", "Opinionated for the PLG loop",
+    "A signal source, not the system of record",
   ];
   const BUNDLE_TITLE = "Ship agent orchestration as a demoable capability";
   const MATRIX_ROWS = [
-    "Unified product + GTM record", "Competitive intelligence", "Agent orchestration",
-    "Roadmapping & delivery", "Signal synthesis", "Human-in-the-loop governance", "Frontier-capability leverage",
+    "Unified product + GTM record", "AI build / prototyping", "Signal sensing & synthesis",
+    "Product & GTM strategy", "PLG analytics & PQLs", "Human-in-the-loop governance", "Frontier-capability leverage",
   ];
 
   const counts: string[] = [];
