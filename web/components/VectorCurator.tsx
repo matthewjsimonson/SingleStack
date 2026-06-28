@@ -9,6 +9,7 @@
 import { useCallback, useEffect, useState } from "react";
 import { createClient } from "@/lib/supabase/client";
 import type { Vector } from "@/components/SignalProfile";
+import NodeSources from "@/components/NodeSources";
 
 type Field = { field_key: string; label: string; value: string; origin?: string; vector?: Vector; weight?: number };
 type Turn = { role: "q" | "a"; text: string };
@@ -83,7 +84,7 @@ export default function VectorCurator({
 
           {/* Interview — records-aware questions to sharpen this vector */}
           <div className="card card-pad" style={{ background: "var(--panel-2)" }}>
-            <div className="t-label" style={{ marginBottom: 8 }}>Curate with AI <span className="t-muted" style={{ fontWeight: 400, textTransform: "none", letterSpacing: 0 }}>— pulls from your records, then asks what they don&apos;t answer</span></div>
+            <div className="t-label" style={{ marginBottom: 8 }}>Build nodes with AI <span className="t-muted" style={{ fontWeight: 400, textTransform: "none", letterSpacing: 0 }}>— pulls from your records, then asks what they don&apos;t answer</span></div>
             {transcript.filter((t) => t.role === "a").length > 0 && (
               <div className="stack-2" style={{ marginBottom: 10 }}>
                 {transcript.map((t, k) => (
@@ -134,6 +135,11 @@ export default function VectorCurator({
               ))}
             </div>
           )}
+
+          {/* Vector-level sources — feed every node in this arm (web now). */}
+          <NodeSources vector={vector} nodeKey={null}
+            seed={entries.find((e) => e.f.field_key.includes("search_focus"))?.f.value
+              || entries.filter((e) => (e.f.weight ?? 2) >= 2).map((e) => e.f.value).join(" · ").slice(0, 600)} />
         </div>
 
         <div style={{ padding: "12px 20px", borderTop: "1px solid var(--border)" }} className="row gap-2">

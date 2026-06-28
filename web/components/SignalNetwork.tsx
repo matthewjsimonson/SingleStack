@@ -92,7 +92,7 @@ export default function SignalNetwork({ fields, openVector, onOpenVector, onOpen
       {openVector && (
         <div style={{ position: "absolute", top: 12, left: 12, zIndex: 2 }} className="row gap-2">
           <button className="btn btn-secondary btn-sm" onClick={() => onOpenVector(null)}>‹ All vectors</button>
-          <button className="btn btn-sm" onClick={onCurate} style={{ background: "var(--ac)", color: "#fff" }}>✨ Curate with AI</button>
+          <button className="btn btn-sm" onClick={onCurate} style={{ background: "var(--ac)", color: "#fff" }}>⚙ Manage vector</button>
         </div>
       )}
       <svg viewBox={`0 0 ${W} ${H}`} width="100%" height="100%" preserveAspectRatio="xMidYMid meet" role="img" aria-label="Signals nucleus" style={{ display: "block" }}>
@@ -151,12 +151,13 @@ export default function SignalNetwork({ fields, openVector, onOpenVector, onOpen
             })}
           </g>
 
-          {/* HOVER LABELS — names only appear on hover */}
-          {!openVector && hoverArm && (() => {
-            const arm = ARMS.find((a) => a.key === hoverArm)!;
+          {/* VECTOR LABELS — always visible (muted); the hovered one pops + colors */}
+          {!openVector && ARMS.map((arm) => {
             const [lx, ly] = P(arm.angle, RING[2] + 30);
-            return <text x={lx} y={ly} textAnchor="middle" dominantBaseline="middle" style={{ fontSize: 15, fontWeight: 800, letterSpacing: "0.06em", textTransform: "uppercase", fill: arm.color, pointerEvents: "none" }}>{arm.label}</text>;
-          })()}
+            const hv = hoverArm === arm.key;
+            return <text key={`lbl-${arm.key}`} x={lx} y={ly} textAnchor="middle" dominantBaseline="middle"
+              style={{ fontSize: hv ? 15.5 : 12.5, fontWeight: hv ? 800 : 680, letterSpacing: "0.07em", textTransform: "uppercase", fill: hv ? arm.color : "var(--tm)", transition: "fill 160ms, font-size 160ms", pointerEvents: "none" }}>{arm.label}</text>;
+          })}
           {openVector && hoverNodeF && (() => {
             const p = [...armLayouts.flatMap((a) => a.placed), ...corePlaced.map((c) => ({ ...c, r: 8 }))].find((x) => x.f.field_key === hoverNode);
             if (!p) return null;
@@ -177,7 +178,7 @@ export default function SignalNetwork({ fields, openVector, onOpenVector, onOpen
       </svg>
 
       {!openVector && (
-        <div className="t-sub t-muted" style={{ position: "absolute", right: 14, bottom: 12, fontSize: 11.5, pointerEvents: "none" }}>Hover a vector · click to zoom in &amp; curate</div>
+        <div className="t-sub t-muted" style={{ position: "absolute", right: 14, bottom: 12, fontSize: 11.5, pointerEvents: "none" }}>Hover a vector · click to zoom in &amp; manage</div>
       )}
     </div>
   );

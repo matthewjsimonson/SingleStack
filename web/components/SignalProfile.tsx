@@ -13,6 +13,7 @@ import { Banner, Chip } from "@/components/ui";
 import { Markdown } from "@/components/Markdown";
 import SignalNetwork from "@/components/SignalNetwork";
 import VectorCurator from "@/components/VectorCurator";
+import NodeSources from "@/components/NodeSources";
 
 // The signals network: a CENTER ('core' — what we are) plus four arms. Each
 // node sits on a vector and carries a WEIGHT (3 core/closest … 1 edge/farthest).
@@ -372,6 +373,8 @@ export default function SignalProfile({ scope, competitorId, competitorName, vec
                       <span className="t-sub t-muted" style={{ fontSize: 11.5, alignSelf: "center" }}>grounded in your records</span>
                     </div>
                   </div>
+                  {/* Sources — where this node pulls from (web now; tools next). */}
+                  <NodeSources vector={(f.vector ?? "core") as Vector} nodeKey={f.field_key} seed={f.value} />
                 </div>
                 <div style={{ padding: "12px 20px", borderTop: "1px solid var(--border)" }} className="row-between">
                   <button className="btn btn-secondary btn-sm" onClick={() => { removeField(ni); setOpenNode(null); }} style={{ color: "var(--rd-text)" }}>Remove node</button>

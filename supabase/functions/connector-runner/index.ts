@@ -62,6 +62,15 @@ const KIND_SEARCH_FRAMING: Record<string, string> = {
 const AUTH_KINDS_LIVE = new Set(["website", "youtube", "web_search", ...SEARCH_BACKED]);
 const liveKind = (kind: string) => AUTH_KINDS_LIVE.has(kind);
 
+// Map a signals-network VECTOR to the signal domain/lens its harvest belongs to,
+// so a source aimed at a vector routes to the right intel surface.
+const VECTOR_DOMAIN: Record<string, string> = {
+  core: "signals", competitive: "competitive", industry: "market", persona: "market", technology: "capability",
+};
+const VECTOR_LENS: Record<string, string | undefined> = {
+  industry: "industry", persona: "persona", technology: "tech",
+};
+
 // YouTube without auth: oEmbed gives title/author; we also pull the watch page
 // text (description/metadata). Honest v1 — full transcript extraction is the
 // next slice; this still yields a real, attributable signal. SSRF-guarded via
@@ -227,7 +236,7 @@ Deno.serve(async (req: Request) => {
     // authoritative). This is what lets scheduled pulls run without a user.
     const { data: source, error: sErr } = await supabase
       .from("sources")
-      .select("id, org_id, label, kind, origin, status, auth_mode, focus, include_terms, exclude_terms, max_per_pull, min_relevance, config, targets, guidance, competitor_id, market_lens, connection_id")
+      .select("id, org_id, label, kind, origin, status, auth_mode, focus, include_terms, exclude_terms, max_per_pull, min_relevance, config, targets, guidance, competitor_id, market_lens, connection_id, signal_vector, signal_node_key")
       .eq("id", source_id).single();
     if (sErr || !source) return json({ error: "source not found" }, 404);
     const orgId = source.org_id as string;
@@ -420,7 +429,16 @@ Deno.serve(async (req: Request) => {
           ? { domain: "market", lens: source.market_lens, channel: source.label,
               industry: (source.config as { industry?: string } | null)?.industry,
               persona: (source.config as { persona?: string } | null)?.persona }
-          : null,
+          // A signals-network source (aimed from the profile): tag the vector's
+          // domain so its harvest lands in the right tab AND carry the node it
+          // feeds so it can roll up to that node's analysis.
+          : source.signal_vector
+            ? { domain: VECTOR_DOMAIN[source.signal_vector as string] ?? "signals",
+                vector: source.signal_vector,
+                node_key: source.signal_node_key ?? undefined,
+                lens: VECTOR_LENS[source.signal_vector as string],
+                channel: source.label }
+            : null,
     }));
     let firstSignalId: string | null = null;
     if (rows.length) {
