@@ -97,12 +97,21 @@ export default function MessagingFramework({ gtmId, recordName }: { gtmId: strin
       else if (src.content.trim()) b.content = src.content.trim();
       if (src.guidance.trim()) b.guidance = src.guidance.trim();
       const { data, error } = await supabase.functions.invoke("messaging-framework", { body: b });
-      if (error) throw error;
+      if (error) {
+        const resp = (error as { context?: Response }).context;
+        if (resp && (resp.status === 546 || resp.status === 504)) throw new Error("The sweep ran past the server time limit — it usually completes on a retry.");
+        throw error;
+      }
       if (data?.error) throw new Error(data.error);
-      if (!data?.changes_saved) { setNotice(data?.message || "Your framework already looks full and on-message — nothing to propose right now."); return; }
+      // Complete: ALWAYS close the modal and confirm — it must never sit silently.
       setSwp(false); setSrc({ mode: src.mode, content: "", url: "", guidance: "" });
       await load();
-      setReviewNonce((n) => n + 1); // open the proposal in the review drawer
+      if (!data?.changes_saved) {
+        setNotice("✓ Sweep complete — your framework is already current; nothing to propose.");
+      } else {
+        setNotice(`✓ Sweep complete — proposed ${data.changes_saved} change${data.changes_saved === 1 ? "" : "s"} into your review queue below.`);
+        setReviewNonce((n) => n + 1); // open the proposal in the review drawer
+      }
     } catch (e) { setError(e instanceof Error ? e.message : "Sweep failed."); }
     finally { setBuilding(false); }
   }
@@ -191,6 +200,8 @@ export default function MessagingFramework({ gtmId, recordName }: { gtmId: strin
             </div>
           </div>
         )}
+
+        {error && <div className="banner banner-error" style={{ marginTop: 12 }}>{error}</div>}
 
         <div className="row gap-2" style={{ marginTop: 12 }}>
           <button className="btn" disabled={building} onClick={build}>{building ? "Sweeping…" : "✦ Sweep the framework → review queue"}</button>
