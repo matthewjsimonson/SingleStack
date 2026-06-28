@@ -69,6 +69,10 @@ export default function CompetitiveSetup({ onDone, productId }: { onDone: () => 
   // and stay fully editable.
   const [prod, setProd] = useState<{ name: string; value_prop: string | null } | null>(null);
   const [gtm, setGtm] = useState<{ name: string; personas: string | null; positioning: string | null } | null>(null);
+  // The competitive (+ shared) vector of the central signals profile — the
+  // curated "where to look" that AIMS this hunt. The profile drives discovery;
+  // this is how the tab draws on it.
+  const [profileFocus, setProfileFocus] = useState("");
   // Structured, ALWAYS-editable market context — pre-filled from the records,
   // never locked. Personas and industries are first-class: they decide which
   // rivals actually compete for the same buyer.
@@ -286,6 +290,15 @@ export default function CompetitiveSetup({ onDone, productId }: { onDone: () => 
         for (const f of allGf ?? []) if (f.value?.trim()) dump.push(`${f.label}: ${f.value}`);
       }
       setRecordsDump(dump.join("\n"));
+      // The CENTRAL signals profile aims the hunt: its competitive (+ shared)
+      // vector nodes are where-to-look guidance the user curated on the Signals
+      // home. Fold them into the search so the profile drives discovery.
+      const { data: prof } = await supabase.from("signal_profiles").select("id").eq("scope", "landscape").is("competitor_id", null).maybeSingle();
+      if (prof) {
+        const { data: pfs } = await supabase.from("signal_profile_fields").select("label, value, vector").eq("profile_id", prof.id).order("position");
+        const focus = (pfs ?? []).filter((f) => (f.vector === "competitive" || f.vector === "shared") && f.value?.trim()).map((f) => `- ${f.label}: ${f.value}`);
+        setProfileFocus(focus.join("\n"));
+      } else setProfileFocus("");
       // Pre-fill the EDITABLE fields from the records — the human can adjust,
       // add, or rewrite everything before anything runs. Never overwrite typing.
       // Force (Clear & rebuild) overwrites the windows with the CURRENT records,
@@ -374,6 +387,10 @@ export default function CompetitiveSetup({ onDone, productId }: { onDone: () => 
     ctx.positioning.trim() ? `How we position / against what: ${ctx.positioning.trim()}` : "",
     ctx.competitors.trim() ? `KNOWN COMPETITORS (user-named — verify these first, then search beyond them): ${ctx.competitors.trim()}` : "",
     ctx.more.trim() ? `Also: ${ctx.more.trim()}` : "",
+    // The signals profile's competitive vector AIMS the hunt — the user's curated
+    // where-to-look. Weight it: it says which capability areas/segments and which
+    // KIND of rival to search for.
+    profileFocus.trim() ? `\nFROM OUR SIGNALS PROFILE — competitive & shared vectors (curated where-to-look; aim the hunt at exactly this):\n${profileFocus.trim()}` : "",
     // Ground the search in the FULL product & GTM records — the real depth lives
     // there (strategy, motion, pricing, technical, differentiation), not in the
     // distilled fields above. Without this the search reasons off thin summaries.

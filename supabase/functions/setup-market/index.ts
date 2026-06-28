@@ -102,6 +102,15 @@ Deno.serve(async (req: Request) => {
       return json({ error: "Your product & GTM records are too sparse to align market watches. Fill them in (Set up with AI), then come back." }, 422);
     }
 
+    // ---- the central signals profile's MARKET vector — the curated where-to-look
+    // that AIMS this. The profile drives discovery; fold its market nodes in. ----
+    let profileMarket = "";
+    const { data: prof } = await supabase.from("signal_profiles").select("id").eq("scope", "landscape").is("competitor_id", null).maybeSingle();
+    if (prof) {
+      const { data: pfs } = await supabase.from("signal_profile_fields").select("label, value, vector").eq("profile_id", prof.id).order("position");
+      profileMarket = (pfs ?? []).filter((f) => (f.vector === "market" || f.vector === "shared") && f.value?.trim()).map((f) => `- ${f.label}: ${f.value}`).join("\n");
+    }
+
     // ---- existing market watches, so we don't re-propose ----
     const { data: have } = await supabase.from("sources").select("label, market_lens").not("market_lens", "is", null);
     const existing = (have ?? []).map((s) => s.label).join("; ");
@@ -112,6 +121,7 @@ Deno.serve(async (req: Request) => {
       `Be RUTHLESSLY focused: propose at most ${targetCount} watches — the segments that are core ICP AND capability-backed. If we list 15 industries, watch the few that matter most; say what you left out in 'note'. A few aligned watches beat broad coverage that floods the feed.`,
       "Lenses: 'industry' (a vertical we serve), 'persona' (a buyer/user we serve), 'analyst' (category coverage e.g. Gartner/Forrester for our category), 'tech' (category/platform shifts that change what buyers expect). kinds = which live search-backed sources fit (press, social, reviews, web_search).",
       "Ground everything in the records below. Never invent a segment we don't serve or a capability we don't have.",
+      "If a SIGNALS PROFILE (market vector) is provided, treat it as the curated AIM — prioritize the segments and the specific sources/communities it names; it is the user's own where-to-look.",
     ].join("\n");
 
     const userText = [
@@ -123,6 +133,7 @@ Deno.serve(async (req: Request) => {
       industries ? `Industries / verticals: ${industries}` : "Industries: (not specified)",
       personas ? `Primary persona(s): ${personas}` : "",
       icp ? `ICP: ${icp}` : "",
+      profileMarket ? `\nFROM OUR SIGNALS PROFILE — market & shared vectors (curated where-to-look; aim the watches at exactly these segments & sources):\n${profileMarket}` : "",
       existing ? `\nAlready watched (don't duplicate): ${existing}` : "",
       `\nPropose up to ${targetCount} aligned market watches now.`,
     ].filter(Boolean).join("\n");
