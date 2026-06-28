@@ -55,7 +55,31 @@ export default function SignalProfile({ scope, competitorId, competitorName, vec
   const [openVector, setOpenVector] = useState<Vector | null>(null); // which vector is zoomed
   const [curating, setCurating] = useState(false);                   // vector-level interview drawer
   const [openNode, setOpenNode] = useState<string | null>(null);     // node-level drawer (field_key)
+  const [refineText, setRefineText] = useState("");
+  const [refining, setRefining] = useState(false);
   function zoomTo(v: Vector | null) { setOpenVector(v); setCurating(false); setOpenNode(null); }
+
+  // Refine ONE node with AI — sharpen it, or apply a free-text instruction.
+  async function refineNode(ni: number, instruction: string) {
+    const f = fields[ni]; if (!f || refining) return;
+    setRefining(true); setError(null);
+    try {
+      const { data, error } = await supabase.functions.invoke("synthesize-profile", { body: { scope: "landscape", vector: f.vector ?? "core", step: "refine_node", instruction, node: { label: f.label, value: f.value, weight: f.weight ?? 2 } } });
+      if (error) throw error;
+      if (data?.error) throw new Error(data.error);
+      const nn = data?.node;
+      if (nn) { setField(ni, { label: nn.label ?? f.label, value: nn.value ?? f.value, weight: nn.weight ?? f.weight, origin: "ai" }); setRefineText(""); }
+    } catch (e) { setError(e instanceof Error ? e.message : "Could not refine the node."); }
+    finally { setRefining(false); }
+  }
+  // Plain-language role of a vector — so a human gets what a node here does.
+  const nodeRole: Record<Vector, string> = {
+    core: "defines who we are — the frame every search inherits.",
+    competitive: "tells search which rivals to find and how to judge them.",
+    industry: "tells search which verticals to track and where their signal lives.",
+    persona: "tells search which buyers to track and where they gather.",
+    technology: "tells search which model/platform shifts to watch.",
+  };
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -293,7 +317,7 @@ export default function SignalProfile({ scope, competitorId, competitorName, vec
       )}
 
       {scope === "landscape" ? (<>
-        <SignalNetwork fields={fields} openVector={openVector} onOpenVector={zoomTo} onOpenNode={setOpenNode} onCurate={() => setCurating(true)} selectedKey={openNode} />
+        <SignalNetwork fields={fields} openVector={openVector} onOpenVector={zoomTo} onOpenNode={(k) => { setOpenNode(k); setRefineText(""); }} onCurate={() => setCurating(true)} selectedKey={openNode} />
         {dirty && <div className="t-sub t-muted" style={{ fontSize: 11.5, marginTop: 8 }}>Unsaved changes — Save in the header or a drawer.</div>}
 
         {/* Vector-level interview/curation drawer (opened by ✨ Curate with AI). */}
@@ -328,6 +352,9 @@ export default function SignalProfile({ scope, competitorId, competitorName, vec
                   <button className="btn btn-secondary btn-sm" onClick={() => setOpenNode(null)}>Close</button>
                 </div>
                 <div style={{ flex: 1, overflowY: "auto", padding: "16px 20px" }} className="stack-3">
+                  <div className="t-sub t-muted" style={{ fontSize: 12, background: "var(--panel-2)", border: "1px solid var(--border)", borderRadius: 8, padding: "8px 10px" }}>
+                    This is a <strong>{vm.label.split(" — ")[0]}</strong> node — it {nodeRole[(f.vector ?? "core") as Vector]} Its <strong>weight</strong> ({weightLabel(f.weight)}) sets how hard search leans on it: core nodes are searched first, edge nodes are caught but not chased.
+                  </div>
                   <label className="field"><span className="t-label">Node</span>
                     <input className="input" value={f.label} onChange={(e) => setField(ni, { label: e.target.value })} placeholder="Short name" /></label>
                   <label className="field"><span className="t-label">Weight <span className="t-muted" style={{ fontWeight: 400 }}>— closeness to the core</span></span>
@@ -336,6 +363,15 @@ export default function SignalProfile({ scope, competitorId, competitorName, vec
                     </select></label>
                   <label className="field"><span className="t-label">Statement <span className="t-muted" style={{ fontWeight: 400 }}>— a fact about us, declarative</span></span>
                     <textarea className="textarea" rows={6} value={f.value} onChange={(e) => setField(ni, { value: e.target.value })} placeholder="e.g. AI-built working prototypes are our core battleground." /></label>
+                  {/* Refine with AI — sharpen, or steer with an instruction */}
+                  <div className="card card-pad" style={{ background: "var(--panel-2)" }}>
+                    <div className="t-label" style={{ marginBottom: 6 }}>Refine with AI</div>
+                    <textarea className="textarea" rows={2} value={refineText} onChange={(e) => setRefineText(e.target.value)} placeholder="Optional: how to change it — e.g. 'more specific', 'split out the DIY angle', 'this is edge, not core'." />
+                    <div className="row gap-2" style={{ marginTop: 8 }}>
+                      <button className="btn btn-sm" onClick={() => refineNode(ni, refineText)} disabled={refining}>{refining ? "Refining…" : refineText.trim() ? "✨ Apply" : "✨ Sharpen"}</button>
+                      <span className="t-sub t-muted" style={{ fontSize: 11.5, alignSelf: "center" }}>grounded in your records</span>
+                    </div>
+                  </div>
                 </div>
                 <div style={{ padding: "12px 20px", borderTop: "1px solid var(--border)" }} className="row-between">
                   <button className="btn btn-secondary btn-sm" onClick={() => { removeField(ni); setOpenNode(null); }} style={{ color: "var(--rd-text)" }}>Remove node</button>

@@ -113,13 +113,46 @@ Deno.serve(async (req: Request) => {
     { global: { headers: { Authorization: authHeader } } },
   );
 
-  let input: { scope?: string; competitor_id?: string; vector?: string; step?: string; transcript?: { role: string; text: string }[]; current?: { field_key: string; label: string; value: string | null; vector?: string }[] };
+  let input: { scope?: string; competitor_id?: string; vector?: string; step?: string; instruction?: string; node?: { label?: string; value?: string; weight?: number }; transcript?: { role: string; text: string }[]; current?: { field_key: string; label: string; value: string | null; vector?: string }[] };
   try { input = await req.json(); } catch { return json({ error: "invalid JSON body" }, 400); }
   // Optional single-VECTOR draft: only that arm (+ the core it hangs off) is
   // (re)built, so each vector can be drafted for its own search/analysis.
   const VECTOR_KEYS = ["core", "competitive", "industry", "persona", "technology"];
   const oneVector = input.vector && VECTOR_KEYS.includes(input.vector) ? input.vector : null;
   const transcript = (Array.isArray(input.transcript) ? input.transcript : []).filter((t) => t && (t.role === "q" || t.role === "a") && typeof t.text === "string");
+
+  // ---- refine ONE node: sharpen a single statement (optionally per a human
+  // instruction), records-grounded. Returns { node:{label,value,weight} }. ----
+  if (input.step === "refine_node" && oneVector) {
+    try {
+      const n = input.node ?? {};
+      const dump = await recordsDump(supabase);
+      const anthropic = new Anthropic({ apiKey: key });
+      const pol = await resolveModelPolicy(supabase, { task: "profile_refine_node", fallback: { model: MODEL, effort: "medium" } });
+      const REFINE_SCHEMA = {
+        type: "object", additionalProperties: false,
+        properties: { label: { type: "string" }, value: { type: "string" }, weight: { type: "integer", enum: [1, 2, 3] } },
+        required: ["label", "value", "weight"],
+      };
+      const resp = (await anthropic.messages.create({
+        model: pol.model, max_tokens: 900,
+        output_config: { effort: pol.effort, format: { type: "json_schema", schema: REFINE_SCHEMA } },
+        system: [
+          `You refine ONE node of the '${oneVector}' vector of an org's signals network. A node is a declarative STATEMENT about the org (present tense, affirmative — never a question or rebuttal), weighted 3=core/closest … 1=edge. It must be specific and SEARCH-ACTIONABLE: a reader should know what signal to look for.`,
+          input.instruction?.trim() ? `Apply this instruction: ${input.instruction.trim()}` : "No instruction given — sharpen it: make it more specific, true, and search-actionable; fix any vague/umbrella phrasing; set the weight to reflect how central it really is.",
+          "Keep it ONE node (do not split). Ground it in the records; invent nothing. Return the improved label (short name), value (the statement), and weight.",
+        ].join("\n"),
+        messages: [{ role: "user", content: `RECORDS:\n${dump || "(sparse)"}\n\nNODE NOW:\nlabel: ${n.label ?? ""}\nweight: ${n.weight ?? 2}\nstatement: ${n.value ?? ""}` }],
+        // deno-lint-ignore no-explicit-any
+      } as any)) as Anthropic.Message;
+      await logUsage(supabase, { task: "profile_refine_node", model: pol.model, usage: resp.usage });
+      const b = resp.content.find((x) => x.type === "text");
+      if (!b || b.type !== "text") throw new Error("no refinement returned");
+      return json({ node: JSON.parse(b.text) });
+    } catch (e) {
+      return json({ error: e instanceof Error ? e.message : String(e) }, 500);
+    }
+  }
 
   // ---- per-vector INTERVIEW step: one records-aware question to sharpen this
   // vector's search profile. Returns { question, why, done } — no DB writes. ----
