@@ -6,6 +6,7 @@
 // the per-COMPETITOR raw battlecard (built from that rival's signals + records).
 // AI drafts/refreshes; the human owns the final word (nothing saves until you save).
 import { useCallback, useEffect, useState } from "react";
+import { useRouter } from "next/navigation";
 import { createClient } from "@/lib/supabase/client";
 import { getOrgId } from "@/lib/org";
 import { Banner, Chip } from "@/components/ui";
@@ -26,17 +27,26 @@ const vectorMeta = (v?: string) => VECTORS.find((x) => x.key === v) ?? VECTORS[0
 // Weight = distance from center. 3 core (closest, highest signal weight) … 1 edge.
 const WEIGHTS: { w: number; label: string }[] = [{ w: 3, label: "Core" }, { w: 2, label: "Standard" }, { w: 1, label: "Edge" }];
 const weightLabel = (w?: number) => WEIGHTS.find((x) => x.w === (w ?? 2))?.label ?? "Standard";
+// Where each vector PUSHES — the intel area that applies it to search/analyze.
+const PUSH: Partial<Record<Vector, { label: string; href: string }>> = {
+  competitive: { label: "Competitive", href: "/competitive" },
+  industry: { label: "Market intel", href: "/market" },
+  persona: { label: "Market intel", href: "/market" },
+  technology: { label: "Frontier", href: "/frontier" },
+};
 
 type Field = { field_key: string; label: string; value: string; origin?: string; vector?: Vector; weight?: number };
 type Profile = { id: string; headline: string | null };
 
 export default function SignalProfile({ scope, competitorId, competitorName, vectorFilter }: { scope: "landscape" | "competitor"; competitorId?: string; competitorName?: string; vectorFilter?: Vector }) {
   const supabase = createClient();
+  const router = useRouter();
   const [profile, setProfile] = useState<Profile | null>(null);
   const [headline, setHeadline] = useState("");
   const [fields, setFields] = useState<Field[]>([]);
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState<null | "save" | "ai" | "create" | "push" | "battlecard" | "clear">(null);
+  const [vecBusy, setVecBusy] = useState<Vector | null>(null); // which vector is mid-draft
   const [error, setError] = useState<string | null>(null);
   const [dirty, setDirty] = useState(false);
   const [note, setNote] = useState<string | null>(null);
@@ -96,6 +106,37 @@ export default function SignalProfile({ scope, competitorId, competitorName, vec
         : `Drafted from ${ev?.internal ?? 0} internal + ${ev?.external ?? 0} external signal(s). Review and edit, then Save.`);
     } catch (e) { setError(e instanceof Error ? e.message : "Could not draft the profile."); }
     finally { setBusy(null); }
+  }
+
+  // Draft ONE vector — focused synthesis for that arm (built on the core),
+  // tuned to that vector's own search/analysis. Replaces only that vector's
+  // nodes; the rest of the network is untouched.
+  async function draftVector(v: Vector) {
+    if (vecBusy || busy) return;
+    setVecBusy(v); setError(null); setNote(null);
+    try {
+      const { data, error } = await supabase.functions.invoke("synthesize-profile", { body: { scope: "landscape", vector: v, current: fields.map((f) => ({ field_key: f.field_key, label: f.label, value: f.value, vector: f.vector ?? "core", weight: f.weight ?? 2 })) } });
+      if (error) throw error;
+      if (data?.error) throw new Error(data.error);
+      const d = data?.draft;
+      if (!d) throw new Error("No draft returned.");
+      const incoming: Field[] = (d.fields ?? []).map((f: Field) => ({ ...f, origin: "ai", vector: v, weight: f.weight ?? 2 }));
+      // Swap in this vector's nodes; keep every other vector as-is.
+      setFields((prev) => [...prev.filter((f) => (f.vector ?? "core") !== v), ...incoming]);
+      if (v === "core" && d.headline) setHeadline(d.headline);
+      setDirty(true);
+      const meta = vectorMeta(v);
+      setNote(`Drafted the ${meta.label.split(" — ")[0]} vector — ${incoming.length} node(s)${data?.mode === "analysis" ? ", analysis mode" : ""}. Review, Save${PUSH[v] ? `, then Push to ${PUSH[v]!.label}` : ""}.`);
+    } catch (e) { setError(e instanceof Error ? e.message : "Could not draft that vector."); }
+    finally { setVecBusy(null); }
+  }
+
+  // Push a vector to its intel area — where it's applied to search/analyze.
+  // Save first so the area reads the latest nodes (the setups read the DB).
+  function pushVector(v: Vector) {
+    const dest = PUSH[v]; if (!dest) return;
+    if (dirty) { setError("Save your changes first, then push — the intel area reads the saved profile."); return; }
+    router.push(dest.href);
   }
 
   async function save() {
@@ -229,8 +270,8 @@ export default function SignalProfile({ scope, competitorId, competitorName, vec
           <div className="t-sub t-muted" style={{ fontSize: 12, marginTop: 2 }}>{blurb}</div>
         </div>
         <div className="row gap-2" style={{ flexShrink: 0 }}>
-          <button className="btn btn-secondary btn-sm" onClick={draftAI} disabled={busy === "ai"} style={{ color: "var(--ac-text)" }}
-            title={scope === "landscape" ? "Build/refresh this profile from your product & GTM records — frames where to aim the rival search" : "Synthesize this competitor's profile from its signals + your records"}>{busy === "ai" ? "Synthesizing…" : "✨ Draft / refresh with AI"}</button>
+          <button className="btn btn-secondary btn-sm" onClick={draftAI} disabled={busy === "ai" || vecBusy !== null} style={{ color: "var(--ac-text)" }}
+            title={scope === "landscape" ? "Draft/refresh the WHOLE network at once — or use the per-vector ✨ Draft to do one arm" : "Synthesize this competitor's profile from its signals + your records"}>{busy === "ai" ? "Synthesizing…" : scope === "landscape" ? "✨ Draft all vectors" : "✨ Draft / refresh with AI"}</button>
           {scope === "competitor" && (
             <button className="btn btn-secondary btn-sm" onClick={fillBattlecard} disabled={busy === "battlecard" || dirty}
               title={dirty ? "Save first" : "This profile is the raw battlecard — the analyst refines it into evidence-cited items (through review), then the messenger drafts the GTM battlecard copy"}>
@@ -304,9 +345,13 @@ export default function SignalProfile({ scope, competitorId, competitorName, vec
             {fields.length === 0 && <div className="t-sub t-muted" style={{ fontSize: 12.5 }}>No nodes yet. Draft with AI to build the profile across vectors, or add one by hand.</div>}
             {groups.map(({ v, entries }) => (
               <div key={v.key}>
-                <div className="row-between" style={{ alignItems: "baseline", marginBottom: 6 }}>
+                <div className="row-between" style={{ alignItems: "baseline", marginBottom: 6, gap: 8, flexWrap: "wrap" }}>
                   <span className="t-label">{v.label} <span className="t-muted" style={{ fontWeight: 400, textTransform: "none", letterSpacing: 0 }}>· {entries.length}</span></span>
-                  <button className="btn btn-secondary btn-sm" onClick={() => addField(v.key)} title={v.blurb}>+ Add</button>
+                  <div className="row gap-2" style={{ flexShrink: 0 }}>
+                    <button className="btn btn-secondary btn-sm" onClick={() => draftVector(v.key)} disabled={vecBusy !== null || busy === "ai"} style={{ color: "var(--ac-text)" }} title={`Draft just the ${v.label.split(" — ")[0]} vector from your records — ${v.blurb}`}>{vecBusy === v.key ? "Drafting…" : "✨ Draft"}</button>
+                    {PUSH[v.key] && <button className="btn btn-secondary btn-sm" onClick={() => pushVector(v.key)} disabled={vecBusy !== null} title={`Apply this vector in ${PUSH[v.key]!.label} — where it aims search & analysis`}>Push to {PUSH[v.key]!.label} →</button>}
+                    <button className="btn btn-secondary btn-sm" onClick={() => addField(v.key)} title={v.blurb}>+ Add</button>
+                  </div>
                 </div>
                 {entries.length === 0
                   ? <div className="t-sub t-muted" style={{ fontSize: 12 }}>{v.blurb}</div>

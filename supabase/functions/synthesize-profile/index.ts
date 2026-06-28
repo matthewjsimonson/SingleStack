@@ -71,8 +71,12 @@ Deno.serve(async (req: Request) => {
     { global: { headers: { Authorization: authHeader } } },
   );
 
-  let input: { scope?: string; competitor_id?: string; current?: { field_key: string; label: string; value: string | null }[] };
+  let input: { scope?: string; competitor_id?: string; vector?: string; current?: { field_key: string; label: string; value: string | null; vector?: string }[] };
   try { input = await req.json(); } catch { return json({ error: "invalid JSON body" }, 400); }
+  // Optional single-VECTOR draft: only that arm (+ the core it hangs off) is
+  // (re)built, so each vector can be drafted for its own search/analysis.
+  const VECTOR_KEYS = ["core", "competitive", "industry", "persona", "technology"];
+  const oneVector = input.vector && VECTOR_KEYS.includes(input.vector) ? input.vector : null;
   const scope = input.scope === "landscape" ? "landscape" : "competitor";
   if (scope === "competitor" && !input.competitor_id) return json({ error: "competitor_id required for scope=competitor" }, 400);
 
@@ -212,7 +216,15 @@ Deno.serve(async (req: Request) => {
       if (synthesized) {
         context += `\nSYNTHESIZED THEMES (analysis is now LIVE — fold what these MEAN into the relevant vectors):\n${synthThemes!.map((t) => `[${t.category}/${t.state} · conf ${(t.conf_level ?? 0).toFixed(2)}] ${t.title} — ${t.summary ?? ""}${t.recommendation ? ` → ${t.recommendation}` : ""}`).join("\n")}`;
       }
-      target = "our central SIGNALS NETWORK — the records-grounded map, organised as a CORE (what we are) + four weighted vectors, that aims discovery and analysis across every intelligence tab";
+      target = oneVector
+        ? `the '${oneVector}' vector of our signals network — the records-grounded nodes that aim ${oneVector === "competitive" ? "the competitor search" : oneVector === "industry" ? "industry discovery" : oneVector === "persona" ? "persona discovery" : oneVector === "technology" ? "frontier/technology watching" : "the whole network"}`
+        : "our central SIGNALS NETWORK — the records-grounded map, organised as a CORE (what we are) + four weighted vectors, that aims discovery and analysis across every intelligence tab";
+      // For a single-vector draft, surface the CORE so the vector is built to
+      // serve it (the model returns only the target vector's nodes).
+      if (oneVector && oneVector !== "core") {
+        const coreNodes = (input.current ?? []).filter((f) => (f.vector ?? "core") === "core" && f.value?.trim());
+        if (coreNodes.length) context += `\nOUR CORE (the center this vector hangs off — do NOT redraft it; build the ${oneVector} vector to serve it):\n${coreNodes.map((f) => `- ${f.label}: ${f.value}`).join("\n")}`;
+      }
       // The signals network: a CENTER ('core') + four arms. Each node is tagged
       // with its vector AND a WEIGHT (3 = core/closest, 2 = standard, 1 = edge).
       // Weight = how central the node is: core features/personas/direct-rival
@@ -223,13 +235,19 @@ Deno.serve(async (req: Request) => {
       // (a specific feature / persona / vertical / rival archetype, weighted by
       // centrality — this is what fills the arm and makes search precise) PLUS the
       // fixed STRUCTURAL lenses listed. Agnostic: read everything from the records.
-      suggestedSections = [
-        "CORE (the center — weight 3; everything hangs off this): essence (what we are, one line), category (our frame of reference / what we replace), core_problem (the job-to-be-done we solve), value_prop (the promise & wedge), business_model (how we package & charge — it shapes who competes). PLUS one node per DEFINING capability/feature (label = the capability): weight 3 for the few that ARE the product, 2 for important-but-secondary.",
-        "COMPETITIVE: one node per competitor ARCHETYPE/attribute that pinpoints rivals — weight 3 = head-on/direct, 2 = adjacent/substitute, 1 = edge (name specific companies ONLY with evidence). PLUS structural lenses: competitive_battlegrounds (where deals are won/lost, w3), differentiation (our wedge vs the alternative set, w3), status_quo_alternative (what buyers do instead today / 'do nothing', w2), competitive_search_focus (WHERE to look — review/comparison sites + the KIND of company/source, w3), win_loss_patterns (why we win/lose — fills in once synthesized, w2), moves_to_watch (rival launches/pricing/funding/positioning shifts, w2).",
-        "INDUSTRY: one node per VERTICAL we serve (label = the vertical), weight 3 = core ICP vertical … 1 = occasional/edge. PLUS: industry_use_cases (how we apply per vertical, w2), regulatory_landscape (compliance forces on the core verticals, w2), industry_search_focus (trade press, analyst coverage, regulators, events, w3), industry_shifts_to_watch (market-size, regulation, budget, consolidation, w2).",
-        "PERSONA: one node per BUYER/USER (label = the role), weight 3 = economic buyer/decision-maker, 2 = user/champion, 1 = influencer. PLUS: persona_jobs_pains (goals/pains of the core personas, w2), persona_objections (objections & buying triggers, w2), persona_search_focus (the communities, forums, job boards, certifications, events where each persona's signal lives, w3), persona_shifts_to_watch (role/tooling/budget/hiring changes, w2).",
-        "TECHNOLOGY: one node per ENABLING model/platform/tech we build on (label = the tech), weight 3 = central to the build … 1 = peripheral. PLUS: platform_dependencies (ecosystems we ride & their shift risk, w2), frontier_capabilities_to_watch (what's newly possible that changes our product/build, w3), technology_search_focus (model releases, research, provider changelogs/blogs, w3), tech_threats_opportunities (where frontier shifts threaten or open our space, w2).",
-      ].join("\n");
+      // A single-vector draft uses just that entry; a full draft uses them all.
+      const VECTOR_AREAS: Record<string, string> = {
+        core: "CORE (the center — weight 3; everything hangs off this): essence (what we are, one line), category (our frame of reference / what we replace), core_problem (the job-to-be-done we solve), value_prop (the promise & wedge), business_model (how we package & charge — it shapes who competes). PLUS one node per DEFINING capability/feature (label = the capability): weight 3 for the few that ARE the product, 2 for important-but-secondary.",
+        competitive: "COMPETITIVE: one node per competitor ARCHETYPE/attribute that pinpoints rivals — weight 3 = head-on/direct, 2 = adjacent/substitute, 1 = edge (name specific companies ONLY with evidence). PLUS structural lenses: competitive_battlegrounds (where deals are won/lost, w3), differentiation (our wedge vs the alternative set, w3), status_quo_alternative (what buyers do instead today / 'do nothing', w2), competitive_search_focus (WHERE to look — review/comparison sites + the KIND of company/source, w3), win_loss_patterns (why we win/lose — fills in once synthesized, w2), moves_to_watch (rival launches/pricing/funding/positioning shifts, w2).",
+        industry: "INDUSTRY: one node per VERTICAL we serve (label = the vertical), weight 3 = core ICP vertical … 1 = occasional/edge. PLUS: industry_use_cases (how we apply per vertical, w2), regulatory_landscape (compliance forces on the core verticals, w2), industry_search_focus (trade press, analyst coverage, regulators, events, w3), industry_shifts_to_watch (market-size, regulation, budget, consolidation, w2).",
+        persona: "PERSONA: one node per BUYER/USER (label = the role), weight 3 = economic buyer/decision-maker, 2 = user/champion, 1 = influencer. PLUS: persona_jobs_pains (goals/pains of the core personas, w2), persona_objections (objections & buying triggers, w2), persona_search_focus (the communities, forums, job boards, certifications, events where each persona's signal lives, w3), persona_shifts_to_watch (role/tooling/budget/hiring changes, w2).",
+        technology: "TECHNOLOGY: one node per ENABLING model/platform/tech we build on (label = the tech), weight 3 = central to the build … 1 = peripheral. PLUS: platform_dependencies (ecosystems we ride & their shift risk, w2), frontier_capabilities_to_watch (what's newly possible that changes our product/build, w3), technology_search_focus (model releases, research, provider changelogs/blogs, w3), tech_threats_opportunities (where frontier shifts threaten or open our space, w2).",
+      };
+      // Single-vector draft → just that arm (always include the CORE as the frame
+      // it hangs off). Full draft → every vector.
+      suggestedSections = oneVector
+        ? (oneVector === "core" ? VECTOR_AREAS.core : `${VECTOR_AREAS.core}\n${VECTOR_AREAS[oneVector]}`)
+        : VECTOR_KEYS.map((k) => VECTOR_AREAS[k]).join("\n");
     }
 
     const system = [
@@ -240,7 +258,9 @@ Deno.serve(async (req: Request) => {
       "Synthesize the INTERNAL and EXTERNAL signals below (plus the records) into a headline + nodes. INTERNAL signals (what our own teams hear in the field) and EXTERNAL signals (public: reviews, launches, pricing) are both evidence; weigh corroboration across them and note where they disagree.",
       scope === "competitor"
         ? `Use these section keys where supported (snake_case): ${suggestedSections}. Always include a 'strategic_implications' section. Only assert what the evidence supports; if thin, say so and keep it short.`
-        : `Build the network: a CORE plus nodes across all four vectors, each node tagged with its \`vector\`, an integer \`weight\` (3 core / 2 standard / 1 edge), and a snake_case field_key. AREA TAXONOMY:\n${suggestedSections}\nPrefer SPECIFIC, instance-level nodes — a named core feature, a concrete persona, a vertical, a rival archetype — over vague umbrella nodes; that specificity is what makes search precise and fills each arm. Each instance node's weight = how central it is (a core feature/persona/vertical/direct-rival = 3; a lesser/adjacent/edge one = 1), so a vector should show a GRADIENT from a few weight-3 nodes out to weight-1 nodes, not one lump. Keep each node's value tight and search-actionable (what to find / where to look / what it means), 1-3 sentences — not an essay. Only assert what the records/evidence support; invent nothing. Aim for genuine coverage of every area above where the records support it; where a vector is thin, still create its structural nodes as short 'what to go find' prompts.`,
+        : (oneVector
+            ? `Draft ONLY the '${oneVector}' vector. The CORE is given to you as context (the center every arm hangs off)${oneVector === "core" ? " — you ARE refining the core here" : " — do NOT re-draft it or any other vector"}. Every node you return carries vector='${oneVector}', an integer \`weight\` (3 core / 2 standard / 1 edge), and a snake_case field_key. AREA SPEC for this vector:\n${suggestedSections}\nPrefer SPECIFIC, instance-level nodes (a named feature / persona / vertical / rival archetype) over vague umbrella nodes — that specificity is what makes search precise. Spread the weights into a real GRADIENT (a few weight-3 core nodes out to weight-1 edge nodes), not one lump. Keep each node tight and search-actionable (what to find / where to look / what it means), 1-3 sentences. Only assert what the records/evidence support; invent nothing.`
+            : `Build the network: a CORE plus nodes across all four vectors, each node tagged with its \`vector\`, an integer \`weight\` (3 core / 2 standard / 1 edge), and a snake_case field_key. AREA TAXONOMY:\n${suggestedSections}\nPrefer SPECIFIC, instance-level nodes — a named core feature, a concrete persona, a vertical, a rival archetype — over vague umbrella nodes; that specificity is what makes search precise and fills each arm. Each instance node's weight = how central it is (a core feature/persona/vertical/direct-rival = 3; a lesser/adjacent/edge one = 1), so a vector should show a GRADIENT from a few weight-3 nodes out to weight-1 nodes, not one lump. Keep each node's value tight and search-actionable (what to find / where to look / what it means), 1-3 sentences — not an essay. Only assert what the records/evidence support; invent nothing. Aim for genuine coverage of every area above where the records support it; where a vector is thin, still create its structural nodes as short 'what to go find' prompts.`),
       // The synthesis gate, made explicit to the model.
       scope === "landscape"
         ? (synthesized
@@ -275,7 +295,7 @@ Deno.serve(async (req: Request) => {
     const block = message.content.find((b) => b.type === "text");
     if (!block || block.type !== "text") throw new Error(`no draft returned (stop_reason: ${message.stop_reason})`);
     const draft = JSON.parse(block.text) as { headline: string; fields: { field_key: string; label: string; value: string; vector?: string; weight?: number }[] };
-    return json({ draft, mode: scope === "landscape" ? (synthesized ? "analysis" : "discovery") : "competitor", evidence: { internal: comp.filter((s) => s.origin === "internal").length, external: comp.filter((s) => s.origin !== "internal").length } });
+    return json({ draft, vector: oneVector, mode: scope === "landscape" ? (synthesized ? "analysis" : "discovery") : "competitor", evidence: { internal: comp.filter((s) => s.origin === "internal").length, external: comp.filter((s) => s.origin !== "internal").length } });
   } catch (e) {
     return json({ error: e instanceof Error ? e.message : String(e) }, 500);
   }
