@@ -19,7 +19,7 @@ export default function SignalProfile({ scope, competitorId, competitorName }: {
   const [headline, setHeadline] = useState("");
   const [fields, setFields] = useState<Field[]>([]);
   const [loading, setLoading] = useState(true);
-  const [busy, setBusy] = useState<null | "save" | "ai" | "create" | "push" | "battlecard">(null);
+  const [busy, setBusy] = useState<null | "save" | "ai" | "create" | "push" | "battlecard" | "clear">(null);
   const [error, setError] = useState<string | null>(null);
   const [dirty, setDirty] = useState(false);
   const [note, setNote] = useState<string | null>(null);
@@ -117,6 +117,23 @@ export default function SignalProfile({ scope, competitorId, competitorName }: {
     finally { setBusy(null); }
   }
 
+  // Clear the WHOLE profile — wipe every section + the headline so it can be
+  // rebuilt from scratch. Writes immediately (not a draft); the empty profile then
+  // re-synthesizes fresh from current signals/battlecards/records, with no stale
+  // section preserved.
+  async function clearProfile() {
+    if (!profile) return;
+    if (!confirm("Clear this competitive profile completely? Every section and the headline are deleted so it can be rebuilt fresh. This can't be undone.")) return;
+    setBusy("clear"); setError(null); setNote(null);
+    try {
+      await supabase.from("signal_profile_fields").delete().eq("profile_id", profile.id);
+      await supabase.from("signal_profiles").update({ headline: null, updated_at: new Date().toISOString() }).eq("id", profile.id);
+      setFields([]); setHeadline(""); setDirty(false);
+      setNote("Cleared. Press ✨ Draft / refresh with AI to rebuild it fresh from your current signals, battlecards & records.");
+    } catch (e) { setError(e instanceof Error ? e.message : "Could not clear the profile."); }
+    finally { setBusy(null); }
+  }
+
   function setField(i: number, patch: Partial<Field>) { setFields((fs) => fs.map((f, j) => (j === i ? { ...f, ...patch } : f))); setDirty(true); }
   function removeField(i: number) { setFields((fs) => fs.filter((_, j) => j !== i)); setDirty(true); }
   function addField() { setFields((fs) => [...fs, { field_key: `section_${fs.length + 1}`, label: "New section", value: "", origin: "human" }]); setDirty(true); }
@@ -155,6 +172,7 @@ export default function SignalProfile({ scope, competitorId, competitorName }: {
             </button>
           )}
           <button className="btn btn-secondary btn-sm" onClick={pushToStrategy} disabled={busy === "push" || dirty} title={dirty ? "Save first" : "Derive product + GTM strategy themes from this profile"}>{busy === "push" ? "Pushing…" : dirty ? "Save to push to strategy" : "→ Push to strategy"}</button>
+          <button className="btn btn-secondary btn-sm" onClick={clearProfile} disabled={busy === "clear" || (fields.length === 0 && !headline.trim())} title="Wipe every section so the profile rebuilds fresh" style={{ color: "var(--rd-text, #b42318)" }}>{busy === "clear" ? "Clearing…" : "Clear"}</button>
           <button className="btn btn-sm" onClick={save} disabled={busy === "save" || !dirty}>{busy === "save" ? "Saving…" : dirty ? "Save" : "Saved"}</button>
         </div>
       </div>
