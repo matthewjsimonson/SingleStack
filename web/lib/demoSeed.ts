@@ -74,8 +74,7 @@ export async function loadDemoData(supabase: SupabaseClient, orgId: string): Pro
       ["value_prop", "Value proposition", "Take an idea all the way through the PLG loop without leaving one system: sense the market, decide what to build, actually BUILD it with AI prototyping, sell it (usage → PQLs → GTM), and learn from the outcome — agents propose, you ratify.", 3],
       ["core_capabilities", "Core capabilities", "AI prototyping / build; signal sensing & synthesis; product & GTM strategy; messaging & battlecards; PQL scoring; outcome learning; agent orchestration; human-in-the-loop governance.", 4],
       ["differentiated_capabilities", "Differentiated capabilities", "A FIRST-CLASS Build module where PMs genuinely prototype with AI — most tools stop at docs or strategy; SingleStack closes sense → build → sell → learn in one loop.", 5],
-      ["positioning", "Positioning", "Not a competitive-intel feed (Crayon/Klue), not a roadmapping tool (Aha!), not a strategy doc — a PLG platform spanning sense → decide → build → sell → learn, with real AI prototyping in the Build module.", 6],
-      ["key_metrics", "Key metrics", "Design partners: 6 · Weekly active operators: 41 · Prototypes shipped/wk: 12", 7],
+      ["key_metrics", "Key metrics", "Design partners: 6 · Weekly active operators: 41 · Prototypes shipped/wk: 12", 6],
     ].map(([field_key, label, value, position]) => ({ org_id: orgId, product_id: pid, field_key, label, value, position })) });
     if (error) throw error; return "created";
   });
