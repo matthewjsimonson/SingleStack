@@ -94,12 +94,13 @@ export default function CompetitiveView() {
   );
 }
 
-// ---------- Competitive profile: our broad positioning + the deliberate setup ----------
-// This tab IS the competitive profile — the broad read of how the market is moving and
-// how we compare (synthesized from battlecards + competitive signals, on top of the GTM
-// & product records). The deliberate "set up / re-analyze" (the wizard — find rivals,
-// design the matrix, build the profile) is invoked from HERE, not the dashboard, because
-// you only call on it for a big positioning update.
+// ---------- Competitive profile: STEP ONE — our positioning + the setup that finds rivals ----------
+// This tab IS the competitive profile, and it is STEP ONE of the workflow: it's
+// built FROM your product & GTM records (not from battlecards — those don't exist
+// yet) and its job is to frame WHERE to look for rivals. The deliberate "set up /
+// re-analyze" (the wizard — interview → picture → find rivals → design the matrix)
+// is invoked from HERE. Overviews + signals from setup carry over to each
+// competitor's battlecard, where you finish the per-competitor work.
 function ProfileTab({ productId, reload }: { productId: string | null; reload: () => void }) {
   const [setup, setSetup] = useState(false);
   if (setup) return <CompetitiveSetup productId={productId} onDone={() => { setSetup(false); reload(); }} />;
@@ -107,11 +108,11 @@ function ProfileTab({ productId, reload }: { productId: string | null; reload: (
     <div>
       <div className="card card-pad row-between" style={{ marginBottom: "var(--sp-4)", gap: 12, flexWrap: "wrap" }}>
         <div style={{ minWidth: 0 }}>
-          <div style={{ fontWeight: 660, fontSize: 14 }}>Competitive profile</div>
-          <div className="t-sub t-muted" style={{ fontSize: 12.5, marginTop: 2 }}>Your broad positioning — how the market is moving and how you compare, synthesized from your battlecards + competitive signals on top of your GTM &amp; product records. This is what drives the competitor search, the comparison, and your battlecards.</div>
+          <div style={{ fontWeight: 660, fontSize: 14 }}>Competitive profile · step 1</div>
+          <div className="t-sub t-muted" style={{ fontSize: 12.5, marginTop: 2 }}>Your positioning, built from your product &amp; GTM records — where you play, the axes you compete on, and your wedge. Its job is to point the search at the right rivals. Run setup to find competitors; as you track them and build battlecards, this profile sharpens with what they reveal.</div>
         </div>
         <button className="btn btn-sm" onClick={() => setSetup(true)} style={{ background: "var(--ac)", color: "#fff", flexShrink: 0 }}
-          title="A deliberate re-analysis of your competitive positioning — find rivals, design the matrix, and rebuild the profile from your records. Use for a big positioning update.">✦ Set up / re-analyze profile</button>
+          title="The guided setup: interview → confirm the picture → find rivals → design the matrix, all from your records. Run it to find competitors or to refresh your positioning.">✦ Set up profile &amp; find competitors</button>
       </div>
       <SignalProfile scope="landscape" />
     </div>

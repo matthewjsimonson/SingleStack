@@ -1,9 +1,10 @@
 "use client";
 
-// Signal Profile — the HITL record of "your place in the market," synthesized
-// from internal + external competitive signals and editable by hand. Used for
-// the org-wide landscape and per-competitor. AI drafts/refreshes; the human
-// owns the final word (nothing saves until you save).
+// Signal Profile — the HITL record of "your place in the market," editable by
+// hand. Two scopes: the org-wide LANDSCAPE (step 1 of the competitive workflow —
+// built from your product & GTM records to frame where to hunt for rivals) and
+// the per-COMPETITOR raw battlecard (built from that rival's signals + records).
+// AI drafts/refreshes; the human owns the final word (nothing saves until you save).
 import { useCallback, useEffect, useState } from "react";
 import { createClient } from "@/lib/supabase/client";
 import { getOrgId } from "@/lib/org";
@@ -62,7 +63,12 @@ export default function SignalProfile({ scope, competitorId, competitorName }: {
       setFields((d.fields ?? []).map((f: Field) => ({ ...f, origin: "ai" })));
       setDirty(true);
       const ev = data?.evidence;
-      setNote(`Drafted from ${ev?.internal ?? 0} internal + ${ev?.external ?? 0} external signal(s). Review and edit, then Save.`);
+      const sigCount = (ev?.internal ?? 0) + (ev?.external ?? 0);
+      setNote(scope === "landscape"
+        ? (sigCount > 0
+            ? `Built from your product & GTM records${sigCount ? ` + ${sigCount} competitive signal(s)` : ""}. Review the 'search_focus' section — that's what aims the rival search — then Save.`
+            : "Built from your product & GTM records. Review the 'search_focus' section — that's what aims the rival search — then Save, and run setup to find competitors.")
+        : `Drafted from ${ev?.internal ?? 0} internal + ${ev?.external ?? 0} external signal(s). Review and edit, then Save.`);
     } catch (e) { setError(e instanceof Error ? e.message : "Could not draft the profile."); }
     finally { setBusy(null); }
   }
@@ -119,8 +125,8 @@ export default function SignalProfile({ scope, competitorId, competitorName }: {
 
   // Clear the WHOLE profile — wipe every section + the headline so it can be
   // rebuilt from scratch. Writes immediately (not a draft); the empty profile then
-  // re-synthesizes fresh from current signals/battlecards/records, with no stale
-  // section preserved.
+  // re-synthesizes fresh — landscape from your records, competitor from signals —
+  // with no stale section preserved.
   async function clearProfile() {
     if (!profile) return;
     if (!confirm("Clear this competitive profile completely? Every section and the headline are deleted so it can be rebuilt fresh. This can't be undone.")) return;
@@ -129,7 +135,9 @@ export default function SignalProfile({ scope, competitorId, competitorName }: {
       await supabase.from("signal_profile_fields").delete().eq("profile_id", profile.id);
       await supabase.from("signal_profiles").update({ headline: null, updated_at: new Date().toISOString() }).eq("id", profile.id);
       setFields([]); setHeadline(""); setDirty(false);
-      setNote("Cleared. Press ✨ Draft / refresh with AI to rebuild it fresh from your current signals, battlecards & records.");
+      setNote(scope === "landscape"
+        ? "Cleared. Press ✨ Draft / refresh with AI to rebuild it fresh from your product & GTM records."
+        : "Cleared. Press ✨ Draft / refresh with AI to rebuild it fresh from this competitor's signals & your records.");
     } catch (e) { setError(e instanceof Error ? e.message : "Could not clear the profile."); }
     finally { setBusy(null); }
   }
@@ -140,10 +148,10 @@ export default function SignalProfile({ scope, competitorId, competitorName }: {
 
   if (loading) return <div className="t-sub t-muted">Loading…</div>;
 
-  const title = scope === "landscape" ? "Signal Profile — your place in the market" : `Signal Profile — ${competitorName ?? "competitor"} (the raw battlecard)`;
+  const title = scope === "landscape" ? "Competitive profile — where you play & who to hunt" : `Signal Profile — ${competitorName ?? "competitor"} (the raw battlecard)`;
   const blurb = scope === "landscape"
-    ? "A living, editable read of the competitive landscape and where you sit — synthesized from internal + external signals. This should dictate your product and GTM strategy."
-    : "Where you stand against this competitor — synthesized from internal (deals, calls) + external (public) signals, editable by hand.";
+    ? "Step 1, built from your product & GTM records: where you play, the axes you compete on, your wedge, and — most importantly — where to aim the search for rivals. Editable by hand. It sharpens as you track competitors and build battlecards."
+    : "Where you stand against this competitor — carried over from setup, then sharpened with internal (deals, calls) + external (public) signals. Editable by hand.";
 
   if (!profile) {
     return (
@@ -164,7 +172,8 @@ export default function SignalProfile({ scope, competitorId, competitorName }: {
           <div className="t-sub t-muted" style={{ fontSize: 12, marginTop: 2 }}>{blurb}</div>
         </div>
         <div className="row gap-2" style={{ flexShrink: 0 }}>
-          <button className="btn btn-secondary btn-sm" onClick={draftAI} disabled={busy === "ai"} style={{ color: "var(--ac-text)" }}>{busy === "ai" ? "Synthesizing…" : "✨ Draft / refresh with AI"}</button>
+          <button className="btn btn-secondary btn-sm" onClick={draftAI} disabled={busy === "ai"} style={{ color: "var(--ac-text)" }}
+            title={scope === "landscape" ? "Build/refresh this profile from your product & GTM records — frames where to aim the rival search" : "Synthesize this competitor's profile from its signals + your records"}>{busy === "ai" ? "Synthesizing…" : "✨ Draft / refresh with AI"}</button>
           {scope === "competitor" && (
             <button className="btn btn-secondary btn-sm" onClick={fillBattlecard} disabled={busy === "battlecard" || dirty}
               title={dirty ? "Save first" : "This profile is the raw battlecard — the analyst refines it into evidence-cited items (through review), then the messenger drafts the GTM battlecard copy"}>
