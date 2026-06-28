@@ -146,7 +146,7 @@ async function fetchViaMcp(key: string, source: any, conn: { mcp_url: string; la
     source.exclude_terms ? `Ignore anything about: ${source.exclude_terms}.` : "",
     source.focus ? `This feeds the ${source.focus} lens.` : "",
   ].filter(Boolean).join("\n");
-  const sys = "You are SingleStack's MCP connector. Use the attached MCP server's tools to RETRIEVE concrete, recent, decision-useful data for a product & GTM team, then report exactly what you retrieved as a tight factual briefing — the specific records, fields, dates, and numbers, each attributed to where it came from. Do NOT analyze, recommend, or speculate; report only what the tools returned. If the tools surface nothing relevant to the aim, say so plainly.";
+  const sys = "You are SingleStack's MCP connector. Use the attached MCP server's tools to RETRIEVE concrete, recent, decision-useful data for this organization, then report exactly what you retrieved as a tight factual briefing — the specific records, fields, dates, and numbers, each attributed to where it came from. Do NOT analyze, recommend, or speculate; report only what the tools returned. If the tools surface nothing relevant to the aim, say so plainly.";
   const mcpServers = [{ type: "url", name, url: conn.mcp_url, ...(token ? { authorization_token: token } : {}) }];
   const anthropic = new Anthropic({ apiKey: key });
   // deno-lint-ignore no-explicit-any
@@ -358,7 +358,7 @@ Deno.serve(async (req: Request) => {
     // System prompt — tailoring becomes the model's aim; the fetched bytes are
     // explicitly UNTRUSTED. Any "instructions" inside the content are ignored.
     const system = [
-      "You are SingleStack's connector — you read fetched source content and distill SIGNALS: discrete, decision-useful observations for a product & GTM team.",
+      "You are SingleStack's connector — you read fetched source content and distill SIGNALS: discrete, decision-useful observations for this organization.",
       `This source is "${source.label}" (kind: ${source.kind}).`,
       source.focus ? `It feeds the ${source.focus} lens — prefer signals relevant to that.` : "",
       source.include_terms ? `ONLY surface things about: ${source.include_terms}.` : "",

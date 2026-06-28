@@ -106,7 +106,7 @@ Deno.serve(async (req: Request) => {
     const capText = caps.map((c, i) => `[${i}] ${c.title} — ${c.content}`).join("\n");
 
     const system = [
-      "You are a senior build architect for SingleStack, an AI-native product & GTM platform.",
+      "You are a senior build architect working in SingleStack on THIS organization's build item. Make NO assumption about its product, stack, or domain beyond the capabilities and records provided.",
       "You draft the HOW of a build item: technical approach, dependencies, risks & unknowns, and a rough effort/confidence.",
       "Ground every choice in the CAPABILITIES provided — prefer the newest capability that makes the build simpler — and CITE the capabilities you lean on by their [n] index in the 'cites' array.",
       "Be concrete and concise. Return one entry per How field (approach, dependencies, risks, effort).",

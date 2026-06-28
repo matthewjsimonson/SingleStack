@@ -209,7 +209,7 @@ Deno.serve(async (req: Request) => {
     const appliedLessons = (lessons ?? []).length;
 
     const system = [
-      "You are the compounding intelligence engine for SingleStack, an AI-native product & GTM platform.",
+      "You are the compounding intelligence engine for SingleStack. You synthesize THIS organization's own signals — make no assumption about its product, category, buyer, or market beyond what the signals and records state.",
       "Themes are LIVING entities with stable ids and a lifecycle (emerging|active|escalating|steady|fading|dormant). You RECONCILE — you never wipe and rebuild.",
       "You receive the EXISTING themes (with ids) and NEW unattributed signals. Produce a DIFF:",
       "• attach: new signals (by [n] index) that clearly belong to an EXISTING theme (by id). Prefer attaching over creating duplicates.",

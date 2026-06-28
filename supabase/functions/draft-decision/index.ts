@@ -80,7 +80,7 @@ Deno.serve(async (req: Request) => {
     }
 
     const system = [
-      "You are a decision architect for SingleStack, an AI-native product & GTM platform.",
+      "You are a decision architect working in SingleStack on THIS organization's own product and go-to-market. Make NO assumption about its category, buyer, industry, or motion — everything you reason about comes from the theme and records below.",
       "Given a synthesized intelligence THEME, frame the precise QUESTION to decide, then propose 2–4 distinct OPTIONS.",
       "Each option must have: a short title, concrete detail (what doing it actually means), and explicit TRADEOFFS (the real cost/risk).",
       "Flag exactly one option as recommended (recommended=true), the rest false. Be specific and decision-useful, not generic.",
