@@ -10,6 +10,7 @@ import { createClient } from "@/lib/supabase/client";
 import { getOrgId } from "@/lib/org";
 import { Banner, Chip } from "@/components/ui";
 import { Markdown } from "@/components/Markdown";
+import SignalNetwork from "@/components/SignalNetwork";
 
 // The signals network: a CENTER ('core' — what we are) plus four arms. Each
 // node sits on a vector and carries a WEIGHT (3 core/closest … 1 edge/farthest).
@@ -40,6 +41,13 @@ export default function SignalProfile({ scope, competitorId, competitorName, vec
   const [dirty, setDirty] = useState(false);
   const [note, setNote] = useState<string | null>(null);
   const [previewKey, setPreviewKey] = useState<string | null>(null);
+  const [showNetwork, setShowNetwork] = useState(true);
+  const [focusKey, setFocusKey] = useState<string | null>(null);
+  // Click a node in the network → scroll its editor card into view + highlight.
+  function focusNode(fieldKey: string) {
+    setFocusKey(fieldKey); setPreviewKey(null);
+    requestAnimationFrame(() => document.getElementById(`spf-${fieldKey}`)?.scrollIntoView({ behavior: "smooth", block: "center" }));
+  }
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -241,12 +249,22 @@ export default function SignalProfile({ scope, competitorId, competitorName, vec
       <label className="field"><span className="t-label">Headline <span className="t-muted" style={{ fontWeight: 400 }}>— where we sit, in one line</span></span>
         <input className="input" value={headline} onChange={(e) => { setHeadline(e.target.value); setDirty(true); }} placeholder="e.g. We lead on explainability for mid-market; exposed on price vs Acme." /></label>
 
+      {scope === "landscape" && (
+        <div style={{ margin: "var(--sp-3) 0" }}>
+          <div className="row-between" style={{ marginBottom: 8 }}>
+            <span className="t-label">Network <span className="t-muted" style={{ fontWeight: 400, textTransform: "none", letterSpacing: 0 }}>— core + four vectors; closer to center = higher weight</span></span>
+            <button className="btn btn-secondary btn-sm" onClick={() => setShowNetwork((v) => !v)}>{showNetwork ? "Hide network" : "Show network"}</button>
+          </div>
+          {showNetwork && <SignalNetwork headline={headline} fields={fields} onSelect={focusNode} selectedKey={focusKey} />}
+        </div>
+      )}
+
       {(() => {
         // The central (landscape) profile groups its nodes by VECTOR; the
         // per-competitor dossier has no vectors, so it renders flat.
         const showVectors = scope === "landscape";
         const card = (f: Field, i: number) => (
-          <div key={i} className="card card-pad">
+          <div key={i} id={`spf-${f.field_key}`} className="card card-pad" style={focusKey === f.field_key ? { boxShadow: "0 0 0 2px var(--ac)" } : undefined}>
             <div className="row-between" style={{ alignItems: "center", gap: 8, marginBottom: 6 }}>
               <input className="input" value={f.label} onChange={(e) => setField(i, { label: e.target.value })} style={{ fontWeight: 640, fontSize: 13.5, maxWidth: 320 }} />
               <div className="row gap-2" style={{ alignItems: "center" }}>
