@@ -133,6 +133,10 @@ Deno.serve(async (req: Request) => {
 
     let target = "the overall competitive landscape and our place in it";
     let suggestedSections = "positioning, our_strengths, our_vulnerabilities, key_players, market_trends, strategic_implications";
+    // THE SYNTHESIS GATE (landscape). Before signals are synthesized into themes,
+    // the profile's job is purely DISCOVERY (what to find). Once synthesis has run,
+    // it ALSO analyzes. Set from synthesized themes below.
+    let synthesized = false;
     if (scope === "competitor") {
       const { data: c } = await supabase.from("competitors").select("name, relationship, notes").eq("id", input.competitor_id!).maybeSingle();
       target = `our standing vs ${c?.name ?? "this competitor"}${c?.relationship ? ` (${c.relationship})` : ""}`;
@@ -194,6 +198,16 @@ Deno.serve(async (req: Request) => {
       } else {
         context += `\nNO COMPETITORS TRACKED YET. This is the FIRST pass: build the profile entirely from our product & GTM records. Its job here is to FRAME the hunt — say sharply where we play and what kind of rivals to go find — NOT to invent specific competitors or pretend to know how a market we haven't searched is moving.`;
       }
+      // The gate: synthesized themes across ALL vectors (competitive, market,
+      // frontier). Their existence flips the profile from discovery-only to
+      // discovery + analysis. Each theme is tagged so the model routes it.
+      const { data: synthThemes } = await supabase.from("signal_themes")
+        .select("title, summary, recommendation, category, state, conf_level, competitor_id")
+        .neq("state", "fading").order("last_evidence_at", { ascending: false, nullsFirst: false }).limit(24);
+      synthesized = (synthThemes?.length ?? 0) > 0;
+      if (synthesized) {
+        context += `\nSYNTHESIZED THEMES (analysis is now LIVE — fold what these MEAN into the relevant vectors):\n${synthThemes!.map((t) => `[${t.category}/${t.state} · conf ${(t.conf_level ?? 0).toFixed(2)}] ${t.title} — ${t.summary ?? ""}${t.recommendation ? ` → ${t.recommendation}` : ""}`).join("\n")}`;
+      }
       target = "our central SIGNALS PROFILE — the records-grounded map that aims discovery across every intelligence vector (competitive, market, frontier)";
       // The central profile spans VECTORS. Each node is tagged with the vector it
       // feeds; the intelligence tabs each read their vector to aim discovery.
@@ -214,6 +228,12 @@ Deno.serve(async (req: Request) => {
       scope === "competitor"
         ? `Use these section keys where supported (snake_case): ${suggestedSections}. Always include a 'strategic_implications' section. Only assert what the evidence supports; if thin, say so and keep it short.`
         : `Build nodes across ALL FOUR vectors, each node tagged with its vector and a snake_case field_key. Guide:\n${suggestedSections}\nEvery node carries its correct \`vector\`. Only assert what the records/evidence support; where a vector is thin, keep its nodes short and action-oriented (what to find), not padded.`,
+      // The synthesis gate, made explicit to the model.
+      scope === "landscape"
+        ? (synthesized
+            ? "SYNTHESIS HAS RUN — analysis is now LIVE. Beyond saying what to find, ANALYZE: fold what the synthesized themes MEAN into the relevant vectors (the patterns, how the market is moving, how we actually compare, what it implies for product & GTM). KEEP the *_search_focus nodes — discovery never stops — and ADD the analysis; add an 'analysis' node to a vector where its themes warrant it."
+            : "SYNTHESIS HAS NOT RUN YET — this profile is in DISCOVERY mode. Say what to FIND and WHERE to look. Do NOT fabricate analysis, 'how we compare', or market movement from signals that haven't been gathered and synthesized; that analysis turns on only once synthesis has run.")
+        : "",
       // Full & current — the user's standard: existence is not completeness.
       "Make EVERY section FULL and CURRENT. Re-evaluate each against the CURRENT product & GTM records and the latest signals/battlecards, and UPDATE it whenever they've moved — never leave a thin, vague, or stale section just because it already has text." + (input.current?.length ? " You are REFRESHING the existing profile (provided): fold the new evidence into each section and keep what still holds, but don't preserve a stale section just because a human wrote it — improve it." : ""),
     ].filter(Boolean).join("\n");
@@ -242,7 +262,7 @@ Deno.serve(async (req: Request) => {
     const block = message.content.find((b) => b.type === "text");
     if (!block || block.type !== "text") throw new Error(`no draft returned (stop_reason: ${message.stop_reason})`);
     const draft = JSON.parse(block.text) as { headline: string; fields: { field_key: string; label: string; value: string; vector?: string }[] };
-    return json({ draft, evidence: { internal: comp.filter((s) => s.origin === "internal").length, external: comp.filter((s) => s.origin !== "internal").length } });
+    return json({ draft, mode: scope === "landscape" ? (synthesized ? "analysis" : "discovery") : "competitor", evidence: { internal: comp.filter((s) => s.origin === "internal").length, external: comp.filter((s) => s.origin !== "internal").length } });
   } catch (e) {
     return json({ error: e instanceof Error ? e.message : String(e) }, 500);
   }

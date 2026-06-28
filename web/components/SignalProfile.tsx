@@ -77,9 +77,11 @@ export default function SignalProfile({ scope, competitorId, competitorName, vec
       const ev = data?.evidence;
       const sigCount = (ev?.internal ?? 0) + (ev?.external ?? 0);
       setNote(scope === "landscape"
-        ? (sigCount > 0
-            ? `Built from your product & GTM records${sigCount ? ` + ${sigCount} competitive signal(s)` : ""}. Review the 'search_focus' section — that's what aims the rival search — then Save.`
-            : "Built from your product & GTM records. Review the 'search_focus' section — that's what aims the rival search — then Save, and run setup to find competitors.")
+        ? (data?.mode === "analysis"
+            ? `Analysis mode — synthesis has run, so the profile now folds in what your ${sigCount} signal(s) mean across vectors, alongside the search-focus that keeps discovery going. Review and Save.`
+            : sigCount > 0
+              ? `Discovery mode — built from your records + ${sigCount} signal(s). The *_search_focus nodes aim each tab's discovery. Synthesize signals to switch this to analysis. Review and Save.`
+              : "Discovery mode — built from your product & GTM records. The *_search_focus nodes aim each tab's discovery; synthesize signals later to add analysis. Review and Save.")
         : `Drafted from ${ev?.internal ?? 0} internal + ${ev?.external ?? 0} external signal(s). Review and edit, then Save.`);
     } catch (e) { setError(e instanceof Error ? e.message : "Could not draft the profile."); }
     finally { setBusy(null); }
