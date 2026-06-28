@@ -85,8 +85,9 @@ const DIM_KEYS = DIMENSIONS.map((d) => d.key);
 const STATUS_SCORE: Record<string, number> = { covered: 1, partial: 0.5, missing: 0, not_applicable: 0 };
 
 // The model ASSESSES coverage per dimension (with evidence + source); the
-// function computes the score. not_applicable drops a dimension from BOTH
-// numerator and denominator (maturity-aware).
+// function computes the score from ALL dimensions. No maturity "stages": an
+// incomplete dimension honestly lowers the score — the profile is a living thing
+// you keep current and grow, not a bar graded against an inferred stage.
 const INTERVIEW_SCHEMA = {
   type: "object", additionalProperties: false,
   properties: {
@@ -96,7 +97,7 @@ const INTERVIEW_SCHEMA = {
         type: "object", additionalProperties: false,
         properties: {
           dimension: { type: "string", enum: DIM_KEYS },
-          status: { type: "string", enum: ["covered", "partial", "missing", "not_applicable"] },
+          status: { type: "string", enum: ["covered", "partial", "missing"] },
           source: { type: "string", enum: ["records", "answer", "none"] },
           note: { type: "string" },   // the actual evidence (or why n/a)
         },
@@ -253,13 +254,13 @@ TEXT IS NOT TRUTH. A dimension is 'covered' ONLY if the records or an answer est
 CHALLENGE THE PRODUCT CHARACTERIZATION above all else. The product, its buyers, and its industries are ENTIRELY whatever THIS user's records define — make NO assumption about category, motion, or what it does; this platform serves any product, so read it only from their fields, modules, and features. If the records describe the product narrowly — one tidy category label — but its MODULES & FEATURES show it does materially more, then 'product', 'positioning', 'use_cases', and 'differentiation' are NOT covered: the label is hiding what the product actually is, and that mischaracterization is exactly why the search returns the wrong rivals. Characterize the product by EVERYTHING it actually does — every module, feature, and job — not a convenient label, and ask the questions that pin that down.
 
 Assess EVERY dimension (one coverage entry each): ${DIMENSIONS.map((d) => `${d.key} (${d.label})`).join(", ")}.
-For each: status = covered (FULLY + ACCURATELY established) / partial (present but thin, generic, or only partly right) / missing (absent) / not_applicable (the company's STAGE genuinely can't have it). source = records / answer / none. note = the actual evidence, TERSE (≤140 chars).
+For each: status = covered (FULLY + ACCURATELY established) / partial (present but thin, generic, or only partly right) / missing (absent). source = records / answer / none. note = the actual evidence, TERSE (≤140 chars).
 
 WHY THESE DIMENSIONS — rivals cluster on more than what/who: the JOBS the product is hired for (functional substitutes), the WEDGE that wins deals, how it's PRICED & packaged, and its GTM MOTION — meaning how they MESSAGE and convince: the value prop, the narrative, the claims and proof they lead with, how they talk about themselves to win the buyer (not merely the sales channel). Two products that pitch the same story to the same buyer are direct rivals even if built differently. These are usually the records' weakest spots, so they're often where the highest-value questions are.
 
-MATURITY — infer stage (exploring=pre-launch / early=first deals / scaling=repeatable / established=mature). Mark deal_loss/known_rivals not_applicable only for genuinely pre-market companies; for young companies favor the intended buyer, the jobs/alternative they replace, the wedge, and pricing intent.
+LIVING PROFILE — there are NO maturity "stages" to grade against. Assess each dimension on its real evidence today; a young company will honestly have gaps (e.g. no deal-loss history yet) — mark those 'missing', don't excuse them. The profile is meant to be kept CURRENT and to GROW as the company learns more, so reflect exactly what's there now and let the score rise as it fills in.
 
-NEXT QUESTION — target the highest-WEIGHT dimension still 'missing' OR 'partial' that's worth asking at this stage (known rivals anchor the search — prioritize them early when missing). Write ONE specific, conversational question that pulls a CONCRETE answer — name the kind of detail you want (e.g. for pricing: "per-seat, usage, or platform fee — and what tier do most buyers land on?"; for GTM motion: "what's the core message and story you lead with to convince a buyer — the claims and the proof behind them?"). Sharpen a 'partial' as readily as you fill a 'missing'. If every weighted dimension is at least solidly covered, next_dimension='' and question=''. One question at a time.`,
+NEXT QUESTION — target the highest-WEIGHT dimension still 'missing' OR 'partial' that's worth asking (known rivals anchor the search — prioritize them early when missing). Write ONE specific, conversational question that pulls a CONCRETE answer — name the kind of detail you want (e.g. for pricing: "per-seat, usage, or platform fee — and what tier do most buyers land on?"; for GTM motion: "what's the core message and story you lead with to convince a buyer — the claims and the proof behind them?"). Sharpen a 'partial' as readily as you fill a 'missing'. If every weighted dimension is at least solidly covered, next_dimension='' and question=''. One question at a time.`,
         messages: [{ role: "user", content: [
           records ? `THE RECORDS (everything already known):\n${records}` : "THE RECORDS: (none yet)",
           transcriptText ? `INTERVIEW SO FAR:\n${transcriptText}` : "INTERVIEW SO FAR: (not started)",
@@ -276,13 +277,13 @@ NEXT QUESTION — target the highest-WEIGHT dimension still 'missing' OR 'partia
         // gracefully so the picture step (the real synthesis) proceeds.
         return json({ done: true, question: "", why: "", readiness: 75, gaps: "", coverage: [], partial: true });
       }
-      // COMPUTE readiness from the assessed coverage — the actual score:
-      // weighted, reproducible, auditable. n/a dims leave the denominator.
+      // COMPUTE readiness from the assessed coverage — the actual score: weighted,
+      // reproducible, auditable. EVERY dimension counts (no stage exemptions), so the
+      // score is true completeness you keep growing, not a moving bar.
       const cov = (out.coverage ?? []).filter((c) => (DIM_KEYS as readonly string[]).includes(c.dimension));
       let num = 0, den = 0;
       for (const d of DIMENSIONS) {
         const status = cov.find((x) => x.dimension === d.key)?.status ?? "missing";
-        if (status === "not_applicable") continue;
         den += d.weight; num += d.weight * (STATUS_SCORE[status] ?? 0);
       }
       const readiness = den > 0 ? Math.round((num / den) * 100) : 0;
