@@ -92,7 +92,7 @@ export default function SignalNetwork({ fields, openVector, onOpenVector, onOpen
       {openVector && (
         <div style={{ position: "absolute", top: 12, left: 12, zIndex: 2 }} className="row gap-2">
           <button className="btn btn-secondary btn-sm" onClick={() => onOpenVector(null)}>‹ All vectors</button>
-          <button className="btn btn-sm" onClick={onCurate} style={{ background: "var(--ac)", color: "#fff" }}>⚙ Manage vector</button>
+          <button className="btn btn-sm" onClick={onCurate} style={{ background: "var(--ac)", color: "#fff" }}>Manage vector</button>
         </div>
       )}
       <svg viewBox={`0 0 ${W} ${H}`} width="100%" height="100%" preserveAspectRatio="xMidYMid meet" role="img" aria-label="Signals nucleus" style={{ display: "block" }}>

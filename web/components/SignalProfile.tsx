@@ -225,8 +225,8 @@ export default function SignalProfile({ scope, competitorId, competitorName, vec
       await supabase.from("signal_profiles").update({ headline: null, updated_at: new Date().toISOString() }).eq("id", profile.id);
       setFields([]); setHeadline(""); setDirty(false);
       setNote(scope === "landscape"
-        ? "Cleared. Press ✨ Draft / refresh with AI to rebuild it fresh from your product & GTM records."
-        : "Cleared. Press ✨ Draft / refresh with AI to rebuild it fresh from this competitor's signals & your records.");
+        ? "Cleared. Press Draft to rebuild it fresh from your product & GTM records."
+        : "Cleared. Press Draft to rebuild it fresh from this competitor's signals & your records.");
     } catch (e) { setError(e instanceof Error ? e.message : "Could not clear the profile."); }
     finally { setBusy(null); }
   }
@@ -294,7 +294,7 @@ export default function SignalProfile({ scope, competitorId, competitorName, vec
         </div>
         <div className="row gap-2" style={{ flexShrink: 0 }}>
           <button className="btn btn-secondary btn-sm" onClick={draftAI} disabled={busy === "ai" || vecBusy !== null} style={{ color: "var(--ac-text)" }}
-            title={scope === "landscape" ? "Draft/refresh the WHOLE network at once — or use the per-vector ✨ Draft to do one arm" : "Synthesize this competitor's profile from its signals + your records"}>{busy === "ai" ? "Synthesizing…" : scope === "landscape" ? "✨ Draft all vectors" : "✨ Draft / refresh with AI"}</button>
+            title={scope === "landscape" ? "Draft/refresh the WHOLE network at once — or use the per-vector Draft to do one arm" : "Synthesize this competitor's profile from its signals + your records"}>{busy === "ai" ? "Synthesizing…" : scope === "landscape" ? "Draft all vectors" : "Draft / refresh with AI"}</button>
           {scope === "competitor" && (
             <button className="btn btn-secondary btn-sm" onClick={fillBattlecard} disabled={busy === "battlecard" || dirty}
               title={dirty ? "Save first" : "This profile is the raw battlecard — the analyst refines it into evidence-cited items (through review), then the messenger drafts the GTM battlecard copy"}>
@@ -321,7 +321,7 @@ export default function SignalProfile({ scope, competitorId, competitorName, vec
         <SignalNetwork fields={fields} openVector={openVector} onOpenVector={zoomTo} onOpenNode={(k) => { setOpenNode(k); setRefineText(""); }} onCurate={() => setCurating(true)} selectedKey={openNode} />
         {dirty && <div className="t-sub t-muted" style={{ fontSize: 11.5, marginTop: 8 }}>Unsaved changes — Save in the header or a drawer.</div>}
 
-        {/* Vector-level interview/curation drawer (opened by ✨ Curate with AI). */}
+        {/* Vector-level interview/curation drawer (opened by Manage vector). */}
         {openVector && curating && (() => {
           const v = VECTORS.find((x) => x.key === openVector)!;
           const entries = fields.map((f, i) => ({ f, i })).filter(({ f }) => (f.vector ?? "core") === openVector).sort((a, b) => (b.f.weight ?? 2) - (a.f.weight ?? 2));
@@ -369,7 +369,7 @@ export default function SignalProfile({ scope, competitorId, competitorName, vec
                     <div className="t-label" style={{ marginBottom: 6 }}>Refine with AI</div>
                     <textarea className="textarea" rows={2} value={refineText} onChange={(e) => setRefineText(e.target.value)} placeholder="Optional: how to change it — e.g. 'more specific', 'split out the DIY angle', 'this is edge, not core'." />
                     <div className="row gap-2" style={{ marginTop: 8 }}>
-                      <button className="btn btn-sm" onClick={() => refineNode(ni, refineText)} disabled={refining}>{refining ? "Refining…" : refineText.trim() ? "✨ Apply" : "✨ Sharpen"}</button>
+                      <button className="btn btn-sm" onClick={() => refineNode(ni, refineText)} disabled={refining}>{refining ? "Refining…" : refineText.trim() ? "Apply" : "Sharpen"}</button>
                       <span className="t-sub t-muted" style={{ fontSize: 11.5, alignSelf: "center" }}>grounded in your records</span>
                     </div>
                   </div>

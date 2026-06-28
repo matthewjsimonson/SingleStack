@@ -67,7 +67,7 @@ export default function NodeSources({ vector, nodeKey, seed }: { vector: string;
     <div key={s.id} className="card card-pad" style={{ padding: "8px 10px", background: inheritedRow ? "var(--panel-2)" : undefined }}>
       <div className="row-between" style={{ gap: 8, alignItems: "center" }}>
         <div style={{ minWidth: 0 }}>
-          <div style={{ fontSize: 12.5, fontWeight: 620 }}>{s.kind === "web_search" ? "🔎 " : "🔌 "}{s.label}</div>
+          <div style={{ fontSize: 12.5, fontWeight: 620 }}>{s.kind === "web_search" ? "Web search · " : "Tool · "}{s.label}</div>
           <div className="t-mono-xs t-muted">{s.last_pull_at ? `last pull: ${s.last_pull_count ?? 0} · ${new Date(s.last_pull_at).toLocaleDateString()}` : "not pulled yet"}{inheritedRow ? " · inherited from vector" : ""}</div>
         </div>
         {!inheritedRow && (

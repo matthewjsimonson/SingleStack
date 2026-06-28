@@ -107,7 +107,7 @@ export default function VectorCurator({
               ) : null}
             <div style={{ marginTop: 12, borderTop: "1px solid var(--border)", paddingTop: 12 }}>
               <button className="btn btn-sm" style={{ width: "100%" }} onClick={() => generate(vector, transcript)} disabled={generating}>
-                {generating ? "Generating nodes…" : entries.length ? "✨ Regenerate nodes (folds in your answers)" : "✨ Generate nodes"}
+                {generating ? "Generating nodes…" : entries.length ? "Regenerate nodes (folds in your answers)" : "Generate nodes"}
               </button>
             </div>
           </div>
