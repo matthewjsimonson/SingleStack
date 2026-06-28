@@ -28,6 +28,7 @@ export default function MessagingFramework({ gtmId, recordName }: { gtmId: strin
   const [editingKey, setEditingKey] = useState<string | null>(null);
   const [draft, setDraft] = useState("");
   const [openGuidance, setOpenGuidance] = useState<Set<string>>(new Set());
+  const [expanded, setExpanded] = useState<Set<string>>(new Set()); // long section values shown in full
 
   // Sweep with AI — one optional source + Focus, proposes the WHOLE framework into the review queue.
   const [swp, setSwp] = useState(false);
@@ -166,9 +167,18 @@ export default function MessagingFramework({ gtmId, recordName }: { gtmId: strin
                     <button className="btn btn-secondary btn-sm" onClick={() => setEditingKey(null)}>Cancel</button>
                   </div>
                 </div>
-              ) : val.trim() ? (
-                <Markdown className="t-body" style={{ lineHeight: 1.6 }} text={val} />
-              ) : (
+              ) : val.trim() ? (() => {
+                const long = val.length > 280;
+                const isExp = expanded.has(s.key);
+                return (
+                  <div>
+                    <div style={long && !isExp ? { maxHeight: 110, overflow: "hidden" } : undefined}>
+                      <Markdown className="t-body" style={{ lineHeight: 1.6 }} text={val} />
+                    </div>
+                    {long && <button onClick={() => setExpanded((p) => { const n = new Set(p); n.has(s.key) ? n.delete(s.key) : n.add(s.key); return n; })} style={{ background: "none", border: "none", cursor: "pointer", color: "var(--ac-text, var(--ac))", fontWeight: 600, fontSize: 11.5, padding: "4px 0 0" }}>{isExp ? "Show less" : "Show more"}</button>}
+                  </div>
+                );
+              })() : (
                 <div className="t-sub t-muted" style={{ fontSize: 12.5 }}>Empty — open the guide, write it by hand, or sweep the framework with AI.</div>
               )}
             </div>

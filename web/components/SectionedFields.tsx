@@ -49,6 +49,10 @@ export default function SectionedFields({ target, excludeSection }: { target: Ta
   const [newVal, setNewVal] = useState("");
   const [newKind, setNewKind] = useState<"narrative" | "metric">("narrative");
   const [newUnit, setNewUnit] = useState("");
+  // density controls — collapse a whole section, or expand a long field value
+  const [collapsed, setCollapsed] = useState<Set<string>>(new Set());
+  const [expanded, setExpanded] = useState<Set<string>>(new Set());
+  const toggle = (set: Set<string>, k: string) => { const n = new Set(set); n.has(k) ? n.delete(k) : n.add(k); return n; };
 
   const load = useCallback(async () => {
     const { data } = await supabase
@@ -249,15 +253,21 @@ export default function SectionedFields({ target, excludeSection }: { target: Ta
       ) : (
         order.map((sName) => {
           const items = bySection[sName];
+          const isCollapsed = collapsed.has(sName);
           return (
             <section className="section" key={sName}>
               <div className="section-head" style={{ alignItems: "flex-start" }}>
-                <div>
-                  <div className="row gap-2"><span className="t-h2" style={{ fontSize: 14.5 }}>{sName}</span><span className="chip">{items.length}</span></div>
-                  {sectionBlurb[sName] && <div className="t-sub t-muted" style={{ fontSize: 12.5, marginTop: 2 }}>{sectionBlurb[sName]}</div>}
-                </div>
-                {addingIn !== sName && <button className="btn btn-secondary btn-sm" onClick={() => { setAddingIn(sName); setNewLabel(""); setNewVal(""); }}>+ Field</button>}
+                <button onClick={() => setCollapsed((s) => toggle(s, sName))} title={isCollapsed ? "Expand" : "Collapse"}
+                  style={{ background: "none", border: "none", cursor: "pointer", textAlign: "left", padding: 0, flex: 1, minWidth: 0 }}>
+                  <div className="row gap-2" style={{ alignItems: "center" }}>
+                    <span className="t-muted" style={{ display: "inline-block", transition: "transform 0.15s", transform: isCollapsed ? "rotate(-90deg)" : "none", fontSize: 11 }}>▾</span>
+                    <span className="t-h2" style={{ fontSize: 14.5 }}>{sName}</span><span className="chip">{items.length}</span>
+                  </div>
+                  {sectionBlurb[sName] && !isCollapsed && <div className="t-sub t-muted" style={{ fontSize: 12.5, marginTop: 2, marginLeft: 19 }}>{sectionBlurb[sName]}</div>}
+                </button>
+                {addingIn !== sName && !isCollapsed && <button className="btn btn-secondary btn-sm" onClick={() => { setAddingIn(sName); setNewLabel(""); setNewVal(""); }}>+ Field</button>}
               </div>
+              {!isCollapsed && (
               <div className="card" style={{ overflow: "hidden" }}>
                 {items.map((f, i) => (
                   <div key={f.id} style={{ padding: "14px 18px", borderTop: i === 0 ? "none" : "1px solid var(--border)" }}>
@@ -276,9 +286,17 @@ export default function SectionedFields({ target, excludeSection }: { target: Ta
                         <textarea className="textarea" rows={3} autoFocus value={draft} onChange={(e) => setDraft(e.target.value)} style={{ marginBottom: 8 }} />
                         <div className="row gap-2"><button className="btn btn-sm" onClick={() => save(f.id)}>Save</button><button className="btn btn-secondary btn-sm" onClick={() => setEditing(null)}>Cancel</button></div>
                       </div>
-                    ) : (
-                      <div className="t-body" style={{ lineHeight: 1.6, whiteSpace: "pre-wrap", marginLeft: 26 }}>{f.value}</div>
-                    )}
+                    ) : (() => {
+                      const long = (f.value ?? "").length > 280;
+                      const isExp = expanded.has(f.id);
+                      const clamp = long && !isExp ? { display: "-webkit-box", WebkitLineClamp: 4, WebkitBoxOrient: "vertical" as const, overflow: "hidden" } : {};
+                      return (
+                        <div style={{ marginLeft: 26 }}>
+                          <div className="t-body" style={{ lineHeight: 1.6, whiteSpace: "pre-wrap", ...clamp }}>{f.value}</div>
+                          {long && <button onClick={() => setExpanded((s) => toggle(s, f.id))} style={{ background: "none", border: "none", cursor: "pointer", color: "var(--ac-text, var(--ac))", fontWeight: 600, fontSize: 11.5, padding: "4px 0 0" }}>{isExp ? "Show less" : "Show more"}</button>}
+                        </div>
+                      );
+                    })()}
                   </div>
                 ))}
                 {addingIn === sName && (
@@ -298,6 +316,7 @@ export default function SectionedFields({ target, excludeSection }: { target: Ta
                   </div>
                 )}
               </div>
+              )}
             </section>
           );
         })
