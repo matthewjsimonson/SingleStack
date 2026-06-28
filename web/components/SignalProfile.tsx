@@ -12,6 +12,7 @@ import { getOrgId } from "@/lib/org";
 import { Banner, Chip } from "@/components/ui";
 import { Markdown } from "@/components/Markdown";
 import SignalNetwork from "@/components/SignalNetwork";
+import VectorCurator from "@/components/VectorCurator";
 
 // The signals network: a CENTER ('core' — what we are) plus four arms. Each
 // node sits on a vector and carries a WEIGHT (3 core/closest … 1 edge/farthest).
@@ -51,13 +52,8 @@ export default function SignalProfile({ scope, competitorId, competitorName, vec
   const [dirty, setDirty] = useState(false);
   const [note, setNote] = useState<string | null>(null);
   const [previewKey, setPreviewKey] = useState<string | null>(null);
-  const [showNetwork, setShowNetwork] = useState(true);
+  const [openVector, setOpenVector] = useState<Vector | null>(null); // which vector is zoomed/curated
   const [focusKey, setFocusKey] = useState<string | null>(null);
-  // Click a node in the network → scroll its editor card into view + highlight.
-  function focusNode(fieldKey: string) {
-    setFocusKey(fieldKey); setPreviewKey(null);
-    requestAnimationFrame(() => document.getElementById(`spf-${fieldKey}`)?.scrollIntoView({ behavior: "smooth", block: "center" }));
-  }
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -111,11 +107,11 @@ export default function SignalProfile({ scope, competitorId, competitorName, vec
   // Draft ONE vector — focused synthesis for that arm (built on the core),
   // tuned to that vector's own search/analysis. Replaces only that vector's
   // nodes; the rest of the network is untouched.
-  async function draftVector(v: Vector) {
+  async function draftVector(v: Vector, transcript: { role: "q" | "a"; text: string }[] = []) {
     if (vecBusy || busy) return;
     setVecBusy(v); setError(null); setNote(null);
     try {
-      const { data, error } = await supabase.functions.invoke("synthesize-profile", { body: { scope: "landscape", vector: v, current: fields.map((f) => ({ field_key: f.field_key, label: f.label, value: f.value, vector: f.vector ?? "core", weight: f.weight ?? 2 })) } });
+      const { data, error } = await supabase.functions.invoke("synthesize-profile", { body: { scope: "landscape", vector: v, transcript, current: fields.map((f) => ({ field_key: f.field_key, label: f.label, value: f.value, vector: f.vector ?? "core", weight: f.weight ?? 2 })) } });
       if (error) throw error;
       if (data?.error) throw new Error(data.error);
       const d = data?.draft;
@@ -294,78 +290,48 @@ export default function SignalProfile({ scope, competitorId, competitorName, vec
           <input className="input" value={headline} onChange={(e) => { setHeadline(e.target.value); setDirty(true); }} placeholder="e.g. We lead on explainability for mid-market; exposed on price vs Acme." /></label>
       )}
 
-      {scope === "landscape" && (
-        <div style={{ margin: "var(--sp-3) 0" }}>
-          <div className="row-between" style={{ marginBottom: 8 }}>
-            <span className="t-label">Network <span className="t-muted" style={{ fontWeight: 400, textTransform: "none", letterSpacing: 0 }}>— core + four vectors; closer to center = higher weight</span></span>
-            <button className="btn btn-secondary btn-sm" onClick={() => setShowNetwork((v) => !v)}>{showNetwork ? "Hide network" : "Show network"}</button>
-          </div>
-          {showNetwork && <SignalNetwork headline={headline} fields={fields} onSelect={focusNode} selectedKey={focusKey} />}
-        </div>
-      )}
-
-      {(() => {
-        // The central (landscape) profile groups its nodes by VECTOR; the
-        // per-competitor dossier has no vectors, so it renders flat.
-        const showVectors = scope === "landscape";
-        const card = (f: Field, i: number) => (
-          <div key={i} id={`spf-${f.field_key}`} className="card card-pad" style={focusKey === f.field_key ? { boxShadow: "0 0 0 2px var(--ac)" } : undefined}>
-            <div className="row-between" style={{ alignItems: "center", gap: 8, marginBottom: 6 }}>
-              <input className="input" value={f.label} onChange={(e) => setField(i, { label: e.target.value })} style={{ fontWeight: 640, fontSize: 13.5, maxWidth: 320 }} />
-              <div className="row gap-2" style={{ alignItems: "center" }}>
-                {f.origin === "ai" && <Chip tone="violet">AI</Chip>}
-                {showVectors && (<>
-                  <select className="select" value={f.vector ?? "core"} onChange={(e) => setField(i, { vector: e.target.value as Vector })} style={{ fontSize: 11.5, padding: "3px 6px" }} title="Which vector of the network this node sits on">
-                    {VECTORS.map((v) => <option key={v.key} value={v.key}>{v.label.split(" — ")[0]}</option>)}
-                  </select>
-                  <select className="select" value={f.weight ?? 2} onChange={(e) => setField(i, { weight: Number(e.target.value) })} style={{ fontSize: 11.5, padding: "3px 6px" }} title="Weight — how close to the center: Core (highest) … Edge">
-                    {WEIGHTS.map((w) => <option key={w.w} value={w.w}>{w.label}</option>)}
-                  </select>
-                </>)}
-                <button type="button" className="btn btn-secondary btn-sm" onClick={() => setPreviewKey(previewKey === f.field_key ? null : f.field_key)}>{previewKey === f.field_key ? "Edit" : "Preview"}</button>
-                <button type="button" className="btn btn-secondary btn-sm" onClick={() => removeField(i)} style={{ color: "var(--rd-text)" }}>Remove</button>
-              </div>
-            </div>
-            {previewKey === f.field_key
-              ? <div className="card card-pad" style={{ background: "var(--panel-2)", minHeight: 60 }}>{f.value.trim() ? <Markdown text={f.value} /> : <span className="t-sub t-muted">Empty.</span>}</div>
-              : <textarea className="textarea" rows={4} value={f.value} onChange={(e) => setField(i, { value: e.target.value })} placeholder="What the evidence says — markdown supported." />}
-          </div>
-        );
-        if (!showVectors) {
-          return (<>
-            <div className="stack-3" style={{ marginTop: "var(--sp-3)" }}>
-              {fields.length === 0 && <div className="t-sub t-muted" style={{ fontSize: 12.5 }}>No sections yet. Draft with AI, or add one by hand.</div>}
-              {fields.map((f, i) => card(f, i))}
-            </div>
-            <div className="row gap-2" style={{ marginTop: "var(--sp-3)" }}>
-              <button className="btn btn-secondary btn-sm" onClick={() => addField()}>+ Add section</button>
-              {dirty && <span className="t-sub t-muted" style={{ fontSize: 11.5, alignSelf: "center" }}>Unsaved changes</span>}
-            </div>
-          </>);
-        }
-        const groups = VECTORS.map((v) => ({ v, entries: fields.map((f, i) => ({ f, i })).filter(({ f }) => (f.vector ?? "core") === v.key).sort((a, b) => (b.f.weight ?? 2) - (a.f.weight ?? 2)) }));
-        return (<>
-          <div className="stack-4" style={{ marginTop: "var(--sp-3)" }}>
-            {fields.length === 0 && <div className="t-sub t-muted" style={{ fontSize: 12.5 }}>No nodes yet. Draft with AI to build the profile across vectors, or add one by hand.</div>}
-            {groups.map(({ v, entries }) => (
-              <div key={v.key}>
-                <div className="row-between" style={{ alignItems: "baseline", marginBottom: 6, gap: 8, flexWrap: "wrap" }}>
-                  <span className="t-label">{v.label} <span className="t-muted" style={{ fontWeight: 400, textTransform: "none", letterSpacing: 0 }}>· {entries.length}</span></span>
-                  <div className="row gap-2" style={{ flexShrink: 0 }}>
-                    <button className="btn btn-secondary btn-sm" onClick={() => draftVector(v.key)} disabled={vecBusy !== null || busy === "ai"} style={{ color: "var(--ac-text)" }} title={`Draft just the ${v.label.split(" — ")[0]} vector from your records — ${v.blurb}`}>{vecBusy === v.key ? "Drafting…" : "✨ Draft"}</button>
-                    {PUSH[v.key] && <button className="btn btn-secondary btn-sm" onClick={() => pushVector(v.key)} disabled={vecBusy !== null} title={`Apply this vector in ${PUSH[v.key]!.label} — where it aims search & analysis`}>Push to {PUSH[v.key]!.label} →</button>}
-                    <button className="btn btn-secondary btn-sm" onClick={() => addField(v.key)} title={v.blurb}>+ Add</button>
-                  </div>
+      {scope === "landscape" ? (<>
+        <SignalNetwork headline={headline} fields={fields} openVector={openVector} onOpenVector={setOpenVector} onSelect={setFocusKey} selectedKey={focusKey} />
+        {dirty && <div className="t-sub t-muted" style={{ fontSize: 11.5, marginTop: 8 }}>Unsaved changes — Save in the header or the vector drawer.</div>}
+        {openVector && (() => {
+          const v = VECTORS.find((x) => x.key === openVector)!;
+          const entries = fields.map((f, i) => ({ f, i })).filter(({ f }) => (f.vector ?? "core") === openVector).sort((a, b) => (b.f.weight ?? 2) - (a.f.weight ?? 2));
+          return (
+            <VectorCurator
+              vector={openVector} label={v.label.split(" — ")[0]} blurb={v.blurb}
+              entries={entries} onClose={() => setOpenVector(null)}
+              setField={setField} removeField={removeField} addField={addField}
+              generate={draftVector} generating={vecBusy === openVector}
+              onSave={save} onPush={() => pushVector(openVector)} pushLabel={PUSH[openVector]?.label}
+              dirty={dirty} savingBusy={busy === "save"}
+            />
+          );
+        })()}
+      </>) : (<>
+        {/* Per-competitor dossier — a flat, editable list (no vectors). */}
+        <div className="stack-3" style={{ marginTop: "var(--sp-3)" }}>
+          {fields.length === 0 && <div className="t-sub t-muted" style={{ fontSize: 12.5 }}>No sections yet. Draft with AI, or add one by hand.</div>}
+          {fields.map((f, i) => (
+            <div key={i} className="card card-pad">
+              <div className="row-between" style={{ alignItems: "center", gap: 8, marginBottom: 6 }}>
+                <input className="input" value={f.label} onChange={(e) => setField(i, { label: e.target.value })} style={{ fontWeight: 640, fontSize: 13.5, maxWidth: 320 }} />
+                <div className="row gap-2" style={{ alignItems: "center" }}>
+                  {f.origin === "ai" && <Chip tone="violet">AI</Chip>}
+                  <button type="button" className="btn btn-secondary btn-sm" onClick={() => setPreviewKey(previewKey === f.field_key ? null : f.field_key)}>{previewKey === f.field_key ? "Edit" : "Preview"}</button>
+                  <button type="button" className="btn btn-secondary btn-sm" onClick={() => removeField(i)} style={{ color: "var(--rd-text)" }}>Remove</button>
                 </div>
-                {entries.length === 0
-                  ? <div className="t-sub t-muted" style={{ fontSize: 12 }}>{v.blurb}</div>
-                  : <div className="stack-3">{entries.map(({ f, i }) => card(f, i))}</div>}
               </div>
-            ))}
-          </div>
-          {dirty && <div className="t-sub t-muted" style={{ fontSize: 11.5, marginTop: "var(--sp-3)" }}>Unsaved changes</div>}
-        </>);
-      })()}
+              {previewKey === f.field_key
+                ? <div className="card card-pad" style={{ background: "var(--panel-2)", minHeight: 60 }}>{f.value.trim() ? <Markdown text={f.value} /> : <span className="t-sub t-muted">Empty.</span>}</div>
+                : <textarea className="textarea" rows={4} value={f.value} onChange={(e) => setField(i, { value: e.target.value })} placeholder="What the evidence says — markdown supported." />}
+            </div>
+          ))}
+        </div>
+        <div className="row gap-2" style={{ marginTop: "var(--sp-3)" }}>
+          <button className="btn btn-secondary btn-sm" onClick={() => addField()}>+ Add section</button>
+          {dirty && <span className="t-sub t-muted" style={{ fontSize: 11.5, alignSelf: "center" }}>Unsaved changes</span>}
+        </div>
+      </>)}
     </div>
   );
 }

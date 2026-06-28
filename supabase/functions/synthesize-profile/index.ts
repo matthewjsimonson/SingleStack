@@ -57,6 +57,48 @@ const SCHEMA = {
   required: ["headline", "fields"],
 };
 
+// The per-vector INTERVIEW: one records-aware question at a time to sharpen the
+// search profile for a vector (mirrors setup-competitive's interviewer).
+const INTERVIEW_SCHEMA = {
+  type: "object", additionalProperties: false,
+  properties: {
+    question: { type: "string" },   // "" when nothing worth asking
+    why: { type: "string" },        // one line on why it sharpens the search
+    done: { type: "boolean" },      // true when the vector is well-enough covered to draft
+  },
+  required: ["question", "why", "done"],
+};
+
+// What each vector's interview is FOR — the gaps the records rarely fill, used to
+// steer the questions toward what makes that vector's search precise.
+const VECTOR_INTERVIEW: Record<string, string> = {
+  core: "Pin down what we ARE at the center: the one-line essence, the category/frame of reference (what we replace), and which handful of capabilities are genuinely CORE vs secondary. Ask what the records leave fuzzy about our identity and the weighting of our capabilities.",
+  competitive: "Sharpen who we actually compete with and on what: what buyers pick instead when we lose (point tool / suite / DIY / nothing), the ONE capability we're put head-to-head on, adjacent tools newly creeping into our space, and where buyers compare tools like us. Ask what the records don't pin down about rivals and battlegrounds.",
+  industry: "Sharpen which verticals matter and why: which are core ICP vs occasional, where regulation/budget cycles change the game, and where each vertical's signal lives (trade press, analysts, regulators). Ask what the records leave vague about vertical priority and where to watch.",
+  persona: "Sharpen the buyers/users: who signs vs who uses daily, what makes them reject a tool like ours, what new hire/title signals demand, and where each persona learns/vents/compares. Ask what the records don't pin down about persona weighting and where their signal lives.",
+  technology: "Sharpen the tech we ride and watch: which models/platforms are load-bearing for what we build, which frontier capability would most change what we can ship, and what platform shifts threaten us. Ask what the records leave vague about our technology dependencies and what to watch.",
+};
+
+// Compact records pull for the interviewer — product + GTM fields + modules.
+async function recordsDump(supabase: SupabaseClient): Promise<string> {
+  const out: string[] = [];
+  const { data: p } = await supabase.from("product_records").select("id, name").order("created_at").limit(1).maybeSingle();
+  if (p) {
+    out.push(`PRODUCT: ${p.name}`);
+    const { data: pf } = await supabase.from("record_fields").select("label, value").eq("product_id", p.id).order("position");
+    for (const f of pf ?? []) if (f.value?.trim()) out.push(`${f.label}: ${f.value}`);
+    const { data: mods } = await supabase.from("modules").select("name, description").eq("product_id", p.id).order("position");
+    if (mods?.length) out.push(`MODULES: ${mods.map((m) => m.description ? `${m.name} (${m.description})` : m.name).join("; ")}`);
+  }
+  const { data: g } = await supabase.from("gtm_records").select("id, name").order("created_at").limit(1).maybeSingle();
+  if (g) {
+    out.push(`\nGTM: ${g.name}`);
+    const { data: gf } = await supabase.from("record_fields").select("label, value").eq("gtm_record_id", g.id).order("position");
+    for (const f of gf ?? []) if (f.value?.trim()) out.push(`${f.label}: ${f.value}`);
+  }
+  return out.join("\n");
+}
+
 Deno.serve(async (req: Request) => {
   if (req.method === "OPTIONS") return new Response("ok", { headers: CORS });
   if (req.method !== "POST") return json({ error: "POST only" }, 405);
@@ -71,12 +113,45 @@ Deno.serve(async (req: Request) => {
     { global: { headers: { Authorization: authHeader } } },
   );
 
-  let input: { scope?: string; competitor_id?: string; vector?: string; current?: { field_key: string; label: string; value: string | null; vector?: string }[] };
+  let input: { scope?: string; competitor_id?: string; vector?: string; step?: string; transcript?: { role: string; text: string }[]; current?: { field_key: string; label: string; value: string | null; vector?: string }[] };
   try { input = await req.json(); } catch { return json({ error: "invalid JSON body" }, 400); }
   // Optional single-VECTOR draft: only that arm (+ the core it hangs off) is
   // (re)built, so each vector can be drafted for its own search/analysis.
   const VECTOR_KEYS = ["core", "competitive", "industry", "persona", "technology"];
   const oneVector = input.vector && VECTOR_KEYS.includes(input.vector) ? input.vector : null;
+  const transcript = (Array.isArray(input.transcript) ? input.transcript : []).filter((t) => t && (t.role === "q" || t.role === "a") && typeof t.text === "string");
+
+  // ---- per-vector INTERVIEW step: one records-aware question to sharpen this
+  // vector's search profile. Returns { question, why, done } — no DB writes. ----
+  if (input.step === "interview" && oneVector) {
+    try {
+      const dump = await recordsDump(supabase);
+      const askedQ = transcript.filter((t) => t.role === "q").length;
+      const budget = 4;
+      const tText = transcript.map((t) => `${t.role === "q" ? "ASKED" : "ANSWERED"}: ${t.text}`).join("\n") || "(not started)";
+      const anthropic = new Anthropic({ apiKey: key });
+      const pol = await resolveModelPolicy(supabase, { task: "profile_vector_interview", fallback: { model: MODEL, effort: "medium" } });
+      const resp = (await anthropic.messages.create({
+        model: pol.model, max_tokens: 1200,
+        output_config: { effort: pol.effort, format: { type: "json_schema", schema: INTERVIEW_SCHEMA } },
+        system: [
+          `You are interviewing to sharpen the '${oneVector}' vector of an org's signals profile — the records-grounded nodes that aim its searches. ${VECTOR_INTERVIEW[oneVector]}`,
+          "Read the RECORDS first; only ask what they DON'T already answer. Ask ONE specific, conversational question that pulls a CONCRETE answer (name the kind of detail you want). Make NO assumption about the product, market, or buyer — read it entirely from the records.",
+          `Budget ${budget} questions total; ${askedQ} asked. Set done=true (and question="") when the vector is covered well enough to draft, or the budget is spent, or nothing useful is left to ask.`,
+        ].join("\n"),
+        messages: [{ role: "user", content: `RECORDS:\n${dump || "(sparse)"}\n\nINTERVIEW SO FAR:\n${tText}` }],
+        // deno-lint-ignore no-explicit-any
+      } as any)) as Anthropic.Message;
+      await logUsage(supabase, { task: "profile_vector_interview", model: pol.model, usage: resp.usage });
+      const b = resp.content.find((x) => x.type === "text");
+      let out = { question: "", why: "", done: true };
+      try { if (b && b.type === "text") out = JSON.parse(b.text); } catch { /* end gracefully */ }
+      const done = out.done || askedQ >= budget || !out.question?.trim();
+      return json({ question: done ? "" : out.question, why: out.why ?? "", done });
+    } catch (e) {
+      return json({ error: e instanceof Error ? e.message : String(e) }, 500);
+    }
+  }
   const scope = input.scope === "landscape" ? "landscape" : "competitor";
   if (scope === "competitor" && !input.competitor_id) return json({ error: "competitor_id required for scope=competitor" }, 400);
 
@@ -267,6 +342,10 @@ Deno.serve(async (req: Request) => {
             ? "SYNTHESIS HAS RUN — analysis is now LIVE. Beyond saying what to find, ANALYZE: fold what the synthesized themes MEAN into the relevant vectors (the patterns, how the market is moving, how we actually compare, what it implies for product & GTM). KEEP the *_search_focus nodes — discovery never stops — and ADD the analysis; add an 'analysis' node to a vector where its themes warrant it."
             : "SYNTHESIS HAS NOT RUN YET — this profile is in DISCOVERY mode. Say what to FIND and WHERE to look. Do NOT fabricate analysis, 'how we compare', or market movement from signals that haven't been gathered and synthesized; that analysis turns on only once synthesis has run.")
         : "",
+      // VOICE — the user's standard: nodes are statements, not questions/rebuttals.
+      scope === "landscape"
+        ? "VOICE: every node is a declarative STATEMENT about us — present tense, affirmative, self-contained. Never a question, never a rebuttal or negation ('unlike X…', 'we don't…'), never a to-do. Name the thing and assert what's true of it (e.g. 'AI-built working prototypes are our core battleground'; 'Head of Product is the economic buyer'). The label is the node's short name; the value is the statement."
+        : "",
       // Full & current — the user's standard: existence is not completeness.
       "Make EVERY section FULL and CURRENT. Re-evaluate each against the CURRENT product & GTM records and the latest signals/battlecards, and UPDATE it whenever they've moved — never leave a thin, vague, or stale section just because it already has text." + (input.current?.length ? " You are REFRESHING the existing profile (provided): fold the new evidence into each section and keep what still holds, but don't preserve a stale section just because a human wrote it — improve it." : ""),
     ].filter(Boolean).join("\n");
@@ -276,6 +355,7 @@ Deno.serve(async (req: Request) => {
       `\nINTERNAL ${scope === "landscape" ? "signals (tagged by vector/domain)" : "competitive signals"}:\n${internal || "(none logged yet)"}`,
       `\nEXTERNAL ${scope === "landscape" ? "signals (tagged by vector/domain)" : "competitive signals"}:\n${external || "(none logged yet)"}`,
       input.current?.length ? `\nEXISTING PROFILE (refresh this):\n${input.current.map((f) => `## ${f.label} (${f.field_key})\n${f.value ?? ""}`).join("\n\n")}` : "",
+      transcript.length ? `\nINTERVIEW (the human's answers — weave these in, they fill what the records don't):\n${transcript.map((t) => `${t.role === "q" ? "Q" : "A"}: ${t.text}`).join("\n")}` : "",
       "\nDraft the profile now.",
     ].filter(Boolean).join("\n");
 
