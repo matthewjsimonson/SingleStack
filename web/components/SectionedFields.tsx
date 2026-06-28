@@ -270,11 +270,10 @@ export default function SectionedFields({ target, excludeSection }: { target: Ta
               {!isCollapsed && (
               <div className="card" style={{ overflow: "hidden" }}>
                 {items.map((f, i) => (
-                  <div key={f.id} style={{ padding: "14px 18px", borderTop: i === 0 ? "none" : "1px solid var(--border)" }}>
-                    <div className="row-between" style={{ marginBottom: 5 }}>
-                      <div className="row gap-2">
-                        <Check done={isMetric(f) ? undefined : true} />
-                        <span className="t-h2" style={{ fontSize: 13, fontWeight: 620 }}>{f.label}</span>
+                  <div key={f.id} style={{ padding: "20px 22px", borderTop: i === 0 ? "none" : "1px solid var(--border)" }}>
+                    <div className="row-between" style={{ marginBottom: 8, alignItems: "center" }}>
+                      <div className="row gap-2" style={{ alignItems: "center" }}>
+                        <span className="t-label" style={{ fontSize: 11.5, color: "var(--tm)" }}>{f.label}</span>
                         {isMetric(f) && <span className="chip" style={{ fontSize: 10 }}>metric</span>}
                       </div>
                       {!isMetric(f) && editing !== f.id && <button className="btn btn-secondary btn-sm" onClick={() => { setEditing(f.id); setDraft(f.value ?? ""); }}>Edit</button>}
@@ -282,18 +281,20 @@ export default function SectionedFields({ target, excludeSection }: { target: Ta
                     {isMetric(f) ? (
                       <MetricField fieldId={f.id} unit={f.metric_unit} />
                     ) : editing === f.id ? (
-                      <div style={{ marginLeft: 26 }}>
-                        <textarea className="textarea" rows={3} autoFocus value={draft} onChange={(e) => setDraft(e.target.value)} style={{ marginBottom: 8 }} />
+                      <div>
+                        <textarea className="textarea" rows={7} autoFocus value={draft} onChange={(e) => setDraft(e.target.value)} style={{ marginBottom: 8, fontSize: 14.5, lineHeight: 1.7 }} />
                         <div className="row gap-2"><button className="btn btn-sm" onClick={() => save(f.id)}>Save</button><button className="btn btn-secondary btn-sm" onClick={() => setEditing(null)}>Cancel</button></div>
                       </div>
                     ) : (() => {
-                      const long = (f.value ?? "").length > 280;
+                      // Read-first: show the value in full, comfortable prose at a
+                      // readable measure. Only the genuinely huge get a soft clamp.
+                      const long = (f.value ?? "").length > 1100;
                       const isExp = expanded.has(f.id);
-                      const clamp = long && !isExp ? { display: "-webkit-box", WebkitLineClamp: 4, WebkitBoxOrient: "vertical" as const, overflow: "hidden" } : {};
+                      const clamp = long && !isExp ? { display: "-webkit-box", WebkitLineClamp: 12, WebkitBoxOrient: "vertical" as const, overflow: "hidden" } : {};
                       return (
-                        <div style={{ marginLeft: 26 }}>
-                          <div className="t-body" style={{ lineHeight: 1.6, whiteSpace: "pre-wrap", ...clamp }}>{f.value}</div>
-                          {long && <button onClick={() => setExpanded((s) => toggle(s, f.id))} style={{ background: "none", border: "none", cursor: "pointer", color: "var(--ac-text, var(--ac))", fontWeight: 600, fontSize: 11.5, padding: "4px 0 0" }}>{isExp ? "Show less" : "Show more"}</button>}
+                        <div>
+                          <div className="t-body" style={{ fontSize: 14.5, lineHeight: 1.75, whiteSpace: "pre-wrap", maxWidth: "68ch", ...clamp }}>{f.value}</div>
+                          {long && <button onClick={() => setExpanded((s) => toggle(s, f.id))} style={{ background: "none", border: "none", cursor: "pointer", color: "var(--ac-text, var(--ac))", fontWeight: 600, fontSize: 12, padding: "6px 0 0" }}>{isExp ? "Show less" : "Show more"}</button>}
                         </div>
                       );
                     })()}
@@ -322,14 +323,6 @@ export default function SectionedFields({ target, excludeSection }: { target: Ta
         })
       )}
     </div>
-  );
-}
-
-function Check({ done }: { done?: boolean }) {
-  // done === true → filled check; undefined → neutral (metric field, no done state)
-  const filled = done === true;
-  return (
-    <span style={{ width: 18, height: 18, borderRadius: 999, flexShrink: 0, display: "inline-flex", alignItems: "center", justifyContent: "center", background: filled ? "var(--gn)" : "transparent", border: filled ? "none" : "1.5px solid var(--border-strong)", color: "#fff", fontSize: 11, fontWeight: 800 }}>{filled ? "✓" : ""}</span>
   );
 }
 
