@@ -52,8 +52,10 @@ export default function SignalProfile({ scope, competitorId, competitorName, vec
   const [dirty, setDirty] = useState(false);
   const [note, setNote] = useState<string | null>(null);
   const [previewKey, setPreviewKey] = useState<string | null>(null);
-  const [openVector, setOpenVector] = useState<Vector | null>(null); // which vector is zoomed/curated
-  const [focusKey, setFocusKey] = useState<string | null>(null);
+  const [openVector, setOpenVector] = useState<Vector | null>(null); // which vector is zoomed
+  const [curating, setCurating] = useState(false);                   // vector-level interview drawer
+  const [openNode, setOpenNode] = useState<string | null>(null);     // node-level drawer (field_key)
+  function zoomTo(v: Vector | null) { setOpenVector(v); setCurating(false); setOpenNode(null); }
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -291,20 +293,59 @@ export default function SignalProfile({ scope, competitorId, competitorName, vec
       )}
 
       {scope === "landscape" ? (<>
-        <SignalNetwork headline={headline} fields={fields} openVector={openVector} onOpenVector={setOpenVector} onSelect={setFocusKey} selectedKey={focusKey} />
-        {dirty && <div className="t-sub t-muted" style={{ fontSize: 11.5, marginTop: 8 }}>Unsaved changes — Save in the header or the vector drawer.</div>}
-        {openVector && (() => {
+        <SignalNetwork fields={fields} openVector={openVector} onOpenVector={zoomTo} onOpenNode={setOpenNode} onCurate={() => setCurating(true)} selectedKey={openNode} />
+        {dirty && <div className="t-sub t-muted" style={{ fontSize: 11.5, marginTop: 8 }}>Unsaved changes — Save in the header or a drawer.</div>}
+
+        {/* Vector-level interview/curation drawer (opened by ✨ Curate with AI). */}
+        {openVector && curating && (() => {
           const v = VECTORS.find((x) => x.key === openVector)!;
           const entries = fields.map((f, i) => ({ f, i })).filter(({ f }) => (f.vector ?? "core") === openVector).sort((a, b) => (b.f.weight ?? 2) - (a.f.weight ?? 2));
           return (
             <VectorCurator
               vector={openVector} label={v.label.split(" — ")[0]} blurb={v.blurb}
-              entries={entries} onClose={() => setOpenVector(null)}
+              entries={entries} onClose={() => setCurating(false)}
               setField={setField} removeField={removeField} addField={addField}
               generate={draftVector} generating={vecBusy === openVector}
               onSave={save} onPush={() => pushVector(openVector)} pushLabel={PUSH[openVector]?.label}
               dirty={dirty} savingBusy={busy === "save"}
             />
+          );
+        })()}
+
+        {/* Node-level drawer (opened by clicking a node). */}
+        {openNode && (() => {
+          const ni = fields.findIndex((f) => f.field_key === openNode);
+          if (ni < 0) return null;
+          const f = fields[ni];
+          const vm = vectorMeta(f.vector);
+          const dest = PUSH[(f.vector ?? "core") as Vector];
+          return (
+            <>
+              <div onClick={() => setOpenNode(null)} style={{ position: "fixed", inset: 0, background: "rgba(11,12,14,0.32)", zIndex: 40 }} />
+              <aside style={{ position: "fixed", top: 0, right: 0, height: "100vh", width: 440, maxWidth: "95vw", background: "var(--panel)", borderLeft: "1px solid var(--border)", boxShadow: "var(--shadow-md)", zIndex: 41, display: "flex", flexDirection: "column" }}>
+                <div style={{ padding: "16px 20px", borderBottom: "1px solid var(--border)" }} className="row-between">
+                  <div className="row gap-2" style={{ alignItems: "center" }}><Chip tone="default">{vm.label.split(" — ")[0]}</Chip>{f.origin === "ai" && <Chip tone="violet">AI</Chip>}</div>
+                  <button className="btn btn-secondary btn-sm" onClick={() => setOpenNode(null)}>Close</button>
+                </div>
+                <div style={{ flex: 1, overflowY: "auto", padding: "16px 20px" }} className="stack-3">
+                  <label className="field"><span className="t-label">Node</span>
+                    <input className="input" value={f.label} onChange={(e) => setField(ni, { label: e.target.value })} placeholder="Short name" /></label>
+                  <label className="field"><span className="t-label">Weight <span className="t-muted" style={{ fontWeight: 400 }}>— closeness to the core</span></span>
+                    <select className="select" value={f.weight ?? 2} onChange={(e) => setField(ni, { weight: Number(e.target.value) })}>
+                      {WEIGHTS.map((w) => <option key={w.w} value={w.w}>{w.label}</option>)}
+                    </select></label>
+                  <label className="field"><span className="t-label">Statement <span className="t-muted" style={{ fontWeight: 400 }}>— a fact about us, declarative</span></span>
+                    <textarea className="textarea" rows={6} value={f.value} onChange={(e) => setField(ni, { value: e.target.value })} placeholder="e.g. AI-built working prototypes are our core battleground." /></label>
+                </div>
+                <div style={{ padding: "12px 20px", borderTop: "1px solid var(--border)" }} className="row-between">
+                  <button className="btn btn-secondary btn-sm" onClick={() => { removeField(ni); setOpenNode(null); }} style={{ color: "var(--rd-text)" }}>Remove node</button>
+                  <div className="row gap-2">
+                    {dest && <button className="btn btn-secondary btn-sm" onClick={() => pushVector((f.vector ?? "core") as Vector)} title={`Apply the ${vm.label.split(" — ")[0]} vector in ${dest.label}`}>Push to {dest.label} →</button>}
+                    <button className="btn btn-sm" onClick={save} disabled={!dirty || busy === "save"}>{busy === "save" ? "Saving…" : dirty ? "Save" : "Saved"}</button>
+                  </div>
+                </div>
+              </aside>
+            </>
           );
         })()}
       </>) : (<>
