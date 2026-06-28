@@ -33,19 +33,26 @@ export default function SignalNetwork({ headline, fields, onSelect, selectedKey 
 }) {
   const core = fields.filter((f) => (f.vector ?? "core") === "core" && f.label.trim());
 
-  // Lay out each arm's nodes: sort by weight (core first), place by radius
-  // (weight) and fan across an angular spread so siblings don't overlap.
+  // Lay out each arm by WEIGHT RING: weight-3 nodes sit on the inner ring,
+  // weight-1 on the outer, and within each ring the nodes fan across the arm's
+  // angular sector — so many nodes spread cleanly instead of stacking.
   type Placed = { f: NetField; x: number; y: number; r: number };
+  const wOf = (f: NetField) => Math.min(3, Math.max(1, f.weight ?? 2));
+  const SECTOR = 72; // degrees an arm spans
   const placeArm = (arm: typeof ARMS[number]): Placed[] => {
-    const nodes = fields.filter((f) => (f.vector ?? "core") === arm.key && f.label.trim())
-      .sort((a, b) => (b.weight ?? 2) - (a.weight ?? 2));
-    const spread = Math.min(64, 18 * Math.max(1, nodes.length - 1)); // total fan, degrees
-    return nodes.map((f, i) => {
-      const off = nodes.length === 1 ? 0 : (i / (nodes.length - 1) - 0.5) * spread;
-      const a = rad(arm.angle + off);
-      const dist = radiusFor(f.weight) + ((i % 2) * 14); // slight stagger to de-overlap
-      return { f, x: CX + Math.cos(a) * dist, y: CY + Math.sin(a) * dist, r: 5 + (f.weight ?? 2) * 3 };
-    });
+    const nodes = fields.filter((f) => (f.vector ?? "core") === arm.key && f.label.trim());
+    const placed: Placed[] = [];
+    for (const w of [3, 2, 1]) {
+      const ring = nodes.filter((f) => wOf(f) === w);
+      const fan = Math.min(SECTOR, 20 * Math.max(1, ring.length - 1));
+      ring.forEach((f, i) => {
+        const off = ring.length === 1 ? 0 : (i / (ring.length - 1) - 0.5) * fan;
+        const a = rad(arm.angle + off);
+        const dist = radiusFor(w);
+        placed.push({ f, x: CX + Math.cos(a) * dist, y: CY + Math.sin(a) * dist, r: 5 + w * 3 });
+      });
+    }
+    return placed;
   };
 
   const armLayouts = ARMS.map((arm) => ({ arm, placed: placeArm(arm) }));
