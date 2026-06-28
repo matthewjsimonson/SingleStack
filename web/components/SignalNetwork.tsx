@@ -19,9 +19,11 @@ const ARMS: { key: Vector; label: string; angle: number; color: string }[] = [
   { key: "technology", label: "Technology", angle: 225, color: "var(--bd, #b45309)" },
 ];
 
-const W = 880, H = 660;
+// Near-square viewBox tightened to the content so the nucleus fills the frame
+// (no wide letterboxing); rings pushed out to use the space.
+const W = 720, H = 680;
 const CX = W / 2, CY = H / 2;
-const RING = [116, 196, 276];
+const RING = [128, 218, 300];
 const radiusFor = (weight?: number) => RING[Math.min(2, Math.max(0, 3 - (weight ?? 2)))];
 const rad = (deg: number) => (deg * Math.PI) / 180;
 const wOf = (f: NetField) => Math.min(3, Math.max(1, f.weight ?? 2));
@@ -75,7 +77,7 @@ export default function SignalNetwork({ fields, openVector, onOpenVector, onOpen
   // hard-dims the rest.
   const armOpacity = (k: Vector) => {
     if (openVector) return openVector === k ? 1 : 0.08;
-    if (hoverArm) return hoverArm === k ? 1 : 0.55;
+    if (hoverArm) return hoverArm === k ? 1 : 0.4;
     return 0.92;
   };
 
@@ -113,18 +115,22 @@ export default function SignalNetwork({ fields, openVector, onOpenVector, onOpen
           </circle>
           {RING.map((r, i) => <circle key={i} cx={CX} cy={CY} r={r} fill="none" stroke="var(--border)" strokeWidth={1} strokeDasharray="2 7" opacity={0.4} />)}
 
-          {/* hover RAY — a soft beam of the arm's color out of the nucleus */}
+          {/* hover RAY — a beam of the arm's color out of the nucleus (wide soft
+              glow + a brighter narrow core, so the color reads clearly) */}
           {!openVector && hoverArm && (() => {
             const arm = ARMS.find((a) => a.key === hoverArm)!;
-            const hw = 22, r = RING[2] + 22;
-            const d = `M ${CX} ${CY} L ${P(arm.angle - hw, r).join(" ")} A ${r} ${r} 0 0 1 ${P(arm.angle + hw, r).join(" ")} Z`;
-            return <path d={d} fill={arm.color} opacity={0.12} filter="url(#soft)" style={{ pointerEvents: "none" }} />;
+            const r = RING[2] + 18;
+            const cone = (hw: number) => `M ${CX} ${CY} L ${P(arm.angle - hw, r).join(" ")} A ${r} ${r} 0 0 1 ${P(arm.angle + hw, r).join(" ")} Z`;
+            return (<>
+              <path d={cone(28)} fill={arm.color} opacity={0.22} filter="url(#soft)" style={{ pointerEvents: "none" }} />
+              <path d={cone(12)} fill={arm.color} opacity={0.30} filter="url(#soft)" style={{ pointerEvents: "none" }} />
+            </>);
           })()}
 
           {/* arms: filaments + node dots */}
           {armLayouts.map(({ arm, placed }) => (
             <g key={arm.key} opacity={armOpacity(arm.key)} style={{ transition: "opacity 240ms" }}>
-              {placed.map((p) => <line key={`l-${p.f.field_key}`} x1={CX} y1={CY} x2={p.x} y2={p.y} stroke={arm.color} strokeWidth={1} opacity={0.28} />)}
+              {placed.map((p) => <line key={`l-${p.f.field_key}`} x1={CX} y1={CY} x2={p.x} y2={p.y} stroke={arm.color} strokeWidth={hoverArm === arm.key ? 1.6 : 1} opacity={hoverArm === arm.key ? 0.6 : 0.28} />)}
               {placed.map((p) => {
                 const on = selectedKey === p.f.field_key, hov = hoverNode === p.f.field_key;
                 const interactive = openVector === arm.key;
@@ -161,7 +167,7 @@ export default function SignalNetwork({ fields, openVector, onOpenVector, onOpen
 
           {/* VECTOR LABELS — always visible (muted); the hovered one pops + colors */}
           {!openVector && ARMS.map((arm) => {
-            const [lx, ly] = P(arm.angle, RING[2] + 30);
+            const [lx, ly] = P(arm.angle, RING[2] + 20);
             const hv = hoverArm === arm.key;
             return <text key={`lbl-${arm.key}`} x={lx} y={ly} textAnchor="middle" dominantBaseline="middle"
               style={{ fontSize: hv ? 15.5 : 12.5, fontWeight: hv ? 800 : 680, letterSpacing: "0.07em", textTransform: "uppercase", fill: hv ? arm.color : "var(--tm)", transition: "fill 160ms, font-size 160ms", pointerEvents: "none" }}>{arm.label}</text>;
