@@ -38,8 +38,15 @@ const SCHEMA = {
       items: {
         type: "object",
         additionalProperties: false,
-        properties: { field_key: { type: "string" }, label: { type: "string" }, value: { type: "string" } },
-        required: ["field_key", "label", "value"],
+        properties: {
+          field_key: { type: "string" },
+          label: { type: "string" },
+          value: { type: "string" },
+          // Which intelligence vector this node feeds. Only meaningful for the
+          // landscape (central) profile; competitor profiles set 'shared'.
+          vector: { type: "string", enum: ["shared", "competitive", "market", "frontier"] },
+        },
+        required: ["field_key", "label", "value", "vector"],
       },
     },
   },
@@ -66,18 +73,28 @@ Deno.serve(async (req: Request) => {
   if (scope === "competitor" && !input.competitor_id) return json({ error: "competitor_id required for scope=competitor" }, 400);
 
   try {
-    // ---- gather evidence: competitive signals (internal + external) ----------
+    // ---- gather evidence: signals (internal + external) ----------------------
+    // Competitor scope sees only competitive signals; the central landscape
+    // profile spans vectors, so it also sees market + frontier(capability)
+    // signals as evidence (each tagged so the model routes it to the right
+    // vector). At first run there are none — the records carry the profile.
     const { data: rawSigs } = await supabase
       .from("signals")
       .select("title, why, origin, conf_label, observed_at, metadata, competitor_id")
       .order("observed_at", { ascending: false, nullsFirst: false })
-      .limit(120);
+      .limit(160);
+    const domainOf = (s: { metadata?: { domain?: string } | null; competitor_id?: string | null }) =>
+      s.metadata?.domain ?? (s.competitor_id ? "competitive" : "signals");
+    const LANDSCAPE_DOMAINS = new Set(["competitive", "market", "capability", "frontier"]);
     // deno-lint-ignore no-explicit-any
-    let comp = ((rawSigs ?? []) as any[]).filter((s) => s.metadata?.domain === "competitive" || s.competitor_id);
+    let comp = ((rawSigs ?? []) as any[]).filter((s) =>
+      scope === "competitor"
+        ? (s.metadata?.domain === "competitive" || s.competitor_id)
+        : LANDSCAPE_DOMAINS.has(domainOf(s)));
     if (scope === "competitor") comp = comp.filter((s) => (s.competitor_id ?? s.metadata?.competitor_id) === input.competitor_id);
 
-    const fmt = (s: { title: string; why: string | null; origin: string; conf_label: string | null }) =>
-      `• [${s.origin === "internal" ? "INTERNAL" : "EXTERNAL"}${s.conf_label ? `/${s.conf_label}` : ""}] ${s.title}${s.why ? ` — ${s.why}` : ""}`;
+    const fmt = (s: { title: string; why: string | null; origin: string; conf_label: string | null; metadata?: { domain?: string } | null; competitor_id?: string | null }) =>
+      `• [${s.origin === "internal" ? "INTERNAL" : "EXTERNAL"}${s.conf_label ? `/${s.conf_label}` : ""}${scope === "landscape" ? `/${domainOf(s)}` : ""}] ${s.title}${s.why ? ` — ${s.why}` : ""}`;
     const internal = comp.filter((s) => s.origin === "internal").map(fmt).join("\n");
     const external = comp.filter((s) => s.origin !== "internal").map(fmt).join("\n");
 
@@ -101,11 +118,13 @@ Deno.serve(async (req: Request) => {
     const { data: gtmRec } = await supabase.from("gtm_records").select("id").order("created_at").limit(1).maybeSingle();
     if (gtmRec) {
       const { data: gf } = await supabase.from("record_fields").select("field_key, value").eq("gtm_record_id", gtmRec.id)
-        .in("field_key", ["icp", "pricing_model"]);
+        .in("field_key", ["icp", "pricing_model", "industries", "primary_persona"]);
       const g = (k: string) => gf?.find((f) => f.field_key === k)?.value;
       const messaging = await loadMessaging(supabase, gtmRec.id); // positioning/differentiation/value/win-themes live in the framework
       const gtmBits = [
         g("icp") && `Our ICP: ${g("icp")}`,
+        g("industries") && `Our industries/verticals: ${g("industries")}`,        // feeds the MARKET vector
+        g("primary_persona") && `Our primary persona(s): ${g("primary_persona")}`, // feeds the MARKET vector
         g("pricing_model") && `Our pricing model: ${g("pricing_model")}`,
         messaging && `OUR MESSAGING (from the messaging framework):\n${messaging}`,
       ].filter(Boolean).join("\n");
@@ -175,24 +194,34 @@ Deno.serve(async (req: Request) => {
       } else {
         context += `\nNO COMPETITORS TRACKED YET. This is the FIRST pass: build the profile entirely from our product & GTM records. Its job here is to FRAME the hunt — say sharply where we play and what kind of rivals to go find — NOT to invent specific competitors or pretend to know how a market we haven't searched is moving.`;
       }
-      suggestedSections = "positioning, competitive_battlegrounds, our_wedge, search_focus, who_we_compete_with, strategic_implications";
+      target = "our central SIGNALS PROFILE — the records-grounded map that aims discovery across every intelligence vector (competitive, market, frontier)";
+      // The central profile spans VECTORS. Each node is tagged with the vector it
+      // feeds; the intelligence tabs each read their vector to aim discovery.
+      suggestedSections = [
+        "shared vector — positioning, our_wedge: where we play and why we win, from the records. Used by every vector.",
+        "competitive vector — competitive_battlegrounds (the capability areas/segments deals are contested on), competitive_search_focus (WHERE to look for rivals: name the product modules/segments + the KIND of company that competes on each — functional substitutes, not a tidy category label), who_we_compete_with (archetypes; only name specific companies you have evidence for).",
+        "market vector — target_industries (the verticals to track), target_personas (the buyers to track), market_search_focus (WHERE to find market/persona signal: the publications, communities, forums, job postings, events worth watching for these industries/personas).",
+        "frontier vector — frontier_watch (the frontier model/platform capabilities to watch that could change what this product can do or how it's built).",
+      ].join("\n");
     }
 
     const system = [
       `You maintain a HITL "Signal Profile" — a sharp, evidence-grounded record of ${target}. It is meant to DICTATE product and GTM strategy, so be decisive and specific, never generic.`,
       scope === "competitor"
-        ? "For a competitor, this profile is the RAW BATTLECARD: the complete, honest dossier of who they are vs us, which the analyst refines into battlecard items and the messenger turns into GTM-ready copy for whatever motion the GTM record describes."
-        : "This is STEP ONE of the competitive workflow and it is built FROM our product & GTM records — NOT a restatement of them (reference them, never copy them). Its job is to FRAME the search for rivals so the agent finds the RIGHT competitors and compares on the RIGHT axes. The 'search_focus' section is the MOST IMPORTANT output: POINT at WHERE TO LOOK — name the specific product modules/features and the specific GTM segments/positioning to search competitors against (cite the record fields/modules by name), and name the KIND of company that competes on each (functional substitutes, not just the obvious category label — a tidy label hides what the product really does and returns the wrong rivals). 'competitive_battlegrounds' = the capability areas/segments where deals are actually contested; 'our_wedge' = the differentiation that wins, referencing (not restating) the records; 'who_we_compete_with' = the archetypes/named candidates to go find (only name specific companies you actually have evidence for — otherwise describe the archetype). Do NOT fabricate market movement, rival momentum, or 'how we compare' before any competitor is tracked — when none are tracked, say plainly what to go find rather than inventing a landscape.",
-      "Synthesize the INTERNAL and EXTERNAL signals below into a headline + sections. INTERNAL signals (what our own teams hear in the field) and EXTERNAL signals (public: reviews, launches, pricing) are both evidence; weigh corroboration across them and note where they disagree.",
-      `Use these section keys where supported (snake_case): ${suggestedSections}. Always include a 'strategic_implications' section spelling out what this means for product strategy and for GTM strategy. Only assert what the evidence supports; if thin, say so and keep it short.`,
+        ? "For a competitor, this profile is the RAW BATTLECARD: the complete, honest dossier of who they are vs us, which the analyst refines into battlecard items and the messenger turns into GTM-ready copy for whatever motion the GTM record describes. Set vector='shared' on EVERY field — vectors only structure the central landscape profile, not a competitor dossier."
+        : "This is the CENTRAL SIGNALS PROFILE, built FROM our product & GTM records — NOT a restatement of them (reference them, never copy them). It is a map organised into VECTORS, and each intelligence tab reads its own vector to aim discovery. Its job is to say, per vector, WHAT TO FIND and WHERE TO LOOK — so set the right `vector` on every node: 'shared' for positioning/wedge every domain uses; 'competitive' for who-to-hunt and the axes rivals are compared on; 'market' for the industries/personas to track and where their signal lives; 'frontier' for the model/platform capabilities to watch. The *_search_focus nodes are the most important: name the SPECIFIC product modules/segments/personas to search against and the KIND of source/company to look at (functional substitutes, not a tidy category label that hides what the product really does). Do NOT fabricate competitors, market movement, or rival momentum before evidence exists — when a vector has no signals yet, say plainly what to GO FIND rather than inventing findings.",
+      "Synthesize the INTERNAL and EXTERNAL signals below (plus the records) into a headline + nodes. INTERNAL signals (what our own teams hear in the field) and EXTERNAL signals (public: reviews, launches, pricing) are both evidence; weigh corroboration across them and note where they disagree.",
+      scope === "competitor"
+        ? `Use these section keys where supported (snake_case): ${suggestedSections}. Always include a 'strategic_implications' section. Only assert what the evidence supports; if thin, say so and keep it short.`
+        : `Build nodes across ALL FOUR vectors, each node tagged with its vector and a snake_case field_key. Guide:\n${suggestedSections}\nEvery node carries its correct \`vector\`. Only assert what the records/evidence support; where a vector is thin, keep its nodes short and action-oriented (what to find), not padded.`,
       // Full & current — the user's standard: existence is not completeness.
       "Make EVERY section FULL and CURRENT. Re-evaluate each against the CURRENT product & GTM records and the latest signals/battlecards, and UPDATE it whenever they've moved — never leave a thin, vague, or stale section just because it already has text." + (input.current?.length ? " You are REFRESHING the existing profile (provided): fold the new evidence into each section and keep what still holds, but don't preserve a stale section just because a human wrote it — improve it." : ""),
     ].filter(Boolean).join("\n");
 
     const userText = [
       context ? `CONTEXT:\n${context}` : "",
-      `\nINTERNAL competitive signals:\n${internal || "(none logged yet)"}`,
-      `\nEXTERNAL competitive signals:\n${external || "(none logged yet)"}`,
+      `\nINTERNAL ${scope === "landscape" ? "signals (tagged by vector/domain)" : "competitive signals"}:\n${internal || "(none logged yet)"}`,
+      `\nEXTERNAL ${scope === "landscape" ? "signals (tagged by vector/domain)" : "competitive signals"}:\n${external || "(none logged yet)"}`,
       input.current?.length ? `\nEXISTING PROFILE (refresh this):\n${input.current.map((f) => `## ${f.label} (${f.field_key})\n${f.value ?? ""}`).join("\n\n")}` : "",
       "\nDraft the profile now.",
     ].filter(Boolean).join("\n");
@@ -212,7 +241,7 @@ Deno.serve(async (req: Request) => {
 
     const block = message.content.find((b) => b.type === "text");
     if (!block || block.type !== "text") throw new Error(`no draft returned (stop_reason: ${message.stop_reason})`);
-    const draft = JSON.parse(block.text) as { headline: string; fields: { field_key: string; label: string; value: string }[] };
+    const draft = JSON.parse(block.text) as { headline: string; fields: { field_key: string; label: string; value: string; vector?: string }[] };
     return json({ draft, evidence: { internal: comp.filter((s) => s.origin === "internal").length, external: comp.filter((s) => s.origin !== "internal").length } });
   } catch (e) {
     return json({ error: e instanceof Error ? e.message : String(e) }, 500);

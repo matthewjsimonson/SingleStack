@@ -17,6 +17,7 @@ import { Markdown } from "@/components/Markdown";
 import SourceManager from "@/components/SourceManager";
 import TrackingTopics from "@/components/TrackingTopics";
 import MarketSetup from "@/components/MarketSetup";
+import SignalProfile from "@/components/SignalProfile";
 
 type Meta = { domain?: string; lens?: string; industry?: string; persona?: string } | null;
 type Signal = { id: string; title: string; why: string | null; conf_label: string | null; conf_level: number | null; observed_at: string | null; origin: string; metadata: Meta };
@@ -131,6 +132,9 @@ export default function MarketView() {
 
       {/* Configurable ingestion: connect web-search / market sources (incl. MCP)
           and declare what to watch. Market signals feed BOTH strategy boards. */}
+      {/* The market vector of the central signals profile — industries & personas
+          to track, drawn from the Signals home. It aims this tab's discovery. */}
+      <div style={{ marginBottom: "var(--sp-4)" }}><SignalProfile scope="landscape" vectorFilter="market" /></div>
       {/* Guided, alignment-aware setup — watches keyed to what we actually serve */}
       <MarketSetup onDone={load} />
       <SourceManager title="Market sources" />

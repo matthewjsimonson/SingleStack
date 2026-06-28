@@ -23,6 +23,7 @@ import IntelReview from "./IntelReview";
 import MapView from "./MapView";
 import SignalDrawer, { type DrawerSignal } from "@/components/SignalDrawer";
 import ThemeDrawer from "@/components/ThemeDrawer";
+import SignalProfile from "@/components/SignalProfile";
 import { useAgentRun, AgentProgress, type AgentRun } from "@/components/AgentProgress";
 
 type Source = { id: string; label: string; icon: string; origin: string };
@@ -39,7 +40,7 @@ type Theme = {
 };
 
 type Lens = "product" | "gtm";
-type Tab = "home" | "map" | Lens;
+type Tab = "home" | "profile" | "map" | Lens;
 type OriginFilter = "all" | "internal" | "external";
 
 // Best-practice scaffolding so a fresh org sees the intended SHAPE of each lens,
@@ -188,6 +189,7 @@ export default function SignalsView() {
       <SubTabs<Tab>
         tabs={[
           { key: "home", label: "Homepage" },
+          { key: "profile", label: "Profile" },
           { key: "map", label: "Map" },
           { key: "product", label: `Product · ${signalsScoped.filter((s) => inLens(s, "product")).length}` },
           { key: "gtm", label: `GTM · ${signalsScoped.filter((s) => inLens(s, "gtm")).length}` },
@@ -196,7 +198,9 @@ export default function SignalsView() {
       />
       <Banner>{error}</Banner>
 
-      {loading ? <div className="t-sub t-muted">Loading…</div> : tab === "map" ? (
+      {loading ? <div className="t-sub t-muted">Loading…</div> : tab === "profile" ? (
+        <SignalProfile scope="landscape" />
+      ) : tab === "map" ? (
         <MapView productFilter={active} onOpenTheme={setOpenThemeId} />
       ) : tab === "home" ? (
         <Home

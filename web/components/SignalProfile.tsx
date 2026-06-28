@@ -11,10 +11,22 @@ import { getOrgId } from "@/lib/org";
 import { Banner, Chip } from "@/components/ui";
 import { Markdown } from "@/components/Markdown";
 
-type Field = { field_key: string; label: string; value: string; origin?: string };
+// A node's VECTOR — which intelligence domain it feeds. 'shared' = positioning/
+// wedge every domain draws on. The central (landscape) profile holds all four;
+// an intelligence tab passes vectorFilter to read just its slice.
+export type Vector = "competitive" | "market" | "frontier" | "shared";
+const VECTORS: { key: Vector; label: string; blurb: string }[] = [
+  { key: "shared", label: "Shared — positioning & wedge", blurb: "What every domain draws on: where you play and why you win." },
+  { key: "competitive", label: "Competitive", blurb: "Who to hunt and the axes you compete on — aims the competitor search." },
+  { key: "market", label: "Market", blurb: "Industries & personas to track — aims the market discovery." },
+  { key: "frontier", label: "Frontier", blurb: "Frontier capabilities & models to watch." },
+];
+const vectorMeta = (v?: string) => VECTORS.find((x) => x.key === v) ?? VECTORS[0];
+
+type Field = { field_key: string; label: string; value: string; origin?: string; vector?: Vector };
 type Profile = { id: string; headline: string | null };
 
-export default function SignalProfile({ scope, competitorId, competitorName }: { scope: "landscape" | "competitor"; competitorId?: string; competitorName?: string }) {
+export default function SignalProfile({ scope, competitorId, competitorName, vectorFilter }: { scope: "landscape" | "competitor"; competitorId?: string; competitorName?: string; vectorFilter?: Vector }) {
   const supabase = createClient();
   const [profile, setProfile] = useState<Profile | null>(null);
   const [headline, setHeadline] = useState("");
@@ -33,7 +45,7 @@ export default function SignalProfile({ scope, competitorId, competitorName }: {
     const { data: p } = await qb.maybeSingle();
     if (p) {
       setProfile(p as Profile); setHeadline(p.headline ?? "");
-      const { data: fs } = await supabase.from("signal_profile_fields").select("field_key, label, value, origin").eq("profile_id", p.id).order("position");
+      const { data: fs } = await supabase.from("signal_profile_fields").select("field_key, label, value, origin, vector").eq("profile_id", p.id).order("position");
       setFields((fs ?? []) as Field[]);
     } else { setProfile(null); setHeadline(""); setFields([]); }
     setDirty(false); setLoading(false);
@@ -54,13 +66,13 @@ export default function SignalProfile({ scope, competitorId, competitorName }: {
   async function draftAI() {
     setBusy("ai"); setError(null); setNote(null);
     try {
-      const { data, error } = await supabase.functions.invoke("synthesize-profile", { body: { scope, competitor_id: competitorId, current: fields.map((f) => ({ field_key: f.field_key, label: f.label, value: f.value })) } });
+      const { data, error } = await supabase.functions.invoke("synthesize-profile", { body: { scope, competitor_id: competitorId, current: fields.map((f) => ({ field_key: f.field_key, label: f.label, value: f.value, vector: f.vector ?? "shared" })) } });
       if (error) throw error;
       if (data?.error) throw new Error(data.error);
       const d = data?.draft;
       if (!d) throw new Error("No draft returned.");
       setHeadline(d.headline ?? headline);
-      setFields((d.fields ?? []).map((f: Field) => ({ ...f, origin: "ai" })));
+      setFields((d.fields ?? []).map((f: Field) => ({ ...f, origin: "ai", vector: (f.vector ?? "shared") as Vector })));
       setDirty(true);
       const ev = data?.evidence;
       const sigCount = (ev?.internal ?? 0) + (ev?.external ?? 0);
@@ -81,7 +93,7 @@ export default function SignalProfile({ scope, competitorId, competitorName }: {
       await supabase.from("signal_profiles").update({ headline: headline.trim() || null, updated_at: new Date().toISOString() }).eq("id", profile.id);
       // Replace the field set (simplest correct path for an editable section list).
       await supabase.from("signal_profile_fields").delete().eq("profile_id", profile.id);
-      const rows = fields.filter((f) => f.field_key.trim() && f.label.trim()).map((f, i) => ({ org_id: orgId, profile_id: profile.id, field_key: f.field_key.trim(), label: f.label.trim(), value: f.value.trim() || null, position: i, origin: f.origin ?? "human" }));
+      const rows = fields.filter((f) => f.field_key.trim() && f.label.trim()).map((f, i) => ({ org_id: orgId, profile_id: profile.id, field_key: f.field_key.trim(), label: f.label.trim(), value: f.value.trim() || null, position: i, origin: f.origin ?? "human", vector: f.vector ?? "shared" }));
       if (rows.length) { const { error } = await supabase.from("signal_profile_fields").insert(rows); if (error) throw error; }
       setDirty(false); setNote("Saved."); load();
     } catch (e) { setError(e instanceof Error ? e.message : "Could not save."); }
@@ -144,13 +156,45 @@ export default function SignalProfile({ scope, competitorId, competitorName }: {
 
   function setField(i: number, patch: Partial<Field>) { setFields((fs) => fs.map((f, j) => (j === i ? { ...f, ...patch } : f))); setDirty(true); }
   function removeField(i: number) { setFields((fs) => fs.filter((_, j) => j !== i)); setDirty(true); }
-  function addField() { setFields((fs) => [...fs, { field_key: `section_${fs.length + 1}`, label: "New section", value: "", origin: "human" }]); setDirty(true); }
+  function addField(vector: Vector = "shared") { setFields((fs) => [...fs, { field_key: `section_${fs.length + 1}`, label: "New section", value: "", origin: "human", vector }]); setDirty(true); }
 
   if (loading) return <div className="t-sub t-muted">Loading…</div>;
 
-  const title = scope === "landscape" ? "Competitive profile — where you play & who to hunt" : `Signal Profile — ${competitorName ?? "competitor"} (the raw battlecard)`;
+  // SLICE MODE — an intelligence tab reads ONE vector of the central profile
+  // (read-only). Editing/drafting happens on the Signals home, not here.
+  if (vectorFilter) {
+    const vm = vectorMeta(vectorFilter);
+    const short = vm.label.split(" — ")[0];
+    const slice = fields.filter((f) => (f.vector ?? "shared") === vectorFilter && f.value.trim());
+    return (
+      <div className="card card-pad">
+        <div className="row-between" style={{ gap: 12, flexWrap: "wrap", marginBottom: 10 }}>
+          <div style={{ minWidth: 0 }}>
+            <div style={{ fontSize: 13.5, fontWeight: 660 }}>Signals profile · {short}</div>
+            <div className="t-sub t-muted" style={{ fontSize: 12, marginTop: 2 }}>{vm.blurb} Drawn from your central signals profile.</div>
+          </div>
+          <a className="btn btn-secondary btn-sm" href="/signals" style={{ flexShrink: 0 }} title="The signals profile lives on the Signals home">Edit on Signals →</a>
+        </div>
+        {headline.trim() && <div className="t-sub" style={{ fontSize: 12.5, fontStyle: "italic", marginBottom: 10 }}>{headline}</div>}
+        {slice.length === 0 ? (
+          <div className="t-sub t-muted" style={{ fontSize: 12.5 }}>No {short.toLowerCase()} guidance in your signals profile yet — set it up on the <strong>Signals</strong> home and it aims this tab&apos;s discovery.</div>
+        ) : (
+          <div className="stack-3">
+            {slice.map((f, i) => (
+              <div key={i}>
+                <div className="t-label" style={{ marginBottom: 4 }}>{f.label}</div>
+                <Markdown text={f.value} />
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
+    );
+  }
+
+  const title = scope === "landscape" ? "Signals profile — what to find, track & analyze" : `Signal Profile — ${competitorName ?? "competitor"} (the raw battlecard)`;
   const blurb = scope === "landscape"
-    ? "Step 1, built from your product & GTM records: where you play, the axes you compete on, your wedge, and — most importantly — where to aim the search for rivals. Editable by hand. It sharpens as you track competitors and build battlecards."
+    ? "Built from your product & GTM records: your positioning & wedge (shared), plus what to find on each vector — competitors to hunt, industries & personas to track, frontier to watch. Each intelligence tab draws on its vector to aim discovery. Editable by hand; it sharpens as signals come in."
     : "Where you stand against this competitor — carried over from setup, then sharpened with internal (deals, calls) + external (public) signals. Editable by hand.";
 
   if (!profile) {
@@ -192,14 +236,21 @@ export default function SignalProfile({ scope, competitorId, competitorName }: {
       <label className="field"><span className="t-label">Headline <span className="t-muted" style={{ fontWeight: 400 }}>— where we sit, in one line</span></span>
         <input className="input" value={headline} onChange={(e) => { setHeadline(e.target.value); setDirty(true); }} placeholder="e.g. We lead on explainability for mid-market; exposed on price vs Acme." /></label>
 
-      <div className="stack-3" style={{ marginTop: "var(--sp-3)" }}>
-        {fields.length === 0 && <div className="t-sub t-muted" style={{ fontSize: 12.5 }}>No sections yet. Draft with AI, or add one by hand.</div>}
-        {fields.map((f, i) => (
+      {(() => {
+        // The central (landscape) profile groups its nodes by VECTOR; the
+        // per-competitor dossier has no vectors, so it renders flat.
+        const showVectors = scope === "landscape";
+        const card = (f: Field, i: number) => (
           <div key={i} className="card card-pad">
             <div className="row-between" style={{ alignItems: "center", gap: 8, marginBottom: 6 }}>
               <input className="input" value={f.label} onChange={(e) => setField(i, { label: e.target.value })} style={{ fontWeight: 640, fontSize: 13.5, maxWidth: 320 }} />
               <div className="row gap-2" style={{ alignItems: "center" }}>
                 {f.origin === "ai" && <Chip tone="violet">AI</Chip>}
+                {showVectors && (
+                  <select className="select" value={f.vector ?? "shared"} onChange={(e) => setField(i, { vector: e.target.value as Vector })} style={{ fontSize: 11.5, padding: "3px 6px" }} title="Which intelligence vector this node feeds">
+                    {VECTORS.map((v) => <option key={v.key} value={v.key}>{v.label.split(" — ")[0]}</option>)}
+                  </select>
+                )}
                 <button type="button" className="btn btn-secondary btn-sm" onClick={() => setPreviewKey(previewKey === f.field_key ? null : f.field_key)}>{previewKey === f.field_key ? "Edit" : "Preview"}</button>
                 <button type="button" className="btn btn-secondary btn-sm" onClick={() => removeField(i)} style={{ color: "var(--rd-text)" }}>Remove</button>
               </div>
@@ -208,12 +259,38 @@ export default function SignalProfile({ scope, competitorId, competitorName }: {
               ? <div className="card card-pad" style={{ background: "var(--panel-2)", minHeight: 60 }}>{f.value.trim() ? <Markdown text={f.value} /> : <span className="t-sub t-muted">Empty.</span>}</div>
               : <textarea className="textarea" rows={4} value={f.value} onChange={(e) => setField(i, { value: e.target.value })} placeholder="What the evidence says — markdown supported." />}
           </div>
-        ))}
-      </div>
-      <div className="row gap-2" style={{ marginTop: "var(--sp-3)" }}>
-        <button className="btn btn-secondary btn-sm" onClick={addField}>+ Add section</button>
-        {dirty && <span className="t-sub t-muted" style={{ fontSize: 11.5, alignSelf: "center" }}>Unsaved changes</span>}
-      </div>
+        );
+        if (!showVectors) {
+          return (<>
+            <div className="stack-3" style={{ marginTop: "var(--sp-3)" }}>
+              {fields.length === 0 && <div className="t-sub t-muted" style={{ fontSize: 12.5 }}>No sections yet. Draft with AI, or add one by hand.</div>}
+              {fields.map((f, i) => card(f, i))}
+            </div>
+            <div className="row gap-2" style={{ marginTop: "var(--sp-3)" }}>
+              <button className="btn btn-secondary btn-sm" onClick={() => addField()}>+ Add section</button>
+              {dirty && <span className="t-sub t-muted" style={{ fontSize: 11.5, alignSelf: "center" }}>Unsaved changes</span>}
+            </div>
+          </>);
+        }
+        const groups = VECTORS.map((v) => ({ v, entries: fields.map((f, i) => ({ f, i })).filter(({ f }) => (f.vector ?? "shared") === v.key) }));
+        return (<>
+          <div className="stack-4" style={{ marginTop: "var(--sp-3)" }}>
+            {fields.length === 0 && <div className="t-sub t-muted" style={{ fontSize: 12.5 }}>No nodes yet. Draft with AI to build the profile across vectors, or add one by hand.</div>}
+            {groups.map(({ v, entries }) => (
+              <div key={v.key}>
+                <div className="row-between" style={{ alignItems: "baseline", marginBottom: 6 }}>
+                  <span className="t-label">{v.label} <span className="t-muted" style={{ fontWeight: 400, textTransform: "none", letterSpacing: 0 }}>· {entries.length}</span></span>
+                  <button className="btn btn-secondary btn-sm" onClick={() => addField(v.key)} title={v.blurb}>+ Add</button>
+                </div>
+                {entries.length === 0
+                  ? <div className="t-sub t-muted" style={{ fontSize: 12 }}>{v.blurb}</div>
+                  : <div className="stack-3">{entries.map(({ f, i }) => card(f, i))}</div>}
+              </div>
+            ))}
+          </div>
+          {dirty && <div className="t-sub t-muted" style={{ fontSize: 11.5, marginTop: "var(--sp-3)" }}>Unsaved changes</div>}
+        </>);
+      })()}
     </div>
   );
 }
