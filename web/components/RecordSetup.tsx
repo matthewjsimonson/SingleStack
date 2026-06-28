@@ -19,6 +19,7 @@ import { getOrgId } from "@/lib/org";
 import { Chip, Banner } from "@/components/ui";
 import { useAgentRun, AgentStepList } from "@/components/AgentProgress";
 import { PRODUCT_TEMPLATE, GTM_TEMPLATE } from "@/lib/templates";
+import { MESSAGING_FRAMEWORK } from "@/lib/messagingFramework";
 
 type Material = { label: string; text: string; kind: "paste" | "url" | "pdf" };
 type ChatMsg = { role: "q" | "a"; text: string };
@@ -28,7 +29,10 @@ type DraftField = { record: "product" | "gtm"; key: string; label: string; secti
 // from ratified competitive facts, not entered on day one).
 const TEMPLATE_FIELDS: DraftField[] = [
   ...PRODUCT_TEMPLATE.flatMap((s) => s.fields.map((f) => ({ record: "product" as const, key: f.key, label: f.label, section: s.section, value: "" }))),
-  ...GTM_TEMPLATE.filter((s) => s.section !== "Battlecard").flatMap((s) => s.fields.map((f) => ({ record: "gtm" as const, key: f.key, label: f.label, section: s.section, value: "" }))),
+  ...GTM_TEMPLATE.flatMap((s) => s.fields.map((f) => ({ record: "gtm" as const, key: f.key, label: f.label, section: s.section, value: "" }))),
+  // The messaging house (positioning, narrative, value prop, pillars, …) lives in the
+  // GTM record's "Messaging" section — draft it here too so a new record isn't missing it.
+  ...MESSAGING_FRAMEWORK.map((s) => ({ record: "gtm" as const, key: s.key, label: s.label, section: "Messaging", value: "" })),
 ];
 
 export default function RecordSetup({ onDone, mode = "both" }: { onDone: (productId?: string) => void; mode?: "both" | "gtm" }) {

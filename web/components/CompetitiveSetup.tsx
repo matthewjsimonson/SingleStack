@@ -35,17 +35,14 @@ const RECORD_FIELD_META: Record<string, { label: string; section: string; scope:
   strategic_intent: { label: "Strategic intent", section: "Overview", scope: "product" },
   core_capabilities: { label: "Core capabilities", section: "Capabilities", scope: "product" },
   differentiated_capabilities: { label: "Differentiated capabilities", section: "Capabilities", scope: "product" },
-  primary_persona: { label: "Primary persona", section: "Buyer", scope: "gtm" },
-  icp: { label: "Ideal customer profile", section: "Buyer", scope: "gtm" },
-  industries: { label: "Industries / verticals", section: "Buyer", scope: "gtm" },
-  positioning: { label: "Positioning", section: "Positioning", scope: "gtm" },
-  category_pov: { label: "Category POV", section: "Positioning", scope: "gtm" },
-  differentiation: { label: "Differentiation", section: "Positioning", scope: "gtm" },
-  value_prop: { label: "Value proposition", section: "Messaging", scope: "gtm" },
-  pillars: { label: "Message pillars", section: "Messaging", scope: "gtm" },
+  // GTM record holds STRATEGY & OPS. Positioning / value prop / pillars / narrative
+  // moved to the MESSAGING FRAMEWORK (their own tab) — competitive setup reads them
+  // for grounding but must NOT write them back here, or it re-creates deleted fields.
+  primary_persona: { label: "Primary persona", section: "Audience", scope: "gtm" },
+  icp: { label: "Ideal customer profile", section: "Audience", scope: "gtm" },
+  industries: { label: "Industries / verticals", section: "Audience", scope: "gtm" },
   gtm_motion: { label: "GTM motion", section: "Motion", scope: "gtm" },
-  pricing_model: { label: "Pricing model", section: "Motion", scope: "gtm" },
-  win_themes: { label: "Win themes", section: "Motion", scope: "gtm" },
+  pricing_model: { label: "Pricing & packaging", section: "Motion", scope: "gtm" },
 };
 
 export default function CompetitiveSetup({ onDone, productId }: { onDone: () => void; productId?: string | null }) {
@@ -243,27 +240,31 @@ export default function CompetitiveSetup({ onDone, productId }: { onDone: () => 
       // GTM record: personas/icp (who we sell to) + positioning (against what).
       const { data: g } = await supabase.from("gtm_records").select("id, name").order("created_at").limit(1).maybeSingle();
       if (g) {
+        // GTM record (strategy) + the Messaging framework (positioning / value prop /
+        // pillars / narrative now live in the "Messaging" section, not as old keys).
         const { data: fs } = await supabase.from("record_fields").select("field_key, value").eq("gtm_record_id", g.id)
-          .in("field_key", ["personas", "primary_persona", "icp", "positioning", "category_pov", "differentiation", "industries", "key_competitors", "value_prop", "pillars", "win_themes", "gtm_motion", "pricing_model"]);
+          .in("field_key", ["personas", "primary_persona", "icp", "industries", "key_competitors", "gtm_motion", "pricing_model",
+                             "positioning_statement", "strategic_narrative", "value_proposition", "pillar_1", "pillar_2", "pillar_3", "proof_points"]);
         const f = (k: string) => fs?.find((x) => x.field_key === k)?.value ?? null;
         const personas = f("personas") ?? f("primary_persona") ?? f("icp");
-        const positioning = f("positioning") ?? f("category_pov");
+        const positioning = f("positioning_statement") ?? f("strategic_narrative");
         setGtm({ name: g.name, personas, positioning });
-        // Richer profile: COMBINE the related GTM fields so each window (and the
-        // search) reflects the depth of the record, not one thin line.
+        // Richer profile: COMBINE the related fields so each window (and the search)
+        // reflects the depth of the records + messaging framework, not one thin line.
         whoLine = [whoLine, f("primary_persona"), f("icp")].filter(Boolean).join(" · ") || whoLine;
-        posLine = [f("positioning"), f("category_pov"), f("differentiation")].filter(Boolean).join(" · ") || posLine;
-        // Industries (verticals) and key competitors have canonical GTM fields, so
-        // they pre-fill from the record and survive a competitive-board clear.
+        posLine = [f("positioning_statement"), f("strategic_narrative")].filter(Boolean).join(" · ") || posLine;
+        // Industries (verticals) and key competitors are GTM strategy fields, so they
+        // pre-fill from the record and survive a competitive-board clear.
         industriesLine = f("industries") ?? "";
         competitorsLine = f("key_competitors") ?? "";
-        // The "Also" window carries our motion/pricing/win-themes — strong signal
+        // The "Also" window carries our messaging + motion/pricing — strong signal
         // for who actually competes with us and how.
+        const pillars = [f("pillar_1"), f("pillar_2"), f("pillar_3")].filter(Boolean).join(" | ");
         moreLine = [
-          f("value_prop") && `Value prop: ${f("value_prop")}`,
-          f("pillars") && `Message pillars: ${f("pillars")}`,
-          f("win_themes") && `Win themes: ${f("win_themes")}`,
-          f("gtm_motion") && `GTM motion (how they message): ${f("gtm_motion")}`,
+          f("value_proposition") && `Value prop: ${f("value_proposition")}`,
+          pillars && `Message pillars: ${pillars}`,
+          f("proof_points") && `Proof: ${f("proof_points")}`,
+          f("gtm_motion") && `GTM motion: ${f("gtm_motion")}`,
           f("pricing_model") && `Pricing: ${f("pricing_model")}`,
         ].filter(Boolean).join(" · ");
       } else setGtm(null);
@@ -335,8 +336,8 @@ export default function CompetitiveSetup({ onDone, productId }: { onDone: () => 
       if (!g) return;
       const { data: rf } = await supabase.from("record_fields").select("id, field_key").eq("gtm_record_id", g.id).in("field_key", ["industries", "key_competitors"]);
       const want: [string, string, string, string][] = [
-        ["industries", "Industries / verticals", ctx.industries.trim(), "Buyer"],
-        ["key_competitors", "Key competitors", ctx.competitors.trim(), "Positioning"],
+        ["industries", "Industries / verticals", ctx.industries.trim(), "Audience"],
+        ["key_competitors", "Key competitors", ctx.competitors.trim(), "Audience"],
       ];
       const adds: Record<string, unknown>[] = [];
       for (const [field_key, label, value, section] of want) {
@@ -573,8 +574,14 @@ export default function CompetitiveSetup({ onDone, productId }: { onDone: () => 
     if (!savedRun) return;
     if (savedRun.context) setCtx(savedRun.context);
     if (savedRun.transcript?.length) setChat(savedRun.transcript);
-    if (savedRun.picture) setPicture(savedRun.picture);
-    if (savedRun.comps?.length) { setComps(savedRun.comps); setStep(2); }
+    if (savedRun.picture) { setPicture(savedRun.picture); setChatDone(true); }
+    if (savedRun.comps?.length) {
+      // Matches were already found → jump to the candidate review step.
+      setComps(savedRun.comps); setStep(2);
+    } else if (savedRun.transcript?.length || savedRun.picture) {
+      // Interview in progress (no matches yet) → re-open the interview where it left off.
+      setStep(1); setChatOpen(true);
+    }
   }
   async function clearSavedRun(status: "discarded" | "confirmed" = "discarded") {
     try { if (runId) await supabase.from("competitive_setup_runs").update({ status }).eq("id", runId); } catch { /* ignore */ }
