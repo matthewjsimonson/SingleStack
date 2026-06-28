@@ -243,7 +243,7 @@ export default function CompetitiveSetup({ onDone, productId }: { onDone: () => 
         // GTM record (strategy) + the Messaging framework (positioning / value prop /
         // pillars / narrative now live in the "Messaging" section, not as old keys).
         const { data: fs } = await supabase.from("record_fields").select("field_key, value").eq("gtm_record_id", g.id)
-          .in("field_key", ["personas", "primary_persona", "icp", "industries", "key_competitors", "gtm_motion", "pricing_model",
+          .in("field_key", ["personas", "primary_persona", "icp", "industries", "gtm_motion", "pricing_model",
                              "positioning_statement", "strategic_narrative", "value_proposition", "pillar_1", "pillar_2", "pillar_3", "proof_points"]);
         const f = (k: string) => fs?.find((x) => x.field_key === k)?.value ?? null;
         const personas = f("personas") ?? f("primary_persona") ?? f("icp");
@@ -253,10 +253,11 @@ export default function CompetitiveSetup({ onDone, productId }: { onDone: () => 
         // reflects the depth of the records + messaging framework, not one thin line.
         whoLine = [whoLine, f("primary_persona"), f("icp")].filter(Boolean).join(" · ") || whoLine;
         posLine = [f("positioning_statement"), f("strategic_narrative")].filter(Boolean).join(" · ") || posLine;
-        // Industries (verticals) and key competitors are GTM strategy fields, so they
-        // pre-fill from the record and survive a competitive-board clear.
+        // Industries pre-fills from the record (a real GTM field). Competitors do
+        // NOT: they're their own entities and the board's source of truth. We never
+        // re-derive them from a sticky record field — so when you Clear, it stays
+        // clear instead of repopulating the old rivals.
         industriesLine = f("industries") ?? "";
-        competitorsLine = f("key_competitors") ?? "";
         // The "Also" window carries our messaging + motion/pricing — strong signal
         // for who actually competes with us and how.
         const pillars = [f("pillar_1"), f("pillar_2"), f("pillar_3")].filter(Boolean).join(" | ");
@@ -334,10 +335,12 @@ export default function CompetitiveSetup({ onDone, productId }: { onDone: () => 
     try {
       const { data: g } = await supabase.from("gtm_records").select("id").order("created_at").limit(1).maybeSingle();
       if (!g) return;
-      const { data: rf } = await supabase.from("record_fields").select("id, field_key").eq("gtm_record_id", g.id).in("field_key", ["industries", "key_competitors"]);
+      const { data: rf } = await supabase.from("record_fields").select("id, field_key").eq("gtm_record_id", g.id).in("field_key", ["industries"]);
+      // Persist ONLY industries (a real GTM strategy field). Competitors are NOT
+      // written back to the record — they live in the competitors table, so a Clear
+      // actually clears instead of being re-seeded from a sticky field.
       const want: [string, string, string, string][] = [
         ["industries", "Industries / verticals", ctx.industries.trim(), "Audience"],
-        ["key_competitors", "Key competitors", ctx.competitors.trim(), "Audience"],
       ];
       const adds: Record<string, unknown>[] = [];
       for (const [field_key, label, value, section] of want) {

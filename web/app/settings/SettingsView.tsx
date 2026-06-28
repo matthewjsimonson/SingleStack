@@ -135,6 +135,9 @@ export default function SettingsView() {
       if (ids.length) await supabase.from("signals").delete().in("competitor_id", ids);
       const { count: cDel } = await supabase.from("competitors").delete({ count: "exact" }).gte("created_at", "1970-01-01");
       const { count: kDel } = await supabase.from("capabilities").delete({ count: "exact" }).gte("created_at", "1970-01-01");
+      // Also drop the stale "key_competitors" field so the competitive setup can't
+      // re-derive the old rivals from the record — Clear means clear.
+      await supabase.from("record_fields").delete().eq("field_key", "key_competitors");
       setSeedNote(`Competitive board cleared — ${cDel ?? 0} competitors (with their sources, scores, battlecards, profiles) and ${kDel ?? 0} matrix rows removed. Run ✦ Guided setup on Competitive to rebuild it legit.`);
     } catch (e) { setError(e instanceof Error ? e.message : "Could not clear the competitive board."); }
     finally { setClearingComp(false); }
