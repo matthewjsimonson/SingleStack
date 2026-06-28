@@ -13,8 +13,8 @@ import TrackingTopics from "@/components/TrackingTopics";
 import SourceManager from "@/components/SourceManager";
 import CapabilityCellDrawer, { type Cell } from "@/components/CapabilityCellDrawer";
 import CompetitiveGrid from "@/components/CompetitiveGrid";
-import SignalProfile from "@/components/SignalProfile";
 import CompetitiveSetup from "@/components/CompetitiveSetup";
+import SignalProfile from "@/components/SignalProfile";
 import CompetitorFinalize from "@/components/CompetitorFinalize";
 import ProfileReadiness from "@/components/ProfileReadiness";
 import BattlecardItemDrawer, { type CardItem } from "@/components/BattlecardItemDrawer";
@@ -108,13 +108,12 @@ function ProfileTab({ productId, reload }: { productId: string | null; reload: (
     <div>
       <div className="card card-pad row-between" style={{ marginBottom: "var(--sp-4)", gap: 12, flexWrap: "wrap" }}>
         <div style={{ minWidth: 0 }}>
-          <div style={{ fontWeight: 660, fontSize: 14 }}>Competitive profile · step 1</div>
-          <div className="t-sub t-muted" style={{ fontSize: 12.5, marginTop: 2 }}>The competitive vector of your signals profile (which lives on the Signals home): where you play and who to hunt. Its job is to point the search at the right rivals. Run setup to find competitors; as you track them and build battlecards, this sharpens with what they reveal.</div>
+          <div style={{ fontWeight: 660, fontSize: 14 }}>Find competitors</div>
+          <div className="t-sub t-muted" style={{ fontSize: 12.5, marginTop: 2 }}>The guided search reads the <strong>competitive vector</strong> of your signals profile — your core attributes and who-to-hunt — to find the right rivals, then designs the matrix. Tune that vector on the <a href="/signals" style={{ color: "var(--ac-text)" }}>Signals profile</a>; run setup here to find competitors.</div>
         </div>
         <button className="btn btn-sm" onClick={() => setSetup(true)} style={{ background: "var(--ac)", color: "#fff", flexShrink: 0 }}
-          title="The guided setup: interview → confirm the picture → find rivals → design the matrix, all from your records. Run it to find competitors or to refresh your positioning.">✦ Set up profile &amp; find competitors</button>
+          title="The guided setup: interview → confirm the picture → find rivals → design the matrix, aimed by your signals profile's competitive vector.">✦ Find competitors</button>
       </div>
-      <SignalProfile scope="landscape" vectorFilter="competitive" />
     </div>
   );
 }

@@ -295,8 +295,12 @@ export default function CompetitiveSetup({ onDone, productId }: { onDone: () => 
       // home. Fold them into the search so the profile drives discovery.
       const { data: prof } = await supabase.from("signal_profiles").select("id").eq("scope", "landscape").is("competitor_id", null).maybeSingle();
       if (prof) {
-        const { data: pfs } = await supabase.from("signal_profile_fields").select("label, value, vector").eq("profile_id", prof.id).order("position");
-        const focus = (pfs ?? []).filter((f) => (f.vector === "competitive" || f.vector === "shared") && f.value?.trim()).map((f) => `- ${f.label}: ${f.value}`);
+        const { data: pfs } = await supabase.from("signal_profile_fields").select("label, value, vector, weight").eq("profile_id", prof.id);
+        // The competitive + core vectors aim the hunt; weight orders them so the
+        // search leans on the core attributes first (closest to center = direct).
+        const focus = (pfs ?? []).filter((f) => (f.vector === "competitive" || f.vector === "core") && f.value?.trim())
+          .sort((a, b) => (b.weight ?? 2) - (a.weight ?? 2))
+          .map((f) => `- [${(f.weight ?? 2) >= 3 ? "core" : (f.weight ?? 2) <= 1 ? "edge" : "standard"}] ${f.label}: ${f.value}`);
         setProfileFocus(focus.join("\n"));
       } else setProfileFocus("");
       // Pre-fill the EDITABLE fields from the records — the human can adjust,
@@ -390,7 +394,7 @@ export default function CompetitiveSetup({ onDone, productId }: { onDone: () => 
     // The signals profile's competitive vector AIMS the hunt — the user's curated
     // where-to-look. Weight it: it says which capability areas/segments and which
     // KIND of rival to search for.
-    profileFocus.trim() ? `\nFROM OUR SIGNALS PROFILE — competitive & shared vectors (curated where-to-look; aim the hunt at exactly this):\n${profileFocus.trim()}` : "",
+    profileFocus.trim() ? `\nFROM OUR SIGNALS PROFILE — competitive & core vectors, weighted (lean hardest on [core], least on [edge]; aim the hunt at exactly this):\n${profileFocus.trim()}` : "",
     // Ground the search in the FULL product & GTM records — the real depth lives
     // there (strategy, motion, pricing, technical, differentiation), not in the
     // distilled fields above. Without this the search reasons off thin summaries.

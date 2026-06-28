@@ -14,7 +14,6 @@ import { fireWorkflows } from "@/lib/triggers";
 import { signalDomain, SIGNAL_DOMAIN } from "@/lib/signals";
 import { Section, Chip, Banner } from "@/components/ui";
 import CapabilityDrawer, { type DrawerCapability } from "@/components/CapabilityDrawer";
-import SignalProfile from "@/components/SignalProfile";
 
 type Cap = { id: string; title: string; why: string | null; observed_at: string | null; metadata: { domain?: string; provider?: string; area?: string; url?: string } | null };
 type Agent = { id: string; key: string; name: string };
@@ -114,11 +113,8 @@ export default function FrontierView() {
     <div>
       <Banner>{error}</Banner>
 
-      {/* The frontier vector of the central signals profile — what to watch,
-          drawn from the Signals home. It aims this radar. */}
-      <div style={{ marginBottom: "var(--sp-4)" }}><SignalProfile scope="landscape" vectorFilter="frontier" /></div>
-
-      {/* 1. Capabilities radar */}
+      {/* 1. Capabilities radar — aimed by the technology vector of the central
+          signals profile (on the Signals home). */}
       <Section label="Capabilities" action={<button className="btn btn-secondary btn-sm" onClick={() => setLogging((v) => !v)}>{logging ? "Cancel" : "+ Log capability"}</button>}>
         {logging && (
           <form onSubmit={logCap} className="card card-pad" style={{ marginBottom: "var(--sp-3)" }}>

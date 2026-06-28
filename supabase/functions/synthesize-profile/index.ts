@@ -42,11 +42,15 @@ const SCHEMA = {
           field_key: { type: "string" },
           label: { type: "string" },
           value: { type: "string" },
-          // Which intelligence vector this node feeds. Only meaningful for the
-          // landscape (central) profile; competitor profiles set 'shared'.
-          vector: { type: "string", enum: ["shared", "competitive", "market", "frontier"] },
+          // Which vector of the signals network this node sits on. The center is
+          // 'core'; the four arms are competitive/industry/persona/technology.
+          // Competitor (battlecard) profiles set vector='core'.
+          vector: { type: "string", enum: ["core", "competitive", "industry", "persona", "technology"] },
+          // Distance from center: 3 = core (closest, highest weight), 2 = standard,
+          // 1 = edge/adjacent (farthest).
+          weight: { type: "integer", enum: [1, 2, 3] },
         },
-        required: ["field_key", "label", "value", "vector"],
+        required: ["field_key", "label", "value", "vector", "weight"],
       },
     },
   },
@@ -208,26 +212,30 @@ Deno.serve(async (req: Request) => {
       if (synthesized) {
         context += `\nSYNTHESIZED THEMES (analysis is now LIVE — fold what these MEAN into the relevant vectors):\n${synthThemes!.map((t) => `[${t.category}/${t.state} · conf ${(t.conf_level ?? 0).toFixed(2)}] ${t.title} — ${t.summary ?? ""}${t.recommendation ? ` → ${t.recommendation}` : ""}`).join("\n")}`;
       }
-      target = "our central SIGNALS PROFILE — the records-grounded map that aims discovery across every intelligence vector (competitive, market, frontier)";
-      // The central profile spans VECTORS. Each node is tagged with the vector it
-      // feeds; the intelligence tabs each read their vector to aim discovery.
+      target = "our central SIGNALS NETWORK — the records-grounded map, organised as a CORE (what we are) + four weighted vectors, that aims discovery and analysis across every intelligence tab";
+      // The signals network: a CENTER ('core') + four arms. Each node is tagged
+      // with its vector AND a WEIGHT (3 = core/closest, 2 = standard, 1 = edge).
+      // Weight = how central the node is: core features/personas/direct-rival
+      // attributes weigh 3; lesser/adjacent/edge weigh 1. The tabs read their
+      // vector to aim discovery; weight focuses it on the highest-signal nodes.
       suggestedSections = [
-        "shared vector — positioning, our_wedge: where we play and why we win, from the records. Used by every vector.",
-        "competitive vector — competitive_battlegrounds (the capability areas/segments deals are contested on), competitive_search_focus (WHERE to look for rivals: name the product modules/segments + the KIND of company that competes on each — functional substitutes, not a tidy category label), who_we_compete_with (archetypes; only name specific companies you have evidence for).",
-        "market vector — target_industries (the verticals to track), target_personas (the buyers to track), market_search_focus (WHERE to find market/persona signal: the publications, communities, forums, job postings, events worth watching for these industries/personas).",
-        "frontier vector — frontier_watch (the frontier model/platform capabilities to watch that could change what this product can do or how it's built).",
+        "core (the CENTER — what we ARE in essence): essence, positioning, our_wedge. These are weight 3. Drawn straight from the records; every vector hangs off this.",
+        "competitive vector — the attributes that pinpoint the RIGHT rivals: competitive_battlegrounds (capability areas/segments deals are contested on), competitive_search_focus (WHERE to look + the KIND of company — functional substitutes, not a tidy label), who_we_compete_with. WEIGHT: a defining head-on attribute / a direct rival archetype = 3; an adjacent or edge-case rival attribute = 1.",
+        "industry vector — the verticals we serve: target_industries, industry_search_focus (publications, analyst coverage, regulators worth watching). WEIGHT: a core ICP vertical = 3; an occasional/edge vertical = 1.",
+        "persona vector — the buyers/users we sell to: target_personas, persona_search_focus (the communities, forums, job boards, certifications where each persona's signal lives). WEIGHT: a core decision-making persona = 3; a peripheral influencer = 1.",
+        "technology vector — frontier model/platform capabilities to watch that change what we can build or how: technology_watch. WEIGHT: a capability central to our build = 3; a peripheral one = 1.",
       ].join("\n");
     }
 
     const system = [
       `You maintain a HITL "Signal Profile" — a sharp, evidence-grounded record of ${target}. It is meant to DICTATE product and GTM strategy, so be decisive and specific, never generic.`,
       scope === "competitor"
-        ? "For a competitor, this profile is the RAW BATTLECARD: the complete, honest dossier of who they are vs us, which the analyst refines into battlecard items and the messenger turns into GTM-ready copy for whatever motion the GTM record describes. Set vector='shared' on EVERY field — vectors only structure the central landscape profile, not a competitor dossier."
-        : "This is the CENTRAL SIGNALS PROFILE, built FROM our product & GTM records — NOT a restatement of them (reference them, never copy them). It is a map organised into VECTORS, and each intelligence tab reads its own vector to aim discovery. Its job is to say, per vector, WHAT TO FIND and WHERE TO LOOK — so set the right `vector` on every node: 'shared' for positioning/wedge every domain uses; 'competitive' for who-to-hunt and the axes rivals are compared on; 'market' for the industries/personas to track and where their signal lives; 'frontier' for the model/platform capabilities to watch. The *_search_focus nodes are the most important: name the SPECIFIC product modules/segments/personas to search against and the KIND of source/company to look at (functional substitutes, not a tidy category label that hides what the product really does). Do NOT fabricate competitors, market movement, or rival momentum before evidence exists — when a vector has no signals yet, say plainly what to GO FIND rather than inventing findings.",
+        ? "For a competitor, this profile is the RAW BATTLECARD: the complete, honest dossier of who they are vs us, which the analyst refines into battlecard items and the messenger turns into GTM-ready copy for whatever motion the GTM record describes. Set vector='core' and weight=2 on EVERY field — vectors/weights only structure the central signals network, not a competitor dossier."
+        : "This is the CENTRAL SIGNALS NETWORK, built FROM our product & GTM records — NOT a restatement of them (reference them, never copy them). It is a graph with a CENTER ('core' — what we ARE in essence) and four arms: 'competitive', 'industry', 'persona', 'technology'. Each intelligence tab reads its own vector to aim discovery & analysis. Set the right `vector` on every node, and a `weight` = how close to the center it sits: 3 = core (a defining attribute — a core feature, a core persona, a head-on rival attribute, a core vertical), 2 = standard, 1 = edge (adjacent/lesser). Weight is what focuses search on the RIGHT signals: the *_search_focus nodes name the SPECIFIC modules/segments/personas to search against and the KIND of source/company to look at (functional substitutes, not a tidy category label). Do NOT fabricate competitors, market movement, or momentum before evidence exists — when a vector has no signals yet, say plainly what to GO FIND.",
       "Synthesize the INTERNAL and EXTERNAL signals below (plus the records) into a headline + nodes. INTERNAL signals (what our own teams hear in the field) and EXTERNAL signals (public: reviews, launches, pricing) are both evidence; weigh corroboration across them and note where they disagree.",
       scope === "competitor"
         ? `Use these section keys where supported (snake_case): ${suggestedSections}. Always include a 'strategic_implications' section. Only assert what the evidence supports; if thin, say so and keep it short.`
-        : `Build nodes across ALL FOUR vectors, each node tagged with its vector and a snake_case field_key. Guide:\n${suggestedSections}\nEvery node carries its correct \`vector\`. Only assert what the records/evidence support; where a vector is thin, keep its nodes short and action-oriented (what to find), not padded.`,
+        : `Build the network: a CORE plus nodes across all four vectors, each node tagged with its \`vector\`, an integer \`weight\` (3 core / 2 standard / 1 edge), and a snake_case field_key. Guide:\n${suggestedSections}\nGive each vector a few weight-3 nodes (the core attributes) and, where warranted, weight-2/1 nodes (standard/edge) — the spread is what lets search prioritise. Only assert what the records/evidence support; where a vector is thin, keep its nodes short and action-oriented (what to find), not padded.`,
       // The synthesis gate, made explicit to the model.
       scope === "landscape"
         ? (synthesized
@@ -261,7 +269,7 @@ Deno.serve(async (req: Request) => {
 
     const block = message.content.find((b) => b.type === "text");
     if (!block || block.type !== "text") throw new Error(`no draft returned (stop_reason: ${message.stop_reason})`);
-    const draft = JSON.parse(block.text) as { headline: string; fields: { field_key: string; label: string; value: string; vector?: string }[] };
+    const draft = JSON.parse(block.text) as { headline: string; fields: { field_key: string; label: string; value: string; vector?: string; weight?: number }[] };
     return json({ draft, mode: scope === "landscape" ? (synthesized ? "analysis" : "discovery") : "competitor", evidence: { internal: comp.filter((s) => s.origin === "internal").length, external: comp.filter((s) => s.origin !== "internal").length } });
   } catch (e) {
     return json({ error: e instanceof Error ? e.message : String(e) }, 500);

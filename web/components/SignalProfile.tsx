@@ -11,19 +11,22 @@ import { getOrgId } from "@/lib/org";
 import { Banner, Chip } from "@/components/ui";
 import { Markdown } from "@/components/Markdown";
 
-// A node's VECTOR — which intelligence domain it feeds. 'shared' = positioning/
-// wedge every domain draws on. The central (landscape) profile holds all four;
-// an intelligence tab passes vectorFilter to read just its slice.
-export type Vector = "competitive" | "market" | "frontier" | "shared";
+// The signals network: a CENTER ('core' — what we are) plus four arms. Each
+// node sits on a vector and carries a WEIGHT (3 core/closest … 1 edge/farthest).
+export type Vector = "core" | "competitive" | "industry" | "persona" | "technology";
 const VECTORS: { key: Vector; label: string; blurb: string }[] = [
-  { key: "shared", label: "Shared — positioning & wedge", blurb: "What every domain draws on: where you play and why you win." },
-  { key: "competitive", label: "Competitive", blurb: "Who to hunt and the axes you compete on — aims the competitor search." },
-  { key: "market", label: "Market", blurb: "Industries & personas to track — aims the market discovery." },
-  { key: "frontier", label: "Frontier", blurb: "Frontier capabilities & models to watch." },
+  { key: "core", label: "Core — what we are", blurb: "The center: essence, positioning, wedge. Every arm hangs off this." },
+  { key: "competitive", label: "Competitive", blurb: "The attributes that pinpoint the right rivals — aims the competitor search." },
+  { key: "industry", label: "Industry", blurb: "The verticals you serve — aims industry discovery." },
+  { key: "persona", label: "Persona", blurb: "The buyers/users you sell to — aims persona discovery." },
+  { key: "technology", label: "Technology", blurb: "Frontier model/platform capabilities to watch." },
 ];
 const vectorMeta = (v?: string) => VECTORS.find((x) => x.key === v) ?? VECTORS[0];
+// Weight = distance from center. 3 core (closest, highest signal weight) … 1 edge.
+const WEIGHTS: { w: number; label: string }[] = [{ w: 3, label: "Core" }, { w: 2, label: "Standard" }, { w: 1, label: "Edge" }];
+const weightLabel = (w?: number) => WEIGHTS.find((x) => x.w === (w ?? 2))?.label ?? "Standard";
 
-type Field = { field_key: string; label: string; value: string; origin?: string; vector?: Vector };
+type Field = { field_key: string; label: string; value: string; origin?: string; vector?: Vector; weight?: number };
 type Profile = { id: string; headline: string | null };
 
 export default function SignalProfile({ scope, competitorId, competitorName, vectorFilter }: { scope: "landscape" | "competitor"; competitorId?: string; competitorName?: string; vectorFilter?: Vector }) {
@@ -45,7 +48,7 @@ export default function SignalProfile({ scope, competitorId, competitorName, vec
     const { data: p } = await qb.maybeSingle();
     if (p) {
       setProfile(p as Profile); setHeadline(p.headline ?? "");
-      const { data: fs } = await supabase.from("signal_profile_fields").select("field_key, label, value, origin, vector").eq("profile_id", p.id).order("position");
+      const { data: fs } = await supabase.from("signal_profile_fields").select("field_key, label, value, origin, vector, weight").eq("profile_id", p.id).order("position");
       setFields((fs ?? []) as Field[]);
     } else { setProfile(null); setHeadline(""); setFields([]); }
     setDirty(false); setLoading(false);
@@ -66,13 +69,13 @@ export default function SignalProfile({ scope, competitorId, competitorName, vec
   async function draftAI() {
     setBusy("ai"); setError(null); setNote(null);
     try {
-      const { data, error } = await supabase.functions.invoke("synthesize-profile", { body: { scope, competitor_id: competitorId, current: fields.map((f) => ({ field_key: f.field_key, label: f.label, value: f.value, vector: f.vector ?? "shared" })) } });
+      const { data, error } = await supabase.functions.invoke("synthesize-profile", { body: { scope, competitor_id: competitorId, current: fields.map((f) => ({ field_key: f.field_key, label: f.label, value: f.value, vector: f.vector ?? "core", weight: f.weight ?? 2 })) } });
       if (error) throw error;
       if (data?.error) throw new Error(data.error);
       const d = data?.draft;
       if (!d) throw new Error("No draft returned.");
       setHeadline(d.headline ?? headline);
-      setFields((d.fields ?? []).map((f: Field) => ({ ...f, origin: "ai", vector: (f.vector ?? "shared") as Vector })));
+      setFields((d.fields ?? []).map((f: Field) => ({ ...f, origin: "ai", vector: (f.vector ?? "core") as Vector, weight: f.weight ?? 2 })));
       setDirty(true);
       const ev = data?.evidence;
       const sigCount = (ev?.internal ?? 0) + (ev?.external ?? 0);
@@ -95,7 +98,7 @@ export default function SignalProfile({ scope, competitorId, competitorName, vec
       await supabase.from("signal_profiles").update({ headline: headline.trim() || null, updated_at: new Date().toISOString() }).eq("id", profile.id);
       // Replace the field set (simplest correct path for an editable section list).
       await supabase.from("signal_profile_fields").delete().eq("profile_id", profile.id);
-      const rows = fields.filter((f) => f.field_key.trim() && f.label.trim()).map((f, i) => ({ org_id: orgId, profile_id: profile.id, field_key: f.field_key.trim(), label: f.label.trim(), value: f.value.trim() || null, position: i, origin: f.origin ?? "human", vector: f.vector ?? "shared" }));
+      const rows = fields.filter((f) => f.field_key.trim() && f.label.trim()).map((f, i) => ({ org_id: orgId, profile_id: profile.id, field_key: f.field_key.trim(), label: f.label.trim(), value: f.value.trim() || null, position: i, origin: f.origin ?? "human", vector: f.vector ?? "core", weight: f.weight ?? 2 }));
       if (rows.length) { const { error } = await supabase.from("signal_profile_fields").insert(rows); if (error) throw error; }
       setDirty(false); setNote("Saved."); load();
     } catch (e) { setError(e instanceof Error ? e.message : "Could not save."); }
@@ -158,7 +161,7 @@ export default function SignalProfile({ scope, competitorId, competitorName, vec
 
   function setField(i: number, patch: Partial<Field>) { setFields((fs) => fs.map((f, j) => (j === i ? { ...f, ...patch } : f))); setDirty(true); }
   function removeField(i: number) { setFields((fs) => fs.filter((_, j) => j !== i)); setDirty(true); }
-  function addField(vector: Vector = "shared") { setFields((fs) => [...fs, { field_key: `section_${fs.length + 1}`, label: "New section", value: "", origin: "human", vector }]); setDirty(true); }
+  function addField(vector: Vector = "core") { setFields((fs) => [...fs, { field_key: `node_${fs.length + 1}`, label: "New node", value: "", origin: "human", vector, weight: 2 }]); setDirty(true); }
 
   if (loading) return <div className="t-sub t-muted">Loading…</div>;
 
@@ -167,7 +170,7 @@ export default function SignalProfile({ scope, competitorId, competitorName, vec
   if (vectorFilter) {
     const vm = vectorMeta(vectorFilter);
     const short = vm.label.split(" — ")[0];
-    const slice = fields.filter((f) => (f.vector ?? "shared") === vectorFilter && f.value.trim());
+    const slice = fields.filter((f) => (f.vector ?? "core") === vectorFilter && f.value.trim()).sort((a, b) => (b.weight ?? 2) - (a.weight ?? 2));
     return (
       <div className="card card-pad">
         <div className="row-between" style={{ gap: 12, flexWrap: "wrap", marginBottom: 10 }}>
@@ -196,7 +199,7 @@ export default function SignalProfile({ scope, competitorId, competitorName, vec
 
   const title = scope === "landscape" ? "Signals profile — what to find, track & analyze" : `Signal Profile — ${competitorName ?? "competitor"} (the raw battlecard)`;
   const blurb = scope === "landscape"
-    ? "Built from your product & GTM records: your positioning & wedge (shared), plus what to find on each vector — competitors to hunt, industries & personas to track, frontier to watch. Each intelligence tab draws on its vector to aim discovery. Editable by hand; it sharpens as signals come in."
+    ? "One intelligence network, built from your product & GTM records: a core (what you are) plus four vectors — competitive, industry, persona, technology. Each node carries a weight (core → edge) so search focuses on what matters. The intelligence tabs draw on their vector. Editable by hand; it sharpens as signals come in."
     : "Where you stand against this competitor — carried over from setup, then sharpened with internal (deals, calls) + external (public) signals. Editable by hand.";
 
   if (!profile) {
@@ -248,11 +251,14 @@ export default function SignalProfile({ scope, competitorId, competitorName, vec
               <input className="input" value={f.label} onChange={(e) => setField(i, { label: e.target.value })} style={{ fontWeight: 640, fontSize: 13.5, maxWidth: 320 }} />
               <div className="row gap-2" style={{ alignItems: "center" }}>
                 {f.origin === "ai" && <Chip tone="violet">AI</Chip>}
-                {showVectors && (
-                  <select className="select" value={f.vector ?? "shared"} onChange={(e) => setField(i, { vector: e.target.value as Vector })} style={{ fontSize: 11.5, padding: "3px 6px" }} title="Which intelligence vector this node feeds">
+                {showVectors && (<>
+                  <select className="select" value={f.vector ?? "core"} onChange={(e) => setField(i, { vector: e.target.value as Vector })} style={{ fontSize: 11.5, padding: "3px 6px" }} title="Which vector of the network this node sits on">
                     {VECTORS.map((v) => <option key={v.key} value={v.key}>{v.label.split(" — ")[0]}</option>)}
                   </select>
-                )}
+                  <select className="select" value={f.weight ?? 2} onChange={(e) => setField(i, { weight: Number(e.target.value) })} style={{ fontSize: 11.5, padding: "3px 6px" }} title="Weight — how close to the center: Core (highest) … Edge">
+                    {WEIGHTS.map((w) => <option key={w.w} value={w.w}>{w.label}</option>)}
+                  </select>
+                </>)}
                 <button type="button" className="btn btn-secondary btn-sm" onClick={() => setPreviewKey(previewKey === f.field_key ? null : f.field_key)}>{previewKey === f.field_key ? "Edit" : "Preview"}</button>
                 <button type="button" className="btn btn-secondary btn-sm" onClick={() => removeField(i)} style={{ color: "var(--rd-text)" }}>Remove</button>
               </div>
@@ -274,7 +280,7 @@ export default function SignalProfile({ scope, competitorId, competitorName, vec
             </div>
           </>);
         }
-        const groups = VECTORS.map((v) => ({ v, entries: fields.map((f, i) => ({ f, i })).filter(({ f }) => (f.vector ?? "shared") === v.key) }));
+        const groups = VECTORS.map((v) => ({ v, entries: fields.map((f, i) => ({ f, i })).filter(({ f }) => (f.vector ?? "core") === v.key).sort((a, b) => (b.f.weight ?? 2) - (a.f.weight ?? 2)) }));
         return (<>
           <div className="stack-4" style={{ marginTop: "var(--sp-3)" }}>
             {fields.length === 0 && <div className="t-sub t-muted" style={{ fontSize: 12.5 }}>No nodes yet. Draft with AI to build the profile across vectors, or add one by hand.</div>}
