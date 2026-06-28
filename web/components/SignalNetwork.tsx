@@ -113,6 +113,14 @@ export default function SignalNetwork({ fields, openVector, onOpenVector, onOpen
           </circle>
           {RING.map((r, i) => <circle key={i} cx={CX} cy={CY} r={r} fill="none" stroke="var(--border)" strokeWidth={1} strokeDasharray="2 7" opacity={0.4} />)}
 
+          {/* hover RAY — a soft beam of the arm's color out of the nucleus */}
+          {!openVector && hoverArm && (() => {
+            const arm = ARMS.find((a) => a.key === hoverArm)!;
+            const hw = 22, r = RING[2] + 22;
+            const d = `M ${CX} ${CY} L ${P(arm.angle - hw, r).join(" ")} A ${r} ${r} 0 0 1 ${P(arm.angle + hw, r).join(" ")} Z`;
+            return <path d={d} fill={arm.color} opacity={0.12} filter="url(#soft)" style={{ pointerEvents: "none" }} />;
+          })()}
+
           {/* arms: filaments + node dots */}
           {armLayouts.map(({ arm, placed }) => (
             <g key={arm.key} opacity={armOpacity(arm.key)} style={{ transition: "opacity 240ms" }}>
