@@ -37,7 +37,7 @@ const PUSH: Partial<Record<Vector, { label: string; href: string }>> = {
   technology: { label: "Frontier", href: "/frontier" },
 };
 
-type Field = { field_key: string; label: string; value: string; origin?: string; vector?: Vector; weight?: number };
+type Field = { field_key: string; label: string; value: string; origin?: string; vector?: Vector; weight?: number; parent_key?: string | null };
 type Profile = { id: string; headline: string | null };
 
 export default function SignalProfile({ scope, competitorId, competitorName, vectorFilter }: { scope: "landscape" | "competitor"; competitorId?: string; competitorName?: string; vectorFilter?: Vector }) {
@@ -89,7 +89,7 @@ export default function SignalProfile({ scope, competitorId, competitorName, vec
     const { data: p } = await qb.maybeSingle();
     if (p) {
       setProfile(p as Profile); setHeadline(p.headline ?? "");
-      const { data: fs } = await supabase.from("signal_profile_fields").select("field_key, label, value, origin, vector, weight").eq("profile_id", p.id).order("position");
+      const { data: fs } = await supabase.from("signal_profile_fields").select("field_key, label, value, origin, vector, weight, parent_key").eq("profile_id", p.id).order("position");
       setFields((fs ?? []) as Field[]);
     } else { setProfile(null); setHeadline(""); setFields([]); }
     setDirty(false); setLoading(false);
@@ -170,7 +170,17 @@ export default function SignalProfile({ scope, competitorId, competitorName, vec
       await supabase.from("signal_profiles").update({ headline: headline.trim() || null, updated_at: new Date().toISOString() }).eq("id", profile.id);
       // Replace the field set (simplest correct path for an editable section list).
       await supabase.from("signal_profile_fields").delete().eq("profile_id", profile.id);
-      const rows = fields.filter((f) => f.field_key.trim() && f.label.trim()).map((f, i) => ({ org_id: orgId, profile_id: profile.id, field_key: f.field_key.trim(), label: f.label.trim(), value: f.value.trim() || null, position: i, origin: f.origin ?? "human", vector: f.vector ?? "core", weight: f.weight ?? 2 }));
+      const kept = fields.filter((f) => f.field_key.trim() && f.label.trim());
+      const keptKeys = new Set(kept.map((f) => f.field_key.trim()));
+      // parent_key only survives if the parent is still in the set (and on the
+      // same vector) — a dangling parent would just re-root at the hub anyway.
+      const parentFor = (f: Field) => {
+        const p = f.parent_key?.trim();
+        if (!p || p === f.field_key.trim() || !keptKeys.has(p)) return null;
+        const parent = kept.find((k) => k.field_key.trim() === p);
+        return parent && (parent.vector ?? "core") === (f.vector ?? "core") ? p : null;
+      };
+      const rows = kept.map((f, i) => ({ org_id: orgId, profile_id: profile.id, field_key: f.field_key.trim(), label: f.label.trim(), value: f.value.trim() || null, position: i, origin: f.origin ?? "human", vector: f.vector ?? "core", weight: f.weight ?? 2, parent_key: parentFor(f) }));
       if (rows.length) { const { error } = await supabase.from("signal_profile_fields").insert(rows); if (error) throw error; }
       setDirty(false); setNote("Saved."); load();
     } catch (e) { setError(e instanceof Error ? e.message : "Could not save."); }
