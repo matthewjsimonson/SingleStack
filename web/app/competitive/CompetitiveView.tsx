@@ -114,6 +114,9 @@ function ProfileTab({ productId, reload }: { productId: string | null; reload: (
         <button className="btn btn-sm" onClick={() => setSetup(true)} style={{ background: "var(--ac)", color: "#fff", flexShrink: 0 }}
           title="The guided setup: interview → confirm the picture → find rivals → design the matrix, aimed by your signals profile's competitive vector.">✦ Find competitors</button>
       </div>
+      {/* The competitive vector of the central signals profile — the slice of
+          the brain that aims the rival hunt. Read-only here; tuned on Signals. */}
+      <SignalProfile scope="landscape" vectorFilter="competitive" />
     </div>
   );
 }

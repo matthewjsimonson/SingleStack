@@ -71,6 +71,51 @@ const VECTOR_LENS: Record<string, string | undefined> = {
   industry: "industry", persona: "persona", technology: "tech",
 };
 
+// The signals network aims the pull LIVE: read the CURRENT landscape profile's
+// vector (and, for a node-bound source, that node's branch) at pull time and
+// compile it into the search steer. This is what makes the profile the brain —
+// tune a node and the very next pull hunts differently, no source re-creation.
+// Best-effort: a missing/empty profile just means no steer.
+// deno-lint-ignore no-explicit-any
+async function profileSteer(supabase: any, orgId: string, vector: string, nodeKey: string | null): Promise<string> {
+  const { data: prof } = await supabase.from("signal_profiles").select("id")
+    .eq("org_id", orgId).eq("scope", "landscape").is("competitor_id", null).maybeSingle();
+  if (!prof) return "";
+  const { data: fs } = await supabase.from("signal_profile_fields")
+    .select("field_key, label, value, weight, parent_key")
+    .eq("profile_id", prof.id).eq("vector", vector).order("weight", { ascending: false });
+  type N = { field_key: string; label: string; value: string | null; weight: number | null; parent_key: string | null };
+  const nodes: N[] = ((fs ?? []) as N[]).filter((f) => f.value?.trim());
+  if (!nodes.length) return "";
+  const W = (w: number | null) => (w ?? 2) >= 3 ? "core" : (w ?? 2) <= 1 ? "edge" : "standard";
+  if (nodeKey) {
+    const n = nodes.find((f) => f.field_key === nodeKey);
+    if (n) {
+      const path: N[] = [];
+      const seen = new Set([n.field_key]);
+      let cur: N | undefined = n;
+      while (cur?.parent_key) {
+        const p = nodes.find((f) => f.field_key === cur!.parent_key);
+        if (!p || seen.has(p.field_key)) break;
+        path.unshift(p); seen.add(p.field_key); cur = p;
+      }
+      const kids = nodes.filter((f) => f.parent_key === n.field_key);
+      return [
+        `PROFILE STEER — this pull feeds ONE node of the org's signals network (${vector} vector).`,
+        path.length ? `Branch: ${path.map((p) => p.label).join(" › ")} › ${n.label}` : "",
+        `Node "${n.label}" (${W(n.weight)}): ${n.value}`,
+        kids.length ? `Its sub-nodes: ${kids.map((k) => `${k.label} — ${k.value}`).join(" | ")}` : "",
+        "Find signals that bear on this statement — evidence that confirms it, contradicts it, or moves it.",
+      ].filter(Boolean).join("\n").slice(0, 1200);
+    }
+  }
+  return [
+    `PROFILE STEER — this pull feeds the ${vector.toUpperCase()} vector of the org's signals network. Its current nodes, closest-to-core first:`,
+    ...nodes.slice(0, 14).map((f) => `- [${W(f.weight)}] ${f.label}: ${f.value}`),
+    "Prioritize signals about the core nodes; catch edge nodes but don't chase them.",
+  ].join("\n").slice(0, 1600);
+}
+
 // YouTube without auth: oEmbed gives title/author; we also pull the watch page
 // text (description/metadata). Honest v1 — full transcript extraction is the
 // next slice; this still yields a real, attributable signal. SSRF-guarded via
@@ -240,6 +285,14 @@ Deno.serve(async (req: Request) => {
       .eq("id", source_id).single();
     if (sErr || !source) return json({ error: "source not found" }, 404);
     const orgId = source.org_id as string;
+
+    // Vector/node-bound sources are aimed by the LIVE profile at every pull.
+    if (source.signal_vector) {
+      try {
+        const steer = await profileSteer(supabase, orgId, source.signal_vector as string, (source.signal_node_key as string | null) ?? null);
+        if (steer) source.guidance = [steer, source.guidance].filter(Boolean).join("\n");
+      } catch { /* steer is best-effort; the pull still runs on its own terms */ }
+    }
 
     // MCP sources pull through an attached, connected MCP connection. Resolve it
     // up front so the live-gate can admit them and the fetch step can reach it.

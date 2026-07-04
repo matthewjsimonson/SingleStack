@@ -14,6 +14,7 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import { createClient } from "@/lib/supabase/client";
 import type { Vector } from "@/components/SignalProfile";
 import NodeSources from "@/components/NodeSources";
+import { compileVectorBrief } from "@/lib/profileBrief";
 
 type Field = { field_key: string; label: string; value: string; origin?: string; vector?: Vector; weight?: number; parent_key?: string | null };
 type Turn = { role: "q" | "a"; text: string };
@@ -259,9 +260,18 @@ export default function VectorCurator({
             </div>
           )}
 
+          {/* What this vector tells the brain — the live steer every pull on this
+              arm inherits. Grows as the branch grows. */}
+          {entries.length > 0 && (
+            <div className="card card-pad" style={{ background: "var(--panel-2)" }}>
+              <div className="t-label" style={{ marginBottom: 6 }}>What this vector tells the brain</div>
+              <div className="t-mono-xs" style={{ whiteSpace: "pre-wrap", color: "var(--ts)", lineHeight: 1.55 }}>{compileVectorBrief(entries.map((e) => e.f), vector)}</div>
+              <div className="t-sub t-muted" style={{ fontSize: 11, marginTop: 6 }}>Compiled live into every pull aimed at this vector — accept or edit nodes above and the next pull hunts differently.</div>
+            </div>
+          )}
           {/* Vector-level sources — feed every node in this arm (web now). */}
           <NodeSources vector={vector} nodeKey={null}
-            seed={entries.find((e) => e.f.field_key.includes("search_focus"))?.f.value
+            seed={compileVectorBrief(entries.map((e) => e.f), vector)
               || entries.filter((e) => (e.f.weight ?? 2) >= 2).map((e) => e.f.value).join(" · ").slice(0, 600)} />
         </div>
 

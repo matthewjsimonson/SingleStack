@@ -17,6 +17,7 @@ import { Markdown } from "@/components/Markdown";
 import SourceManager from "@/components/SourceManager";
 import TrackingTopics from "@/components/TrackingTopics";
 import MarketSetup from "@/components/MarketSetup";
+import SignalProfile from "@/components/SignalProfile";
 
 type Meta = { domain?: string; lens?: string; industry?: string; persona?: string } | null;
 type Signal = { id: string; title: string; why: string | null; conf_label: string | null; conf_level: number | null; observed_at: string | null; origin: string; metadata: Meta };
@@ -135,6 +136,15 @@ export default function MarketView() {
           It reads the industry + persona vectors of the central signals profile
           (on the Signals home) to aim discovery. */}
       <MarketSetup onDone={load} />
+
+      {/* The industry + persona vectors of the central signals profile — the
+          slices of the brain that aim this tab's discovery. Read-only here;
+          tuned on the Signals home. */}
+      <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(340px, 1fr))", gap: "var(--sp-4)", marginBottom: "var(--sp-4)" }}>
+        <SignalProfile scope="landscape" vectorFilter="industry" />
+        <SignalProfile scope="landscape" vectorFilter="persona" />
+      </div>
+
       <SourceManager title="Market sources" />
       <TrackingTopics category="market" suggestions={["Category & market-size shifts", "Buyer/persona behavior changes", "Regulatory or platform changes", "Emerging entrants & substitutes"]} />
       <div className="t-sub t-muted" style={{ fontSize: 11.5, margin: "0 0 var(--sp-4)" }}>Market signals flow into <strong>Product strategy</strong> and <strong>GTM strategy</strong> themes — synthesize there to fold them into your strategy.</div>

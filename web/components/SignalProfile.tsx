@@ -14,6 +14,7 @@ import { Markdown } from "@/components/Markdown";
 import SignalNetwork from "@/components/SignalNetwork";
 import VectorCurator from "@/components/VectorCurator";
 import NodeSources from "@/components/NodeSources";
+import { compileNodeBrief, compileVectorBrief } from "@/lib/profileBrief";
 
 // The signals network: a CENTER ('core' — what we are) plus four arms. Each
 // node sits on a vector and carries a WEIGHT (3 core/closest … 1 edge/farthest).
@@ -277,14 +278,21 @@ export default function SignalProfile({ scope, competitorId, competitorName, vec
         {slice.length === 0 ? (
           <div className="t-sub t-muted" style={{ fontSize: 12.5 }}>No {short.toLowerCase()} guidance in your signals profile yet — set it up on the <strong>Signals</strong> home and it aims this tab&apos;s discovery.</div>
         ) : (
-          <div className="stack-3">
-            {slice.map((f, i) => (
-              <div key={i}>
-                <div className="t-label" style={{ marginBottom: 4 }}>{f.label}</div>
-                <Markdown text={f.value} />
-              </div>
-            ))}
-          </div>
+          <>
+            <div className="stack-3">
+              {slice.map((f, i) => (
+                <div key={i}>
+                  <div className="t-label" style={{ marginBottom: 4 }}>{f.label}</div>
+                  <Markdown text={f.value} />
+                </div>
+              ))}
+            </div>
+            {/* The exact steer this tab's pulls inherit, compiled live. */}
+            <details style={{ marginTop: 12 }}>
+              <summary className="t-sub t-muted" style={{ fontSize: 11.5, cursor: "pointer" }}>What this vector tells the brain (the live pull steer)</summary>
+              <div className="t-mono-xs" style={{ whiteSpace: "pre-wrap", color: "var(--ts)", lineHeight: 1.55, marginTop: 6, background: "var(--panel-2)", border: "1px solid var(--border)", borderRadius: "var(--radius-sm)", padding: "8px 10px" }}>{compileVectorBrief(fields, vectorFilter)}</div>
+            </details>
+          </>
         )}
       </div>
     );
@@ -408,8 +416,16 @@ export default function SignalProfile({ scope, competitorId, competitorName, vec
                       <span className="t-sub t-muted" style={{ fontSize: 11.5, alignSelf: "center" }}>grounded in your records</span>
                     </div>
                   </div>
+                  {/* What this node tells the brain — the LIVE steer compiled into
+                      every pull this node feeds. Edit the node (and Save) and the
+                      next pull hunts differently. */}
+                  <div className="card card-pad" style={{ background: "var(--panel-2)" }}>
+                    <div className="t-label" style={{ marginBottom: 6 }}>What this node tells the brain</div>
+                    <div className="t-mono-xs" style={{ whiteSpace: "pre-wrap", color: "var(--ts)", lineHeight: 1.55 }}>{compileNodeBrief(fields, f.field_key) || "Give the node a statement — that statement becomes the search steer."}</div>
+                    <div className="t-sub t-muted" style={{ fontSize: 11, marginTop: 6 }}>Compiled into every pull this node feeds, live at pull time. Edit the statement and Save — the next pull hunts differently.</div>
+                  </div>
                   {/* Sources — where this node pulls from (web now; tools next). */}
-                  <NodeSources vector={(f.vector ?? "core") as Vector} nodeKey={f.field_key} seed={f.value} />
+                  <NodeSources vector={(f.vector ?? "core") as Vector} nodeKey={f.field_key} seed={compileNodeBrief(fields, f.field_key)} />
                 </div>
                 <div style={{ padding: "12px 20px", borderTop: "1px solid var(--border)" }} className="row-between">
                   <button className="btn btn-secondary btn-sm" onClick={() => { removeField(ni); setOpenNode(null); }} style={{ color: "var(--rd-text)" }}>Remove node</button>
