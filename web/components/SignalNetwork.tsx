@@ -31,8 +31,7 @@ export type NetField = {
 // one deliberately dark surface); icons are tiny inline strokes, no icon lib.
 const VECTOR_STYLE: Record<Exclude<Vector, "core">, { label: string; color: string; icon: string }> = {
   competitive: { label: "Competitive", color: "var(--net-competitive)", icon: "M8 2v3M8 11v3M2 8h3M11 8h3M8 5.5A2.5 2.5 0 1 1 8 10.5 2.5 2.5 0 0 1 8 5.5" },
-  industry: { label: "Industry", color: "var(--net-industry)", icon: "M3 14V7l3-2v9M6 14V5l4-3v12M10 14V6l3 2v6M2 14h12" },
-  persona: { label: "Persona", color: "var(--net-persona)", icon: "M8 3.5A2.4 2.4 0 1 1 8 8.3 2.4 2.4 0 0 1 8 3.5M3.5 13.5c.6-2.6 2.4-4 4.5-4s3.9 1.4 4.5 4" },
+  market: { label: "Market", color: "var(--net-industry)", icon: "M8 2A6 6 0 1 1 8 14 6 6 0 0 1 8 2M2 8h12M8 2c-1.8 1.7-2.7 3.8-2.7 6S6.2 12.3 8 14c1.8-1.7 2.7-3.8 2.7-6S9.8 3.7 8 2" },
   technology: { label: "Technology", color: "var(--net-technology)", icon: "M5 5h6v6H5zM8 2v3M8 11v3M2 8h3M11 8h3M4 4l1.5 1.5M12 4l-1.5 1.5M4 12l1.5-1.5M12 12l-1.5-1.5" },
 };
 
@@ -254,7 +253,10 @@ export default function SignalNetwork({ fields, openVector, onOpenVector, onOpen
           {arms.map(({ v, angle, placed, links, count }) => {
             const st = VECTOR_STYLE[v];
             const [hx, hy] = P(angle, R_HUB);
-            const [tx, ty] = P(angle, R_LABEL);
+            // Clamp the name into the frame — however many arms, wherever they point.
+            const [tx0, ty0] = P(angle, R_LABEL);
+            const tx = Math.min(W - 118, Math.max(118, tx0));
+            const ty = Math.min(H - 58, Math.max(42, ty0));
             const [c1x, c1y] = P(angle, 96);
             const [c2x, c2y] = P(angle, R_HUB - 26);
             const isOpen = openVector === v;

@@ -19,12 +19,21 @@ import { compileVectorBrief } from "@/lib/profileBrief";
 type Field = { field_key: string; label: string; value: string; origin?: string; vector?: Vector; weight?: number; parent_key?: string | null };
 type Turn = { role: "q" | "a"; text: string };
 
-const WLABEL = (w?: number) => (w ?? 2) >= 3 ? "Core" : (w ?? 2) <= 1 ? "Edge" : "Standard";
-const WHY_WEIGHT: Record<number, string> = {
-  3: "sits closest to the center — a defining attribute, searched first",
-  2: "standard distance — tracked steadily",
-  1: "edge of the branch — adjacent, caught but not chased",
-};
+// Weight vocabulary is the vector's own: market grades by applicability
+// (direct → adjacent → indirect); the rest by closeness to the core.
+const VOCAB = (v?: string): Record<number, string> =>
+  v === "market" ? { 3: "Direct", 2: "Adjacent", 1: "Indirect" } : { 3: "Core", 2: "Standard", 1: "Edge" };
+const WHY_WEIGHT = (v?: string): Record<number, string> => v === "market"
+  ? {
+    3: "directly applicable — your market, searched first",
+    2: "adjacent — nearby segments and buyers, tracked steadily",
+    1: "indirect — general movement, caught but not chased",
+  }
+  : {
+    3: "sits closest to the center — a defining attribute, searched first",
+    2: "standard distance — tracked steadily",
+    1: "edge of the branch — adjacent, caught but not chased",
+  };
 
 const slugify = (s: string) => s.toLowerCase().replace(/[^a-z0-9]+/g, "_").replace(/^_+|_+$/g, "").slice(0, 48) || "node";
 
@@ -189,7 +198,7 @@ export default function VectorCurator({
                       <input className="input" value={p.label} onChange={(e) => patchProposal(p.field_key, { label: e.target.value })} style={{ fontWeight: 620, fontSize: 13, maxWidth: 220 }} />
                       <div className="row gap-2" style={{ alignItems: "center", flexShrink: 0 }}>
                         <select className="select" value={Math.min(3, Math.max(1, p.weight ?? 2))} onChange={(e) => patchProposal(p.field_key, { weight: Number(e.target.value) })} style={{ fontSize: 11.5, padding: "3px 6px" }} title="Weight — closeness to the center">
-                          {[3, 2, 1].map((w) => <option key={w} value={w}>{WLABEL(w)}</option>)}
+                          {[3, 2, 1].map((w) => <option key={w} value={w}>{VOCAB(vector)[w]}</option>)}
                         </select>
                         <button className="btn btn-secondary btn-sm" onClick={() => discardProposal(p)} style={{ color: "var(--rd-text)" }}>Discard</button>
                         <button className="btn btn-sm" onClick={() => acceptProposal(p)}>Accept</button>
@@ -216,7 +225,7 @@ export default function VectorCurator({
               <label className="field"><span className="t-label">Attaches to <span className="t-muted" style={{ fontWeight: 400, textTransform: "none", letterSpacing: 0 }}>— the hub starts a new branch; a node grows its chain</span></span>
                 <select className="select" value={addParent} onChange={(e) => { setAddParent(e.target.value); setAddWeight(null); }}>
                   <option value="">The {label} hub (new branch)</option>
-                  {entries.map(({ f }) => <option key={f.field_key} value={f.field_key}>{f.label} ({WLABEL(f.weight)})</option>)}
+                  {entries.map(({ f }) => <option key={f.field_key} value={f.field_key}>{f.label} ({VOCAB(vector)[Math.min(3, Math.max(1, f.weight ?? 2))]})</option>)}
                 </select></label>
               <label className="field"><span className="t-label">Name</span>
                 <input className="input" value={addLabel} onChange={(e) => setAddLabel(e.target.value)} placeholder="Short name — e.g. a rival, a vertical, a persona, a capability" /></label>
@@ -224,7 +233,7 @@ export default function VectorCurator({
                 <textarea className="textarea" rows={3} value={addValue} onChange={(e) => setAddValue(e.target.value)} placeholder="A declarative fact about you, plus where its signal lives — specific enough that search knows what to hunt." /></label>
               <label className="field"><span className="t-label">Weight</span>
                 <select className="select" value={effWeight} onChange={(e) => setAddWeight(Number(e.target.value))}>
-                  {[3, 2, 1].map((w) => <option key={w} value={w}>{WLABEL(w)} — {WHY_WEIGHT[w]}</option>)}
+                  {[3, 2, 1].map((w) => <option key={w} value={w}>{VOCAB(vector)[w]} — {WHY_WEIGHT(vector)[w]}</option>)}
                 </select></label>
               {addWeight === null && <div className="t-mono-xs t-muted" style={{ marginTop: -4, marginBottom: 8 }}>suggested from where it attaches — adjust if it matters more or less</div>}
               <div className="row gap-2">
@@ -242,7 +251,7 @@ export default function VectorCurator({
                     <input className="input" value={f.label} onChange={(e) => setField(i, { label: e.target.value })} style={{ fontWeight: 620, fontSize: 13, maxWidth: 220 }} />
                     <div className="row gap-2" style={{ alignItems: "center", flexShrink: 0 }}>
                       <select className="select" value={Math.min(3, Math.max(1, f.weight ?? 2))} onChange={(e) => setField(i, { weight: Number(e.target.value) })} style={{ fontSize: 11.5, padding: "3px 6px" }} title="Weight — closeness to the center">
-                        {[3, 2, 1].map((w) => <option key={w} value={w}>{WLABEL(w)}</option>)}
+                        {[3, 2, 1].map((w) => <option key={w} value={w}>{VOCAB(vector)[w]}</option>)}
                       </select>
                       <button className="btn btn-secondary btn-sm" onClick={() => removeField(i)} style={{ color: "var(--rd-text)" }}>✕</button>
                     </div>

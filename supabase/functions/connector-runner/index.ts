@@ -65,10 +65,12 @@ const liveKind = (kind: string) => AUTH_KINDS_LIVE.has(kind);
 // Map a signals-network VECTOR to the signal domain/lens its harvest belongs to,
 // so a source aimed at a vector routes to the right intel surface.
 const VECTOR_DOMAIN: Record<string, string> = {
-  core: "signals", competitive: "competitive", industry: "market", persona: "market", technology: "capability",
+  core: "signals", competitive: "competitive", market: "market", technology: "capability",
+  // legacy vector values (pre-three-vector fold) still route correctly
+  industry: "market", persona: "market",
 };
 const VECTOR_LENS: Record<string, string | undefined> = {
-  industry: "industry", persona: "persona", technology: "tech",
+  technology: "tech", industry: "industry", persona: "persona",
 };
 
 // The signals network aims the pull LIVE: read the CURRENT landscape profile's

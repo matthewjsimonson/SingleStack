@@ -137,12 +137,11 @@ export default function MarketView() {
           (on the Signals home) to aim discovery. */}
       <MarketSetup onDone={load} />
 
-      {/* The industry + persona vectors of the central signals profile — the
-          slices of the brain that aim this tab's discovery. Read-only here;
-          tuned on the Signals home. */}
-      <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(340px, 1fr))", gap: "var(--sp-4)", marginBottom: "var(--sp-4)" }}>
-        <SignalProfile scope="landscape" vectorFilter="industry" />
-        <SignalProfile scope="landscape" vectorFilter="persona" />
+      {/* The market vector of the central signals profile — the slice of the
+          brain that aims this tab's discovery (industries, personas, market
+          news; direct → adjacent → indirect). Tuned on the Signals home. */}
+      <div style={{ marginBottom: "var(--sp-4)" }}>
+        <SignalProfile scope="landscape" vectorFilter="market" />
       </div>
 
       <SourceManager title="Market sources" />

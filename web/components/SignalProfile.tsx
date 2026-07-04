@@ -16,25 +16,26 @@ import VectorCurator from "@/components/VectorCurator";
 import NodeSources from "@/components/NodeSources";
 import { compileNodeBrief, compileVectorBrief } from "@/lib/profileBrief";
 
-// The signals network: a CENTER ('core' — what we are) plus four arms. Each
-// node sits on a vector and carries a WEIGHT (3 core/closest … 1 edge/farthest).
-export type Vector = "core" | "competitive" | "industry" | "persona" | "technology";
+// The signals network: a CENTER ('core' — what we are) plus THREE intelligence
+// arms. Each node sits on a vector and carries a WEIGHT (3 closest … 1 edge);
+// what the weight MEANS is the vector's own vocabulary (market: direct →
+// adjacent → indirect).
+export type Vector = "core" | "competitive" | "market" | "technology";
 const VECTORS: { key: Vector; label: string; blurb: string }[] = [
   { key: "core", label: "Core — what we are", blurb: "The center: essence, positioning, wedge. Every arm hangs off this." },
-  { key: "competitive", label: "Competitive", blurb: "The attributes that pinpoint the right rivals — aims the competitor search." },
-  { key: "industry", label: "Industry", blurb: "The verticals you serve — aims industry discovery." },
-  { key: "persona", label: "Persona", blurb: "The buyers/users you sell to — aims persona discovery." },
-  { key: "technology", label: "Technology", blurb: "Frontier model/platform capabilities to watch." },
+  { key: "competitive", label: "Competitive", blurb: "Competing products — the attributes that pinpoint the right rivals and aim the competitor search." },
+  { key: "market", label: "Market", blurb: "The applicable market: industries, personas, and market news — direct (closest), adjacent, and indirect." },
+  { key: "technology", label: "Technology", blurb: "What powers the product, what powers building it, and what powers GTM — frontier and open-source models across all three." },
 ];
 const vectorMeta = (v?: string) => VECTORS.find((x) => x.key === v) ?? VECTORS[0];
-// Weight = distance from center. 3 core (closest, highest signal weight) … 1 edge.
-const WEIGHTS: { w: number; label: string }[] = [{ w: 3, label: "Core" }, { w: 2, label: "Standard" }, { w: 1, label: "Edge" }];
-const weightLabel = (w?: number) => WEIGHTS.find((x) => x.w === (w ?? 2))?.label ?? "Standard";
+// Weight = distance from center; each vector says it in its own words.
+const weightVocab = (v?: Vector): Record<number, string> =>
+  v === "market" ? { 3: "Direct", 2: "Adjacent", 1: "Indirect" } : { 3: "Core", 2: "Standard", 1: "Edge" };
+const weightLabel = (v?: Vector, w?: number) => weightVocab(v)[Math.min(3, Math.max(1, w ?? 2))];
 // Where each vector PUSHES — the intel area that applies it to search/analyze.
 const PUSH: Partial<Record<Vector, { label: string; href: string }>> = {
   competitive: { label: "Competitive", href: "/competitive" },
-  industry: { label: "Market intel", href: "/market" },
-  persona: { label: "Market intel", href: "/market" },
+  market: { label: "Market intel", href: "/market" },
   technology: { label: "Frontier", href: "/frontier" },
 };
 
@@ -78,10 +79,9 @@ export default function SignalProfile({ scope, competitorId, competitorName, vec
   // Plain-language role of a vector — so a human gets what a node here does.
   const nodeRole: Record<Vector, string> = {
     core: "defines who we are — the frame every search inherits.",
-    competitive: "tells search which rivals to find and how to judge them.",
-    industry: "tells search which verticals to track and where their signal lives.",
-    persona: "tells search which buyers to track and where they gather.",
-    technology: "tells search which model/platform shifts to watch.",
+    competitive: "tells search which competing products to find and how to judge them.",
+    market: "tells search which industries, personas, and market movements to track — direct first, then adjacent, then indirect.",
+    technology: "tells search which technology shifts to watch — what we embed, what we build with, and what runs our GTM.",
   };
 
   const load = useCallback(async () => {
@@ -383,13 +383,13 @@ export default function SignalProfile({ scope, competitorId, competitorName, vec
                 </div>
                 <div style={{ flex: 1, overflowY: "auto", padding: "16px 20px" }} className="stack-3">
                   <div className="t-sub t-muted" style={{ fontSize: 12, background: "var(--panel-2)", border: "1px solid var(--border)", borderRadius: 8, padding: "8px 10px" }}>
-                    This is a <strong>{vm.label.split(" — ")[0]}</strong> node — it {nodeRole[(f.vector ?? "core") as Vector]} Its <strong>weight</strong> ({weightLabel(f.weight)}) sets how hard search leans on it: core nodes are searched first, edge nodes are caught but not chased.
+                    This is a <strong>{vm.label.split(" — ")[0]}</strong> node — it {nodeRole[(f.vector ?? "core") as Vector]} Its <strong>weight</strong> ({weightLabel(f.vector, f.weight)}) sets how hard search leans on it: the closest nodes are searched first, the farthest are caught but not chased.
                   </div>
                   <label className="field"><span className="t-label">Node</span>
                     <input className="input" value={f.label} onChange={(e) => setField(ni, { label: e.target.value })} placeholder="Short name" /></label>
                   <label className="field"><span className="t-label">Weight <span className="t-muted" style={{ fontWeight: 400 }}>— closeness to the core</span></span>
                     <select className="select" value={f.weight ?? 2} onChange={(e) => setField(ni, { weight: Number(e.target.value) })}>
-                      {WEIGHTS.map((w) => <option key={w.w} value={w.w}>{w.label}</option>)}
+                      {[3, 2, 1].map((w) => <option key={w} value={w}>{weightVocab(f.vector)[w]}</option>)}
                     </select></label>
                   {/* Where this node sits on its branch — and grow the chain from here */}
                   {(() => {

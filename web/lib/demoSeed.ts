@@ -198,34 +198,34 @@ export async function loadDemoData(supabase: SupabaseClient, orgId: string): Pro
       ["competitive_search_focus", "Where to hunt", "Hunt functional substitutes, not category labels: tools that turn product decisions into working software, AI agents inside PM suites, and platforms unifying product + GTM. Watch G2 comparisons, launch posts, pricing pages, and agent-roadmap announcements.", "competitive", 3, null],
       ["win_loss_patterns", "Win/loss pattern", "We win where the team feels tool-boundary pain — signal lost between product and GTM; we lose to single-leg depth when one champion owns one job.", "competitive", 2, null],
 
-      // ---- INDUSTRY — verticals root; sub-segments chain ----
-      ["vert_b2b_saas", "Series A–C B2B SaaS", "Series A–C B2B software companies building product-led are the core market — big enough to hold PM and GTM roles, small enough to feel every tool seam.", "industry", 3, null],
-      ["vert_plg_native", "PLG-native startups", "PLG-native startups (self-serve first, usage-priced) are the sharpest fit — the whole company already runs the loop we operate.", "industry", 2, "vert_b2b_saas"],
-      ["vert_devtools", "DevTools", "DevTools companies are the strong early vertical — technical PMs prototype naturally and their GTM is PLG by default.", "industry", 2, "vert_b2b_saas"],
-      ["vert_vertical_saas", "Vertical SaaS on PLG", "Vertical SaaS teams adopting PLG motions are the expansion edge — they arrive when the sales-led motion stalls and bring compliance questions with them.", "industry", 1, "vert_plg_native"],
-      ["industry_use_cases", "Same loop, new ground", "The use case is constant across verticals — compress signal → decision → prototype → PQL; what changes is where each vertical's signal lives and who ratifies.", "industry", 2, null],
-      ["regulatory_landscape", "AI governance pressure", "AI-governance expectations (EU-AI-Act-class rules, SOC 2 scrutiny of AI features) shape agentic-tool adoption — our human-ratification gate is the compliance answer.", "industry", 1, null],
-      ["industry_search_focus", "Where the signal lives", "Watch where PLG operators actually talk: PLG and growth communities, product-leadership newsletters, launch feeds for PLG-native startups, and analyst coverage of AI in product management.", "industry", 3, null],
+      // ---- MARKET — one branch: industries, personas, market news, graded by
+      //      applicability (3 direct · 2 adjacent · 1 indirect) ----
+      ["mkt_b2b_saas", "Series A–C B2B SaaS", "Series A–C B2B software companies building product-led are the direct market — big enough to hold PM and GTM roles, small enough to feel every tool seam.", "market", 3, null],
+      ["mkt_plg_native", "PLG-native startups", "PLG-native startups (self-serve first, usage-priced) are the sharpest fit — the whole company already runs the loop we operate.", "market", 2, "mkt_b2b_saas"],
+      ["mkt_devtools", "DevTools", "DevTools companies are the strong early segment — technical PMs prototype naturally and their GTM is PLG by default.", "market", 2, "mkt_b2b_saas"],
+      ["mkt_vertical_saas", "Vertical SaaS on PLG", "Vertical SaaS teams adopting PLG motions are the indirect edge — they arrive when the sales-led motion stalls and bring compliance questions with them.", "market", 1, "mkt_plg_native"],
+      ["p_head_product", "Head of Product", "The Head of Product / VP Product is the economic buyer — they own the tool budget and personally feel the broken sense→ship thread.", "market", 3, null],
+      ["p_pm", "Product manager", "The product manager is the daily operator — senses, decides, and now legitimately prototypes with AI instead of writing another spec.", "market", 2, "p_head_product"],
+      ["p_pm_signal", "Where PMs talk", "PM signal lives where they compare tools and vent about sprawl: product communities, PM podcasts and newsletters, and AI-prototyping threads.", "market", 1, "p_pm"],
+      ["p_pmm", "PMM / GTM lead", "The PMM or GTM lead is the second daily operator — turns the same living record into messaging, battlecards, and campaigns without re-asking product.", "market", 3, null],
+      ["p_growth", "Growth / RevOps", "Growth and RevOps leads adopt the sell loop — usage → PQL scoring — arriving with the data and staying for the pipeline.", "market", 2, "p_pmm"],
+      ["p_founder", "Founder-operator", "Series A founders run product AND GTM personally — the whole-loop pitch lands hardest on them, and they ratify fastest.", "market", 2, null],
+      ["market_objections", "Standing objections", "'We already have Productboard and Notion' and 'AI can't be trusted to change our records' are the two standing objections — the Build wedge answers the first, ratification the second.", "market", 2, null],
+      ["regulatory_landscape", "AI governance pressure", "AI-governance expectations (EU-AI-Act-class rules, SOC 2 scrutiny of AI features) shape agentic-tool adoption — our human-ratification gate is the compliance answer.", "market", 1, null],
+      ["market_search_focus", "Where the market talks", "Watch where PLG operators actually talk: PLG and growth communities, product-leadership newsletters and podcasts, launch feeds for PLG-native startups, analyst coverage of AI in product management, and hiring signals (first PMM, growth PM, product-ops-plus-AI postings).", "market", 3, null],
 
-      // ---- PERSONA — buyers root; users and their signal chain off ----
-      ["p_head_product", "Head of Product", "The Head of Product / VP Product is the economic buyer — they own the tool budget and personally feel the broken sense→ship thread.", "persona", 3, null],
-      ["p_pm", "Product manager", "The product manager is the daily operator — senses, decides, and now legitimately prototypes with AI instead of writing another spec.", "persona", 2, "p_head_product"],
-      ["p_pm_signal", "Where PMs talk", "PM signal lives where they compare tools and vent about sprawl: product communities, PM podcasts and newsletters, and AI-prototyping threads.", "persona", 1, "p_pm"],
-      ["p_pmm", "PMM / GTM lead", "The PMM or GTM lead is the second daily operator — turns the same living record into messaging, battlecards, and campaigns without re-asking product.", "persona", 3, null],
-      ["p_growth", "Growth / RevOps", "Growth and RevOps leads adopt the sell loop — usage → PQL scoring — arriving with the data and staying for the pipeline.", "persona", 2, "p_pmm"],
-      ["p_founder", "Founder-operator", "Series A founders run product AND GTM personally — the whole-loop pitch lands hardest on them, and they ratify fastest.", "persona", 2, null],
-      ["persona_jobs_pains", "The shared job", "Every persona shares one job: keep product and GTM moving on a single thread of truth without becoming the human router between tools.", "persona", 2, null],
-      ["persona_objections", "Standing objections", "'We already have Productboard and Notion' and 'AI can't be trusted to change our records' are the two standing objections — the Build wedge answers the first, ratification the second.", "persona", 2, null],
-      ["persona_search_focus", "Demand signals", "Track first-PMM and growth-PM hiring, job posts pairing product operations with AI, and community talk about PMs prototyping — each is demand for the loop.", "persona", 3, null],
-
-      // ---- TECHNOLOGY — load-bearing platforms root; the stack chains off ----
-      ["t_frontier_llms", "Frontier models", "Frontier LLMs are load-bearing: agent quality, prototype quality, and synthesis honesty all ride the current model generation.", "technology", 3, null],
-      ["t_agent_sdks", "Agent frameworks", "Agent frameworks and SDKs set what our executive agents can do — tool use, long-horizon work, and governed autonomy ride their release cadence.", "technology", 2, "t_frontier_llms"],
+      // ---- TECHNOLOGY — three uses root the branches: what we EMBED, what we
+      //      BUILD with, what powers GTM; frontier AND open-source across all ----
+      ["tech_embedded", "Embedded in the product", "Frontier and open-source models are embedded in the product itself — agent quality, synthesis honesty, and proposal quality all ride the current model generation.", "technology", 3, null],
+      ["t_agent_sdks", "Agent frameworks", "Agent frameworks and SDKs set what our executive agents can do — tool use, long-horizon work, and governed autonomy ride their release cadence.", "technology", 2, "tech_embedded"],
       ["t_mcp", "MCP fabric", "MCP is the connector fabric — every tool a customer already runs becomes a signal source or an action surface without bespoke integrations.", "technology", 2, "t_agent_sdks"],
-      ["t_prototyping", "Prompt-to-app engines", "Prompt-to-app and code-generation capability is the Build module's engine — releases that improve working-app generation move our core wedge directly.", "technology", 3, null],
+      ["t_open_models", "Open-source models", "Open-source model releases set the floor for embedded cost and the ceiling for self-hosted demands — watch open-weight releases that approach frontier quality on our workloads.", "technology", 2, "tech_embedded"],
+      ["tech_build", "Powers building the product", "Prompt-to-app and code-generation capability is the Build module's engine — every release that improves working-app generation moves our core wedge directly.", "technology", 3, null],
+      ["t_codegen_watch", "Codegen step changes", "Long-horizon agents, computer use, and code-executing agents are the step changes to watch — each one redraws what 'the PM prototypes it themselves' means.", "technology", 2, "tech_build"],
+      ["tech_gtm", "Powers our GTM", "AI products that run GTM work — content generation, signal enrichment, outreach, scoring — are both our tooling and our teachers; what wins there sets buyer expectations for our sell loop.", "technology", 3, null],
       ["platform_dependencies", "Infra we ride", "We ride managed Postgres/edge-function infrastructure and frontier-model APIs — pricing or capability shifts there move our margins and roadmap.", "technology", 2, null],
-      ["frontier_capabilities_to_watch", "Capability watch", "Long-horizon agents, computer use, and code-executing agents are the step changes to watch — each one redraws what 'the PM prototypes it themselves' means.", "technology", 3, null],
-      ["technology_search_focus", "Where tech signal lives", "Track model-provider changelogs and launch posts, agent-framework releases, MCP registry growth, and prompt-to-app tool launches.", "technology", 3, null],
+      ["ai_guide_posture", "The AI guide", "Across all three uses — embedding, building, and GTM — we are the customer's AI guide: the platform that knows which model or tool fits which job, frontier or open-source, and folds each shift into the loop.", "technology", 3, null],
+      ["technology_search_focus", "Where tech signal lives", "Track frontier-provider changelogs and launch posts, open-weight model releases and benchmarks, agent-framework releases, MCP registry growth, prompt-to-app tool launches, and AI-for-GTM product launches.", "technology", 3, null],
       ["tech_threats_opportunities", "Platform risk", "The standing platform risk: a frontier provider ships a native idea-to-app-to-GTM loop — watch provider product moves, not just model releases.", "technology", 2, null],
     ];
     const { error } = await supabase.from("signal_profile_fields").insert(

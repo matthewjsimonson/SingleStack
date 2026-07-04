@@ -108,11 +108,12 @@ Deno.serve(async (req: Request) => {
     const { data: prof } = await supabase.from("signal_profiles").select("id").eq("scope", "landscape").is("competitor_id", null).maybeSingle();
     if (prof) {
       const { data: pfs } = await supabase.from("signal_profile_fields").select("label, value, vector, weight").eq("profile_id", prof.id);
-      // The industry + persona vectors (and core) aim the watches; weight orders
-      // them so the core verticals/personas are prioritized over edge ones.
-      profileMarket = (pfs ?? []).filter((f) => (f.vector === "industry" || f.vector === "persona" || f.vector === "core") && f.value?.trim())
+      // The market vector (and core) aims the watches; weight = applicability
+      // (direct → adjacent → indirect), so direct segments/personas lead.
+      // Legacy 'industry'/'persona' vector values still count as market.
+      profileMarket = (pfs ?? []).filter((f) => (f.vector === "market" || f.vector === "industry" || f.vector === "persona" || f.vector === "core") && f.value?.trim())
         .sort((a, b) => ((b.weight as number) ?? 2) - ((a.weight as number) ?? 2))
-        .map((f) => `- [${f.vector}/${((f.weight as number) ?? 2) >= 3 ? "core" : ((f.weight as number) ?? 2) <= 1 ? "edge" : "standard"}] ${f.label}: ${f.value}`).join("\n");
+        .map((f) => `- [${f.vector}/${((f.weight as number) ?? 2) >= 3 ? "direct" : ((f.weight as number) ?? 2) <= 1 ? "indirect" : "adjacent"}] ${f.label}: ${f.value}`).join("\n");
     }
 
     // ---- existing market watches, so we don't re-propose ----
@@ -125,7 +126,7 @@ Deno.serve(async (req: Request) => {
       `Be RUTHLESSLY focused: propose at most ${targetCount} watches — the segments that are core ICP AND capability-backed. If we list 15 industries, watch the few that matter most; say what you left out in 'note'. A few aligned watches beat broad coverage that floods the feed.`,
       "Lenses: 'industry' (a vertical we serve), 'persona' (a buyer/user we serve), 'analyst' (category coverage e.g. Gartner/Forrester for our category), 'tech' (category/platform shifts that change what buyers expect). kinds = which live search-backed sources fit (press, social, reviews, web_search).",
       "Ground everything in the records below. Never invent a segment we don't serve or a capability we don't have.",
-      "If a SIGNALS PROFILE (industry & persona vectors) is provided, treat it as the curated AIM — prioritize the highest-weight ([core]) segments and the specific sources/communities it names; it is the user's own where-to-look.",
+      "If a SIGNALS PROFILE (market vector) is provided, treat it as the curated AIM — prioritize the [direct] segments and personas and the specific sources/communities it names; it is the user's own where-to-look.",
     ].join("\n");
 
     const userText = [
@@ -137,7 +138,7 @@ Deno.serve(async (req: Request) => {
       industries ? `Industries / verticals: ${industries}` : "Industries: (not specified)",
       personas ? `Primary persona(s): ${personas}` : "",
       icp ? `ICP: ${icp}` : "",
-      profileMarket ? `\nFROM OUR SIGNALS PROFILE — industry & persona vectors, weighted (lean hardest on [core], least on [edge]; aim the watches at exactly these segments & sources):\n${profileMarket}` : "",
+      profileMarket ? `\nFROM OUR SIGNALS PROFILE — the market vector, graded by applicability (lean hardest on [direct], least on [indirect]; aim the watches at exactly these segments & sources):\n${profileMarket}` : "",
       existing ? `\nAlready watched (don't duplicate): ${existing}` : "",
       `\nPropose up to ${targetCount} aligned market watches now.`,
     ].filter(Boolean).join("\n");
