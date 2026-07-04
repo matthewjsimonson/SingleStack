@@ -24,6 +24,7 @@ import MapView from "./MapView";
 import SignalDrawer, { type DrawerSignal } from "@/components/SignalDrawer";
 import ThemeDrawer from "@/components/ThemeDrawer";
 import SignalProfile from "@/components/SignalProfile";
+import AutomationHealth from "@/components/AutomationHealth";
 import { useAgentRun, AgentProgress, type AgentRun } from "@/components/AgentProgress";
 
 type Source = { id: string; label: string; icon: string; origin: string };
@@ -202,14 +203,15 @@ export default function SignalsView() {
         <SignalProfile scope="landscape" />
       ) : tab === "map" ? (
         <MapView productFilter={active} onOpenTheme={setOpenThemeId} />
-      ) : tab === "home" ? (
+      ) : tab === "home" ? (<>
+        <AutomationHealth />
         <Home
           signals={signalsScoped} themes={themesScoped} productThemes={productThemes} gtmThemes={gtmThemes}
           highSignals={highSignals} unsorted={unsorted} internalCount={internalCount} externalCount={externalCount}
           sourceById={sourceById} synthRun={synthRun} onSynthesize={synthesize} setCategory={setCategory} goLens={setTab}
           reload={load} productFilter={active} onOpen={setOpenSignal} onOpenTheme={setOpenThemeId}
         />
-      ) : (
+      </>) : (
         <LensTab
           lens={tab} signals={signalsScoped.filter((s) => inLens(s, tab))} originFilter={originFilter}
           onOriginFilter={setOriginFilter} sourceById={sourceById} setCategory={setCategory} onOpen={setOpenSignal}
