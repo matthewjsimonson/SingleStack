@@ -55,10 +55,11 @@ export default function SignalProfile({ scope, competitorId, competitorName, vec
   const [previewKey, setPreviewKey] = useState<string | null>(null);
   const [openVector, setOpenVector] = useState<Vector | null>(null); // which vector is zoomed
   const [curating, setCurating] = useState(false);                   // vector-level interview drawer
+  const [curateParent, setCurateParent] = useState<string | null>(null); // preselected attach point
   const [openNode, setOpenNode] = useState<string | null>(null);     // node-level drawer (field_key)
   const [refineText, setRefineText] = useState("");
   const [refining, setRefining] = useState(false);
-  function zoomTo(v: Vector | null) { setOpenVector(v); setCurating(false); setOpenNode(null); }
+  function zoomTo(v: Vector | null) { setOpenVector(v); setCurating(false); setCurateParent(null); setOpenNode(null); }
 
   // Refine ONE node with AI — sharpen it, or apply a free-text instruction.
   async function refineNode(ni: number, instruction: string) {
@@ -110,13 +111,13 @@ export default function SignalProfile({ scope, competitorId, competitorName, vec
   async function draftAI() {
     setBusy("ai"); setError(null); setNote(null);
     try {
-      const { data, error } = await supabase.functions.invoke("synthesize-profile", { body: { scope, competitor_id: competitorId, current: fields.map((f) => ({ field_key: f.field_key, label: f.label, value: f.value, vector: f.vector ?? "core", weight: f.weight ?? 2 })) } });
+      const { data, error } = await supabase.functions.invoke("synthesize-profile", { body: { scope, competitor_id: competitorId, current: fields.map((f) => ({ field_key: f.field_key, label: f.label, value: f.value, vector: f.vector ?? "core", weight: f.weight ?? 2, parent_key: f.parent_key ?? null })) } });
       if (error) throw error;
       if (data?.error) throw new Error(data.error);
       const d = data?.draft;
       if (!d) throw new Error("No draft returned.");
       setHeadline(d.headline ?? headline);
-      setFields((d.fields ?? []).map((f: Field) => ({ ...f, origin: "ai", vector: (f.vector ?? "core") as Vector, weight: f.weight ?? 2 })));
+      setFields((d.fields ?? []).map((f: Field) => ({ ...f, origin: "ai", vector: (f.vector ?? "core") as Vector, weight: f.weight ?? 2, parent_key: f.parent_key ?? null })));
       setDirty(true);
       const ev = data?.evidence;
       const sigCount = (ev?.internal ?? 0) + (ev?.external ?? 0);
@@ -132,26 +133,35 @@ export default function SignalProfile({ scope, competitorId, competitorName, vec
   }
 
   // Draft ONE vector — focused synthesis for that arm (built on the core),
-  // tuned to that vector's own search/analysis. Replaces only that vector's
-  // nodes; the rest of the network is untouched.
-  async function draftVector(v: Vector, transcript: { role: "q" | "a"; text: string }[] = []) {
-    if (vecBusy || busy) return;
+  // tuned to that vector's own search/analysis. Returns PROPOSALS: nothing
+  // lands on the network until the human accepts each node in the curator.
+  async function draftVector(v: Vector, transcript: { role: "q" | "a"; text: string }[] = []): Promise<Field[] | null> {
+    if (vecBusy || busy) return null;
     setVecBusy(v); setError(null); setNote(null);
     try {
-      const { data, error } = await supabase.functions.invoke("synthesize-profile", { body: { scope: "landscape", vector: v, transcript, current: fields.map((f) => ({ field_key: f.field_key, label: f.label, value: f.value, vector: f.vector ?? "core", weight: f.weight ?? 2 })) } });
+      const { data, error } = await supabase.functions.invoke("synthesize-profile", { body: { scope: "landscape", vector: v, transcript, current: fields.map((f) => ({ field_key: f.field_key, label: f.label, value: f.value, vector: f.vector ?? "core", weight: f.weight ?? 2, parent_key: f.parent_key ?? null })) } });
       if (error) throw error;
       if (data?.error) throw new Error(data.error);
       const d = data?.draft;
       if (!d) throw new Error("No draft returned.");
-      const incoming: Field[] = (d.fields ?? []).map((f: Field) => ({ ...f, origin: "ai", vector: v, weight: f.weight ?? 2 }));
-      // Swap in this vector's nodes; keep every other vector as-is.
-      setFields((prev) => [...prev.filter((f) => (f.vector ?? "core") !== v), ...incoming]);
-      if (v === "core" && d.headline) setHeadline(d.headline);
-      setDirty(true);
+      if (v === "core" && d.headline) { setHeadline(d.headline); setDirty(true); }
       const meta = vectorMeta(v);
-      setNote(`Drafted the ${meta.label.split(" — ")[0]} vector — ${incoming.length} node(s)${data?.mode === "analysis" ? ", analysis mode" : ""}. Review, Save${PUSH[v] ? `, then Push to ${PUSH[v]!.label}` : ""}.`);
-    } catch (e) { setError(e instanceof Error ? e.message : "Could not draft that vector."); }
+      const incoming: Field[] = (d.fields ?? []).map((f: Field) => ({ ...f, origin: "ai", vector: v, weight: f.weight ?? 2, parent_key: f.parent_key ?? null }));
+      setNote(`Proposed ${incoming.length} node(s) for ${meta.label.split(" — ")[0]}${data?.mode === "analysis" ? " (analysis mode)" : ""} — accept the ones that are true.`);
+      return incoming;
+    } catch (e) { setError(e instanceof Error ? e.message : "Could not draft that vector."); return null; }
     finally { setVecBusy(null); }
+  }
+
+  // Accept one reviewed node onto the network (replaces by field_key if it
+  // already exists). Still unsaved until Save — the second gate.
+  function upsertNode(n: Field) {
+    setFields((fs) => {
+      const i = fs.findIndex((f) => f.field_key === n.field_key);
+      if (i >= 0) return fs.map((f, j) => (j === i ? { ...f, ...n } : f));
+      return [...fs, n];
+    });
+    setDirty(true);
   }
 
   // Push a vector to its intel area — where it's applied to search/analyze.
@@ -243,7 +253,8 @@ export default function SignalProfile({ scope, competitorId, competitorName, vec
 
   function setField(i: number, patch: Partial<Field>) { setFields((fs) => fs.map((f, j) => (j === i ? { ...f, ...patch } : f))); setDirty(true); }
   function removeField(i: number) { setFields((fs) => fs.filter((_, j) => j !== i)); setDirty(true); }
-  function addField(vector: Vector = "core") { setFields((fs) => [...fs, { field_key: `node_${fs.length + 1}`, label: "New node", value: "", origin: "human", vector, weight: 2 }]); setDirty(true); }
+  // Competitor dossiers keep the plain add (flat sections, no vectors/branches).
+  function addField(vector: Vector = "core") { setFields((fs) => [...fs, { field_key: `node_${fs.length + 1}`, label: "New section", value: "", origin: "human", vector, weight: 2 }]); setDirty(true); }
 
   if (loading) return <div className="t-sub t-muted">Loading…</div>;
 
@@ -338,11 +349,11 @@ export default function SignalProfile({ scope, competitorId, competitorName, vec
           return (
             <VectorCurator
               vector={openVector} label={v.label.split(" — ")[0]} blurb={v.blurb}
-              entries={entries} onClose={() => setCurating(false)}
-              setField={setField} removeField={removeField} addField={addField}
+              entries={entries} onClose={() => { setCurating(false); setCurateParent(null); }}
+              setField={setField} removeField={removeField} upsertNode={upsertNode}
               generate={draftVector} generating={vecBusy === openVector}
               onSave={save} onPush={() => pushVector(openVector)} pushLabel={PUSH[openVector]?.label}
-              dirty={dirty} savingBusy={busy === "save"}
+              dirty={dirty} savingBusy={busy === "save"} initialParent={curateParent}
             />
           );
         })()}
@@ -372,6 +383,20 @@ export default function SignalProfile({ scope, competitorId, competitorName, vec
                     <select className="select" value={f.weight ?? 2} onChange={(e) => setField(ni, { weight: Number(e.target.value) })}>
                       {WEIGHTS.map((w) => <option key={w.w} value={w.w}>{w.label}</option>)}
                     </select></label>
+                  {/* Where this node sits on its branch — and grow the chain from here */}
+                  {(() => {
+                    const parent = f.parent_key ? fields.find((x) => x.field_key === f.parent_key) : null;
+                    const kids = fields.filter((x) => x.parent_key === f.field_key);
+                    return (
+                      <div className="row-between" style={{ alignItems: "center", gap: 8 }}>
+                        <div className="t-mono-xs t-muted" style={{ minWidth: 0 }}>
+                          branches off {parent ? parent.label : `the ${vm.label.split(" — ")[0]} hub`}{kids.length ? ` · ${kids.length} node${kids.length === 1 ? "" : "s"} branch off it` : ""}
+                        </div>
+                        <button className="btn btn-secondary btn-sm" style={{ flexShrink: 0 }}
+                          onClick={() => { setOpenNode(null); setCurateParent(f.field_key); setCurating(true); }}>+ Branch off this node</button>
+                      </div>
+                    );
+                  })()}
                   <label className="field"><span className="t-label">Statement <span className="t-muted" style={{ fontWeight: 400 }}>— a fact about us, declarative</span></span>
                     <textarea className="textarea" rows={6} value={f.value} onChange={(e) => setField(ni, { value: e.target.value })} placeholder="e.g. AI-built working prototypes are our core battleground." /></label>
                   {/* Refine with AI — sharpen, or steer with an instruction */}

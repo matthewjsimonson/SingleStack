@@ -49,8 +49,12 @@ const SCHEMA = {
           // Distance from center: 3 = core (closest, highest weight), 2 = standard,
           // 1 = edge/adjacent (farthest).
           weight: { type: "integer", enum: [1, 2, 3] },
+          // Branching: the field_key of the SAME-vector node this one chains off
+          // ("" = none — the node roots at the vector's hub). A more specific
+          // facet of another node should branch off it, one step further out.
+          parent_key: { type: "string" },
         },
-        required: ["field_key", "label", "value", "vector", "weight"],
+        required: ["field_key", "label", "value", "vector", "weight", "parent_key"],
       },
     },
   },
@@ -113,7 +117,7 @@ Deno.serve(async (req: Request) => {
     { global: { headers: { Authorization: authHeader } } },
   );
 
-  let input: { scope?: string; competitor_id?: string; vector?: string; step?: string; instruction?: string; node?: { label?: string; value?: string; weight?: number }; transcript?: { role: string; text: string }[]; current?: { field_key: string; label: string; value: string | null; vector?: string }[] };
+  let input: { scope?: string; competitor_id?: string; vector?: string; step?: string; instruction?: string; node?: { label?: string; value?: string; weight?: number }; transcript?: { role: string; text: string }[]; current?: { field_key: string; label: string; value: string | null; vector?: string; weight?: number; parent_key?: string | null }[] };
   try { input = await req.json(); } catch { return json({ error: "invalid JSON body" }, 400); }
   // Optional single-VECTOR draft: only that arm (+ the core it hangs off) is
   // (re)built, so each vector can be drafted for its own search/analysis.
@@ -379,6 +383,10 @@ Deno.serve(async (req: Request) => {
       scope === "landscape"
         ? "VOICE: every node is a declarative STATEMENT about us — present tense, affirmative, self-contained. Never a question, never a rebuttal or negation ('unlike X…', 'we don't…'), never a to-do. Name the thing and assert what's true of it (e.g. 'AI-built working prototypes are our core battleground'; 'Head of Product is the economic buyer'). The label is the node's short name; the value is the statement."
         : "",
+      // BRANCHES — the network is chains, not a flat list.
+      scope === "landscape"
+        ? "BRANCHES: nodes CHAIN. When a node is a more specific facet of another node in the SAME vector (a sub-segment of a vertical, a specific rival under an archetype, a niche community under a persona), set its parent_key to that node's field_key — it sits one step further out on the branch, and its weight is one lower than its parent's. Weight-3 nodes root the branches (parent_key=\"\"); don't chain deeper than 3 steps. Structural *_search_focus nodes root at the hub (parent_key=\"\")."
+        : "Set parent_key=\"\" on every field (competitor dossiers are flat).",
       // Full & current — the user's standard: existence is not completeness.
       "Make EVERY section FULL and CURRENT. Re-evaluate each against the CURRENT product & GTM records and the latest signals/battlecards, and UPDATE it whenever they've moved — never leave a thin, vague, or stale section just because it already has text." + (input.current?.length ? " You are REFRESHING the existing profile (provided): fold the new evidence into each section and keep what still holds, but don't preserve a stale section just because a human wrote it — improve it." : ""),
     ].filter(Boolean).join("\n");

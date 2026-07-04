@@ -18,7 +18,7 @@
 // component can later draw the agent ecosystem: departments as vectors, agents
 // as nodes — general near the hub, task-specific further out.
 
-import { useMemo, useState } from "react";
+import { useMemo, useState, type CSSProperties } from "react";
 import type { Vector } from "@/components/SignalProfile";
 
 export type NetField = {
@@ -170,20 +170,27 @@ export default function SignalNetwork({ fields, openVector, onOpenVector, onOpen
     });
   }, []);
 
-  // Zoom: focus the open arm (or the core) at the frame center.
+  // Zoom: fit the open arm's (or the core's) actual bounds to the frame, so
+  // the view recalibrates to whatever the branch has grown into — and returns
+  // to the identity fit when you back out.
   let transform = "";
-  if (openVector && openVector !== "core") {
-    const arm = arms.find((a) => a.v === openVector);
-    if (arm) {
-      const focusDist = arm.placed.length
-        ? arm.placed.reduce((s, p) => s + Math.hypot(p.x - CX, p.y - CY), 0) / arm.placed.length
-        : R_HUB + 60;
-      const S = 1.55, [fx, fy] = P(arm.angle, focusDist);
-      transform = `translate(${CX - S * fx} ${CY - S * fy}) scale(${S})`;
+  if (openVector) {
+    let xs: number[], ys: number[];
+    if (openVector === "core") {
+      xs = [CX - 130, CX + 130, ...corePlaced.map((p) => p.x)];
+      ys = [CY - 130, CY + 130, ...corePlaced.map((p) => p.y)];
+    } else {
+      const arm = arms.find((a) => a.v === openVector);
+      const [hx, hy] = P(arm?.angle ?? 0, R_HUB);
+      xs = [hx - 30, hx + 30, ...(arm?.placed.map((p) => p.x) ?? [])];
+      ys = [hy - 30, hy + 30, ...(arm?.placed.map((p) => p.y) ?? [])];
     }
-  } else if (openVector === "core") {
-    const S = 1.8;
-    transform = `translate(${CX - S * CX} ${CY - S * CY}) scale(${S})`;
+    const pad = 120; // room for the canvas-top header and node labels
+    const [minX, maxX] = [Math.min(...xs), Math.max(...xs)];
+    const [minY, maxY] = [Math.min(...ys), Math.max(...ys)];
+    const S = Math.min(2.2, Math.max(1.15, Math.min((W - pad * 2) / Math.max(1, maxX - minX), (H - pad * 2) / Math.max(1, maxY - minY))));
+    const [bx, by] = [(minX + maxX) / 2, (minY + maxY) / 2];
+    transform = `translate(${CX - S * bx} ${CY - S * by}) scale(${S})`;
   }
 
   const armOpacity = (v: Vector) => {
@@ -308,15 +315,31 @@ export default function SignalNetwork({ fields, openVector, onOpenVector, onOpen
         </g>
       </svg>
 
-      {/* zoomed controls — you always know where you are and how to act */}
-      {openVector && (
-        <div style={{ position: "absolute", top: 12, left: 12, right: 12, display: "flex", justifyContent: "space-between", gap: 8, pointerEvents: "none" }}>
-          <button className="btn btn-secondary btn-sm" style={{ pointerEvents: "auto" }} onClick={() => onOpenVector(null)}>‹ Whole network</button>
-          <button className="btn btn-sm" style={{ pointerEvents: "auto" }} onClick={onCurate}>
-            {openVector === "core" ? "Manage core" : `Manage ${VECTOR_STYLE[openVector as Exclude<Vector, "core">].label}`}
-          </button>
-        </div>
-      )}
+      {/* zoomed controls — the vector's name sits at the TOP of the canvas
+          (never among the nodes), controls styled for the dark ground so the
+          canvas reads as one consistent surface */}
+      {openVector && (() => {
+        const isCore = openVector === "core";
+        const st = isCore ? null : VECTOR_STYLE[openVector as Exclude<Vector, "core">];
+        const name = isCore ? "Core" : st!.label;
+        const count = isCore ? core.length : arms.find((a) => a.v === openVector)?.count ?? 0;
+        const netBtn: CSSProperties = {
+          pointerEvents: "auto", cursor: "pointer",
+          background: "rgba(240, 235, 221, 0.07)", color: "var(--net-ink)",
+          border: "1px solid rgba(240, 235, 221, 0.22)", borderRadius: "var(--radius-sm)",
+          fontSize: 12, fontWeight: 600, padding: "5px 10px", letterSpacing: "0.01em",
+        };
+        return (
+          <div style={{ position: "absolute", top: 12, left: 12, right: 12, display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: 8, pointerEvents: "none" }}>
+            <button style={netBtn} onClick={() => onOpenVector(null)}>‹ Whole network</button>
+            <div style={{ textAlign: "center", pointerEvents: "none" }}>
+              <div style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: 15, fontWeight: 600, letterSpacing: "0.22em", textTransform: "uppercase", color: st?.color ?? "var(--net-core)" }}>{name}</div>
+              <div style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: 10, letterSpacing: "0.08em", color: "var(--net-ink-dim)", marginTop: 2 }}>{count} node{count === 1 ? "" : "s"}</div>
+            </div>
+            <button style={netBtn} onClick={onCurate}>Manage {isCore ? "core" : st!.label}</button>
+          </div>
+        );
+      })()}
       {!openVector && (
         <div className="t-mono-xs" style={{ position: "absolute", bottom: 10, left: 14, color: "var(--net-ink-dim)", pointerEvents: "none" }}>
           Click a vector to zoom · click a node to open it · closer to the center = closer to your core
