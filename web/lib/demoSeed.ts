@@ -157,6 +157,85 @@ export async function loadDemoData(supabase: SupabaseClient, orgId: string): Pro
     if (error) throw error; return "+3";
   });
 
+  // ---- Signals network (the landscape profile: core + 4 branched vectors) ----
+  // SingleStack's own brain, as DATA. The platform stays agnostic: this content
+  // lives in signal_profile_fields for THIS org; the pull/steer logic reads
+  // whatever profile the customer's own records grow. weight 3 = closest to the
+  // core … 1 = edge; parent = the same-vector node a branch chains off.
+  await step("signals network", async () => {
+    let { data: prof } = await supabase.from("signal_profiles").select("id").eq("scope", "landscape").is("competitor_id", null).maybeSingle();
+    if (!prof) {
+      const { data: np, error: pe } = await supabase.from("signal_profiles")
+        .insert({ org_id: orgId, scope: "landscape", headline: "The PLG operating platform — the loop is the product; the Build module is the wedge." })
+        .select("id").single();
+      if (pe) throw pe;
+      prof = np;
+    }
+    const { count: c } = await supabase.from("signal_profile_fields").select("id", { count: "exact", head: true }).eq("profile_id", prof!.id);
+    if (c) return "exist";
+    // [key, label, statement, vector, weight, parent]
+    const N: [string, string, string, string, number, string | null][] = [
+      // ---- CORE — what we are; everything hangs off this ----
+      ["essence", "PLG operating platform", "SingleStack is a product-led growth operating platform: one governed system that runs sense → decide → build → sell → learn for product managers and GTM teams together.", "core", 3, null],
+      ["core_problem", "The broken loop", "Product and GTM teams lose the thread between the market signal, the decision, the build, and the sale — the loop breaks at every tool boundary and someone becomes the human router.", "core", 3, null],
+      ["build_first_class", "Build is first-class", "AI prototyping is a first-class Build module: a PM turns a ratified decision into a real, working prototype — not another document.", "core", 3, null],
+      ["value_prop", "One system, whole loop", "An idea travels the entire loop without leaving the system — sensed, decided, legitimately prototyped, sold through PQLs, and learned from. Agents propose; humans ratify.", "core", 3, null],
+      ["living_records", "Living records", "Product and GTM records are living artifacts — signal-fed, agent-maintained, human-ratified — the one source both sides of the company read.", "core", 2, null],
+      ["hitl_governance", "Human-gated AI", "Every AI change passes a human gate: propose → review → ratify, field by field, with provenance — the trust layer that lets agents do real work.", "core", 2, null],
+      ["business_model", "Who pays and how", "We sell workspace SaaS to Series A–C B2B software companies (20–200 people); product leadership buys, PMs and PMMs operate it daily.", "core", 2, null],
+
+      // ---- COMPETITIVE — archetypes root the branches; rivals chain off them ----
+      ["arch_pm_suites", "PM suites", "Product-management suites are the head-on frame: they own the DECIDE leg (roadmapping, discovery, prioritization) and are bolting on AI agents.", "competitive", 3, null],
+      ["riv_productboard", "Productboard", "Productboard is the closest adjacent — deep roadmapping plus the Spark AI agent; product-side only, it doesn't build and holds no GTM record.", "competitive", 2, "arch_pm_suites"],
+      ["pb_agent_moves", "Spark's trajectory", "Productboard Spark's move from 'AI suggests' toward 'AI builds' is the single sharpest encroachment on our wedge — watch its releases and positioning.", "competitive", 1, "riv_productboard"],
+      ["arch_ai_builders", "AI app builders", "Prompt-to-app builders own the BUILD leg — PMs already reach for them; they generate working software with no memory of the strategy, signals, or GTM behind it.", "competitive", 3, null],
+      ["riv_lovable", "Lovable", "Lovable is the reference prompt-to-app builder our Build module orchestrates or displaces — watch its team features, pricing, and enterprise motion.", "competitive", 2, "arch_ai_builders"],
+      ["riv_cursor", "Cursor", "Cursor owns developer-led building; it enters our deals when engineering says 'we'll just build it ourselves' — a BYO tool we embed, not a system of record.", "competitive", 2, "arch_ai_builders"],
+      ["arch_workspaces", "AI workspaces", "Connected AI workspaces (Notion-class) are the flexible status-quo substitute — docs + AI that can model anything and understand nothing about the loop.", "competitive", 2, null],
+      ["arch_plg_analytics", "PLG analytics", "PLG analytics tools (Pendo-class) own LEARN-leg telemetry and compete for the same 'PLG platform' budget line without deciding or building anything.", "competitive", 2, null],
+      ["battlegrounds", "Where deals are won", "Deals are won on the closed loop — sense-to-ship-to-sell in one governed system — and lost when the buyer scopes the problem to a single leg a point tool does deeper.", "competitive", 3, null],
+      ["status_quo_alternative", "The stitched stack", "The real rival is the stitched stack: a PM suite + Notion docs + an AI builder + spreadsheets — 'we already have tools for each piece' is the default no.", "competitive", 2, null],
+      ["competitive_search_focus", "Where to hunt", "Hunt functional substitutes, not category labels: tools that turn product decisions into working software, AI agents inside PM suites, and platforms unifying product + GTM. Watch G2 comparisons, launch posts, pricing pages, and agent-roadmap announcements.", "competitive", 3, null],
+      ["win_loss_patterns", "Win/loss pattern", "We win where the team feels tool-boundary pain — signal lost between product and GTM; we lose to single-leg depth when one champion owns one job.", "competitive", 2, null],
+
+      // ---- INDUSTRY — verticals root; sub-segments chain ----
+      ["vert_b2b_saas", "Series A–C B2B SaaS", "Series A–C B2B software companies building product-led are the core market — big enough to hold PM and GTM roles, small enough to feel every tool seam.", "industry", 3, null],
+      ["vert_plg_native", "PLG-native startups", "PLG-native startups (self-serve first, usage-priced) are the sharpest fit — the whole company already runs the loop we operate.", "industry", 2, "vert_b2b_saas"],
+      ["vert_devtools", "DevTools", "DevTools companies are the strong early vertical — technical PMs prototype naturally and their GTM is PLG by default.", "industry", 2, "vert_b2b_saas"],
+      ["vert_vertical_saas", "Vertical SaaS on PLG", "Vertical SaaS teams adopting PLG motions are the expansion edge — they arrive when the sales-led motion stalls and bring compliance questions with them.", "industry", 1, "vert_plg_native"],
+      ["industry_use_cases", "Same loop, new ground", "The use case is constant across verticals — compress signal → decision → prototype → PQL; what changes is where each vertical's signal lives and who ratifies.", "industry", 2, null],
+      ["regulatory_landscape", "AI governance pressure", "AI-governance expectations (EU-AI-Act-class rules, SOC 2 scrutiny of AI features) shape agentic-tool adoption — our human-ratification gate is the compliance answer.", "industry", 1, null],
+      ["industry_search_focus", "Where the signal lives", "Watch where PLG operators actually talk: PLG and growth communities, product-leadership newsletters, launch feeds for PLG-native startups, and analyst coverage of AI in product management.", "industry", 3, null],
+
+      // ---- PERSONA — buyers root; users and their signal chain off ----
+      ["p_head_product", "Head of Product", "The Head of Product / VP Product is the economic buyer — they own the tool budget and personally feel the broken sense→ship thread.", "persona", 3, null],
+      ["p_pm", "Product manager", "The product manager is the daily operator — senses, decides, and now legitimately prototypes with AI instead of writing another spec.", "persona", 2, "p_head_product"],
+      ["p_pm_signal", "Where PMs talk", "PM signal lives where they compare tools and vent about sprawl: product communities, PM podcasts and newsletters, and AI-prototyping threads.", "persona", 1, "p_pm"],
+      ["p_pmm", "PMM / GTM lead", "The PMM or GTM lead is the second daily operator — turns the same living record into messaging, battlecards, and campaigns without re-asking product.", "persona", 3, null],
+      ["p_growth", "Growth / RevOps", "Growth and RevOps leads adopt the sell loop — usage → PQL scoring — arriving with the data and staying for the pipeline.", "persona", 2, "p_pmm"],
+      ["p_founder", "Founder-operator", "Series A founders run product AND GTM personally — the whole-loop pitch lands hardest on them, and they ratify fastest.", "persona", 2, null],
+      ["persona_jobs_pains", "The shared job", "Every persona shares one job: keep product and GTM moving on a single thread of truth without becoming the human router between tools.", "persona", 2, null],
+      ["persona_objections", "Standing objections", "'We already have Productboard and Notion' and 'AI can't be trusted to change our records' are the two standing objections — the Build wedge answers the first, ratification the second.", "persona", 2, null],
+      ["persona_search_focus", "Demand signals", "Track first-PMM and growth-PM hiring, job posts pairing product operations with AI, and community talk about PMs prototyping — each is demand for the loop.", "persona", 3, null],
+
+      // ---- TECHNOLOGY — load-bearing platforms root; the stack chains off ----
+      ["t_frontier_llms", "Frontier models", "Frontier LLMs are load-bearing: agent quality, prototype quality, and synthesis honesty all ride the current model generation.", "technology", 3, null],
+      ["t_agent_sdks", "Agent frameworks", "Agent frameworks and SDKs set what our executive agents can do — tool use, long-horizon work, and governed autonomy ride their release cadence.", "technology", 2, "t_frontier_llms"],
+      ["t_mcp", "MCP fabric", "MCP is the connector fabric — every tool a customer already runs becomes a signal source or an action surface without bespoke integrations.", "technology", 2, "t_agent_sdks"],
+      ["t_prototyping", "Prompt-to-app engines", "Prompt-to-app and code-generation capability is the Build module's engine — releases that improve working-app generation move our core wedge directly.", "technology", 3, null],
+      ["platform_dependencies", "Infra we ride", "We ride managed Postgres/edge-function infrastructure and frontier-model APIs — pricing or capability shifts there move our margins and roadmap.", "technology", 2, null],
+      ["frontier_capabilities_to_watch", "Capability watch", "Long-horizon agents, computer use, and code-executing agents are the step changes to watch — each one redraws what 'the PM prototypes it themselves' means.", "technology", 3, null],
+      ["technology_search_focus", "Where tech signal lives", "Track model-provider changelogs and launch posts, agent-framework releases, MCP registry growth, and prompt-to-app tool launches.", "technology", 3, null],
+      ["tech_threats_opportunities", "Platform risk", "The standing platform risk: a frontier provider ships a native idea-to-app-to-GTM loop — watch provider product moves, not just model releases.", "technology", 2, null],
+    ];
+    const { error } = await supabase.from("signal_profile_fields").insert(
+      N.map(([field_key, label, value, vector, weight, parent_key], i) => ({
+        org_id: orgId, profile_id: prof!.id, field_key, label, value, vector, weight, parent_key, position: i, origin: "human",
+      })));
+    if (error) throw error;
+    return `+${N.length} nodes`;
+  });
+
   // ---- Battle cards (the SELLER's asset — what to SAY, per competitor) ----
   await step("battle cards", async () => {
     const { count: c } = await supabase.from("battlecard_items").select("id", { count: "exact", head: true });

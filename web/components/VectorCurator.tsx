@@ -221,7 +221,7 @@ export default function VectorCurator({
               <label className="field"><span className="t-label">Name</span>
                 <input className="input" value={addLabel} onChange={(e) => setAddLabel(e.target.value)} placeholder="Short name — e.g. a rival, a vertical, a persona, a capability" /></label>
               <label className="field"><span className="t-label">Statement <span className="t-muted" style={{ fontWeight: 400, textTransform: "none", letterSpacing: 0 }}>— a declarative fact about you, search-actionable</span></span>
-                <textarea className="textarea" rows={3} value={addValue} onChange={(e) => setAddValue(e.target.value)} placeholder="e.g. 'Mid-market PLG teams are our core buyers — their signal lives in PLG communities and RevOps job posts.'" /></label>
+                <textarea className="textarea" rows={3} value={addValue} onChange={(e) => setAddValue(e.target.value)} placeholder="A declarative fact about you, plus where its signal lives — specific enough that search knows what to hunt." /></label>
               <label className="field"><span className="t-label">Weight</span>
                 <select className="select" value={effWeight} onChange={(e) => setAddWeight(Number(e.target.value))}>
                   {[3, 2, 1].map((w) => <option key={w} value={w}>{WLABEL(w)} — {WHY_WEIGHT[w]}</option>)}
@@ -247,7 +247,7 @@ export default function VectorCurator({
                       <button className="btn btn-secondary btn-sm" onClick={() => removeField(i)} style={{ color: "var(--rd-text)" }}>✕</button>
                     </div>
                   </div>
-                  <textarea className="textarea" rows={2} value={f.value} onChange={(e) => setField(i, { value: e.target.value })} placeholder="A statement about you (e.g. 'AI-built working prototypes are our core battleground')." />
+                  <textarea className="textarea" rows={2} value={f.value} onChange={(e) => setField(i, { value: e.target.value })} placeholder="A statement about you — name the thing, assert what's true of it." />
                   <label className="field" style={{ marginTop: 6, marginBottom: 0 }}>
                     <span className="t-mono-xs t-muted">branches off</span>
                     <select className="select" value={f.parent_key && entries.some((e2) => e2.f.field_key === f.parent_key) ? f.parent_key : ""} onChange={(e) => setField(i, { parent_key: e.target.value || null })} style={{ fontSize: 11.5, padding: "3px 6px" }}>

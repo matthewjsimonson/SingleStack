@@ -381,7 +381,7 @@ Deno.serve(async (req: Request) => {
         : "",
       // VOICE — the user's standard: nodes are statements, not questions/rebuttals.
       scope === "landscape"
-        ? "VOICE: every node is a declarative STATEMENT about us — present tense, affirmative, self-contained. Never a question, never a rebuttal or negation ('unlike X…', 'we don't…'), never a to-do. Name the thing and assert what's true of it (e.g. 'AI-built working prototypes are our core battleground'; 'Head of Product is the economic buyer'). The label is the node's short name; the value is the statement."
+        ? "VOICE: every node is a declarative STATEMENT about us — present tense, affirmative, self-contained. Never a question, never a rebuttal or negation ('unlike X…', 'we don't…'), never a to-do. Name the thing and assert what's true of it, in the shape '<the specific thing> is <what's true of it for us>' — e.g. '<our defining capability> is our core battleground'; '<a specific role> is the economic buyer'. Fill those shapes ONLY from this org's records; the label is the node's short name, the value is the statement."
         : "",
       // BRANCHES — the network is chains, not a flat list.
       scope === "landscape"

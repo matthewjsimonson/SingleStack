@@ -34,10 +34,13 @@ export default function NodeSources({ vector, nodeKey, seed }: { vector: string;
     setBusy("add"); setErr(null);
     try {
       const orgId = await getOrgId(); if (!orgId) throw new Error("Could not resolve your organization.");
+      // daily cadence: network sources are meant to FIRE — the hourly heartbeat
+      // picks up anything non-manual. The steer itself is compiled live from the
+      // profile at pull time; include_terms is only the fallback seed.
       const { error } = await supabase.from("sources").insert({
         org_id: orgId, icon: "search", label: `${vector} web search${nodeKey ? " · node" : ""}`,
         origin: "external", kind: "web_search", status: "connected", auth_mode: "none",
-        include_terms: (seed || "").slice(0, 600) || null, max_per_pull: 10, cadence: "manual",
+        include_terms: (seed || "").slice(0, 600) || null, max_per_pull: 10, cadence: "daily",
         signal_vector: vector, signal_node_key: nodeKey,
       });
       if (error) throw error;

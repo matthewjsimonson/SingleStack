@@ -406,7 +406,7 @@ export default function SignalProfile({ scope, competitorId, competitorName, vec
                     );
                   })()}
                   <label className="field"><span className="t-label">Statement <span className="t-muted" style={{ fontWeight: 400 }}>— a fact about us, declarative</span></span>
-                    <textarea className="textarea" rows={6} value={f.value} onChange={(e) => setField(ni, { value: e.target.value })} placeholder="e.g. AI-built working prototypes are our core battleground." /></label>
+                    <textarea className="textarea" rows={6} value={f.value} onChange={(e) => setField(ni, { value: e.target.value })} placeholder="A declarative fact about you — name the thing and assert what's true of it, so search knows what to hunt." /></label>
                   {/* Refine with AI — sharpen, or steer with an instruction */}
                   <div className="card card-pad" style={{ background: "var(--panel-2)" }}>
                     <div className="t-label" style={{ marginBottom: 6 }}>Refine with AI</div>
