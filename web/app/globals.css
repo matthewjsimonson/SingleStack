@@ -248,6 +248,37 @@ button { font-family: inherit; cursor: pointer; }
 .field { display: block; margin-bottom: var(--sp-4); }
 .field > .t-label { display: block; margin-bottom: 6px; }
 
+/* ---- org-chart hierarchy (signals profile focus pages) ----------------------
+   A top-down tree: direct nodes at the top, adjacent below, indirect at the
+   bottom. Pure CSS connectors (rails + drops), no motion. */
+.otree, .otree ul { list-style: none; margin: 0; padding: 0; display: flex; }
+.otree { justify-content: flex-start; overflow-x: auto; padding: 4px 2px 8px; }
+.otree li { display: flex; flex-direction: column; align-items: center; position: relative; padding: 22px 6px 0; }
+.otree > li { padding-top: 0; }
+/* sibling rail */
+.otree li::before { content: ""; position: absolute; top: 0; left: 0; right: 0; border-top: 1px solid var(--border-strong); }
+.otree li:first-child::before { left: 50%; }
+.otree li:last-child::before { right: 50%; }
+.otree li:only-child::before, .otree > li::before { display: none; }
+/* drop from rail to card */
+.otree li::after { content: ""; position: absolute; top: 0; left: 50%; height: 22px; border-left: 1px solid var(--border-strong); }
+.otree > li::after { display: none; }
+/* stem from parent card to the children rail */
+.otree li > ul { padding-top: 22px; position: relative; }
+.otree li > ul::before { content: ""; position: absolute; top: 0; left: 50%; height: 22px; border-left: 1px solid var(--border-strong); }
+/* node card */
+.otree-card {
+  background: var(--panel); border: 1px solid var(--border); border-radius: var(--radius-sm);
+  box-shadow: var(--shadow-sm); padding: 8px 11px; cursor: pointer; text-align: left;
+  min-width: 130px; max-width: 200px; transition: var(--motion);
+}
+.otree-card:hover { border-color: var(--border-strong); box-shadow: var(--shadow-md); }
+.otree-add {
+  border: 1px dashed var(--border-strong); border-radius: var(--radius-sm); background: transparent;
+  padding: 8px 11px; cursor: pointer; color: var(--tm); font-size: 12px; font-weight: 600; min-width: 110px;
+}
+.otree-add:hover { color: var(--tp); border-color: var(--tm); }
+
 /* ---- layout helpers ------------------------------------------------------ */
 .row { display: flex; align-items: center; }
 .row-between { display: flex; align-items: center; justify-content: space-between; }

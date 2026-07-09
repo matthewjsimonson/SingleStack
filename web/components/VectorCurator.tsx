@@ -1,15 +1,12 @@
 "use client";
 
-// VectorCurator — a focus's working surface on the Signals profile workbench.
-// The page holds the OVERVIEW (the focus's nodes as a readable tree, sources,
-// recent signals); all reading, editing, and ratifying happens in CENTERED,
-// TALL POP-UPS that keep your place on the page underneath:
-//   • click a node → its editor opens as a vertical-rectangle modal (full
-//     statement, weight, branch parent, AI refine, pull steer, sources);
-//   • + Add node → the guided add opens the same way;
-//   • AI proposals open a REVIEW modal you PAN through — one proposal at a
-//     time, prev/next, Accept or Discard each (nothing lands unreviewed,
-//     nothing saves until Save).
+// VectorCurator — one focus's page on the Signals setup. The page IS the
+// hierarchy: an org-chart of nodes, direct at the top, adjacent below,
+// indirect at the bottom. Web sources are managed INSIDE each node (its
+// pop-up editor); no signal feed lives here — signals land on the
+// intelligence page this focus feeds. All reading/editing/ratifying happens
+// in centered, tall pop-ups: click a node to edit it; + adds a child;
+// AI proposals open a review pop-up you pan through one at a time.
 
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { createClient } from "@/lib/supabase/client";
@@ -89,9 +86,9 @@ export default function VectorCurator({
   const suggestedWeight = addParent ? Math.max(1, ((parentOf(addParent)?.weight ?? 2) - 1)) : 3;
   const effWeight = addWeight ?? suggestedWeight;
 
-  // The branch as a TREE: depth-first order (roots by weight, children under
-  // their parent) so the list reads as the structure it is.
-  const tree = useMemo(() => {
+  // The hierarchy as a FOREST: direct roots at the top, children below —
+  // ordered by level so the chart reads top-down like the org it is.
+  const forest = useMemo(() => {
     const byKey = new Map(entries.map((e) => [e.f.field_key, e]));
     const kidsOf = new Map<string, typeof entries>();
     const roots: typeof entries = [];
@@ -101,16 +98,9 @@ export default function VectorCurator({
       else roots.push(e);
     }
     const byW = (a: { f: Field }, b: { f: Field }) => W_OF(b.f.weight) - W_OF(a.f.weight);
-    const out: { e: (typeof entries)[number]; depth: number }[] = [];
-    const seen = new Set<string>();
-    const walk = (e: (typeof entries)[number], depth: number) => {
-      if (seen.has(e.f.field_key)) return;
-      seen.add(e.f.field_key);
-      out.push({ e, depth });
-      (kidsOf.get(e.f.field_key) ?? []).sort(byW).forEach((k) => walk(k, depth + 1));
-    };
-    roots.sort(byW).forEach((r) => walk(r, 0));
-    return out;
+    roots.sort(byW);
+    for (const k of kidsOf.values()) k.sort(byW);
+    return { roots, kidsOf };
   }, [entries]);
 
   // Pull the next interview question for this focus.
@@ -133,24 +123,6 @@ export default function VectorCurator({
     if (interviewOpen && !question && !done && !asking && transcript.length === 0) void nextQuestion([]);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [interviewOpen]);
-
-  // The focus's recent SIGNALS — what its pulls actually brought in.
-  type Sig = { id: string; title: string; origin: string; observed_at: string | null };
-  const [sigs, setSigs] = useState<Sig[]>([]);
-  const [sigBusy, setSigBusy] = useState<string | null>(null);
-  const loadSigs = useCallback(async () => {
-    const { data } = await supabase.from("signals").select("id, title, origin, observed_at")
-      .eq("metadata->>vector", vector)
-      .order("observed_at", { ascending: false, nullsFirst: false }).limit(8);
-    setSigs((data ?? []) as Sig[]);
-  }, [supabase, vector]);
-  useEffect(() => { loadSigs(); }, [loadSigs]);
-  async function dismissSig(id: string) {
-    setSigBusy(id);
-    const { error } = await supabase.from("signals").delete().eq("id", id);
-    if (error) setErr(error.message); else await loadSigs();
-    setSigBusy(null);
-  }
 
   async function submitAnswer() {
     if (!answer.trim()) return;
@@ -203,41 +175,6 @@ export default function VectorCurator({
   return (
     <div className="stack-3">
       {err && <div className="banner banner-err">{err}</div>}
-
-      {/* Coverage by level — THIS focus only. Full coverage means every level
-          holds nodes; a dashed cell is a visible gap you can fill in place. */}
-      {vector !== "core" && (
-        <div className="card card-pad">
-          <div className="t-label" style={{ marginBottom: 8 }}>Coverage <span className="t-muted" style={{ fontWeight: 400, textTransform: "none", letterSpacing: 0 }}>— every level covered = you&apos;re not missing {label.toLowerCase()} signal</span></div>
-          <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(200px, 1fr))", gap: 8 }}>
-            {[3, 2, 1].map((w) => {
-              const at = entries.filter(({ f }) => W_OF(f.weight) === w);
-              const gap = at.length === 0;
-              return (
-                <div key={w} style={{ border: gap ? "1px dashed var(--border-strong)" : "1px solid var(--border)", borderRadius: "var(--radius-sm)", padding: "8px 10px" }}>
-                  <div className="row-between" style={{ alignItems: "baseline", marginBottom: 6 }}>
-                    <span className="t-label" style={{ fontSize: 10.5 }}>{VOCAB[w]}</span>
-                    <span className="t-mono-xs t-muted">{WHY_WEIGHT[w].split(" — ")[1]}</span>
-                  </div>
-                  <div className="row" style={{ flexWrap: "wrap", gap: 4 }}>
-                    {gap
-                      ? <button className="btn btn-secondary btn-sm" onClick={() => startAdd("", w)}>+ Cover this</button>
-                      : (<>
-                        {at.slice(0, 5).map(({ f }) => (
-                          <button key={f.field_key} onClick={() => { setOpenKey(f.field_key); setRefineText(""); }}
-                            style={{ cursor: "pointer", border: "none", fontSize: 11.5, background: "var(--fill)", borderRadius: 999, padding: "2px 9px", color: "var(--ts)", maxWidth: 170, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
-                            {f.label || "Untitled"}
-                          </button>
-                        ))}
-                        {at.length > 5 && <span className="t-mono-xs t-muted" style={{ alignSelf: "center" }}>+{at.length - 5}</span>}
-                      </>)}
-                  </div>
-                </div>
-              );
-            })}
-          </div>
-        </div>
-      )}
 
       {/* Build with AI — the interview + proposals run in pop-ups; the page
           just offers the way in */}
@@ -301,40 +238,29 @@ export default function VectorCurator({
         </div>
       </Modal>
 
-      {/* The nodes — the branch as an indented, readable tree; click to open */}
+      {/* The hierarchy — an org-chart, top-down: direct roots, adjacent below,
+          indirect at the bottom. Click a node to open it (statement, level,
+          AI refine, its web sources); + under a node adds a child one level
+          further out. */}
       <div className="card card-pad">
         <div className="row-between" style={{ marginBottom: 10, alignItems: "center" }}>
-          <div className="t-label">Nodes · {entries.length}</div>
+          <div className="t-label">Hierarchy · {entries.length} node{entries.length === 1 ? "" : "s"}</div>
           <div className="row gap-2">
-            <button className="btn btn-secondary btn-sm" onClick={() => startAdd("")}>+ Add node</button>
             <button className="btn btn-sm" onClick={onSave} disabled={!dirty || savingBusy}>{savingBusy ? "Saving…" : dirty ? "Save" : "Saved"}</button>
             {pushLabel && <button className="btn btn-secondary btn-sm" onClick={onPush} title={dirty ? "Save first" : `Apply this focus in ${pushLabel}`}>Push to {pushLabel} →</button>}
           </div>
         </div>
-        {tree.length === 0 ? (
-          <div className="t-sub t-muted" style={{ fontSize: 12.5 }}>No nodes yet — build with AI above (you review every proposal), or add one by hand.</div>
-        ) : (
-          <div className="stack-2">
-            {tree.map(({ e: { f }, depth }) => {
-              const kids = entries.filter((e2) => e2.f.parent_key === f.field_key).length;
-              return (
-                <div key={f.field_key} className="card" style={{ marginLeft: Math.min(3, depth) * 22, padding: "10px 12px", cursor: "pointer" }}
-                  onClick={() => { setOpenKey(f.field_key); setRefineText(""); }}>
-                  <div className="row-between" style={{ gap: 8, alignItems: "center", flexWrap: "wrap" }}>
-                    <div className="row gap-2" style={{ alignItems: "center", minWidth: 0 }}>
-                      {depth > 0 && <span className="t-mono-xs t-muted" style={{ flexShrink: 0 }}>└</span>}
-                      <span style={{ fontWeight: 630, fontSize: 13.5 }}>{f.label || "Unnamed node"}</span>
-                      <span style={{ fontSize: 10.5, padding: "1px 7px", background: "var(--fill)", borderRadius: 999, color: "var(--ts)", flexShrink: 0 }}>{VOCAB[W_OF(f.weight)]}</span>
-                      {f.origin === "ai" && <span className="t-mono-xs" style={{ color: "var(--vl-text)", flexShrink: 0 }}>AI</span>}
-                      {kids > 0 && <span className="t-mono-xs t-muted" style={{ flexShrink: 0 }}>{kids} branch{kids === 1 ? "" : "es"}</span>}
-                    </div>
-                    <span className="t-mono-xs t-muted" style={{ flexShrink: 0 }}>open</span>
-                  </div>
-                  {f.value.trim() && <div className="t-sub" style={{ fontSize: 12.5, marginTop: 4, lineHeight: 1.55 }}>{f.value}</div>}
-                </div>
-              );
-            })}
+        {forest.roots.length === 0 ? (
+          <div className="row gap-2" style={{ alignItems: "center" }}>
+            <button className="otree-add" onClick={() => startAdd("", 3)}>+ Add the first direct node</button>
+            <span className="t-sub t-muted" style={{ fontSize: 12.5 }}>or build with AI above — you review every proposal.</span>
           </div>
+        ) : (
+          <ul className="otree">
+            {forest.roots.map((e) => <OrgNode key={e.f.field_key} entry={e} kidsOf={forest.kidsOf}
+              onOpen={(k) => { setOpenKey(k); setRefineText(""); }} onAddChild={(k, w) => startAdd(k, w)} seen={new Set()} />)}
+            <li><button className="otree-add" onClick={() => startAdd("", 3)} title="A new direct node — the top of a new branch">+ Direct</button></li>
+          </ul>
         )}
       </div>
 
@@ -345,34 +271,6 @@ export default function VectorCurator({
           <div className="t-mono-xs" style={{ whiteSpace: "pre-wrap", color: "var(--ts)", lineHeight: 1.55, marginTop: 8 }}>{compileVectorBrief(fieldsOnly, vector)}</div>
         </details>
       )}
-
-      {/* Focus-level sources — feed every node in this branch */}
-      <NodeSources vector={vector} nodeKey={null}
-        seed={compileVectorBrief(fieldsOnly, vector)
-          || fieldsOnly.filter((f) => W_OF(f.weight) >= 2).map((f) => f.value).join(" · ").slice(0, 600)} />
-
-      {/* The focus's recent signals — control what the pulls brought in */}
-      <div className="card card-pad">
-        <div className="row-between" style={{ marginBottom: 8, alignItems: "center" }}>
-          <div className="t-label">Recent signals <span className="t-muted" style={{ fontWeight: 400, textTransform: "none", letterSpacing: 0 }}>— what your pulls for this focus brought in</span></div>
-          <button className="btn btn-secondary btn-sm" onClick={loadSigs}>Refresh</button>
-        </div>
-        {sigs.length === 0 ? (
-          <div className="t-sub t-muted" style={{ fontSize: 12.5 }}>Nothing pulled for this focus yet — add a source above and Pull, or let the scheduled pulls run.</div>
-        ) : (
-          <div className="stack-2">
-            {sigs.map((s) => (
-              <div key={s.id} className="row-between" style={{ gap: 8, alignItems: "baseline" }}>
-                <div style={{ minWidth: 0 }}>
-                  <span style={{ fontSize: 12.5 }}>{s.title}</span>
-                  <span className="t-mono-xs t-muted" style={{ marginLeft: 8 }}>{s.origin}{s.observed_at ? ` · ${new Date(s.observed_at).toLocaleDateString()}` : ""}</span>
-                </div>
-                <button className="btn btn-secondary btn-sm" style={{ flexShrink: 0, color: "var(--rd-text)" }} disabled={sigBusy === s.id} onClick={() => dismissSig(s.id)}>{sigBusy === s.id ? "…" : "Dismiss"}</button>
-              </div>
-            ))}
-          </div>
-        )}
-      </div>
 
       {/* ---- NODE EDITOR pop-up — a tall centered rectangle; the page (and
               your place on it) stays underneath ---- */}
@@ -481,5 +379,41 @@ export default function VectorCurator({
         </Modal>
       )}
     </div>
+  );
+}
+
+// One node of the org chart — recursive; a cycle-guarded top-down tree.
+function OrgNode({ entry, kidsOf, onOpen, onAddChild, seen }: {
+  entry: { f: Field; i: number };
+  kidsOf: Map<string, { f: Field; i: number }[]>;
+  onOpen: (key: string) => void;
+  onAddChild: (parentKey: string, weight: number) => void;
+  seen: Set<string>;
+}) {
+  const { f } = entry;
+  if (seen.has(f.field_key)) return null;
+  const nextSeen = new Set(seen); nextSeen.add(f.field_key);
+  const kids = kidsOf.get(f.field_key) ?? [];
+  const w = W_OF(f.weight);
+  return (
+    <li>
+      <div className="otree-card" onClick={() => onOpen(f.field_key)} title={f.value || f.label}>
+        <div style={{ fontWeight: 630, fontSize: 12.5, lineHeight: 1.35 }}>{f.label || "Untitled"}</div>
+        <div className="row-between" style={{ marginTop: 5, alignItems: "center", gap: 6 }}>
+          <span style={{ fontSize: 10, padding: "1px 7px", background: "var(--fill)", borderRadius: 999, color: "var(--ts)" }}>{VOCAB[w]}</span>
+          <span className="row" style={{ alignItems: "center", gap: 6 }}>
+            {f.origin === "ai" && <span className="t-mono-xs" style={{ color: "var(--vl-text)" }}>AI</span>}
+            <button onClick={(ev) => { ev.stopPropagation(); onAddChild(f.field_key, Math.max(1, w - 1)); }}
+              title="Add a node under this one — one level further out"
+              style={{ border: "1px solid var(--border)", background: "var(--panel)", borderRadius: 999, width: 18, height: 18, lineHeight: "16px", fontSize: 12, color: "var(--tm)", cursor: "pointer", padding: 0 }}>+</button>
+          </span>
+        </div>
+      </div>
+      {kids.length > 0 && (
+        <ul>
+          {kids.map((k) => <OrgNode key={k.f.field_key} entry={k} kidsOf={kidsOf} onOpen={onOpen} onAddChild={onAddChild} seen={nextSeen} />)}
+        </ul>
+      )}
+    </li>
   );
 }

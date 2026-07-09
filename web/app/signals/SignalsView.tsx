@@ -1,90 +1,32 @@
 "use client";
 
-// Signals — the INTEL HOMEPAGE, organized around the two lenses that matter:
-//   • What a signal INFORMS — Product (how you build/update the product) vs
-//     GTM (how you go to market: sales, messaging, marketing, pricing). This is
-//     the primary structure: the Product and GTM tabs.
-//   • Where it CAME FROM — Internal (your tools & engagements) vs External
-//     (the web / market). This is a filter inside each lens.
-// Home = a situation room (status, synthesized themes, unsorted triage, ticker).
-// Setup (log a signal, sources, tracking) stays in modals / compact rows so the
-// page is for SHOWING intel, not housing forms.
+// Signals — the SETUP page, and only that: build the search for signals and
+// manage what you pull in. The profile's focus pages (tabs below) define WHAT
+// the brain hunts; the review queue ratifies what the pulls brought back; the
+// health strip says whether it's pulling on its own. The signals themselves
+// live on the intelligence pages they feed — Competitive, Market, Technology.
 import { useEffect, useState, useCallback } from "react";
 import { createClient } from "@/lib/supabase/client";
 import { getOrgId } from "@/lib/org";
 import { fireWorkflows } from "@/lib/triggers";
 import { useProductScope } from "@/lib/ProductContext";
-import { momentumGlyph, stateTone } from "@/lib/themeLife";
-import { Section, Chip, Banner, Confidence, Modal, SubTabs } from "@/components/ui";
+import { Banner, Modal } from "@/components/ui";
 import PageBar from "@/components/PageBar";
 import TrackingTopics from "@/components/TrackingTopics";
-import SourceManager from "@/components/SourceManager";
 import IntelReview from "./IntelReview";
-import MapView from "./MapView";
-import SignalDrawer, { type DrawerSignal } from "@/components/SignalDrawer";
-import ThemeDrawer from "@/components/ThemeDrawer";
 import SignalProfile from "@/components/SignalProfile";
 import AutomationHealth from "@/components/AutomationHealth";
-import { useAgentRun, AgentProgress, type AgentRun } from "@/components/AgentProgress";
+import { useAgentRun, AgentProgress } from "@/components/AgentProgress";
 
 type Source = { id: string; label: string; icon: string; origin: string };
-type Signal = {
-  id: string; title: string; why: string | null; conf_label: string | null; conf_level: number | null;
-  observed_at: string | null; scope: string; source_id: string | null; category: string | null; origin: string;
-  product_id: string | null;
-};
-type Theme = {
-  id: string; category: string; title: string; summary: string | null;
-  recommendation: string | null; conf_level: number | null; signal_ids: string[] | null;
-  state: string | null; momentum: string | null; last_evidence_at: string | null;
-  product_id: string | null; co_product_ids?: string[] | null; newThisWeek?: number;
-};
-
-type Lens = "product" | "gtm";
-type Tab = "home" | "profile" | "map" | Lens;
-type OriginFilter = "all" | "internal" | "external";
-
-// Best-practice scaffolding so a fresh org sees the intended SHAPE of each lens,
-// not an empty form. Pure guidance — not stored.
-const LENS_GUIDE: Record<Lens, { title: string; tone: "accent" | "violet"; blurb: string; buckets: string[] }> = {
-  product: {
-    title: "Product intelligence", tone: "accent",
-    blurb: "How you build and update the product.",
-    buckets: ["Usage & adoption", "Feature requests", "Quality & reliability", "Technical & competitive product moves"],
-  },
-  gtm: {
-    title: "Go-to-market intelligence", tone: "violet",
-    blurb: "How you take the product to market — sales, messaging, marketing, pricing.",
-    buckets: ["Messaging & positioning", "Pricing", "Sales objections & wins", "Market & competitive moves"],
-  },
-};
-
-const CATS: [string, string][] = [["product", "Product"], ["gtm", "GTM"], ["both", "Both"]];
-
-function ago(iso: string | null) {
-  if (!iso) return "";
-  const s = (Date.now() - new Date(iso).getTime()) / 1000;
-  if (s < 3600) return `${Math.max(1, Math.round(s / 60))}m ago`;
-  if (s < 86400) return `${Math.round(s / 3600)}h ago`;
-  return `${Math.round(s / 86400)}d ago`;
-}
-
-// A signal shows in a lens when it's tagged for that lens (or 'both').
-const inLens = (s: Signal, lens: Lens) => s.category === lens || s.category === "both";
 
 export default function SignalsView() {
   const supabase = createClient();
   const [sources, setSources] = useState<Source[]>([]);
-  const [signals, setSignals] = useState<Signal[]>([]);
-  const [openSignal, setOpenSignal] = useState<DrawerSignal | null>(null);
-  const [openThemeId, setOpenThemeId] = useState<string | null>(null);
-  const [themes, setThemes] = useState<Theme[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
-  const [tab, setTab] = useState<Tab>("home");
-  const [originFilter, setOriginFilter] = useState<OriginFilter>("all");
   const [products, setProducts] = useState<{ id: string; name: string }[]>([]);
-  const { active, matches } = useProductScope(); // shared cross-module product scope (replaces the old local switcher)
+  const [signalCount, setSignalCount] = useState(0);
+  const [error, setError] = useState<string | null>(null);
+  const { active } = useProductScope();
   const synthRun = useAgentRun("synthesize");
 
   const [logOpen, setLogOpen] = useState(false);
@@ -93,26 +35,20 @@ export default function SignalsView() {
   const [busy, setBusy] = useState(false);
 
   const load = useCallback(async () => {
-    const weekAgo = new Date(Date.now() - 7 * 86400000).toISOString();
-    const [{ data: srcs }, { data: sigs }, { data: ths }, { data: recent }, { data: prods }] = await Promise.all([
+    const [{ data: srcs }, { data: prods }, { count }] = await Promise.all([
       supabase.from("sources").select("id, label, icon, origin").order("created_at"),
-      supabase.from("signals").select("id, title, why, conf_label, conf_level, observed_at, scope, source_id, category, origin, product_id").order("observed_at", { ascending: false, nullsFirst: false }).order("created_at", { ascending: false }),
-      supabase.from("signal_themes").select("id, category, title, summary, recommendation, conf_level, signal_ids, state, momentum, last_evidence_at, product_id, co_product_ids").order("position"),
-      // Evidence added in the last 7d, for the "+N this week" delta on each theme.
-      supabase.from("theme_signals").select("theme_id").gte("added_at", weekAgo),
       supabase.from("product_records").select("id, name").order("created_at"),
+      supabase.from("signals").select("id", { count: "exact", head: true }),
     ]);
-    const freshByTheme: Record<string, number> = {};
-    for (const r of recent ?? []) freshByTheme[r.theme_id] = (freshByTheme[r.theme_id] ?? 0) + 1;
-    const themesWithDelta = (ths ?? []).map((t) => ({ ...t, newThisWeek: freshByTheme[t.id] ?? 0 }));
-    setSources(srcs ?? []); setSignals(sigs ?? []); setThemes(themesWithDelta); setProducts(prods ?? []);
-    setLoading(false);
+    setSources(srcs ?? []); setProducts(prods ?? []); setSignalCount(count ?? 0);
   }, [supabase]);
-
   useEffect(() => { load(); }, [load]);
 
   const sourceById = (id: string | null) => sources.find((s) => s.id === id) ?? null;
 
+  // Synthesize: fold pulled signals into themes + review proposals — the
+  // "manage what came in" half of this page. Results are ratified in the
+  // review queue below; the themes land on the strategy boards.
   async function synthesize() {
     setError(null);
     try {
@@ -143,83 +79,45 @@ export default function SignalsView() {
       const { data: sig, error } = await supabase.from("signals").insert({
         org_id: orgId, scope: product ? "product" : "org", product_id: product,
         title: form.title.trim(), why: form.why.trim() || null,
-        conf_level: isNaN(lvl) ? null : lvl,
-        conf_label: isNaN(lvl) ? null : lvl >= 0.75 ? "High" : lvl >= 0.5 ? "Medium" : "Low",
-        observed_at: new Date().toISOString(), source_id: form.source_id || null,
-        category: form.category || null, origin: form.origin,
+        conf_level: lvl, conf_label: lvl >= 0.85 ? "High" : lvl >= 0.6 ? "Medium" : "Low",
+        source_id: form.source_id || null, category: form.category || null, origin: form.origin,
+        observed_at: new Date().toISOString(),
       }).select("id").single();
       if (error) throw error;
-      // A signal landing is a real event — fire on_signal workflows (propose-only:
-      // they queue runs in Agents, and accepting has the officer draft a proposal).
+      // A signal landing is a real event — fire on_signal workflows (propose-only).
       await fireWorkflows(supabase, orgId, "on_signal", { label: form.title.trim(), why: form.why.trim() || undefined, signalId: sig?.id });
-      setLogOpen(false); setForm({ title: "", why: "", conf: "0.7", source_id: "", category: "", origin: "internal", product_id: "" });
+      setLogOpen(false);
+      setForm({ title: "", why: "", conf: "0.7", source_id: "", category: "", origin: "internal", product_id: "" });
       await load();
-    } catch (e) { setError(e instanceof Error ? e.message : "Could not log signal."); }
+    } catch (e) { setError(e instanceof Error ? e.message : "Could not log the signal."); }
     finally { setBusy(false); }
   }
-
-  // Inline (re)classification — the "clean way to sort what you're looking at".
-  async function setCategory(id: string, category: string | null) {
-    setError(null);
-    setSignals((prev) => prev.map((s) => (s.id === id ? { ...s, category } : s)));
-    const { error } = await supabase.from("signals").update({ category }).eq("id", id);
-    if (error) { setError(error.message); await load(); }
-  }
-
-  // Product scope now comes from the app-wide switcher (Shell → ProductContext),
-  // so Signals stays in sync with every other module. `matches` shows the active
-  // line's own intel PLUS cross-sell themes whose co_product_ids include it.
-  const signalsScoped = signals.filter(matches);
-  const themesScoped = themes.filter(matches);
-
-  const internalCount = signalsScoped.filter((s) => s.origin === "internal").length;
-  const externalCount = signalsScoped.filter((s) => s.origin === "external").length;
-  const unsorted = signalsScoped.filter((s) => !s.category);
-  const productThemes = themesScoped.filter((t) => t.category === "product");
-  const gtmThemes = themesScoped.filter((t) => t.category === "gtm");
-  const highSignals = signalsScoped.filter((s) => (s.conf_level ?? 0) >= 0.75);
 
   return (
     <div>
       <PageBar actions={
         <>
           <button className="btn btn-secondary btn-sm" onClick={() => setTrackOpen(true)}>Tracking</button>
-          <button className="btn btn-sm" onClick={() => setLogOpen(true)}>+ Log signal</button>
+          <button className="btn btn-secondary btn-sm" onClick={() => setLogOpen(true)}>+ Log signal</button>
+          {synthRun.active
+            ? <AgentProgress run={synthRun} compact />
+            : <button className="btn btn-sm" disabled={signalCount === 0} onClick={synthesize}
+                title="Fold pulled signals into themes + review proposals — ratify them below">Synthesize</button>}
         </>
       } />
-      <SubTabs<Tab>
-        tabs={[
-          { key: "home", label: "Homepage" },
-          { key: "profile", label: "Profile" },
-          { key: "map", label: "Map" },
-          { key: "product", label: `Product · ${signalsScoped.filter((s) => inLens(s, "product")).length}` },
-          { key: "gtm", label: `GTM · ${signalsScoped.filter((s) => inLens(s, "gtm")).length}` },
-        ]}
-        active={tab} onChange={setTab}
-      />
+      <div className="t-sub t-muted" style={{ margin: "-6px 0 var(--sp-4)", fontSize: 12.5 }}>
+        Set up the search and manage what comes in. The signals themselves live where they land: <a href="/competitive" style={{ color: "var(--ac-text)" }}>Competitive</a>, <a href="/market" style={{ color: "var(--ac-text)" }}>Market</a>, and <a href="/frontier" style={{ color: "var(--ac-text)" }}>Technology</a>.
+      </div>
       <Banner>{error}</Banner>
 
-      {loading ? <div className="t-sub t-muted">Loading…</div> : tab === "profile" ? (
-        <SignalProfile scope="landscape" />
-      ) : tab === "map" ? (
-        <MapView productFilter={active} onOpenTheme={setOpenThemeId} />
-      ) : tab === "home" ? (<>
-        <AutomationHealth />
-        <Home
-          signals={signalsScoped} themes={themesScoped} productThemes={productThemes} gtmThemes={gtmThemes}
-          highSignals={highSignals} unsorted={unsorted} internalCount={internalCount} externalCount={externalCount}
-          sourceById={sourceById} synthRun={synthRun} onSynthesize={synthesize} setCategory={setCategory} goLens={setTab}
-          reload={load} productFilter={active} onOpen={setOpenSignal} onOpenTheme={setOpenThemeId}
-        />
-      </>) : (
-        <LensTab
-          lens={tab} signals={signalsScoped.filter((s) => inLens(s, tab))} originFilter={originFilter}
-          onOriginFilter={setOriginFilter} sourceById={sourceById} setCategory={setCategory} onOpen={setOpenSignal}
-        />
-      )}
+      {/* Is the brain pulling on its own? */}
+      <AutomationHealth />
 
-      <SignalDrawer signal={openSignal} onClose={() => setOpenSignal(null)} onChanged={load} />
-      <ThemeDrawer themeId={openThemeId} onClose={() => setOpenThemeId(null)} onChanged={load} />
+      {/* What the pulls brought back — ratify it (accept / edit / reject). */}
+      <IntelReview onApplied={load} productFilter={active} />
+
+      {/* The search itself: one page per focus, nodes as the hierarchy. */}
+      <SignalProfile scope="landscape" />
 
       {/* Log signal — modal */}
       <Modal open={logOpen} onClose={() => setLogOpen(false)} title="Log a signal">
@@ -268,250 +166,6 @@ export default function SignalsView() {
       <Modal open={trackOpen} onClose={() => setTrackOpen(false)} title="What you're tracking">
         <TrackingTopics category="signals" suggestions={["Recurring onboarding friction", "Feature requests by segment", "Churn signals from usage", "Support ticket themes"]} />
       </Modal>
-    </div>
-  );
-}
-
-// ---------- Intel homepage ----------
-function Home({ signals, themes, productThemes, gtmThemes, highSignals, unsorted, internalCount, externalCount, sourceById, synthRun, onSynthesize, setCategory, goLens, reload , productFilter, onOpen, onOpenTheme }: {
-  signals: Signal[]; themes: Theme[]; productThemes: Theme[]; gtmThemes: Theme[]; highSignals: Signal[]; unsorted: Signal[];
-  internalCount: number; externalCount: number;
-  sourceById: (id: string | null) => Source | null; synthRun: AgentRun; onSynthesize: () => void;
-  setCategory: (id: string, c: string | null) => void; goLens: (l: Lens) => void; reload: () => void; productFilter: string;
-  onOpen: (s: Signal) => void; onOpenTheme: (id: string) => void;
-}) {
-  return (
-    <div>
-      {/* Situation strip */}
-      <div className="card card-pad" style={{ marginBottom: "var(--sp-5)", display: "flex", alignItems: "center", gap: 20 }}>
-        <div style={{ display: "grid", gridTemplateColumns: "repeat(5, auto)", gap: 28, flex: 1 }}>
-          <Stat n={signals.length} label="Signals tracked" />
-          <Stat n={internalCount} label="Internal" />
-          <Stat n={externalCount} label="External" />
-          <Stat n={unsorted.length} label="Unsorted" accent={unsorted.length > 0} />
-          <Stat n={themes.length} label="Themes" accent={themes.length > 0} />
-        </div>
-        {synthRun.active
-          ? <div style={{ display: "flex", alignItems: "center", paddingInline: 6 }}><AgentProgress run={synthRun} /></div>
-          : <button className="btn btn-accent" disabled={signals.length === 0} onClick={onSynthesize}>
-              {themes.length ? "Re-synthesize" : "Synthesize intel"}
-            </button>}
-      </div>
-
-      {signals.length === 0 ? (
-        <div className="empty">
-          <div className="t-body" style={{ fontWeight: 600, marginBottom: 6 }}>Your situation room is empty</div>
-          <div className="t-sub" style={{ maxWidth: 460, marginInline: "auto" }}>Log signals (top right) or connect sources on the Product / GTM tabs, then synthesize to see the patterns and what to do.</div>
-        </div>
-      ) : (
-        <>
-          {/* Review queue + learning — the HITL feedback loop */}
-          <IntelReview onApplied={reload} productFilter={productFilter} />
-
-
-          {/* Callouts: synthesized themes as product/gtm intelligence briefs */}
-          {themes.length > 0 && (
-            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "var(--sp-5)", alignItems: "start", marginBottom: "var(--sp-6)" }}>
-              <ThemeColumn title="Product intelligence" tone="accent" themes={productThemes} onOpenTheme={onOpenTheme} />
-              <ThemeColumn title="Go-to-market intelligence" tone="violet" themes={gtmThemes} onOpenTheme={onOpenTheme} />
-            </div>
-          )}
-
-          {/* Unsorted triage — sort signals into the lens they inform */}
-          {unsorted.length > 0 && (
-            <Section label={`Unsorted · ${unsorted.length}`}>
-              <div className="t-sub t-muted" style={{ fontSize: 12.5, marginBottom: 10 }}>Tag what each informs, or run Synthesize to let AI sort them.</div>
-              <div className="stack-3">
-                {unsorted.slice(0, 6).map((s) => (
-                  <div key={s.id} className="card card-pad row-between signal-card" style={{ gap: 12, alignItems: "center", cursor: "pointer" }} onClick={() => onOpen(s)} title="Open signal">
-                    <div style={{ minWidth: 0 }}>
-                      <div style={{ fontSize: 13.5, fontWeight: 600, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{s.title}</div>
-                      <Chip tone={s.origin === "external" ? "violet" : "default"}>{s.origin}</Chip>
-                    </div>
-                    <div onClick={(e) => e.stopPropagation()}>
-                      <CategoryPicker value={s.category} onChange={(c) => setCategory(s.id, c)} />
-                    </div>
-                  </div>
-                ))}
-              </div>
-            </Section>
-          )}
-
-          <div style={{ display: "grid", gridTemplateColumns: "1.4fr 1fr", gap: "var(--sp-6)", alignItems: "start" }}>
-            {/* Activity ticker */}
-            <Section label="Live activity" action={<button className="btn btn-secondary btn-sm" onClick={() => goLens("product")}>Browse by lens →</button>}>
-              <div className="card">
-                {signals.slice(0, 8).map((s, i) => {
-                  const src = sourceById(s.source_id);
-                  return (
-                    <div key={s.id} className="ticker-row" onClick={() => onOpen(s)} title="Open signal" style={{ padding: "11px 14px", borderTop: i === 0 ? "none" : "1px solid var(--border)", display: "flex", alignItems: "center", gap: 10, cursor: "pointer" }}>
-                      <span style={{ width: 6, height: 6, borderRadius: 999, flexShrink: 0, background: (s.conf_level ?? 0) >= 0.75 ? "var(--gn)" : (s.conf_level ?? 0) >= 0.5 ? "var(--am-text)" : "var(--border-strong)" }} />
-                      <span style={{ flex: 1, fontSize: 13.5, fontWeight: 600, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{s.title}</span>
-                      {s.category && <Chip tone={s.category === "gtm" ? "violet" : "accent"}>{s.category === "both" ? "P+G" : s.category}</Chip>}
-                      {src && <span className="chip" style={{ flexShrink: 0 }}>{src.icon}</span>}
-                      <span className="t-mono-xs" style={{ flexShrink: 0 }}>{ago(s.observed_at)}</span>
-                    </div>
-                  );
-                })}
-              </div>
-            </Section>
-
-            {/* High-confidence watch list */}
-            <Section label="High-confidence">
-              {highSignals.length === 0 ? <div className="t-sub t-muted" style={{ fontSize: 12.5 }}>No high-confidence signals yet.</div> : (
-                <div className="stack-3">
-                  {highSignals.slice(0, 5).map((s) => (
-                    <div key={s.id} className="card card-pad signal-card" onClick={() => onOpen(s)} title="Open signal" style={{ borderLeft: "2px solid var(--gn)", padding: "12px 14px", cursor: "pointer" }}>
-                      <div style={{ fontSize: 13.5, fontWeight: 620, marginBottom: 3 }}>{s.title}</div>
-                      <Confidence label={s.conf_label} level={s.conf_level} />
-                    </div>
-                  ))}
-                </div>
-              )}
-            </Section>
-          </div>
-        </>
-      )}
-    </div>
-  );
-}
-
-// ---------- Lens tab (Product / GTM) ----------
-function LensTab({ lens, signals, originFilter, onOriginFilter, sourceById, setCategory, onOpen }: {
-  lens: Lens; signals: Signal[]; originFilter: OriginFilter; onOriginFilter: (f: OriginFilter) => void;
-  sourceById: (id: string | null) => Source | null; setCategory: (id: string, c: string | null) => void;
-  onOpen: (s: Signal) => void;
-}) {
-  const guide = LENS_GUIDE[lens];
-  const stream = signals.filter((s) => originFilter === "all" ? true : s.origin === originFilter);
-  const internalN = signals.filter((s) => s.origin === "internal").length;
-  const externalN = signals.filter((s) => s.origin === "external").length;
-  const FILTERS: [OriginFilter, string][] = [["all", `All · ${signals.length}`], ["internal", `Internal · ${internalN}`], ["external", `External · ${externalN}`]];
-
-  return (
-    <div>
-      {/* Lens header — live summary of this lens (not static scaffold) */}
-      <div className="card card-pad" style={{ borderTop: `2px solid var(--${guide.tone === "accent" ? "ac" : "vl"})`, marginBottom: "var(--sp-5)" }}>
-        <div className="row-between" style={{ alignItems: "flex-start", gap: 12 }}>
-          <div style={{ minWidth: 0 }}>
-            <div className="t-h2" style={{ fontSize: 15, marginBottom: 2 }}>{guide.title}</div>
-            <div className="t-sub t-muted" style={{ fontSize: 12.5 }}>{guide.blurb}</div>
-          </div>
-          <div className="row gap-2" style={{ flexShrink: 0 }}>
-            <div className="stat"><span className="stat-num" style={{ fontSize: 18 }}>{signals.length}</span><span className="stat-label">Signals</span></div>
-            <div className="stat"><span className="stat-num" style={{ fontSize: 18, color: signals.filter((s) => (s.conf_level ?? 0) >= 0.75).length ? "var(--gn-text)" : undefined }}>{signals.filter((s) => (s.conf_level ?? 0) >= 0.75).length}</span><span className="stat-label">High-conf</span></div>
-            <div className="stat"><span className="stat-num" style={{ fontSize: 18 }}>{signals.filter((s) => s.origin === "external").length}</span><span className="stat-label">External</span></div>
-          </div>
-        </div>
-      </div>
-
-      {/* Origin filter */}
-      <div className="row gap-2" style={{ marginBottom: "var(--sp-4)" }}>
-        {FILTERS.map(([k, label]) => (
-          <button key={k} className={`btn btn-sm ${originFilter === k ? "" : "btn-secondary"}`} onClick={() => onOriginFilter(k)}>{label}</button>
-        ))}
-      </div>
-
-      <SourceManager title={`${guide.title} — sources`} />
-
-      {stream.length === 0 ? (
-        <div className="t-sub t-muted">No {originFilter === "all" ? "" : originFilter + " "}signals in this lens yet. Log one (top right) or connect a source above; unsorted signals get classified on Synthesize.</div>
-      ) : (
-        <div className="stack-3">
-          {stream.map((s) => <SignalCard key={s.id} s={s} src={sourceById(s.source_id)} setCategory={setCategory} onOpen={onOpen} />)}
-        </div>
-      )}
-    </div>
-  );
-}
-
-function SignalCard({ s, src, setCategory, onOpen }: { s: Signal; src: Source | null; setCategory: (id: string, c: string | null) => void; onOpen: (s: Signal) => void }) {
-  return (
-    <div className="card card-pad card-link signal-card" style={{ cursor: "pointer", borderLeft: `3px solid ${s.category === "gtm" ? "var(--vl)" : s.category === "product" ? "var(--ac)" : "var(--border-strong)"}` }} onClick={() => onOpen(s)} title="Open signal">
-      <div className="row-between" style={{ gap: 12, alignItems: "flex-start", marginBottom: 5 }}>
-        <span style={{ fontSize: 14.5, fontWeight: 620 }}>{s.title}</span>
-        <Confidence label={s.conf_label} level={s.conf_level} />
-      </div>
-      {s.why && <p className="t-sub" style={{ lineHeight: 1.5, marginBottom: 8 }}>{s.why}</p>}
-      <div className="row-between" style={{ gap: 12, flexWrap: "wrap" }}>
-        <div className="row gap-2" style={{ flexWrap: "wrap" }}>
-          {src && <Chip>{src.icon} {src.label}</Chip>}
-          <Chip tone={s.origin === "external" ? "violet" : "default"}>{s.origin}</Chip>
-          {s.observed_at && <span className="t-mono-xs">{ago(s.observed_at)}</span>}
-        </div>
-        <div onClick={(e) => e.stopPropagation()}>
-          <CategoryPicker value={s.category} onChange={(c) => setCategory(s.id, c)} />
-        </div>
-      </div>
-    </div>
-  );
-}
-
-// Compact lens (re)classifier. Click a lens to (re)tag; click the active one to
-// clear back to unsorted.
-function CategoryPicker({ value, onChange }: { value: string | null; onChange: (c: string | null) => void }) {
-  return (
-    <div className="row gap-2" style={{ flexShrink: 0 }}>
-      {CATS.map(([key, label]) => {
-        const on = value === key;
-        return (
-          <button key={key} type="button" onClick={() => onChange(on ? null : key)}
-            className="chip" style={{ cursor: "pointer", background: on ? (key === "gtm" ? "var(--vl)" : "var(--ac)") : "var(--fill)", color: on ? "#fff" : "var(--ts)" }}>
-            {label}
-          </button>
-        );
-      })}
-    </div>
-  );
-}
-
-function Stat({ n, label, accent }: { n: number; label: string; accent?: boolean }) {
-  return (
-    <div className="stat">
-      <span className="stat-num" style={{ color: accent ? "var(--ac-text)" : undefined }}>{n}</span>
-      <span className="stat-label">{label}</span>
-    </div>
-  );
-}
-
-function ThemeColumn({ title, tone, themes, onOpenTheme }: { title: string; tone: "accent" | "violet"; themes: Theme[]; onOpenTheme: (id: string) => void }) {
-  return (
-    <div>
-      <div className="t-label" style={{ marginBottom: "var(--sp-3)" }}>{title}</div>
-      {themes.length === 0 ? <div className="t-sub t-muted" style={{ fontSize: 12.5 }}>No themes in this category.</div> : (
-        <div className="stack-3">
-          {themes.map((t) => {
-            const mo = momentumGlyph(t.momentum);
-            const n = (t.signal_ids ?? []).length;
-            const fresh = t.newThisWeek ?? 0;
-            return (
-            <div key={t.id} className="card card-pad signal-card" onClick={() => onOpenTheme(t.id)} title="Open theme" style={{ borderTop: `2px solid var(--${tone === "accent" ? "ac" : "vl"})`, cursor: "pointer" }}>
-              <div className="row-between" style={{ gap: 10, alignItems: "flex-start", marginBottom: 6 }}>
-                <span style={{ fontSize: 14.5, fontWeight: 640 }}>{t.title}</span>
-                <span title={mo.label} style={{ color: mo.color, fontSize: 12, flexShrink: 0 }}>{mo.glyph}</span>
-              </div>
-              <div className="row gap-2" style={{ marginBottom: 8, flexWrap: "wrap" }}>
-                {t.state && <Chip tone={stateTone(t.state)}>{t.state}</Chip>}
-                <Confidence level={t.conf_level} label={t.conf_level != null ? (t.conf_level >= 0.75 ? "High" : t.conf_level >= 0.5 ? "Med" : "Low") : null} />
-              </div>
-              {t.summary && <p className="t-sub" style={{ lineHeight: 1.5, marginBottom: 10 }}>{t.summary}</p>}
-              {t.recommendation && (
-                <div style={{ background: "var(--panel-2)", borderRadius: 8, padding: "10px 12px" }}>
-                  <div className="t-label" style={{ marginBottom: 3 }}>Recommended</div>
-                  <div className="t-body" style={{ fontSize: 13, lineHeight: 1.5 }}>{t.recommendation}</div>
-                </div>
-              )}
-              <div className="row-between" style={{ marginTop: 10, alignItems: "center" }}>
-                <span className="t-mono-xs">
-                  {n} signal{n === 1 ? "" : "s"}{fresh > 0 ? ` · +${fresh} this week` : ""}{t.last_evidence_at ? ` · ${ago(t.last_evidence_at)}` : ""}
-                </span>
-                <button className="btn btn-secondary btn-sm" onClick={(e) => { e.stopPropagation(); onOpenTheme(t.id); }}>Open →</button>
-              </div>
-            </div>
-            );
-          })}
-        </div>
-      )}
     </div>
   );
 }
