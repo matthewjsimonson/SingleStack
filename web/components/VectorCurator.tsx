@@ -81,9 +81,10 @@ export default function VectorCurator({
 
   const existingKeys = useMemo(() => new Set(entries.map((e) => e.f.field_key)), [entries]);
   const parentOf = (key: string) => entries.find((e) => e.f.field_key === key)?.f ?? null;
-  // Suggested weight from the attach point: the focus roots a direct branch
-  // (3); a child sits one step further out than its parent.
-  const suggestedWeight = addParent ? Math.max(1, ((parentOf(addParent)?.weight ?? 2) - 1)) : 3;
+  // Suggested level from the attach point: a child INHERITS its parent's
+  // level (a named rival under a direct archetype is still direct); the focus
+  // itself roots a direct branch. Depth organizes; level classifies.
+  const suggestedWeight = addParent ? (parentOf(addParent)?.weight ?? 2) : 3;
   const effWeight = addWeight ?? suggestedWeight;
 
   // The hierarchy as a FOREST: direct roots at the top, children below —
@@ -462,8 +463,8 @@ function OrgNode({ entry, kidsOf, onOpen, onAddChild, seen }: {
           <span style={{ fontSize: 10, padding: "1px 7px", background: "var(--fill)", borderRadius: 999, color: "var(--ts)" }}>{VOCAB[w]}</span>
           <span className="row" style={{ alignItems: "center", gap: 6 }}>
             {f.origin === "ai" && <span className="t-mono-xs" style={{ color: "var(--vl-text)" }}>AI</span>}
-            <button onClick={(ev) => { ev.stopPropagation(); onAddChild(f.field_key, Math.max(1, w - 1)); }}
-              title="Add a node under this one — one level further out"
+            <button onClick={(ev) => { ev.stopPropagation(); onAddChild(f.field_key, w); }}
+              title="Add a node under this one — it inherits this level"
               style={{ border: "1px solid var(--border)", background: "var(--panel)", borderRadius: 999, width: 18, height: 18, lineHeight: "16px", fontSize: 12, color: "var(--tm)", cursor: "pointer", padding: 0 }}>+</button>
           </span>
         </div>
