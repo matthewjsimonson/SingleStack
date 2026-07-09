@@ -68,23 +68,6 @@
 
   /* Default micro-motion curve for interactive surfaces. */
   --motion: background-color 0.14s ease, box-shadow 0.18s ease, border-color 0.14s ease, transform 0.14s ease;
-
-  /* ---- signals-network canvas (the one deliberately DARK surface) ----------
-     The network reads as a living nucleus on a night canvas (reference design);
-     everything on it uses these tokens, never raw hex in the component. Warm
-     graphite + cream, not cold blue-black. Per-vector hues are tuned for the
-     dark ground (their light-theme cousins would glow muddy here). */
-  --net-bg: #131316;            /* canvas ground */
-  --net-bg-edge: #0D0D10;       /* vignette edge */
-  --net-ink: #F0EBDD;           /* cream — labels, bright nodes */
-  --net-ink-dim: #8E8B80;       /* dimmed cream — secondary text */
-  --net-line: rgba(240, 235, 221, 0.28);   /* branch links */
-  --net-ring: rgba(240, 235, 221, 0.12);   /* hub ring base */
-  --net-core: #E8C56A;          /* nucleus gold */
-  --net-competitive: #E2725B;   /* warm coral-red */
-  --net-industry: #5BA98B;      /* sea green */
-  --net-persona: #A98BD6;       /* soft violet */
-  --net-technology: #D8A84E;    /* amber */
 }
 
 /* ---- modern surface primitives (additive — crisp + glass + micro-motion) ----
