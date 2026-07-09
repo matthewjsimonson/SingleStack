@@ -35,7 +35,7 @@ const slugify = (s: string) => s.toLowerCase().replace(/[^a-z0-9]+/g, "_").repla
 
 export default function VectorCurator({
   vector, label, blurb, entries, setField, removeField, upsertNode, generate, generating,
-  refineNode, refining, onSave, onPush, pushLabel, dirty, savingBusy, initialAdd,
+  refineNode, refining, onSave, onPush, pushLabel, dirty, savingBusy,
 }: {
   vector: Vector;
   label: string;
@@ -53,7 +53,6 @@ export default function VectorCurator({
   pushLabel?: string;
   dirty: boolean;
   savingBusy: boolean;
-  initialAdd?: { weight: number; at: number } | null;  // coverage-map gap click: open the add pop-up at this level
 }) {
   const supabase = createClient();
   const [transcript, setTranscript] = useState<Turn[]>([]);
@@ -135,13 +134,6 @@ export default function VectorCurator({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [interviewOpen]);
 
-  // A coverage-map gap click opens the guided add at that level (declared
-  // AFTER the reset effect so it wins the mount-order race on a focus switch).
-  useEffect(() => {
-    if (initialAdd) { setAdding(true); setAddParent(""); setAddLabel(""); setAddValue(""); setAddWeight(initialAdd.weight); }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [initialAdd?.at]);
-
   // The focus's recent SIGNALS — what its pulls actually brought in.
   type Sig = { id: string; title: string; origin: string; observed_at: string | null };
   const [sigs, setSigs] = useState<Sig[]>([]);
@@ -193,8 +185,8 @@ export default function VectorCurator({
     setProposals((ps) => ps.map((x, j) => (j === idx ? { ...x, ...patch } : x)));
   }
 
-  function startAdd(parent: string) {
-    setAdding(true); setAddParent(parent); setAddLabel(""); setAddValue(""); setAddWeight(null); setOpenKey(null);
+  function startAdd(parent: string, weight: number | null = null) {
+    setAdding(true); setAddParent(parent); setAddLabel(""); setAddValue(""); setAddWeight(weight); setOpenKey(null);
   }
   function addGuided() {
     if (!addLabel.trim()) return;
@@ -211,6 +203,41 @@ export default function VectorCurator({
   return (
     <div className="stack-3">
       {err && <div className="banner banner-err">{err}</div>}
+
+      {/* Coverage by level — THIS focus only. Full coverage means every level
+          holds nodes; a dashed cell is a visible gap you can fill in place. */}
+      {vector !== "core" && (
+        <div className="card card-pad">
+          <div className="t-label" style={{ marginBottom: 8 }}>Coverage <span className="t-muted" style={{ fontWeight: 400, textTransform: "none", letterSpacing: 0 }}>— every level covered = you&apos;re not missing {label.toLowerCase()} signal</span></div>
+          <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(200px, 1fr))", gap: 8 }}>
+            {[3, 2, 1].map((w) => {
+              const at = entries.filter(({ f }) => W_OF(f.weight) === w);
+              const gap = at.length === 0;
+              return (
+                <div key={w} style={{ border: gap ? "1px dashed var(--border-strong)" : "1px solid var(--border)", borderRadius: "var(--radius-sm)", padding: "8px 10px" }}>
+                  <div className="row-between" style={{ alignItems: "baseline", marginBottom: 6 }}>
+                    <span className="t-label" style={{ fontSize: 10.5 }}>{VOCAB[w]}</span>
+                    <span className="t-mono-xs t-muted">{WHY_WEIGHT[w].split(" — ")[1]}</span>
+                  </div>
+                  <div className="row" style={{ flexWrap: "wrap", gap: 4 }}>
+                    {gap
+                      ? <button className="btn btn-secondary btn-sm" onClick={() => startAdd("", w)}>+ Cover this</button>
+                      : (<>
+                        {at.slice(0, 5).map(({ f }) => (
+                          <button key={f.field_key} onClick={() => { setOpenKey(f.field_key); setRefineText(""); }}
+                            style={{ cursor: "pointer", border: "none", fontSize: 11.5, background: "var(--fill)", borderRadius: 999, padding: "2px 9px", color: "var(--ts)", maxWidth: 170, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
+                            {f.label || "Untitled"}
+                          </button>
+                        ))}
+                        {at.length > 5 && <span className="t-mono-xs t-muted" style={{ alignSelf: "center" }}>+{at.length - 5}</span>}
+                      </>)}
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        </div>
+      )}
 
       {/* Build with AI — the interview + proposals run in pop-ups; the page
           just offers the way in */}

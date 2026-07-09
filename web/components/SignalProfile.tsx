@@ -18,7 +18,6 @@ import { getOrgId } from "@/lib/org";
 import { Banner, Chip, SubTabs } from "@/components/ui";
 import { Markdown } from "@/components/Markdown";
 import VectorCurator from "@/components/VectorCurator";
-import CoverageMap from "@/components/CoverageMap";
 import { compileVectorBrief } from "@/lib/profileBrief";
 import { edgeErrorMessage } from "@/lib/edgeError";
 
@@ -61,7 +60,6 @@ export default function SignalProfile({ scope, competitorId, competitorName, vec
   const [activeVector, setActiveVector] = useState<Vector>("core");
   const [refining, setRefining] = useState(false);
   const [stages, setStages] = useState<Stage[]>([]); // staged Draft-all progress
-  const [pendingAdd, setPendingAdd] = useState<{ weight: number; at: number } | null>(null); // coverage-gap click
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -416,19 +414,12 @@ export default function SignalProfile({ scope, competitorId, competitorName, vec
       )}
 
       {scope === "landscape" ? (<>
-        {/* The coverage map: three focuses × three levels of directness.
-            Full coverage is visible; a gap is a dashed cell you can fill. */}
-        <CoverageMap
-          fields={fields} active={activeVector}
-          onOpen={(focus, level, addFirst) => {
-            setActiveVector(focus);
-            setPendingAdd(addFirst ? { weight: level, at: Date.now() } : null);
-          }}
-        />
-        {/* One tab per focus, one working surface at a time. */}
+        {/* ONE navigation: a tab per focus. Each tab is that focus's own page,
+            where its nodes and hierarchy are set up; coverage by level lives
+            INSIDE the page, not in a second structure above it. */}
         <SubTabs<Vector>
           tabs={VECTORS.map((v) => ({ key: v.key, label: `${v.label.split(" — ")[0]} · ${countOf(v.key)}` }))}
-          active={activeVector} onChange={(v) => { setActiveVector(v); setPendingAdd(null); }}
+          active={activeVector} onChange={setActiveVector}
         />
         {dirty && <div className="t-sub t-muted" style={{ fontSize: 11.5, margin: "6px 0 10px" }}>Unsaved changes — Save in the header or on the Nodes card.</div>}
         <VectorCurator
@@ -439,7 +430,7 @@ export default function SignalProfile({ scope, competitorId, competitorName, vec
           generate={draftVector} generating={vecBusy === activeVector}
           refineNode={refineNode} refining={refining}
           onSave={save} onPush={() => pushVector(activeVector)} pushLabel={PUSH[activeVector]?.label}
-          dirty={dirty} savingBusy={busy === "save"} initialAdd={pendingAdd}
+          dirty={dirty} savingBusy={busy === "save"}
         />
       </>) : (<>
         <label className="field"><span className="t-label">Headline <span className="t-muted" style={{ fontWeight: 400 }}>— where we sit, in one line</span></span>
