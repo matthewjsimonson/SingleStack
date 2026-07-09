@@ -236,7 +236,7 @@ export default function IntelReview({ onApplied, productFilter = "all" }: { onAp
           <Modal open onClose={() => setReviewIdx(null)} width={640} tall
             title={`Review intelligence — ${reviewIdx + 1} of ${updates.length}`}>
             <div style={{ height: "100%", display: "flex", flexDirection: "column" }}>
-              <div className="stack-3" style={{ flex: 1 }}>
+              <div className="stack-3" style={{ flex: 1, minHeight: 0, overflowY: "auto", paddingRight: 2 }}>
                 <div>
                   <div style={{ fontSize: 15, fontWeight: 640, lineHeight: 1.45 }}>{u.summary}</div>
                   <div className="row gap-2" style={{ marginTop: 6, flexWrap: "wrap" }}>

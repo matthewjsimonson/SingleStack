@@ -43,7 +43,11 @@ export function Modal({
           <span className="t-h2" style={{ fontSize: 15 }}>{title}</span>
           <button className="btn btn-secondary btn-sm" onClick={onClose}>Close</button>
         </div>
-        <div style={{ padding: 20, overflowY: "auto" }}>{children}</div>
+        {/* tall: the body fills the rectangle so children can pin footers
+            (pan/verdict rows) to its bottom with flex. */}
+        <div style={{ padding: 20, overflowY: "auto", ...(tall ? { flex: 1, minHeight: 0, display: "flex", flexDirection: "column" } : {}) }}>
+          {tall ? <div style={{ flex: 1, minHeight: 0, display: "flex", flexDirection: "column" }}>{children}</div> : children}
+        </div>
       </div>
     </div>
   );

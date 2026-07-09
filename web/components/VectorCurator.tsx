@@ -127,8 +127,13 @@ export default function VectorCurator({
     finally { setAsking(false); }
   }, [supabase, vector]);
 
-  // Fresh state each time the focus changes.
-  useEffect(() => { setTranscript([]); setQuestion(""); setWhy(""); setAnswer(""); setDone(false); setErr(null); setProposals([]); setReviewIdx(null); setOpenKey(null); setAdding(false); setAddParent(""); void nextQuestion([]); }, [nextQuestion]);
+  // Fresh state each time the focus changes. The first interview question is
+  // fetched only when the interview pop-up OPENS — not on every tab switch.
+  useEffect(() => { setTranscript([]); setQuestion(""); setWhy(""); setAnswer(""); setDone(false); setErr(null); setProposals([]); setReviewIdx(null); setInterviewOpen(false); setOpenKey(null); setAdding(false); setAddParent(""); }, [nextQuestion]);
+  useEffect(() => {
+    if (interviewOpen && !question && !done && !asking && transcript.length === 0) void nextQuestion([]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [interviewOpen]);
 
   // A coverage-map gap click opens the guided add at that level (declared
   // AFTER the reset effect so it wins the mount-order race on a focus switch).
@@ -229,7 +234,7 @@ export default function VectorCurator({
       <Modal open={interviewOpen} onClose={() => setInterviewOpen(false)} width={640} tall
         title={`Build the ${label} focus`}>
         <div style={{ height: "100%", display: "flex", flexDirection: "column" }}>
-          <div className="stack-3" style={{ flex: 1 }}>
+          <div className="stack-3" style={{ flex: 1, minHeight: 0, overflowY: "auto", paddingRight: 2 }}>
             <div className="t-sub t-muted" style={{ fontSize: 12.5 }}>{blurb} It reads your records first and only asks what they don&apos;t answer — answer, skip, or stop anytime; then it proposes nodes you accept one by one.</div>
             {transcript.filter((t) => t.role === "a").length > 0 && (
               <div className="stack-2" style={{ background: "var(--panel-2)", border: "1px solid var(--border)", borderRadius: "var(--radius)", padding: "10px 12px" }}>
@@ -411,7 +416,7 @@ export default function VectorCurator({
         <Modal open onClose={() => setReviewIdx(null)} width={640} tall
           title={`Review proposals — ${reviewIdx + 1} of ${proposals.length}`}>
           <div className="stack-3" style={{ height: "100%", display: "flex", flexDirection: "column" }}>
-            <div className="stack-3" style={{ flex: 1 }}>
+            <div className="stack-3" style={{ flex: 1, minHeight: 0, overflowY: "auto", paddingRight: 2 }}>
               <label className="field"><span className="t-label">Name</span>
                 <input className="input" value={reviewing.label} onChange={(e) => patchProposal(reviewIdx, { label: e.target.value })} style={{ fontWeight: 620 }} /></label>
               <label className="field"><span className="t-label">Statement</span>
