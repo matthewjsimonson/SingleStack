@@ -10,12 +10,16 @@ export function Modal({
   title,
   children,
   width = 560,
+  tall = false,
 }: {
   open: boolean;
   onClose: () => void;
   title: ReactNode;
   children: ReactNode;
   width?: number;
+  // A stable vertical rectangle centered on screen — for reading and
+  // ratifying long text without losing your place underneath.
+  tall?: boolean;
 }) {
   if (!open) return null;
   return (
@@ -32,6 +36,7 @@ export function Modal({
           width, maxWidth: "100%", background: "var(--panel)",
           border: "1px solid var(--border)", borderRadius: 12, boxShadow: "var(--shadow-1)",
           display: "flex", flexDirection: "column", maxHeight: "calc(100vh - 120px)",
+          height: tall ? "calc(100vh - 120px)" : undefined,
         }}
       >
         <div className="row-between" style={{ padding: "18px 22px", borderBottom: "1px solid var(--border)" }}>
