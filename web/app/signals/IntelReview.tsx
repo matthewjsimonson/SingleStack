@@ -10,7 +10,7 @@
 import { useEffect, useState, useCallback } from "react";
 import { createClient } from "@/lib/supabase/client";
 import { getOrgId } from "@/lib/org";
-import { Section, Chip, Banner } from "@/components/ui";
+import { Section, Chip, Banner, Modal } from "@/components/ui";
 import { useAgentRun, AgentProgress } from "@/components/AgentProgress";
 import { useProductScope } from "@/lib/ProductContext";
 
@@ -52,7 +52,8 @@ export default function IntelReview({ onApplied, productFilter = "all" }: { onAp
   const [lessons, setLessons] = useState<Lesson[]>([]);
   const [acceptRate, setAcceptRate] = useState<{ rate: number; n: number } | null>(null);
   const [error, setError] = useState<string | null>(null);
-  const [openId, setOpenId] = useState<string | null>(null);
+  // The review pop-up pans through the queue one proposal at a time.
+  const [reviewIdx, setReviewIdx] = useState<number | null>(null);
   const [draft, setDraft] = useState<{ rationale: string; tags: string[]; edit: string; lines: string[]; score: number | null }>({ rationale: "", tags: [], edit: "", lines: [], score: null });
   const [busy, setBusy] = useState(false);
   const distillRun = useAgentRun("distill");
@@ -79,12 +80,14 @@ export default function IntelReview({ onApplied, productFilter = "all" }: { onAp
   }, [supabase, productFilter]);
   useEffect(() => { load(); }, [load]);
 
-  function openItem(u: Update) {
-    setOpenId(u.id);
-    // Seed the line attribution from the proposal so the human can confirm or
-    // correct WHICH lines a (possibly cross-sell) new theme spans.
+  // Seed the working draft from a proposal — the line attribution comes from
+  // the payload so the human can confirm or correct which lines it spans.
+  const seedDraft = useCallback((u: Update | undefined) => {
+    if (!u) return;
     setDraft({ rationale: "", tags: [], edit: typeof u.payload?.recommendation === "string" ? (u.payload.recommendation as string) : "", lines: linesOf(u.payload ?? {}), score: typeof u.payload?.score === "number" ? (u.payload.score as number) : null });
-  }
+  }, []);
+  function openAt(idx: number) { setReviewIdx(idx); seedDraft(updates[idx]); }
+  function panTo(idx: number) { setReviewIdx(idx); seedDraft(updates[idx]); }
   const toggleTag = (t: string) => setDraft((d) => ({ ...d, tags: d.tags.includes(t) ? d.tags.filter((x) => x !== t) : [...d.tags, t] }));
   // Toggle a product line in the attribution; first selected stays the primary.
   const toggleLine = (id: string) => setDraft((d) => ({ ...d, lines: d.lines.includes(id) ? d.lines.filter((x) => x !== id) : [...d.lines, id] }));
@@ -112,7 +115,13 @@ export default function IntelReview({ onApplied, productFilter = "all" }: { onAp
       });
       if (error) throw error;
       if (data?.error) throw new Error(data.error);
-      setOpenId(null); setDraft({ rationale: "", tags: [], edit: "", lines: [], score: null });
+      // Pan to the next pending proposal (the resolved one leaves the queue).
+      const remaining = updates.filter((x) => x.id !== u.id);
+      if (!remaining.length) setReviewIdx(null);
+      else {
+        const next = Math.min(reviewIdx ?? 0, remaining.length - 1);
+        setReviewIdx(next); seedDraft(remaining[next]);
+      }
       await load(); onApplied?.();
     } catch (e) { setError(e instanceof Error ? e.message : "Could not resolve."); }
     finally { setBusy(false); }
@@ -197,115 +206,133 @@ export default function IntelReview({ onApplied, productFilter = "all" }: { onAp
             The engine proposes these. Accept, edit, or reject — and tell it why. Your context teaches it.
           </div>
           <div className="stack-3">
-            {updates.map((u) => (
-              <div key={u.id} className="card card-pad">
-                <div className="row-between" style={{ alignItems: "baseline", gap: 10 }}>
+            {updates.map((u, idx) => (
+              <div key={u.id} className="card card-pad row-between" style={{ alignItems: "baseline", gap: 10 }}>
+                <div className="row gap-2" style={{ alignItems: "baseline", minWidth: 0, flexWrap: "wrap" }}>
                   <span style={{ fontSize: 13.5, fontWeight: 600 }}>{u.summary}</span>
-                  <div className="row gap-2" style={{ flexShrink: 0 }}>
-                    {/* Scope is visible up front so the reviewer can supervise the
-                        line attribution — especially cross-sell themes. */}
-                    {u.kind === "new_theme" && (() => {
-                      const ls = linesOf(u.payload ?? {});
-                      return ls.length >= 2
-                        ? <Chip tone="green">cross-sell · {ls.map(lineName).join(" + ")}</Chip>
-                        : ls.length === 1
-                          ? <Chip tone="default">{lineName(ls[0])}</Chip>
-                          : <Chip tone="default">company-wide</Chip>;
-                    })()}
-                    <Chip tone={KIND_TONE[u.kind] ?? "default"}>{u.kind.replace("_", " ")}</Chip>
-                  </div>
+                  {/* Scope is visible up front so the reviewer can supervise the
+                      line attribution — especially cross-sell themes. */}
+                  {u.kind === "new_theme" && (() => {
+                    const ls = linesOf(u.payload ?? {});
+                    return ls.length >= 2
+                      ? <Chip tone="green">cross-sell · {ls.map(lineName).join(" + ")}</Chip>
+                      : ls.length === 1
+                        ? <Chip tone="default">{lineName(ls[0])}</Chip>
+                        : <Chip tone="default">company-wide</Chip>;
+                  })()}
+                  <Chip tone={KIND_TONE[u.kind] ?? "default"}>{u.kind.replace("_", " ")}</Chip>
                 </div>
-
-                {openId === u.id ? (
-                  <div style={{ marginTop: 10, display: "grid", gap: 8 }}>
-                    {/* Line attribution — only for a new theme, and only when the
-                        org runs >1 line. Confirm or correct which lines it spans:
-                        none = company-wide, one = that line, ≥2 = cross-sell
-                        (first picked is the primary). The human owns this call. */}
-                    {u.kind === "new_theme" && products.length > 1 && (
-                      <div className="field">
-                        <span className="t-label">Which product line(s)? {draft.lines.length >= 2 && <span style={{ color: "var(--gn-text)" }}>· cross-sell</span>}</span>
-                        <div className="row gap-2" style={{ flexWrap: "wrap", marginTop: 4 }}>
-                          {products.map((p) => {
-                            const on = draft.lines.includes(p.id);
-                            const primary = draft.lines[0] === p.id && draft.lines.length >= 2;
-                            return (
-                              <button key={p.id} type="button" className="chip" onClick={() => toggleLine(p.id)}
-                                style={{ cursor: "pointer", background: on ? "var(--ac)" : "var(--fill)", color: on ? "#fff" : "var(--ts)" }}
-                                title={primary ? "primary line" : on ? "spanned line" : "not included"}>
-                                {primary ? "★ " : ""}{p.name}
-                              </button>
-                            );
-                          })}
-                        </div>
-                        <span className="t-mono-xs" style={{ marginTop: 4 }}>
-                          {draft.lines.length === 0 ? "company-wide (applies to all)" : draft.lines.length === 1 ? `${lineName(draft.lines[0])} only` : `cross-sell: ${draft.lines.map(lineName).join(" + ")}`}
-                        </span>
-                      </div>
-                    )}
-                    {/* Capability score: the rationale + evidence behind the rating,
-                        and a score override (the human owns the final number). */}
-                    {u.kind === "capability_score" && (
-                      <div className="card card-pad" style={{ background: "var(--panel-2)" }}>
-                        {typeof u.payload?.rationale === "string" && u.payload.rationale && <div className="t-sub" style={{ fontSize: 12.5, lineHeight: 1.5, marginBottom: 8 }}>{u.payload.rationale as string}</div>}
-                        <span className="t-label" style={{ display: "block", marginBottom: 6 }}>Score <span className="t-sub t-muted" style={{ textTransform: "none", letterSpacing: 0 }}>— agent proposes, you decide</span></span>
-                        <div className="row gap-2" style={{ flexWrap: "wrap" }}>
-                          {SCORE_LEVELS.map(([label, val]) => {
-                            const on = (draft.score ?? u.payload?.score) === val;
-                            return (
-                              <button key={val} type="button" onClick={() => setDraft({ ...draft, score: val })}
-                                className="chip" style={{ cursor: "pointer", padding: "6px 12px", background: on ? "var(--ac)" : "var(--fill)", color: on ? "#fff" : "var(--ts)", fontWeight: 600 }}>
-                                {label}
-                              </button>
-                            );
-                          })}
-                        </div>
-                        {typeof u.payload?.prev_score === "number" && (
-                          <div className="t-mono-xs" style={{ marginTop: 6 }}>currently {String(u.payload.prev_score)}/3 in the matrix · {(u.payload?.signal_ids as string[] | undefined)?.length ?? 0} signal{((u.payload?.signal_ids as string[] | undefined)?.length ?? 0) === 1 ? "" : "s"} cited</div>
-                        )}
-                      </div>
-                    )}
-                    {/* Battlecard item: show the analyst's substantiation + why it proposed it. */}
-                    {u.kind === "battlecard_item" && (
-                      <div className="card card-pad" style={{ background: "var(--panel-2)" }}>
-                        {typeof u.payload?.detail === "string" && u.payload.detail && <div className="t-sub" style={{ fontSize: 12.5, lineHeight: 1.5 }}>{u.payload.detail as string}</div>}
-                        {typeof u.payload?.rationale === "string" && u.payload.rationale && <div className="t-sub t-muted" style={{ fontSize: 12, marginTop: 6 }}>Analyst: {u.payload.rationale as string}</div>}
-                      </div>
-                    )}
-                    {typeof u.payload?.recommendation === "string" && (
-                      <label className="field"><span className="t-label">Recommendation (edit to teach a better one)</span>
-                        <textarea className="textarea" rows={2} value={draft.edit} onChange={(e) => setDraft({ ...draft, edit: e.target.value })} /></label>
-                    )}
-                    <label className="field"><span className="t-label">Why? (this is what it learns from)</span>
-                      <textarea className="textarea" rows={2} placeholder="e.g. one call isn't a pattern — wait for 3+ before opening a theme" value={draft.rationale} onChange={(e) => setDraft({ ...draft, rationale: e.target.value })} /></label>
-                    <div>
-                      <span className="t-label" style={{ display: "block", marginBottom: 6 }}>Reason</span>
-                      <div className="row gap-2" style={{ flexWrap: "wrap" }}>
-                        {REASON_TAGS.map((t) => (
-                          <button key={t} type="button" className="chip" onClick={() => toggleTag(t)}
-                            style={{ cursor: "pointer", background: draft.tags.includes(t) ? "var(--ac)" : "var(--fill)", color: draft.tags.includes(t) ? "#fff" : "var(--ts)" }}>
-                            {TAG_LABEL[t]}
-                          </button>
-                        ))}
-                      </div>
-                    </div>
-                    <div className="row gap-2" style={{ marginTop: 2 }}>
-                      <button className="btn btn-sm" disabled={busy} onClick={() => resolve(u, "accept")}>Accept</button>
-                      {typeof u.payload?.recommendation === "string" && <button className="btn btn-sm btn-secondary" disabled={busy} onClick={() => resolve(u, "edit")}>Accept edit</button>}
-                      <button className="btn btn-sm btn-secondary" disabled={busy} onClick={() => resolve(u, "reject")}>Reject</button>
-                      <button className="btn btn-sm btn-secondary" disabled={busy} onClick={() => setOpenId(null)}>Cancel</button>
-                    </div>
-                  </div>
-                ) : (
-                  <div className="row gap-2" style={{ marginTop: 10 }}>
-                    <button className="btn btn-sm" onClick={() => openItem(u)}>Review</button>
-                  </div>
-                )}
+                <button className="btn btn-sm" style={{ flexShrink: 0 }} onClick={() => openAt(idx)}>Review</button>
               </div>
             ))}
           </div>
         </Section>
       )}
+
+      {/* ---- REVIEW pop-up — a tall centered rectangle you PAN through ---- */}
+      {reviewIdx != null && updates[reviewIdx] && (() => {
+        const u = updates[reviewIdx];
+        return (
+          <Modal open onClose={() => setReviewIdx(null)} width={640} tall
+            title={`Review intelligence — ${reviewIdx + 1} of ${updates.length}`}>
+            <div style={{ height: "100%", display: "flex", flexDirection: "column" }}>
+              <div className="stack-3" style={{ flex: 1 }}>
+                <div>
+                  <div style={{ fontSize: 15, fontWeight: 640, lineHeight: 1.45 }}>{u.summary}</div>
+                  <div className="row gap-2" style={{ marginTop: 6, flexWrap: "wrap" }}>
+                    <Chip tone={KIND_TONE[u.kind] ?? "default"}>{u.kind.replace("_", " ")}</Chip>
+                    {u.kind === "new_theme" && (() => {
+                      const ls = linesOf(u.payload ?? {});
+                      return ls.length >= 2 ? <Chip tone="green">cross-sell</Chip> : null;
+                    })()}
+                  </div>
+                </div>
+                {/* Line attribution — only for a new theme, and only when the
+                    org runs >1 line. The human owns this call. */}
+                {u.kind === "new_theme" && products.length > 1 && (
+                  <div className="field">
+                    <span className="t-label">Which product line(s)? {draft.lines.length >= 2 && <span style={{ color: "var(--gn-text)" }}>· cross-sell</span>}</span>
+                    <div className="row gap-2" style={{ flexWrap: "wrap", marginTop: 4 }}>
+                      {products.map((p) => {
+                        const on = draft.lines.includes(p.id);
+                        const primary = draft.lines[0] === p.id && draft.lines.length >= 2;
+                        return (
+                          <button key={p.id} type="button" className="chip" onClick={() => toggleLine(p.id)}
+                            style={{ cursor: "pointer", background: on ? "var(--ac)" : "var(--fill)", color: on ? "#fff" : "var(--ts)" }}
+                            title={primary ? "primary line" : on ? "spanned line" : "not included"}>
+                            {primary ? "★ " : ""}{p.name}
+                          </button>
+                        );
+                      })}
+                    </div>
+                    <span className="t-mono-xs" style={{ marginTop: 4 }}>
+                      {draft.lines.length === 0 ? "company-wide (applies to all)" : draft.lines.length === 1 ? `${lineName(draft.lines[0])} only` : `cross-sell: ${draft.lines.map(lineName).join(" + ")}`}
+                    </span>
+                  </div>
+                )}
+                {/* Capability score: the rationale + evidence behind the rating,
+                    and a score override (the human owns the final number). */}
+                {u.kind === "capability_score" && (
+                  <div className="card card-pad" style={{ background: "var(--panel-2)" }}>
+                    {typeof u.payload?.rationale === "string" && u.payload.rationale && <div className="t-sub" style={{ fontSize: 13, lineHeight: 1.6, marginBottom: 8 }}>{u.payload.rationale as string}</div>}
+                    <span className="t-label" style={{ display: "block", marginBottom: 6 }}>Score <span className="t-sub t-muted" style={{ textTransform: "none", letterSpacing: 0 }}>— agent proposes, you decide</span></span>
+                    <div className="row gap-2" style={{ flexWrap: "wrap" }}>
+                      {SCORE_LEVELS.map(([label, val]) => {
+                        const on = (draft.score ?? u.payload?.score) === val;
+                        return (
+                          <button key={val} type="button" onClick={() => setDraft({ ...draft, score: val })}
+                            className="chip" style={{ cursor: "pointer", padding: "6px 12px", background: on ? "var(--ac)" : "var(--fill)", color: on ? "#fff" : "var(--ts)", fontWeight: 600 }}>
+                            {label}
+                          </button>
+                        );
+                      })}
+                    </div>
+                    {typeof u.payload?.prev_score === "number" && (
+                      <div className="t-mono-xs" style={{ marginTop: 6 }}>currently {String(u.payload.prev_score)}/3 in the matrix · {(u.payload?.signal_ids as string[] | undefined)?.length ?? 0} signal{((u.payload?.signal_ids as string[] | undefined)?.length ?? 0) === 1 ? "" : "s"} cited</div>
+                    )}
+                  </div>
+                )}
+                {/* Battlecard item: the analyst's substantiation + why it proposed it. */}
+                {u.kind === "battlecard_item" && (
+                  <div className="card card-pad" style={{ background: "var(--panel-2)" }}>
+                    {typeof u.payload?.detail === "string" && u.payload.detail && <div className="t-sub" style={{ fontSize: 13, lineHeight: 1.6 }}>{u.payload.detail as string}</div>}
+                    {typeof u.payload?.rationale === "string" && u.payload.rationale && <div className="t-sub t-muted" style={{ fontSize: 12.5, marginTop: 6 }}>Analyst: {u.payload.rationale as string}</div>}
+                  </div>
+                )}
+                {typeof u.payload?.recommendation === "string" && (
+                  <label className="field"><span className="t-label">Recommendation (edit to teach a better one)</span>
+                    <textarea className="textarea" rows={6} value={draft.edit} onChange={(e) => setDraft({ ...draft, edit: e.target.value })} /></label>
+                )}
+                <label className="field"><span className="t-label">Why? (this is what it learns from)</span>
+                  <textarea className="textarea" rows={3} placeholder="e.g. one call isn't a pattern — wait for 3+ before opening a theme" value={draft.rationale} onChange={(e) => setDraft({ ...draft, rationale: e.target.value })} /></label>
+                <div>
+                  <span className="t-label" style={{ display: "block", marginBottom: 6 }}>Reason</span>
+                  <div className="row gap-2" style={{ flexWrap: "wrap" }}>
+                    {REASON_TAGS.map((t) => (
+                      <button key={t} type="button" className="chip" onClick={() => toggleTag(t)}
+                        style={{ cursor: "pointer", background: draft.tags.includes(t) ? "var(--ac)" : "var(--fill)", color: draft.tags.includes(t) ? "#fff" : "var(--ts)" }}>
+                        {TAG_LABEL[t]}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              </div>
+              {/* Pan + verdict — fixed to the bottom of the rectangle */}
+              <div className="row-between" style={{ borderTop: "1px solid var(--border)", paddingTop: 12, marginTop: 12, alignItems: "center" }}>
+                <div className="row gap-2">
+                  <button className="btn btn-secondary btn-sm" onClick={() => panTo(Math.max(0, reviewIdx - 1))} disabled={reviewIdx === 0}>‹ Prev</button>
+                  <button className="btn btn-secondary btn-sm" onClick={() => panTo(Math.min(updates.length - 1, reviewIdx + 1))} disabled={reviewIdx >= updates.length - 1}>Next ›</button>
+                </div>
+                <div className="row gap-2">
+                  <button className="btn btn-secondary" disabled={busy} onClick={() => resolve(u, "reject")} style={{ color: "var(--rd-text)" }}>Reject</button>
+                  {typeof u.payload?.recommendation === "string" && <button className="btn btn-secondary" disabled={busy} onClick={() => resolve(u, "edit")}>Accept edit</button>}
+                  <button className="btn" disabled={busy} onClick={() => resolve(u, "accept")}>Accept</button>
+                </div>
+              </div>
+            </div>
+          </Modal>
+        );
+      })()}
 
       {(lessons.length > 0 || acceptRate || updates.length === 0) && (
         <Section

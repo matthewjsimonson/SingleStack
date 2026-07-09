@@ -68,6 +68,9 @@ export default function VectorCurator({
   // review pop-up (null = closed).
   const [proposals, setProposals] = useState<Field[]>([]);
   const [reviewIdx, setReviewIdx] = useState<number | null>(null);
+  // The Q&A interview runs in its own pop-up (a setup workflow reads better
+  // in a tall centered window than in an inline card).
+  const [interviewOpen, setInterviewOpen] = useState(false);
 
   // Which node's editor pop-up is open.
   const [openKey, setOpenKey] = useState<string | null>(null);
@@ -165,7 +168,8 @@ export default function VectorCurator({
     if (incoming) {
       const clean = incoming.filter((f) => f.label.trim());
       setProposals(clean);
-      setReviewIdx(clean.length ? 0 : null);   // open the review pop-up on the first one
+      setInterviewOpen(false);                 // the interview hands off…
+      setReviewIdx(clean.length ? 0 : null);   // …to the review pop-up, first proposal up
     }
   }
 
@@ -203,38 +207,59 @@ export default function VectorCurator({
     <div className="stack-3">
       {err && <div className="banner banner-err">{err}</div>}
 
-      {/* Build with AI — the interview feeds proposals reviewed in the pop-up */}
-      <div className="card card-pad" style={{ background: "var(--panel-2)" }}>
-        <div className="t-label" style={{ marginBottom: 8 }}>Build with AI <span className="t-muted" style={{ fontWeight: 400, textTransform: "none", letterSpacing: 0 }}>— reads your records, asks what they don&apos;t answer, then proposes nodes you review one by one</span></div>
-        {transcript.filter((t) => t.role === "a").length > 0 && (
-          <div className="stack-2" style={{ marginBottom: 10 }}>
-            {transcript.map((t, k) => (
-              <div key={k} className="t-sub" style={{ fontSize: 12.5, color: t.role === "q" ? "var(--tm)" : "var(--tp)" }}>{t.role === "q" ? "Q: " : "A: "}{t.text}</div>
-            ))}
-          </div>
-        )}
-        {asking ? <div className="t-sub t-muted" style={{ fontSize: 12.5 }}>Thinking…</div>
-          : done ? <div className="t-sub" style={{ fontSize: 12.5, color: "var(--gn-text)" }}>Enough to propose nodes for this focus — or add your own below.</div>
-          : question ? (
-            <>
-              <div style={{ fontSize: 13.5, fontWeight: 600, marginBottom: 2 }}>{question}</div>
-              {why && <div className="t-sub t-muted" style={{ fontSize: 11.5, marginBottom: 8 }}>{why}</div>}
-              <textarea className="textarea" rows={3} value={answer} onChange={(e) => setAnswer(e.target.value)} placeholder="Your answer — or skip" />
-              <div className="row gap-2" style={{ marginTop: 8 }}>
-                <button className="btn btn-sm" onClick={submitAnswer} disabled={!answer.trim()}>Answer →</button>
-                <button className="btn btn-secondary btn-sm" onClick={() => setDone(true)}>Skip / enough</button>
-              </div>
-            </>
-          ) : null}
-        <div style={{ marginTop: 12, borderTop: "1px solid var(--border)", paddingTop: 12 }} className="row gap-2">
-          <button className="btn btn-sm" onClick={propose} disabled={generating}>
-            {generating ? "Proposing nodes…" : "Propose nodes"}
-          </button>
+      {/* Build with AI — the interview + proposals run in pop-ups; the page
+          just offers the way in */}
+      <div className="card card-pad row-between" style={{ background: "var(--panel-2)", alignItems: "center", gap: 12, flexWrap: "wrap" }}>
+        <div style={{ minWidth: 0 }}>
+          <div className="t-label">Build with AI</div>
+          <div className="t-sub t-muted" style={{ fontSize: 12.5, marginTop: 2 }}>Reads your records, asks what they don&apos;t answer, then proposes nodes you review one by one.</div>
+        </div>
+        <div className="row gap-2" style={{ flexShrink: 0 }}>
           {proposals.length > 0 && reviewIdx == null && (
             <button className="btn btn-secondary btn-sm" onClick={() => setReviewIdx(0)}>Review {proposals.length} proposal{proposals.length === 1 ? "" : "s"}</button>
           )}
+          <button className="btn btn-sm" onClick={() => setInterviewOpen(true)} disabled={generating}>
+            {generating ? "Proposing nodes…" : "Build with AI"}
+          </button>
         </div>
       </div>
+
+      {/* ---- INTERVIEW pop-up — the Q&A setup workflow, one question at a
+              time in a tall centered window ---- */}
+      <Modal open={interviewOpen} onClose={() => setInterviewOpen(false)} width={640} tall
+        title={`Build the ${label} focus`}>
+        <div style={{ height: "100%", display: "flex", flexDirection: "column" }}>
+          <div className="stack-3" style={{ flex: 1 }}>
+            <div className="t-sub t-muted" style={{ fontSize: 12.5 }}>{blurb} It reads your records first and only asks what they don&apos;t answer — answer, skip, or stop anytime; then it proposes nodes you accept one by one.</div>
+            {transcript.filter((t) => t.role === "a").length > 0 && (
+              <div className="stack-2" style={{ background: "var(--panel-2)", border: "1px solid var(--border)", borderRadius: "var(--radius)", padding: "10px 12px" }}>
+                {transcript.map((t, k) => (
+                  <div key={k} className="t-sub" style={{ fontSize: 12.5, lineHeight: 1.55, color: t.role === "q" ? "var(--tm)" : "var(--tp)" }}>{t.role === "q" ? "Q: " : "A: "}{t.text}</div>
+                ))}
+              </div>
+            )}
+            {asking ? <div className="t-sub t-muted" style={{ fontSize: 12.5 }}>Thinking about what to ask…</div>
+              : done ? <div className="t-sub" style={{ fontSize: 13, color: "var(--gn-text)" }}>Enough to propose nodes for this focus.</div>
+              : question ? (
+                <>
+                  <div style={{ fontSize: 15, fontWeight: 630, lineHeight: 1.45 }}>{question}</div>
+                  {why && <div className="t-sub t-muted" style={{ fontSize: 12 }}>{why}</div>}
+                  <textarea className="textarea" rows={6} value={answer} onChange={(e) => setAnswer(e.target.value)} placeholder="Your answer — or skip" autoFocus />
+                  <div className="row gap-2">
+                    <button className="btn" onClick={submitAnswer} disabled={!answer.trim()}>Answer →</button>
+                    <button className="btn btn-secondary" onClick={() => setDone(true)}>Skip / enough</button>
+                  </div>
+                </>
+              ) : null}
+          </div>
+          <div className="row-between" style={{ borderTop: "1px solid var(--border)", paddingTop: 12, marginTop: 12, alignItems: "center" }}>
+            <span className="t-sub t-muted" style={{ fontSize: 12 }}>{transcript.filter((t) => t.role === "a").length} answered</span>
+            <button className="btn" onClick={propose} disabled={generating}>
+              {generating ? "Proposing nodes…" : "Propose nodes →"}
+            </button>
+          </div>
+        </div>
+      </Modal>
 
       {/* The nodes — the branch as an indented, readable tree; click to open */}
       <div className="card card-pad">

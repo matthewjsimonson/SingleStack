@@ -262,7 +262,7 @@ export default function SourceManager({ scope = {}, title = "Sources" }: { scope
                 connection and a USEFUL one (esp. for MCP: which reports/accounts). */}
             <div className="t-label" style={{ marginTop: 4 }}>Where to look — point it at specifics</div>
             <label className="field"><span className="t-label">Targets (one URL or reference per line)</span>
-              <textarea className="input" rows={3} value={cfg.targets} placeholder={picked.kind === "website" || picked.kind === "youtube" ? "https://competitor.com/pricing\nhttps://competitor.com/blog" : "e.g. report: Win/loss by competitor\naccount: Acme Corp"} onChange={(e) => setCfg({ ...cfg, targets: e.target.value })} /></label>
+              <textarea className="input" rows={4} value={cfg.targets} placeholder={picked.kind === "website" || picked.kind === "youtube" ? "https://competitor.com/pricing\nhttps://competitor.com/blog" : "e.g. report: Win/loss by competitor\naccount: Acme Corp"} onChange={(e) => setCfg({ ...cfg, targets: e.target.value })} /></label>
             <label className="field"><span className="t-label">Guidance (plain words — what to prioritize / ignore)</span>
               <input className="input" value={cfg.guidance} placeholder="e.g. focus on enterprise pricing & SSO; ignore careers" onChange={(e) => setCfg({ ...cfg, guidance: e.target.value })} /></label>
 
@@ -338,7 +338,7 @@ export default function SourceManager({ scope = {}, title = "Sources" }: { scope
                 config syntax, no server-building. The non-technical path in. */}
             <div className="card" style={{ padding: 12, marginBottom: 14, background: "var(--panel-2)" }}>
               <div className="t-label" style={{ marginBottom: 6 }}>Describe a signal you want</div>
-              <textarea className="input" rows={2} value={describe} placeholder="e.g. Tell me when Acme changes their pricing page or starts hiring senior sales reps"
+              <textarea className="input" rows={3} value={describe} placeholder="e.g. Tell me when Acme changes their pricing page or starts hiring senior sales reps"
                 onChange={(e) => setDescribe(e.target.value)} style={{ marginBottom: 8 }} />
               <button className="btn btn-sm" disabled={building || describe.trim().length < 4} onClick={buildRecipe}>
                 {building ? "Drafting…" : "Draft it for me"}

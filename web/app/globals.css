@@ -212,18 +212,25 @@ button { font-family: inherit; cursor: pointer; }
 .chip-amber  { background: var(--am-fill); color: var(--am-text); }
 .chip-dot::before { content: ""; width: 5px; height: 5px; border-radius: 999px; background: currentColor; opacity: 0.7; }
 
-/* ---- inputs -------------------------------------------------------------- */
+/* ---- inputs ---------------------------------------------------------------
+   Calm, modern fields (Linear/Notion school): a softly recessed resting state
+   that lifts to white with the accent ring on focus. One look for every
+   input/textarea/select in the product — the same family, size, and rhythm
+   as the rest of the type system, never the browser's native chrome. */
 .input, .textarea, .select {
-  width: 100%; background: #fff; border: 1px solid var(--border-strong);
-  border-radius: var(--radius-sm); padding: 9px 12px;
-  font-family: inherit; font-size: 14px; color: var(--tp);
+  width: 100%; background: var(--panel-2); border: 1px solid var(--border);
+  border-radius: var(--radius); padding: 10px 12px;
+  font-family: inherit; font-size: 14px; color: var(--tp); line-height: 1.5;
+  letter-spacing: -0.005em;
   transition: border-color 0.14s ease, box-shadow 0.18s ease, background-color 0.14s ease;
 }
+.input::placeholder, .textarea::placeholder { color: var(--tm); }
+.input:hover, .textarea:hover, .select:hover { border-color: var(--border-strong); }
 .input:focus, .textarea:focus, .select:focus,
 .input:focus-visible, .textarea:focus-visible, .select:focus-visible {
-  outline: none; border-color: var(--ac); box-shadow: 0 0 0 3px var(--ac-fill);
+  outline: none; background: #fff; border-color: var(--ac); box-shadow: 0 0 0 3px var(--ac-fill);
 }
-.textarea { resize: vertical; line-height: 1.5; }
+.textarea, textarea.input { resize: vertical; line-height: 1.55; }
 
 /* Custom select — not a native OS dropdown. A right-aligned chevron (inline SVG
    in --tm) keeps height consistent with .input; right padding clears the caret. */

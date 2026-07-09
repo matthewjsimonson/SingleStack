@@ -227,7 +227,7 @@ export default function SignalsView() {
           <label className="field"><span className="t-label">What&apos;s the signal?</span>
             <input className="input" autoFocus value={form.title} onChange={(e) => setForm({ ...form, title: e.target.value })} placeholder="e.g. Buyers stall on pricing after demo" /></label>
           <label className="field"><span className="t-label">Why it matters</span>
-            <textarea className="textarea" rows={2} value={form.why} onChange={(e) => setForm({ ...form, why: e.target.value })} placeholder="Context, evidence, implication." /></label>
+            <textarea className="textarea" rows={4} value={form.why} onChange={(e) => setForm({ ...form, why: e.target.value })} placeholder="Context, evidence, implication." /></label>
           {products.length > 1 && (
             <label className="field"><span className="t-label">Product</span>
               <select className="select" value={form.product_id} onChange={(e) => setForm({ ...form, product_id: e.target.value })}>

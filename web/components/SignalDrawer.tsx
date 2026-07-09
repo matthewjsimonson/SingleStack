@@ -358,8 +358,8 @@ export default function SignalDrawer({ signal, onClose, onChanged }: { signal: D
                   <select className="select" value={rec.scope} onChange={(e) => setRec({ ...rec, scope: e.target.value })}>
                     {SCOPES.map(([k, label]) => <option key={k} value={k}>{label}</option>)}
                   </select></label>
-                {rec.scope !== "gtm" && <label className="field"><span className="t-label" style={{ color: "var(--ac-text)" }}>Build workstream</span><textarea className="textarea" rows={2} value={rec.build} onChange={(e) => setRec({ ...rec, build: e.target.value })} /></label>}
-                {rec.scope !== "product" && <label className="field"><span className="t-label" style={{ color: "var(--vl-text)" }}>GTM workstream</span><textarea className="textarea" rows={2} value={rec.gtm} onChange={(e) => setRec({ ...rec, gtm: e.target.value })} /></label>}
+                {rec.scope !== "gtm" && <label className="field"><span className="t-label" style={{ color: "var(--ac-text)" }}>Build workstream</span><textarea className="textarea" rows={4} value={rec.build} onChange={(e) => setRec({ ...rec, build: e.target.value })} /></label>}
+                {rec.scope !== "product" && <label className="field"><span className="t-label" style={{ color: "var(--vl-text)" }}>GTM workstream</span><textarea className="textarea" rows={4} value={rec.gtm} onChange={(e) => setRec({ ...rec, gtm: e.target.value })} /></label>}
                 {rec.why && <div className="t-sub t-muted" style={{ fontSize: 12, marginBottom: 8 }}>Why: {rec.why}</div>}
                 <div className="row gap-2"><button className="btn btn-success btn-sm" onClick={createRecommended} disabled={recBusy}>{recBusy ? "Creating…" : "Create initiative"}</button><button className="btn btn-secondary btn-sm" onClick={() => setRec(null)}>Discard</button></div>
               </div>
@@ -378,7 +378,7 @@ export default function SignalDrawer({ signal, onClose, onChanged }: { signal: D
           <details className="card card-pad">
             <summary className="t-label" style={{ color: "var(--tm)", cursor: "pointer" }}>Your context</summary>
             <div style={{ marginTop: 10 }}>
-              <textarea className="textarea" rows={3} value={context} onChange={(e) => setContext(e.target.value)} placeholder="Add what you know that the data doesn't — nuance, caveats. The agents read this." />
+              <textarea className="textarea" rows={4} value={context} onChange={(e) => setContext(e.target.value)} placeholder="Add what you know that the data doesn't — nuance, caveats. The agents read this." />
               <button className="btn btn-secondary btn-sm" onClick={saveContext} disabled={busy === "context"} style={{ marginTop: 8 }}>{busy === "context" ? "Saving…" : "Save context"}</button>
             </div>
           </details>
@@ -388,7 +388,7 @@ export default function SignalDrawer({ signal, onClose, onChanged }: { signal: D
             <summary className="t-label" style={{ color: "var(--tm)", cursor: "pointer" }}>Edit signal</summary>
             <div style={{ marginTop: 10 }}>
               <label className="field"><span className="t-label">Title</span><input className="input" value={edit.title} onChange={(e) => setEdit({ ...edit, title: e.target.value })} /></label>
-              <label className="field"><span className="t-label">Why it matters</span><textarea className="textarea" rows={2} value={edit.why} onChange={(e) => setEdit({ ...edit, why: e.target.value })} /></label>
+              <label className="field"><span className="t-label">Why it matters</span><textarea className="textarea" rows={4} value={edit.why} onChange={(e) => setEdit({ ...edit, why: e.target.value })} /></label>
               <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "var(--sp-3)" }}>
                 <label className="field"><span className="t-label">Confidence (0–1)</span><input className="input" value={edit.conf_level} onChange={(e) => setEdit({ ...edit, conf_level: e.target.value })} placeholder="0.7" /></label>
                 <label className="field"><span className="t-label">Informs</span>

@@ -131,7 +131,7 @@ export default function MarketSetup({ onDone }: { onDone: () => void }) {
               </div>
               <div className="t-sub" style={{ fontSize: 12, marginTop: 6 }}><b>Serves:</b> {w.serves}</div>
               <div className="t-sub t-muted" style={{ fontSize: 12, marginTop: 2 }}>{w.why}</div>
-              <textarea className="textarea" rows={2} value={w.guidance} onChange={(e) => edit(i, { guidance: e.target.value })} style={{ fontSize: 12, marginTop: 6 }} />
+              <textarea className="textarea" rows={3} value={w.guidance} onChange={(e) => edit(i, { guidance: e.target.value })} style={{ fontSize: 12, marginTop: 6 }} />
             </div>
           ))}
           {pulls.length > 0 && (
