@@ -1,19 +1,18 @@
 "use client";
 
-// Signals — the SETUP page, and only that: build the search for signals and
-// manage what you pull in. The profile's focus pages (tabs below) define WHAT
-// the brain hunts; the review queue ratifies what the pulls brought back; the
-// health strip says whether it's pulling on its own. The signals themselves
-// live on the intelligence pages they feed — Competitive, Market, Technology.
+// Signals — the SETUP page, and only that: the signals profile IS the page.
+// The focus pages (tabs) define WHAT the brain hunts as a node hierarchy;
+// recommendations from what the pulls brought back are accessed INSIDE the
+// nodes they derive from (and pushed to their area from there). The signals
+// themselves live on the intelligence pages they feed — Competitive, Market,
+// Technology.
 import { useEffect, useState, useCallback } from "react";
 import { createClient } from "@/lib/supabase/client";
 import { getOrgId } from "@/lib/org";
 import { fireWorkflows } from "@/lib/triggers";
-import { useProductScope } from "@/lib/ProductContext";
 import { Banner, Modal } from "@/components/ui";
 import PageBar from "@/components/PageBar";
 import TrackingTopics from "@/components/TrackingTopics";
-import IntelReview from "./IntelReview";
 import SignalProfile from "@/components/SignalProfile";
 import AutomationHealth from "@/components/AutomationHealth";
 import { useAgentRun, AgentProgress } from "@/components/AgentProgress";
@@ -26,7 +25,6 @@ export default function SignalsView() {
   const [products, setProducts] = useState<{ id: string; name: string }[]>([]);
   const [signalCount, setSignalCount] = useState(0);
   const [error, setError] = useState<string | null>(null);
-  const { active } = useProductScope();
   const synthRun = useAgentRun("synthesize");
 
   const [logOpen, setLogOpen] = useState(false);
@@ -113,10 +111,8 @@ export default function SignalsView() {
       {/* Is the brain pulling on its own? */}
       <AutomationHealth />
 
-      {/* What the pulls brought back — ratify it (accept / edit / reject). */}
-      <IntelReview onApplied={load} productFilter={active} />
-
-      {/* The search itself: one page per focus, nodes as the hierarchy. */}
+      {/* The page IS the profile: one page per focus, nodes as the hierarchy.
+          Recommendations surface inside the nodes they came from. */}
       <SignalProfile scope="landscape" />
 
       {/* Log signal — modal */}

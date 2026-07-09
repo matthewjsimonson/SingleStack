@@ -638,6 +638,8 @@ export async function clearDemoIntel(supabase: any): Promise<{ message: string }
 
   // Themes first (theme_signals/theme_events cascade with them), then signals.
   await del("themes", supabase.from("signal_themes").delete({ count: "exact" }).in("title", THEME_TITLES));
+  // Pending recommendations derive from the intel being cleared — sweep them too.
+  await del("pending recommendations", supabase.from("intel_updates").delete({ count: "exact" }).eq("status", "pending"));
   await del("signals", supabase.from("signals").delete({ count: "exact" }).in("title", SIGNAL_TITLES));
   await del("usage signals", supabase.from("signals").delete({ count: "exact" }).eq("metadata->>domain", "usage"));
   await del("battle cards", supabase.from("battlecard_items").delete({ count: "exact" }).in("title", CARD_TITLES));

@@ -124,6 +124,43 @@ export default function VectorCurator({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [interviewOpen]);
 
+  // RECOMMENDATIONS for this focus — pending intelligence updates whose
+  // EVIDENCE came from this focus's signals (battlecard/capability ones are
+  // competitive by nature). Derivation is structural: no signals pulled for
+  // the focus → no recommendations, ever. Surfaced inside the node pop-ups;
+  // accepting pushes the item to its area (theme boards / battlecards / matrix).
+  type Rec = { id: string; kind: string; summary: string | null; payload: Record<string, unknown> };
+  const [recs, setRecs] = useState<Rec[]>([]);
+  const [recBusy, setRecBusy] = useState<string | null>(null);
+  const loadRecs = useCallback(async () => {
+    const { data: ups } = await supabase.from("intel_updates").select("id, kind, summary, payload").eq("status", "pending");
+    const list = (ups ?? []) as Rec[];
+    const sigIds = [...new Set(list.flatMap((u) => (Array.isArray(u.payload?.signal_ids) ? (u.payload.signal_ids as string[]) : [])))];
+    const vecOfSig = new Map<string, string | null>();
+    if (sigIds.length) {
+      const { data: sigs } = await supabase.from("signals").select("id, metadata").in("id", sigIds);
+      for (const s of sigs ?? []) vecOfSig.set(s.id as string, ((s.metadata as { vector?: string } | null)?.vector) ?? null);
+    }
+    setRecs(list.filter((u) => {
+      if (u.kind === "battlecard_item" || u.kind === "capability_score" || u.payload?.competitor_id) return vector === "competitive";
+      const ids = Array.isArray(u.payload?.signal_ids) ? (u.payload.signal_ids as string[]) : [];
+      return ids.some((id) => vecOfSig.get(id) === vector);
+    }));
+  }, [supabase, vector]);
+  useEffect(() => { loadRecs(); }, [loadRecs]);
+  async function resolveRec(id: string, verdict: "accept" | "reject") {
+    setRecBusy(id); setErr(null);
+    try {
+      const { data: s } = await supabase.auth.getSession();
+      const token = s.session?.access_token;
+      const { data, error } = await supabase.functions.invoke("resolve-intel-update", { body: { update_id: id, verdict }, headers: token ? { Authorization: `Bearer ${token}` } : undefined });
+      if (error) throw error;
+      if (data?.error) throw new Error(data.error);
+      await loadRecs();
+    } catch (e) { setErr(await edgeErrorMessage(e, "resolve-intel-update")); }
+    finally { setRecBusy(null); }
+  }
+
   async function submitAnswer() {
     if (!answer.trim()) return;
     const t = [...transcript, { role: "a" as const, text: answer.trim() }];
@@ -308,6 +345,28 @@ export default function VectorCurator({
                 <div className="t-mono-xs" style={{ whiteSpace: "pre-wrap", color: "var(--ts)", lineHeight: 1.55, marginTop: 6, background: "var(--panel-2)", border: "1px solid var(--border)", borderRadius: "var(--radius-sm)", padding: "8px 10px" }}>{compileNodeBrief(fieldsOnly, f.field_key) || "Give the node a statement — that statement becomes the search steer."}</div>
               </details>
               <NodeSources vector={vector} nodeKey={f.field_key} seed={compileNodeBrief(fieldsOnly, f.field_key)} />
+              {/* Recommendations — only when this focus's signals produced any.
+                  Accept pushes the item to its area; nothing appears before
+                  signals are set up and pulled. */}
+              {recs.length > 0 && (
+                <div className="card card-pad" style={{ background: "var(--panel-2)" }}>
+                  <div className="t-label" style={{ marginBottom: 8 }}>Recommendations · {recs.length} <span className="t-muted" style={{ fontWeight: 400, textTransform: "none", letterSpacing: 0 }}>— from this focus&apos;s signals; accepting pushes each to its area</span></div>
+                  <div className="stack-2">
+                    {recs.map((r) => (
+                      <div key={r.id} className="row-between" style={{ gap: 8, alignItems: "baseline" }}>
+                        <div style={{ minWidth: 0 }}>
+                          <span style={{ fontSize: 12.5, lineHeight: 1.5 }}>{r.summary}</span>
+                          <span className="t-mono-xs t-muted" style={{ marginLeft: 8 }}>{r.kind.replace("_", " ")}</span>
+                        </div>
+                        <div className="row gap-2" style={{ flexShrink: 0 }}>
+                          <button className="btn btn-secondary btn-sm" disabled={recBusy === r.id} onClick={() => resolveRec(r.id, "reject")} style={{ color: "var(--rd-text)" }}>Dismiss</button>
+                          <button className="btn btn-sm" disabled={recBusy === r.id} onClick={() => resolveRec(r.id, "accept")}>{recBusy === r.id ? "…" : "Accept → push"}</button>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
               <div className="row-between" style={{ paddingTop: 4 }}>
                 <button className="btn btn-secondary btn-sm" onClick={() => { removeField(i); setOpenKey(null); }} style={{ color: "var(--rd-text)" }}>Remove node</button>
                 <div className="row gap-2">
