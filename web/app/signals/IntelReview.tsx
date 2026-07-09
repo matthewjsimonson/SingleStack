@@ -13,6 +13,7 @@ import { getOrgId } from "@/lib/org";
 import { Section, Chip, Banner, Modal } from "@/components/ui";
 import { useAgentRun, AgentProgress } from "@/components/AgentProgress";
 import { useProductScope } from "@/lib/ProductContext";
+import { edgeErrorMessage } from "@/lib/edgeError";
 
 type Update = {
   id: string; kind: string; summary: string | null; theme_id: string | null;
@@ -115,15 +116,17 @@ export default function IntelReview({ onApplied, productFilter = "all" }: { onAp
       });
       if (error) throw error;
       if (data?.error) throw new Error(data.error);
-      // Pan to the next pending proposal (the resolved one leaves the queue).
+      // Pan to the next pending proposal. Update the queue OPTIMISTICALLY so
+      // the pop-up never flashes the just-resolved item while load() runs.
       const remaining = updates.filter((x) => x.id !== u.id);
+      setUpdates(remaining);
       if (!remaining.length) setReviewIdx(null);
       else {
         const next = Math.min(reviewIdx ?? 0, remaining.length - 1);
         setReviewIdx(next); seedDraft(remaining[next]);
       }
       await load(); onApplied?.();
-    } catch (e) { setError(e instanceof Error ? e.message : "Could not resolve."); }
+    } catch (e) { setError(await edgeErrorMessage(e, "resolve-intel-update")); }
     finally { setBusy(false); }
   }
 

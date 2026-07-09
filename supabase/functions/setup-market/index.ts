@@ -113,7 +113,7 @@ Deno.serve(async (req: Request) => {
       // Legacy 'industry'/'persona' vector values still count as market.
       profileMarket = (pfs ?? []).filter((f) => (f.vector === "market" || f.vector === "industry" || f.vector === "persona" || f.vector === "core") && f.value?.trim())
         .sort((a, b) => ((b.weight as number) ?? 2) - ((a.weight as number) ?? 2))
-        .map((f) => `- [${f.vector}/${((f.weight as number) ?? 2) >= 3 ? "direct" : ((f.weight as number) ?? 2) <= 1 ? "indirect" : "adjacent"}] ${f.label}: ${f.value}`).join("\n");
+        .map((f) => `- [${((f.weight as number) ?? 2) >= 3 ? "direct" : ((f.weight as number) ?? 2) <= 1 ? "indirect" : "adjacent"} · ${f.vector}] ${f.label}: ${f.value}`).join("\n");
     }
 
     // ---- existing market watches, so we don't re-propose ----
@@ -126,7 +126,7 @@ Deno.serve(async (req: Request) => {
       `Be RUTHLESSLY focused: propose at most ${targetCount} watches — the segments that are core ICP AND capability-backed. If we list 15 industries, watch the few that matter most; say what you left out in 'note'. A few aligned watches beat broad coverage that floods the feed.`,
       "Lenses: 'industry' (a vertical we serve), 'persona' (a buyer/user we serve), 'analyst' (category coverage e.g. Gartner/Forrester for our category), 'tech' (category/platform shifts that change what buyers expect). kinds = which live search-backed sources fit (press, social, reviews, web_search).",
       "Ground everything in the records below. Never invent a segment we don't serve or a capability we don't have.",
-      "If a SIGNALS PROFILE (market vector) is provided, treat it as the curated AIM — prioritize the [direct] segments and personas and the specific sources/communities it names; it is the user's own where-to-look.",
+      "If a SIGNALS PROFILE (market vector) is provided, treat it as the curated AIM — prioritize the [direct·…] segments and personas and the specific sources/communities it names; it is the user's own where-to-look.",
     ].join("\n");
 
     const userText = [

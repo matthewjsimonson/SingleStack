@@ -90,6 +90,23 @@ export default function SignalProfile({ scope, competitorId, competitorName, vec
 
   const currentPayload = (fs: Field[]) => fs.map((f) => ({ field_key: f.field_key, label: f.label, value: f.value, vector: f.vector ?? "core", weight: f.weight ?? 2, parent_key: f.parent_key ?? null }));
 
+  // The model only guarantees snake_case keys, not cross-focus uniqueness —
+  // and the DB has unique (profile_id, field_key). Re-key any incoming node
+  // that collides with a key already taken elsewhere (fixing its children's
+  // parent_key along the way) so Save can never hit a unique violation.
+  function dedupeKeys(incoming: Field[], taken: Set<string>): Field[] {
+    const seen = new Set(taken);
+    const renamed = new Map<string, string>();
+    const out = incoming.map((f) => {
+      let k = f.field_key;
+      while (seen.has(k)) k = `${k}_x`;
+      seen.add(k);
+      if (k !== f.field_key) renamed.set(f.field_key, k);
+      return { ...f, field_key: k };
+    });
+    return renamed.size ? out.map((f) => (f.parent_key && renamed.has(f.parent_key) ? { ...f, parent_key: renamed.get(f.parent_key)! } : f)) : out;
+  }
+
   // Draft the WHOLE profile — STAGED, one vector at a time, with visible
   // progress: core first (everything builds on it), then each vector. A failed
   // stage reports its real error and the rest still run. Landscape only.
@@ -106,8 +123,11 @@ export default function SignalProfile({ scope, competitorId, competitorName, vec
         const { data, error } = await supabase.functions.invoke("synthesize-profile", { body: { scope: "landscape", vector: v, current: currentPayload(acc) } });
         if (error) throw error;
         if (data?.error) throw new Error(data.error);
-        const incoming: Field[] = (data?.draft?.fields ?? []).map((f: Field) => ({ ...f, origin: "ai", vector: v, weight: f.weight ?? 2, parent_key: f.parent_key ?? null }));
-        acc = [...acc.filter((f) => (f.vector ?? "core") !== v), ...incoming];
+        const keep = acc.filter((f) => (f.vector ?? "core") !== v);
+        const incoming: Field[] = dedupeKeys(
+          (data?.draft?.fields ?? []).map((f: Field) => ({ ...f, origin: "ai", vector: v, weight: f.weight ?? 2, parent_key: f.parent_key ?? null })),
+          new Set(keep.map((f) => f.field_key)));
+        acc = [...keep, ...incoming];
         if (v === "core" && data?.draft?.headline) setHeadline(data.draft.headline);
         setFields(acc); setDirty(true);
         total += incoming.length;
@@ -136,7 +156,11 @@ export default function SignalProfile({ scope, competitorId, competitorName, vec
       const d = data?.draft;
       if (!d) throw new Error("No draft returned.");
       if (v === "core" && d.headline) { setHeadline(d.headline); setDirty(true); }
-      const incoming: Field[] = (d.fields ?? []).map((f: Field) => ({ ...f, origin: "ai", vector: v, weight: f.weight ?? 2, parent_key: f.parent_key ?? null }));
+      // Proposals dedupe against OTHER focuses' keys up front (same-focus keys
+      // may match — accepting one intentionally replaces that node).
+      const incoming: Field[] = dedupeKeys(
+        (d.fields ?? []).map((f: Field) => ({ ...f, origin: "ai", vector: v, weight: f.weight ?? 2, parent_key: f.parent_key ?? null })),
+        new Set(fields.filter((f) => (f.vector ?? "core") !== v).map((f) => f.field_key)));
       setNote(`Proposed ${incoming.length} node(s) for ${vectorMeta(v).label.split(" — ")[0]}${data?.mode === "analysis" ? " (analysis mode)" : ""} — accept the ones that are true.`);
       return incoming;
     } catch (e) { setError(await edgeErrorMessage(e, "synthesize-profile")); return null; }
@@ -157,12 +181,18 @@ export default function SignalProfile({ scope, competitorId, competitorName, vec
     finally { setRefining(false); }
   }
 
-  // Accept one reviewed node (replaces by field_key if it already exists).
-  // Still unsaved until Save — the second gate.
+  // Accept one reviewed node. Replaces by field_key ONLY within the same
+  // focus — a key collision with another focus's node gets a fresh key
+  // instead of silently overwriting it. Still unsaved until Save.
   function upsertNode(n: Field) {
     setFields((fs) => {
       const i = fs.findIndex((f) => f.field_key === n.field_key);
-      if (i >= 0) return fs.map((f, j) => (j === i ? { ...f, ...n } : f));
+      if (i >= 0 && (fs[i].vector ?? "core") === (n.vector ?? "core")) return fs.map((f, j) => (j === i ? { ...f, ...n } : f));
+      if (i >= 0) {
+        let k = n.field_key;
+        while (fs.some((f) => f.field_key === k)) k = `${k}_x`;
+        return [...fs, { ...n, field_key: k }];
+      }
       return [...fs, n];
     });
     setDirty(true);
@@ -176,14 +206,16 @@ export default function SignalProfile({ scope, competitorId, competitorName, vec
   }
 
   async function save() {
-    if (!profile) return;
+    if (!profile || busy) return;  // never race the staged draft (or another op)
     setBusy("save"); setError(null);
     try {
       const orgId = await getOrgId(); if (!orgId) throw new Error("Could not resolve your organization.");
       await supabase.from("signal_profiles").update({ headline: headline.trim() || null, updated_at: new Date().toISOString() }).eq("id", profile.id);
       // Replace the field set (simplest correct path for an editable section list).
       await supabase.from("signal_profile_fields").delete().eq("profile_id", profile.id);
-      const kept = fields.filter((f) => f.field_key.trim() && f.label.trim());
+      // A cleared Name must NOT silently delete the node — it survives as
+      // "Untitled" (the user emptied a field, not the node).
+      const kept = fields.filter((f) => f.field_key.trim());
       const keptKeys = new Set(kept.map((f) => f.field_key.trim()));
       // parent_key only survives if the parent is still in the set (and on the
       // same vector) — a dangling parent would just re-root at the vector anyway.
@@ -193,7 +225,7 @@ export default function SignalProfile({ scope, competitorId, competitorName, vec
         const parent = kept.find((k) => k.field_key.trim() === p);
         return parent && (parent.vector ?? "core") === (f.vector ?? "core") ? p : null;
       };
-      const rows = kept.map((f, i) => ({ org_id: orgId, profile_id: profile.id, field_key: f.field_key.trim(), label: f.label.trim(), value: f.value.trim() || null, position: i, origin: f.origin ?? "human", vector: f.vector ?? "core", weight: f.weight ?? 2, parent_key: parentFor(f) }));
+      const rows = kept.map((f, i) => ({ org_id: orgId, profile_id: profile.id, field_key: f.field_key.trim(), label: f.label.trim() || "Untitled", value: f.value.trim() || null, position: i, origin: f.origin ?? "human", vector: f.vector ?? "core", weight: f.weight ?? 2, parent_key: parentFor(f) }));
       if (rows.length) { const { error } = await supabase.from("signal_profile_fields").insert(rows); if (error) throw error; }
       setDirty(false); setNote("Saved."); load();
     } catch (e) { setError(e instanceof Error ? e.message : "Could not save."); }
@@ -238,7 +270,7 @@ export default function SignalProfile({ scope, competitorId, competitorName, vec
   // Clear the WHOLE profile — wipe every section + the headline so it can be
   // rebuilt from scratch.
   async function clearProfile() {
-    if (!profile) return;
+    if (!profile || busy) return;  // never race the staged draft (or another op)
     if (!confirm("Clear this profile completely? Every node and the headline are deleted so it can be rebuilt fresh. This can't be undone.")) return;
     setBusy("clear"); setError(null); setNote(null);
     try {
@@ -255,7 +287,16 @@ export default function SignalProfile({ scope, competitorId, competitorName, vec
   function setField(i: number, patch: Partial<Field>) { setFields((fs) => fs.map((f, j) => (j === i ? { ...f, ...patch } : f))); setDirty(true); }
   function removeField(i: number) { setFields((fs) => fs.filter((_, j) => j !== i)); setDirty(true); }
   // Competitor dossiers keep the plain add (flat sections, no vectors/branches).
-  function addField(vector: Vector = "core") { setFields((fs) => [...fs, { field_key: `node_${fs.length + 1}`, label: "New section", value: "", origin: "human", vector, weight: 2 }]); setDirty(true); }
+  // Key must be unique against SURVIVING sections, not just the count —
+  // add/remove/add would otherwise mint a duplicate and break Save.
+  function addField(vector: Vector = "core") {
+    setFields((fs) => {
+      let n = fs.length + 1;
+      while (fs.some((f) => f.field_key === `node_${n}`)) n++;
+      return [...fs, { field_key: `node_${n}`, label: "New section", value: "", origin: "human", vector, weight: 2 }];
+    });
+    setDirty(true);
+  }
 
   if (loading) return <div className="t-sub t-muted">Loading…</div>;
 
@@ -315,7 +356,9 @@ export default function SignalProfile({ scope, competitorId, competitorName, vec
   }
 
   const activeMeta = vectorMeta(activeVector);
-  const countOf = (v: Vector) => fields.filter((f) => (f.vector ?? "core") === v && f.label.trim()).length;
+  // Count every real node (a mid-edit empty Name still counts — it survives
+  // Save as "Untitled"), so the tab badge and the Nodes card always agree.
+  const countOf = (v: Vector) => fields.filter((f) => (f.vector ?? "core") === v && f.field_key.trim()).length;
 
   return (
     <div>
@@ -336,8 +379,8 @@ export default function SignalProfile({ scope, competitorId, competitorName, vec
           {scope === "competitor" && (
             <button className="btn btn-secondary btn-sm" onClick={pushToStrategy} disabled={busy === "push" || dirty} title={dirty ? "Save first" : "Derive product + GTM strategy themes from this profile"}>{busy === "push" ? "Pushing…" : dirty ? "Save to push to strategy" : "→ Push to strategy"}</button>
           )}
-          <button className="btn btn-secondary btn-sm" onClick={clearProfile} disabled={busy === "clear" || (fields.length === 0 && !headline.trim())} title="Wipe every node so the profile rebuilds fresh" style={{ color: "var(--rd-text)" }}>{busy === "clear" ? "Clearing…" : "Clear"}</button>
-          <button className="btn btn-sm" onClick={save} disabled={busy === "save" || !dirty}>{busy === "save" ? "Saving…" : dirty ? "Save" : "Saved"}</button>
+          <button className="btn btn-secondary btn-sm" onClick={clearProfile} disabled={busy !== null || (fields.length === 0 && !headline.trim())} title="Wipe every node so the profile rebuilds fresh" style={{ color: "var(--rd-text)" }}>{busy === "clear" ? "Clearing…" : "Clear"}</button>
+          <button className="btn btn-sm" onClick={save} disabled={busy !== null || !dirty}>{busy === "save" ? "Saving…" : dirty ? "Save" : "Saved"}</button>
         </div>
       </div>
 

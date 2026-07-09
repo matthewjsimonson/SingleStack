@@ -32,8 +32,8 @@ export default function CoverageMap({ fields, active, onOpen }: {
   onOpen: (focus: Vector, level: number, addFirst: boolean) => void;
 }) {
   const nodesAt = (focus: string, w: number) =>
-    fields.filter((f) => (f.vector ?? "core") === focus && Math.min(3, Math.max(1, f.weight ?? 2)) === w && f.label.trim());
-  const core = fields.filter((f) => (f.vector ?? "core") === "core" && f.label.trim());
+    fields.filter((f) => (f.vector ?? "core") === focus && Math.min(3, Math.max(1, f.weight ?? 2)) === w && f.field_key.trim());
+  const core = fields.filter((f) => (f.vector ?? "core") === "core" && f.field_key.trim());
 
   return (
     <div className="card card-pad" style={{ marginBottom: "var(--sp-4)" }}>
@@ -47,7 +47,7 @@ export default function CoverageMap({ fields, active, onOpen }: {
           ? <span className="t-sub t-muted" style={{ fontSize: 12 }}>not set up yet — start here; every focus builds on it</span>
           : core.map((f) => (
             <span key={f.field_key} className="t-sub" style={{ fontSize: 12, background: "var(--fill)", borderRadius: 999, padding: "2px 9px", cursor: "pointer" }}
-              onClick={() => onOpen("core", 3, false)}>{f.label}</span>
+              onClick={() => onOpen("core", 3, false)}>{f.label || "Untitled"}</span>
           ))}
       </div>
 
@@ -95,7 +95,7 @@ function FragmentRow({ lv, nodesAt, onOpen, active }: {
             {gap
               ? <span className="t-sub t-muted" style={{ fontSize: 11.5 }}>+ cover this</span>
               : nodes.slice(0, 6).map((n) => (
-                <span key={n.field_key} className="t-sub" style={{ fontSize: 11.5, background: "var(--fill)", borderRadius: 999, padding: "1px 8px", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis", maxWidth: 150 }}>{n.label}</span>
+                <span key={n.field_key} className="t-sub" style={{ fontSize: 11.5, background: "var(--fill)", borderRadius: 999, padding: "1px 8px", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis", maxWidth: 150 }}>{n.label || "Untitled"}</span>
               ))}
             {!gap && nodes.length > 6 && <span className="t-mono-xs t-muted">+{nodes.length - 6}</span>}
           </button>

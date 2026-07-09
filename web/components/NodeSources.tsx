@@ -71,7 +71,7 @@ export default function NodeSources({ vector, nodeKey, seed }: { vector: string;
       <div className="row-between" style={{ gap: 8, alignItems: "center" }}>
         <div style={{ minWidth: 0 }}>
           <div style={{ fontSize: 12.5, fontWeight: 620 }}>{s.kind === "web_search" ? "Web search · " : "Tool · "}{s.label}</div>
-          <div className="t-mono-xs t-muted">{s.last_pull_at ? `last pull: ${s.last_pull_count ?? 0} · ${new Date(s.last_pull_at).toLocaleDateString()}` : "not pulled yet"}{inheritedRow ? " · inherited from vector" : ""}</div>
+          <div className="t-mono-xs t-muted">{s.last_pull_at ? `last pull: ${s.last_pull_count ?? 0} · ${new Date(s.last_pull_at).toLocaleDateString()}` : "not pulled yet"}{inheritedRow ? " · inherited from the focus" : ""}</div>
         </div>
         {!inheritedRow && (
           <div className="row gap-2" style={{ flexShrink: 0 }}>
@@ -86,13 +86,13 @@ export default function NodeSources({ vector, nodeKey, seed }: { vector: string;
   return (
     <div className="card card-pad" style={{ background: "var(--panel-2)" }}>
       <div className="row-between" style={{ marginBottom: 8 }}>
-        <div className="t-label">Sources <span className="t-muted" style={{ fontWeight: 400, textTransform: "none", letterSpacing: 0 }}>— where this {nodeKey ? "node" : "vector"} pulls from</span></div>
+        <div className="t-label">Sources <span className="t-muted" style={{ fontWeight: 400, textTransform: "none", letterSpacing: 0 }}>— where this {nodeKey ? "node" : "focus"} pulls from</span></div>
       </div>
       {err && <div className="banner banner-err" style={{ marginBottom: 8 }}>{err}</div>}
       <div className="stack-2">
         {mine.map((s) => row(s, false))}
         {inherited.map((s) => row(s, true))}
-        {mine.length === 0 && inherited.length === 0 && <div className="t-sub t-muted" style={{ fontSize: 12 }}>No sources yet. Add web search (seeded from this {nodeKey ? "node" : "vector"}&apos;s focus), or attach a connected tool.</div>}
+        {mine.length === 0 && inherited.length === 0 && <div className="t-sub t-muted" style={{ fontSize: 12 }}>No sources yet. Add web search (aimed by this {nodeKey ? "node" : "focus"}&apos;s steer), or attach a connected tool.</div>}
       </div>
       <div className="row gap-2" style={{ marginTop: 10 }}>
         <button className="btn btn-sm" onClick={addWebSearch} disabled={busy === "add"}>{busy === "add" ? "Adding…" : "+ Web search"}</button>

@@ -258,7 +258,15 @@ export default function VectorCurator({
               ) : null}
           </div>
           <div className="row-between" style={{ borderTop: "1px solid var(--border)", paddingTop: 12, marginTop: 12, alignItems: "center" }}>
-            <span className="t-sub t-muted" style={{ fontSize: 12 }}>{transcript.filter((t) => t.role === "a").length} answered</span>
+            <div className="row gap-2" style={{ alignItems: "center" }}>
+              <span className="t-sub t-muted" style={{ fontSize: 12 }}>{transcript.filter((t) => t.role === "a").length} answered</span>
+              {(done || transcript.length > 0) && (
+                <button className="btn btn-secondary btn-sm" disabled={asking}
+                  onClick={() => { setTranscript([]); setQuestion(""); setWhy(""); setAnswer(""); setDone(false); void nextQuestion([]); }}>
+                  Restart interview
+                </button>
+              )}
+            </div>
             <button className="btn" onClick={propose} disabled={generating}>
               {generating ? "Proposing nodes…" : "Propose nodes →"}
             </button>
