@@ -22,28 +22,22 @@ import { edgeErrorMessage } from "@/lib/edgeError";
 type Field = { field_key: string; label: string; value: string; origin?: string; vector?: Vector; weight?: number; parent_key?: string | null };
 type Turn = { role: "q" | "a"; text: string };
 
-// Weight vocabulary is the vector's own: market grades by applicability
-// (direct → adjacent → indirect); the rest by closeness to the core.
-const VOCAB = (v?: string): Record<number, string> =>
-  v === "market" ? { 3: "Direct", 2: "Adjacent", 1: "Indirect" } : { 3: "Core", 2: "Standard", 1: "Edge" };
-const WHY_WEIGHT = (v?: string): Record<number, string> => v === "market"
-  ? {
-    3: "directly applicable — your market, searched first",
-    2: "adjacent — nearby segments and buyers, tracked steadily",
-    1: "indirect — general movement, caught but not chased",
-  }
-  : {
-    3: "closest to your core — a defining attribute, searched first",
-    2: "standard distance — tracked steadily",
-    1: "edge of the branch — adjacent, caught but not chased",
-  };
+// One level vocabulary across every focus: how DIRECT the signal is.
+// Direct = your ground, searched first; adjacent = one step out, tracked
+// steadily; indirect = the horizon, caught but not chased.
+const VOCAB = (_v?: string): Record<number, string> => ({ 3: "Direct", 2: "Adjacent", 1: "Indirect" });
+const WHY_WEIGHT = (_v?: string): Record<number, string> => ({
+  3: "direct — your ground, searched first",
+  2: "adjacent — one step out, tracked steadily",
+  1: "indirect — the horizon, caught but not chased",
+});
 const W_OF = (w?: number) => Math.min(3, Math.max(1, w ?? 2));
 
 const slugify = (s: string) => s.toLowerCase().replace(/[^a-z0-9]+/g, "_").replace(/^_+|_+$/g, "").slice(0, 48) || "node";
 
 export default function VectorCurator({
   vector, label, blurb, entries, setField, removeField, upsertNode, generate, generating,
-  refineNode, refining, onSave, onPush, pushLabel, dirty, savingBusy,
+  refineNode, refining, onSave, onPush, pushLabel, dirty, savingBusy, initialAdd,
 }: {
   vector: Vector;
   label: string;
@@ -61,6 +55,7 @@ export default function VectorCurator({
   pushLabel?: string;
   dirty: boolean;
   savingBusy: boolean;
+  initialAdd?: { weight: number; at: number } | null;  // coverage-map gap click: open the add form at this level
 }) {
   const supabase = createClient();
   const [transcript, setTranscript] = useState<Turn[]>([]);
@@ -131,6 +126,13 @@ export default function VectorCurator({
 
   // Fresh state each time the vector changes.
   useEffect(() => { setTranscript([]); setQuestion(""); setWhy(""); setAnswer(""); setDone(false); setErr(null); setProposals([]); setOpenKey(null); setAdding(false); setAddParent(""); void nextQuestion([]); }, [nextQuestion]);
+
+  // A coverage-map gap click opens the guided add at that level (declared
+  // AFTER the reset effect so it wins the mount-order race on a focus switch).
+  useEffect(() => {
+    if (initialAdd) { setAdding(true); setAddParent(""); setAddLabel(""); setAddValue(""); setAddWeight(initialAdd.weight); }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [initialAdd?.at]);
 
   // The vector's recent SIGNALS — what its pulls actually brought in.
   type Sig = { id: string; title: string; origin: string; observed_at: string | null };
@@ -204,7 +206,7 @@ export default function VectorCurator({
           </div>
         )}
         {asking ? <div className="t-sub t-muted" style={{ fontSize: 12.5 }}>Thinking…</div>
-          : done ? <div className="t-sub" style={{ fontSize: 12.5, color: "var(--gn-text)" }}>Enough to propose nodes for this vector — or add your own below.</div>
+          : done ? <div className="t-sub" style={{ fontSize: 12.5, color: "var(--gn-text)" }}>Enough to propose nodes for this focus — or add your own below.</div>
           : question ? (
             <>
               <div style={{ fontSize: 13.5, fontWeight: 600, marginBottom: 2 }}>{question}</div>
@@ -272,7 +274,7 @@ export default function VectorCurator({
             <div className="t-label" style={{ marginBottom: 8 }}>New node</div>
             <label className="field"><span className="t-label">Attaches to <span className="t-muted" style={{ fontWeight: 400, textTransform: "none", letterSpacing: 0 }}>— the vector starts a new branch; a node grows its chain</span></span>
               <select className="select" value={addParent} onChange={(e) => { setAddParent(e.target.value); setAddWeight(null); }}>
-                <option value="">The {label} vector (new branch)</option>
+                <option value="">The {label} focus (new branch)</option>
                 {entries.map(({ f }) => <option key={f.field_key} value={f.field_key}>{f.label} ({VOCAB(vector)[W_OF(f.weight)]})</option>)}
               </select></label>
             <label className="field"><span className="t-label">Name</span>
@@ -329,7 +331,7 @@ export default function VectorCurator({
                           </select></label>
                         <label className="field" style={{ flex: 1, minWidth: 160 }}><span className="t-label">Branches off</span>
                           <select className="select" value={f.parent_key && entries.some((e2) => e2.f.field_key === f.parent_key) ? f.parent_key : ""} onChange={(ev) => setField(i, { parent_key: ev.target.value || null })}>
-                            <option value="">The {label} vector</option>
+                            <option value="">The {label} focus</option>
                             {entries.filter((e2) => e2.f.field_key !== f.field_key).map(({ f: p }) => <option key={p.field_key} value={p.field_key}>{p.label}</option>)}
                           </select></label>
                       </div>
@@ -362,10 +364,10 @@ export default function VectorCurator({
         )}
       </div>
 
-      {/* What this vector tells the brain — the steer every pull inherits */}
+      {/* What this focus tells the brain — the steer every pull inherits */}
       {entries.length > 0 && (
         <details className="card card-pad">
-          <summary className="t-label" style={{ cursor: "pointer" }}>What this vector tells the brain <span className="t-muted" style={{ fontWeight: 400, textTransform: "none", letterSpacing: 0 }}>— compiled live into every pull aimed at it</span></summary>
+          <summary className="t-label" style={{ cursor: "pointer" }}>What this focus tells the brain <span className="t-muted" style={{ fontWeight: 400, textTransform: "none", letterSpacing: 0 }}>— compiled live into every pull aimed at this focus</span></summary>
           <div className="t-mono-xs" style={{ whiteSpace: "pre-wrap", color: "var(--ts)", lineHeight: 1.55, marginTop: 8 }}>{compileVectorBrief(fieldsOnly, vector)}</div>
         </details>
       )}
@@ -378,11 +380,11 @@ export default function VectorCurator({
       {/* The vector's recent signals — control what the pulls brought in */}
       <div className="card card-pad">
         <div className="row-between" style={{ marginBottom: 8, alignItems: "center" }}>
-          <div className="t-label">Recent signals <span className="t-muted" style={{ fontWeight: 400, textTransform: "none", letterSpacing: 0 }}>— what this vector&apos;s pulls brought in</span></div>
+          <div className="t-label">Recent signals <span className="t-muted" style={{ fontWeight: 400, textTransform: "none", letterSpacing: 0 }}>— what your pulls for this focus brought in</span></div>
           <button className="btn btn-secondary btn-sm" onClick={loadSigs}>Refresh</button>
         </div>
         {sigs.length === 0 ? (
-          <div className="t-sub t-muted" style={{ fontSize: 12.5 }}>Nothing pulled for this vector yet — add a source above and Pull, or let the scheduled pulls run.</div>
+          <div className="t-sub t-muted" style={{ fontSize: 12.5 }}>Nothing pulled for this focus yet — add a source above and Pull, or let the scheduled pulls run.</div>
         ) : (
           <div className="stack-2">
             {sigs.map((s) => (

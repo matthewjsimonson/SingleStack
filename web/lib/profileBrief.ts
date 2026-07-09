@@ -9,7 +9,7 @@ export type BriefField = {
   vector?: string; weight?: number; parent_key?: string | null;
 };
 
-const W = (w?: number) => (w ?? 2) >= 3 ? "core" : (w ?? 2) <= 1 ? "edge" : "standard";
+const W = (w?: number) => (w ?? 2) >= 3 ? "direct" : (w ?? 2) <= 1 ? "indirect" : "adjacent";
 
 // One node's steer: its branch path, its statement, its sub-nodes, and the ask.
 export function compileNodeBrief(fields: BriefField[], nodeKey: string): string {
@@ -27,7 +27,7 @@ export function compileNodeBrief(fields: BriefField[], nodeKey: string): string 
   }
   const kids = siblings.filter((f) => f.parent_key === n.field_key);
   return [
-    `This pull feeds ONE node of the signals network (${vecOf(n)} vector).`,
+    `This pull feeds ONE node of the signals network (${vecOf(n)} focus).`,
     path.length ? `Branch: ${path.map((p) => p.label).join(" › ")} › ${n.label}` : "",
     `Node "${n.label}" (${W(n.weight)}): ${n.value}`,
     kids.length ? `Its sub-nodes: ${kids.map((k) => `${k.label} — ${k.value}`).join(" | ")}` : "",
@@ -42,8 +42,8 @@ export function compileVectorBrief(fields: BriefField[], vector: string): string
     .sort((a, b) => (b.weight ?? 2) - (a.weight ?? 2));
   if (!nodes.length) return "";
   return [
-    `This pull feeds the ${vector.toUpperCase()} vector of the signals network. Its current nodes, closest-to-core first:`,
+    `This pull feeds the ${vector.toUpperCase()} focus of the signals network. Its current nodes, most direct first:`,
     ...nodes.slice(0, 14).map((f) => `- [${W(f.weight)}] ${f.label}: ${f.value}`),
-    "Prioritize signals about the core nodes; catch edge nodes but don't chase them.",
+    "Prioritize signals about the direct nodes; catch adjacent and indirect ones but don't chase them.",
   ].join("\n").slice(0, 1600);
 }

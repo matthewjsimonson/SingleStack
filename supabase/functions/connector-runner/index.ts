@@ -89,7 +89,7 @@ async function profileSteer(supabase: any, orgId: string, vector: string, nodeKe
   type N = { field_key: string; label: string; value: string | null; weight: number | null; parent_key: string | null };
   const nodes: N[] = ((fs ?? []) as N[]).filter((f) => f.value?.trim());
   if (!nodes.length) return "";
-  const W = (w: number | null) => (w ?? 2) >= 3 ? "core" : (w ?? 2) <= 1 ? "edge" : "standard";
+  const W = (w: number | null) => (w ?? 2) >= 3 ? "direct" : (w ?? 2) <= 1 ? "indirect" : "adjacent";
   if (nodeKey) {
     const n = nodes.find((f) => f.field_key === nodeKey);
     if (n) {
@@ -112,9 +112,9 @@ async function profileSteer(supabase: any, orgId: string, vector: string, nodeKe
     }
   }
   return [
-    `PROFILE STEER — this pull feeds the ${vector.toUpperCase()} vector of the org's signals network. Its current nodes, closest-to-core first:`,
+    `PROFILE STEER — this pull feeds the ${vector.toUpperCase()} focus of the org's signals network. Its current nodes, most direct first:`,
     ...nodes.slice(0, 14).map((f) => `- [${W(f.weight)}] ${f.label}: ${f.value}`),
-    "Prioritize signals about the core nodes; catch edge nodes but don't chase them.",
+    "Prioritize signals about the direct nodes; catch adjacent and indirect ones but don't chase them.",
   ].join("\n").slice(0, 1600);
 }
 

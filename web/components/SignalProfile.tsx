@@ -18,17 +18,19 @@ import { getOrgId } from "@/lib/org";
 import { Banner, Chip, SubTabs } from "@/components/ui";
 import { Markdown } from "@/components/Markdown";
 import VectorCurator from "@/components/VectorCurator";
+import CoverageMap from "@/components/CoverageMap";
 import { compileVectorBrief } from "@/lib/profileBrief";
 import { edgeErrorMessage } from "@/lib/edgeError";
 
-// The signals profile: a CORE (what we are) plus THREE intelligence vectors.
-// Each node carries a WEIGHT (3 closest … 1 edge); what the weight MEANS is
-// the vector's own vocabulary (market: direct → adjacent → indirect).
+// The signals profile: a CORE (what we are) plus THREE FOCUSES, each covered
+// at three LEVELS of directness — direct (your ground), adjacent (one step
+// out), indirect (the horizon). Full coverage = every focus covered at every
+// level; the coverage map makes the gaps visible.
 export type Vector = "core" | "competitive" | "market" | "technology";
 const VECTORS: { key: Vector; label: string; blurb: string }[] = [
-  { key: "core", label: "Core — what we are", blurb: "The center: essence, positioning, wedge. Every vector builds on this." },
+  { key: "core", label: "Core — what we are", blurb: "The center: essence, positioning, wedge. Every focus builds on this." },
   { key: "competitive", label: "Competitive", blurb: "Competing products — the attributes that pinpoint the right rivals and aim the competitor search." },
-  { key: "market", label: "Market", blurb: "The applicable market: industries, personas, and market news — direct, adjacent, and indirect." },
+  { key: "market", label: "Market", blurb: "The applicable market: industries, personas, and market news." },
   { key: "technology", label: "Technology", blurb: "What powers the product, what powers building it, and what powers GTM — frontier and open-source models across all three." },
 ];
 const vectorMeta = (v?: string) => VECTORS.find((x) => x.key === v) ?? VECTORS[0];
@@ -59,6 +61,7 @@ export default function SignalProfile({ scope, competitorId, competitorName, vec
   const [activeVector, setActiveVector] = useState<Vector>("core");
   const [refining, setRefining] = useState(false);
   const [stages, setStages] = useState<Stage[]>([]); // staged Draft-all progress
+  const [pendingAdd, setPendingAdd] = useState<{ weight: number; at: number } | null>(null); // coverage-gap click
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -370,10 +373,19 @@ export default function SignalProfile({ scope, competitorId, competitorName, vec
       )}
 
       {scope === "landscape" ? (<>
-        {/* The workbench: one tab per vector, one working surface at a time. */}
+        {/* The coverage map: three focuses × three levels of directness.
+            Full coverage is visible; a gap is a dashed cell you can fill. */}
+        <CoverageMap
+          fields={fields} active={activeVector}
+          onOpen={(focus, level, addFirst) => {
+            setActiveVector(focus);
+            setPendingAdd(addFirst ? { weight: level, at: Date.now() } : null);
+          }}
+        />
+        {/* One tab per focus, one working surface at a time. */}
         <SubTabs<Vector>
           tabs={VECTORS.map((v) => ({ key: v.key, label: `${v.label.split(" — ")[0]} · ${countOf(v.key)}` }))}
-          active={activeVector} onChange={setActiveVector}
+          active={activeVector} onChange={(v) => { setActiveVector(v); setPendingAdd(null); }}
         />
         {dirty && <div className="t-sub t-muted" style={{ fontSize: 11.5, margin: "6px 0 10px" }}>Unsaved changes — Save in the header or on the Nodes card.</div>}
         <VectorCurator
@@ -384,7 +396,7 @@ export default function SignalProfile({ scope, competitorId, competitorName, vec
           generate={draftVector} generating={vecBusy === activeVector}
           refineNode={refineNode} refining={refining}
           onSave={save} onPush={() => pushVector(activeVector)} pushLabel={PUSH[activeVector]?.label}
-          dirty={dirty} savingBusy={busy === "save"}
+          dirty={dirty} savingBusy={busy === "save"} initialAdd={pendingAdd}
         />
       </>) : (<>
         <label className="field"><span className="t-label">Headline <span className="t-muted" style={{ fontWeight: 400 }}>— where we sit, in one line</span></span>
