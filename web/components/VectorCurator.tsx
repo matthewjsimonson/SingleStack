@@ -294,11 +294,25 @@ export default function VectorCurator({
             <span className="t-sub t-muted" style={{ fontSize: 12.5 }}>or build with AI above — you review every proposal.</span>
           </div>
         ) : (
-          <ul className="otree">
-            {forest.roots.map((e) => <OrgNode key={e.f.field_key} entry={e} kidsOf={forest.kidsOf}
-              onOpen={(k) => { setOpenKey(k); setRefineText(""); }} onAddChild={(k, w) => startAdd(k, w)} seen={new Set()} />)}
-            <li><button className="otree-add" onClick={() => startAdd("", 3)} title="A new direct node — the top of a new branch">+ Direct</button></li>
-          </ul>
+          /* VERTICAL: one band per level, stacked — trees wrap within a band,
+             so new nodes and branches grow the page downward, never sideways. */
+          [3, 2, 1].map((w) => {
+            const bandRoots = forest.roots.filter((r) => W_OF(r.f.weight) === w);
+            const hint = WHY_WEIGHT[w].split(" — ")[1];
+            return (
+              <div key={w} className="otree-band">
+                <div className="otree-band-head">
+                  <span className={`otree-lvl w${w}`}>{VOCAB[w]}</span>
+                  <span className="t-sub t-muted" style={{ fontSize: 11.5 }}>{hint}</span>
+                </div>
+                <ul className="otree">
+                  {bandRoots.map((e) => <OrgNode key={e.f.field_key} entry={e} kidsOf={forest.kidsOf}
+                    onOpen={(k) => { setOpenKey(k); setRefineText(""); }} onAddChild={(k, cw) => startAdd(k, cw)} seen={new Set()} />)}
+                  <li><button className="otree-add" onClick={() => startAdd("", w)} title={`Start a new ${VOCAB[w].toLowerCase()} branch`}>+ {VOCAB[w]}</button></li>
+                </ul>
+              </div>
+            );
+          })
         )}
       </div>
 
@@ -460,7 +474,7 @@ function OrgNode({ entry, kidsOf, onOpen, onAddChild, seen }: {
       <div className="otree-card" onClick={() => onOpen(f.field_key)} title={f.value || f.label}>
         <div style={{ fontWeight: 630, fontSize: 12.5, lineHeight: 1.35 }}>{f.label || "Untitled"}</div>
         <div className="row-between" style={{ marginTop: 5, alignItems: "center", gap: 6 }}>
-          <span style={{ fontSize: 10, padding: "1px 7px", background: "var(--fill)", borderRadius: 999, color: "var(--ts)" }}>{VOCAB[w]}</span>
+          <span className={`otree-lvl w${w}`}>{VOCAB[w]}</span>
           <span className="row" style={{ alignItems: "center", gap: 6 }}>
             {f.origin === "ai" && <span className="t-mono-xs" style={{ color: "var(--vl-text)" }}>AI</span>}
             <button onClick={(ev) => { ev.stopPropagation(); onAddChild(f.field_key, w); }}

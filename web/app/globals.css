@@ -249,10 +249,14 @@ button { font-family: inherit; cursor: pointer; }
 .field > .t-label { display: block; margin-bottom: 6px; }
 
 /* ---- org-chart hierarchy (signals profile focus pages) ----------------------
-   A top-down tree: direct nodes at the top, adjacent below, indirect at the
-   bottom. Pure CSS connectors (rails + drops), no motion. */
+   VERTICAL structure: stacked LEVEL BANDS (direct → adjacent → indirect), each
+   holding its trees. Trees WRAP within a band, so adding nodes and branches
+   grows the page downward — never a sideways scroll. Pure CSS connectors. */
+.otree-band { border: 1px solid var(--border); border-radius: var(--radius); padding: 12px 14px 14px; }
+.otree-band + .otree-band { margin-top: 10px; }
+.otree-band-head { display: flex; gap: 10px; align-items: baseline; margin-bottom: 10px; }
 .otree, .otree ul { list-style: none; margin: 0; padding: 0; display: flex; }
-.otree { justify-content: flex-start; overflow-x: auto; padding: 4px 2px 8px; }
+.otree { justify-content: flex-start; flex-wrap: wrap; row-gap: 22px; column-gap: 10px; padding: 2px; }
 .otree li { display: flex; flex-direction: column; align-items: center; position: relative; padding: 22px 6px 0; }
 .otree > li { padding-top: 0; }
 /* sibling rail */
@@ -269,10 +273,15 @@ button { font-family: inherit; cursor: pointer; }
 /* node card */
 .otree-card {
   background: var(--panel); border: 1px solid var(--border); border-radius: var(--radius-sm);
-  box-shadow: var(--shadow-sm); padding: 8px 11px; cursor: pointer; text-align: left;
-  min-width: 130px; max-width: 200px; transition: var(--motion);
+  box-shadow: var(--shadow-sm); padding: 9px 12px; cursor: pointer; text-align: left;
+  min-width: 140px; max-width: 210px; transition: var(--motion);
 }
-.otree-card:hover { border-color: var(--border-strong); box-shadow: var(--shadow-md); }
+.otree-card:hover { border-color: var(--border-strong); box-shadow: var(--shadow-md); transform: translateY(-1px); }
+/* level chips — the band's color, so a node's level reads at a glance */
+.otree-lvl { font-size: 10px; padding: 1px 8px; border-radius: 999px; font-weight: 600; }
+.otree-lvl.w3 { background: var(--rd-fill); color: var(--rd-text); }
+.otree-lvl.w2 { background: var(--am-fill); color: var(--am-text); }
+.otree-lvl.w1 { background: var(--fill); color: var(--ts); }
 .otree-add {
   border: 1px dashed var(--border-strong); border-radius: var(--radius-sm); background: transparent;
   padding: 8px 11px; cursor: pointer; color: var(--tm); font-size: 12px; font-weight: 600; min-width: 110px;
