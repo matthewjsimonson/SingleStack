@@ -141,7 +141,7 @@ Deno.serve(async (req: Request) => {
         model: pol.model, max_tokens: 900,
         output_config: { effort: pol.effort, format: { type: "json_schema", schema: REFINE_SCHEMA } },
         system: [
-          `You refine ONE node of the '${oneVector}' vector of an org's signals network. A node is a declarative STATEMENT about the org (present tense, affirmative — never a question or rebuttal), weighted by directness: 3=direct … 1=indirect. It must be specific and SEARCH-ACTIONABLE: a reader should know what signal to look for.`,
+          `You refine ONE node of the '${oneVector}' focus of an org's signals profile. A node's label is a plain, concrete noun phrase (2–4 words) a stranger understands instantly — never a metaphor. Its value is a tight analyst brief in 3–6 declarative sentences: WHAT it is (with real examples where evidence supports), WHY it matters to this org's capabilities specifically, WHAT concrete changes would matter, and WHERE that signal lives. Weighted by directness: 3=direct … 1=indirect. Lazy one-liners are a failure.`,
           input.instruction?.trim() ? `Apply this instruction: ${input.instruction.trim()}` : "No instruction given — sharpen it: make it more specific, true, and search-actionable; fix any vague/umbrella phrasing; set the weight to reflect how central it really is.",
           "Keep it ONE node (do not split). Ground it in the records; invent nothing. Return the improved label (short name), value (the statement), and weight.",
         ].join("\n"),
@@ -377,9 +377,13 @@ Deno.serve(async (req: Request) => {
             ? "SYNTHESIS HAS RUN — analysis is now LIVE. Beyond saying what to find, ANALYZE: fold what the synthesized themes MEAN into the relevant vectors (the patterns, how the market is moving, how we actually compare, what it implies for product & GTM). KEEP the *_search_focus nodes — discovery never stops — and ADD the analysis; add an 'analysis' node to a vector where its themes warrant it."
             : "SYNTHESIS HAS NOT RUN YET — this profile is in DISCOVERY mode. Say what to FIND and WHERE to look. Do NOT fabricate analysis, 'how we compare', or market movement from signals that haven't been gathered and synthesized; that analysis turns on only once synthesis has run.")
         : "",
-      // VOICE — the user's standard: nodes are statements, not questions/rebuttals.
+      // QUALITY BAR — names anyone understands, statements an analyst would sign.
       scope === "landscape"
-        ? "VOICE: every node is a declarative STATEMENT about us — present tense, affirmative, self-contained. Never a question, never a rebuttal or negation ('unlike X…', 'we don't…'), never a to-do. Name the thing and assert what's true of it, in the shape '<the specific thing> is <what's true of it for us>' — e.g. '<our defining capability> is our core battleground'; '<a specific role> is the economic buyer'. Fill those shapes ONLY from this org's records; the label is the node's short name, the value is the statement."
+        ? [
+            "NAMING: every label is a plain, concrete noun phrase (2–4 words) that a brand-new teammate understands with zero context — name the THING, never a metaphor, never cleverness, never internal shorthand. Archetype labels describe the group plainly ('Platform competitors', 'Substitute approaches', 'Hiring demand signals'); instance labels name the instance ('AI app builders', 'Open-weight models'). If a label needs the statement to be understood, rename it.",
+            "STATEMENTS: every node's value is a tight analyst brief in 3–6 declarative sentences of flowing prose (no headers, no bullets), covering four moves in order: (1) WHAT it is, concretely — define the thing and, where the records/evidence support it, name real examples; (2) WHY it matters to us — the specific exposure or opportunity against OUR capabilities, not a generic risk; (3) WHAT changes would matter — the concrete events worth catching (launches, pricing moves, acquisitions, hiring, filings, releases); (4) WHERE that signal lives — the named source types or venues to watch. Specific enough that a search agent needs no other context; lazy one-liners are a failure.",
+            "VOICE: present tense, affirmative, self-contained. Never a question, never a rebuttal or negation ('unlike X…', 'we don't…'), never a to-do. Assert only what this org's records and evidence support; invent nothing.",
+          ].join("\n")
         : "",
       // BRANCHES — the network is chains, not a flat list.
       scope === "landscape"
