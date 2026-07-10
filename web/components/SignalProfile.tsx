@@ -86,7 +86,9 @@ export default function SignalProfile({ scope, competitorId, competitorName, vec
     finally { setBusy(null); }
   }
 
-  const currentPayload = (fs: Field[]) => fs.map((f) => ({ field_key: f.field_key, label: f.label, value: f.value, vector: f.vector ?? "core", weight: f.weight ?? 2, parent_key: f.parent_key ?? null }));
+  // Bookkeeping rows (vector 'meta', e.g. a seed-version marker) are not part
+  // of the profile the AI reads or drafts — they only ride along in storage.
+  const currentPayload = (fs: Field[]) => fs.filter((f) => (f.vector as string) !== "meta").map((f) => ({ field_key: f.field_key, label: f.label, value: f.value, vector: f.vector ?? "core", weight: f.weight ?? 2, parent_key: f.parent_key ?? null }));
 
   // The model only guarantees snake_case keys, not cross-focus uniqueness —
   // and the DB has unique (profile_id, field_key). Re-key any incoming node

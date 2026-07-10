@@ -30,6 +30,24 @@ const W_OF = (w?: number) => Math.min(3, Math.max(1, w ?? 2));
 
 const slugify = (s: string) => s.toLowerCase().replace(/[^a-z0-9]+/g, "_").replace(/^_+|_+$/g, "").slice(0, 48) || "node";
 
+// One pulled signal, fully visible: headline (linked to its source when we
+// have it), where/when it was caught, and why it matters.
+function SignalLine({ s, compact }: { s: { title: string; why: string | null; observed_at: string | null; url?: string; source?: string }; compact?: boolean }) {
+  return (
+    <div style={{ minWidth: 0 }}>
+      <div style={{ lineHeight: 1.45 }}>
+        {s.url
+          ? <a href={s.url} target="_blank" rel="noreferrer" style={{ fontSize: compact ? 12 : 12.5, fontWeight: 600, color: "var(--ac-text)", textDecoration: "none" }}>{s.title} ↗</a>
+          : <span style={{ fontSize: compact ? 12 : 12.5, fontWeight: 600 }}>{s.title}</span>}
+        <span className="t-mono-xs t-muted" style={{ marginLeft: 8 }}>
+          {[s.source, s.observed_at ? new Date(s.observed_at).toLocaleDateString() : null].filter(Boolean).join(" · ")}
+        </span>
+      </div>
+      {!compact && s.why && <div className="t-sub" style={{ fontSize: 12, color: "var(--ts)", lineHeight: 1.5, marginTop: 2 }}>{s.why}</div>}
+    </div>
+  );
+}
+
 export default function VectorCurator({
   vector, label, blurb, entries, setField, removeField, upsertNode, generate, generating,
   refineNode, refining, onSave, onPush, pushLabel, dirty, savingBusy,
@@ -128,27 +146,66 @@ export default function VectorCurator({
   // RECOMMENDATIONS for this focus — pending intelligence updates whose
   // EVIDENCE came from this focus's signals (battlecard/capability ones are
   // competitive by nature). Derivation is structural: no signals pulled for
-  // the focus → no recommendations, ever. Surfaced inside the node pop-ups;
-  // accepting pushes the item to its area (theme boards / battlecards / matrix).
-  type Rec = { id: string; kind: string; summary: string | null; payload: Record<string, unknown> };
+  // the focus → no recommendations, ever. Each carries its evidence signals
+  // (title/source/date/link) so the human can SEE what it rests on. A
+  // recommendation surfaces inside the node its evidence was pulled for;
+  // ones whose evidence names no node appear ONCE at the focus level —
+  // never duplicated across nodes.
+  type EvSig = { id: string; title: string; why: string | null; observed_at: string | null; url?: string; source?: string; node_key?: string | null; vector?: string | null };
+  type Rec = { id: string; kind: string; summary: string | null; payload: Record<string, unknown>; evidence: EvSig[] };
   const [recs, setRecs] = useState<Rec[]>([]);
   const [recBusy, setRecBusy] = useState<string | null>(null);
   const loadRecs = useCallback(async () => {
     const { data: ups } = await supabase.from("intel_updates").select("id, kind, summary, payload").eq("status", "pending");
-    const list = (ups ?? []) as Rec[];
+    const list = (ups ?? []) as Omit<Rec, "evidence">[];
     const sigIds = [...new Set(list.flatMap((u) => (Array.isArray(u.payload?.signal_ids) ? (u.payload.signal_ids as string[]) : [])))];
-    const vecOfSig = new Map<string, string | null>();
+    const sigById = new Map<string, EvSig>();
     if (sigIds.length) {
-      const { data: sigs } = await supabase.from("signals").select("id, metadata").in("id", sigIds);
-      for (const s of sigs ?? []) vecOfSig.set(s.id as string, ((s.metadata as { vector?: string } | null)?.vector) ?? null);
+      const { data: sigs } = await supabase.from("signals").select("id, title, why, observed_at, metadata").in("id", sigIds);
+      for (const s of sigs ?? []) {
+        const m = (s.metadata ?? {}) as { vector?: string; node_key?: string; url?: string; source?: string };
+        sigById.set(s.id as string, { id: s.id as string, title: s.title as string, why: (s.why as string | null) ?? null, observed_at: (s.observed_at as string | null) ?? null, url: m.url, source: m.source, node_key: m.node_key ?? null, vector: m.vector ?? null });
+      }
     }
-    setRecs(list.filter((u) => {
+    const withEvidence: Rec[] = list.map((u) => ({
+      ...u,
+      evidence: (Array.isArray(u.payload?.signal_ids) ? (u.payload.signal_ids as string[]) : []).map((id) => sigById.get(id)).filter(Boolean) as EvSig[],
+    }));
+    setRecs(withEvidence.filter((u) => {
       if (u.kind === "battlecard_item" || u.kind === "capability_score" || u.payload?.competitor_id) return vector === "competitive";
-      const ids = Array.isArray(u.payload?.signal_ids) ? (u.payload.signal_ids as string[]) : [];
-      return ids.some((id) => vecOfSig.get(id) === vector);
+      return u.evidence.some((s) => s.vector === vector);
     }));
   }, [supabase, vector]);
   useEffect(() => { loadRecs(); }, [loadRecs]);
+  // Split by attribution: a rec belongs to the node(s) its evidence was pulled
+  // for; a rec with no node-attributed evidence shows once at the focus level.
+  const recsForNode = useCallback((key: string) => recs.filter((r) => r.evidence.some((s) => s.node_key === key)), [recs]);
+  const focusRecs = useMemo(() => recs.filter((r) => !r.evidence.some((s) => s.node_key && existingKeys.has(s.node_key))), [recs, existingKeys]);
+
+  // The node's OWN catch — the real signals its aimed sources pulled in
+  // (connector-runner stamps metadata.node_key on every node-aimed pull).
+  // Loaded when a node opens; zero rows is honest zero: the node isn't
+  // pulling yet, which is exactly what the curator needs to see.
+  const [nodeSigs, setNodeSigs] = useState<EvSig[] | null>(null);
+  const [nodeSigCount, setNodeSigCount] = useState(0);
+  useEffect(() => {
+    if (!openKey) { setNodeSigs(null); setNodeSigCount(0); return; }
+    let live = true;
+    (async () => {
+      const { data, count } = await supabase.from("signals")
+        .select("id, title, why, observed_at, metadata", { count: "exact" })
+        .eq("metadata->>node_key", openKey)
+        .order("observed_at", { ascending: false, nullsFirst: false })
+        .limit(12);
+      if (!live) return;
+      setNodeSigCount(count ?? data?.length ?? 0);
+      setNodeSigs((data ?? []).map((s) => {
+        const m = (s.metadata ?? {}) as { url?: string; source?: string };
+        return { id: s.id as string, title: s.title as string, why: (s.why as string | null) ?? null, observed_at: (s.observed_at as string | null) ?? null, url: m.url, source: m.source };
+      }));
+    })();
+    return () => { live = false; };
+  }, [openKey, supabase]);
   async function resolveRec(id: string, verdict: "accept" | "reject") {
     setRecBusy(id); setErr(null);
     try {
@@ -316,6 +373,36 @@ export default function VectorCurator({
         )}
       </div>
 
+      {/* Focus-level recommendations — the ones whose evidence doesn't name a
+          node (older pulls, cross-cutting synthesis). Node-attributed ones
+          live inside their node; nothing is duplicated across nodes. */}
+      {focusRecs.length > 0 && (
+        <div className="card card-pad">
+          <div className="t-label" style={{ marginBottom: 8 }}>Recommendations · {focusRecs.length} <span className="t-muted" style={{ fontWeight: 400, textTransform: "none", letterSpacing: 0 }}>— from this focus&apos;s signals, not tied to one node; accepting pushes each to its area</span></div>
+          <div className="stack-2">
+            {focusRecs.map((r) => (
+              <div key={r.id} style={{ borderTop: "1px solid var(--border)", paddingTop: 8 }}>
+                <div className="row-between" style={{ gap: 8, alignItems: "baseline" }}>
+                  <div style={{ minWidth: 0 }}>
+                    <span style={{ fontSize: 12.5, lineHeight: 1.5 }}>{r.summary}</span>
+                    <span className="t-mono-xs t-muted" style={{ marginLeft: 8 }}>{r.kind.replace(/_/g, " ")}</span>
+                  </div>
+                  <div className="row gap-2" style={{ flexShrink: 0 }}>
+                    <button className="btn btn-secondary btn-sm" disabled={recBusy === r.id} onClick={() => resolveRec(r.id, "reject")} style={{ color: "var(--rd-text)" }}>Dismiss</button>
+                    <button className="btn btn-sm" disabled={recBusy === r.id} onClick={() => resolveRec(r.id, "accept")}>{recBusy === r.id ? "…" : "Accept → push"}</button>
+                  </div>
+                </div>
+                {r.evidence.length > 0 && (
+                  <div className="stack-1" style={{ marginTop: 4, paddingLeft: 10, borderLeft: "2px solid var(--border)" }}>
+                    {r.evidence.map((s) => <SignalLine key={s.id} s={s} compact />)}
+                  </div>
+                )}
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
       {/* What this focus tells the brain — the steer every pull inherits */}
       {entries.length > 0 && (
         <details className="card card-pad">
@@ -334,8 +421,8 @@ export default function VectorCurator({
             <div className="stack-3">
               <label className="field"><span className="t-label">Name</span>
                 <input className="input" value={f.label} onChange={(ev) => setField(i, { label: ev.target.value })} /></label>
-              <label className="field"><span className="t-label">Statement <span className="t-muted" style={{ fontWeight: 400, textTransform: "none", letterSpacing: 0 }}>— a declarative fact about you, search-actionable</span></span>
-                <textarea className="textarea" rows={9} value={f.value} onChange={(ev) => setField(i, { value: ev.target.value })} placeholder="A declarative fact about you — name the thing and assert what's true of it, so search knows what to hunt." /></label>
+              <label className="field"><span className="t-label">Statement <span className="t-muted" style={{ fontWeight: 400, textTransform: "none", letterSpacing: 0 }}>— what it is · why it matters to you · what changes to catch · where the signal lives</span></span>
+                <textarea className="textarea" rows={9} value={f.value} onChange={(ev) => setField(i, { value: ev.target.value })} placeholder="A short analyst brief: what this is (name real examples), why it matters to you specifically, which concrete changes are worth catching, and where that signal lives." /></label>
               <div className="row gap-2" style={{ flexWrap: "wrap" }}>
                 <label className="field" style={{ flex: 1, minWidth: 180 }}><span className="t-label">Level</span>
                   <select className="select" value={W_OF(f.weight)} onChange={(ev) => setField(i, { weight: Number(ev.target.value) })}>
@@ -347,6 +434,49 @@ export default function VectorCurator({
                     {entries.filter((e2) => e2.f.field_key !== f.field_key).map(({ f: p }) => <option key={p.field_key} value={p.field_key}>{p.label}</option>)}
                   </select></label>
               </div>
+              {/* ---- What this node caught — its OWN pulled signals, then the
+                      recommendations whose evidence came from them. Placed
+                      right under the statement: the statement is the aim,
+                      this is what the aim brought back. ---- */}
+              {(() => {
+                const nrecs = recsForNode(f.field_key);
+                return (
+                  <div className="card card-pad" style={{ background: "var(--panel-2)" }}>
+                    <div className="t-label" style={{ marginBottom: 8 }}>Signals this node pulled{nodeSigs ? ` · ${nodeSigCount}` : ""} <span className="t-muted" style={{ fontWeight: 400, textTransform: "none", letterSpacing: 0 }}>— the real catch from this node&apos;s aimed sources{nodeSigCount > 12 ? "; newest 12 shown" : ""}</span></div>
+                    {nodeSigs === null ? (
+                      <div className="t-sub t-muted" style={{ fontSize: 12 }}>Loading…</div>
+                    ) : nodeSigs.length === 0 ? (
+                      <div className="t-sub t-muted" style={{ fontSize: 12, lineHeight: 1.5 }}>Nothing pulled for this node yet — check its web sources below and that the heartbeat is running. A node that never catches anything needs a sharper statement or a source.</div>
+                    ) : (
+                      <div className="stack-2">{nodeSigs.map((s) => <SignalLine key={s.id} s={s} />)}</div>
+                    )}
+                    {nrecs.length > 0 && (
+                      <div style={{ marginTop: 12 }}>
+                        <div className="t-label" style={{ marginBottom: 8 }}>Recommendations · {nrecs.length} <span className="t-muted" style={{ fontWeight: 400, textTransform: "none", letterSpacing: 0 }}>— built on this node&apos;s signals; accepting pushes each to its area</span></div>
+                        <div className="stack-2">
+                          {nrecs.map((r) => (
+                            <div key={r.id} style={{ borderTop: "1px solid var(--border)", paddingTop: 8 }}>
+                              <div className="row-between" style={{ gap: 8, alignItems: "baseline" }}>
+                                <div style={{ minWidth: 0 }}>
+                                  <span style={{ fontSize: 12.5, lineHeight: 1.5 }}>{r.summary}</span>
+                                  <span className="t-mono-xs t-muted" style={{ marginLeft: 8 }}>{r.kind.replace(/_/g, " ")}</span>
+                                </div>
+                                <div className="row gap-2" style={{ flexShrink: 0 }}>
+                                  <button className="btn btn-secondary btn-sm" disabled={recBusy === r.id} onClick={() => resolveRec(r.id, "reject")} style={{ color: "var(--rd-text)" }}>Dismiss</button>
+                                  <button className="btn btn-sm" disabled={recBusy === r.id} onClick={() => resolveRec(r.id, "accept")}>{recBusy === r.id ? "…" : "Accept → push"}</button>
+                                </div>
+                              </div>
+                              <div className="stack-1" style={{ marginTop: 4, paddingLeft: 10, borderLeft: "2px solid var(--border)" }}>
+                                {r.evidence.map((s) => <SignalLine key={s.id} s={s} compact />)}
+                              </div>
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                );
+              })()}
               <div className="card card-pad" style={{ background: "var(--panel-2)" }}>
                 <div className="t-label" style={{ marginBottom: 6 }}>Refine with AI</div>
                 <textarea className="textarea" rows={3} value={refineText} onChange={(ev) => setRefineText(ev.target.value)} placeholder="Optional: how to change it — e.g. 'more specific', 'split out the adjacent angle', 'this is indirect, not direct'." />
@@ -360,28 +490,6 @@ export default function VectorCurator({
                 <div className="t-mono-xs" style={{ whiteSpace: "pre-wrap", color: "var(--ts)", lineHeight: 1.55, marginTop: 6, background: "var(--panel-2)", border: "1px solid var(--border)", borderRadius: "var(--radius-sm)", padding: "8px 10px" }}>{compileNodeBrief(fieldsOnly, f.field_key) || "Give the node a statement — that statement becomes the search steer."}</div>
               </details>
               <NodeSources vector={vector} nodeKey={f.field_key} seed={compileNodeBrief(fieldsOnly, f.field_key)} />
-              {/* Recommendations — only when this focus's signals produced any.
-                  Accept pushes the item to its area; nothing appears before
-                  signals are set up and pulled. */}
-              {recs.length > 0 && (
-                <div className="card card-pad" style={{ background: "var(--panel-2)" }}>
-                  <div className="t-label" style={{ marginBottom: 8 }}>Recommendations · {recs.length} <span className="t-muted" style={{ fontWeight: 400, textTransform: "none", letterSpacing: 0 }}>— from this focus&apos;s signals; accepting pushes each to its area</span></div>
-                  <div className="stack-2">
-                    {recs.map((r) => (
-                      <div key={r.id} className="row-between" style={{ gap: 8, alignItems: "baseline" }}>
-                        <div style={{ minWidth: 0 }}>
-                          <span style={{ fontSize: 12.5, lineHeight: 1.5 }}>{r.summary}</span>
-                          <span className="t-mono-xs t-muted" style={{ marginLeft: 8 }}>{r.kind.replace("_", " ")}</span>
-                        </div>
-                        <div className="row gap-2" style={{ flexShrink: 0 }}>
-                          <button className="btn btn-secondary btn-sm" disabled={recBusy === r.id} onClick={() => resolveRec(r.id, "reject")} style={{ color: "var(--rd-text)" }}>Dismiss</button>
-                          <button className="btn btn-sm" disabled={recBusy === r.id} onClick={() => resolveRec(r.id, "accept")}>{recBusy === r.id ? "…" : "Accept → push"}</button>
-                        </div>
-                      </div>
-                    ))}
-                  </div>
-                </div>
-              )}
               <div className="row-between" style={{ paddingTop: 4 }}>
                 <button className="btn btn-secondary btn-sm" onClick={() => { removeField(i); setOpenKey(null); }} style={{ color: "var(--rd-text)" }}>Remove node</button>
                 <div className="row gap-2">
@@ -404,8 +512,8 @@ export default function VectorCurator({
             </select></label>
           <label className="field"><span className="t-label">Name</span>
             <input className="input" value={addLabel} onChange={(e) => setAddLabel(e.target.value)} placeholder="Short name — e.g. a rival, a segment, a persona, a capability" /></label>
-          <label className="field"><span className="t-label">Statement <span className="t-muted" style={{ fontWeight: 400, textTransform: "none", letterSpacing: 0 }}>— a declarative fact about you, search-actionable</span></span>
-            <textarea className="textarea" rows={8} value={addValue} onChange={(e) => setAddValue(e.target.value)} placeholder="A declarative fact about you, plus where its signal lives — specific enough that search knows what to hunt." /></label>
+          <label className="field"><span className="t-label">Statement <span className="t-muted" style={{ fontWeight: 400, textTransform: "none", letterSpacing: 0 }}>— what it is · why it matters to you · what changes to catch · where the signal lives</span></span>
+            <textarea className="textarea" rows={8} value={addValue} onChange={(e) => setAddValue(e.target.value)} placeholder="A short analyst brief: what this is (name real examples), why it matters to you specifically, which concrete changes are worth catching, and where that signal lives." /></label>
           <label className="field"><span className="t-label">Level</span>
             <select className="select" value={effWeight} onChange={(e) => setAddWeight(Number(e.target.value))}>
               {[3, 2, 1].map((w) => <option key={w} value={w}>{VOCAB[w]} — {WHY_WEIGHT[w]}</option>)}

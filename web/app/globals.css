@@ -293,6 +293,8 @@ button { font-family: inherit; cursor: pointer; }
 .row-between { display: flex; align-items: center; justify-content: space-between; }
 .gap-2 { gap: var(--sp-2); } .gap-3 { gap: var(--sp-3); }
 .grid-cards { display: grid; gap: var(--sp-3); grid-template-columns: repeat(auto-fill, minmax(280px, 1fr)); }
+.stack-1 > * + * { margin-top: var(--sp-1); }
+.stack-2 > * + * { margin-top: var(--sp-2); }
 .stack-3 > * + * { margin-top: var(--sp-3); }
 
 /* ---- collapsible sidebar ------------------------------------------------- */

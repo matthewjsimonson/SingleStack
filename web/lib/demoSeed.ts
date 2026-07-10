@@ -162,6 +162,11 @@ export async function loadDemoData(supabase: SupabaseClient, orgId: string): Pro
   // lives in signal_profile_fields for THIS org; the pull/steer logic reads
   // whatever profile the customer's own records grow. weight 3 = closest to the
   // core … 1 = edge; parent = the same-vector node a branch chains off.
+  // Content-versioned: bumping SEED_NODES_VERSION re-lands every seeded node's
+  // label/statement onto existing rows (only the seeded keys are overwritten,
+  // once per bump — user-ADDED nodes are never touched). The version rides in
+  // a hidden sentinel row (vector 'meta' — no tab renders it, briefs skip it).
+  const SEED_NODES_VERSION = 2;
   await step("signals network", async () => {
     let { data: prof } = await supabase.from("signal_profiles").select("id").eq("scope", "landscape").is("competitor_id", null).maybeSingle();
     if (!prof) {
@@ -171,8 +176,10 @@ export async function loadDemoData(supabase: SupabaseClient, orgId: string): Pro
       if (pe) throw pe;
       prof = np;
     }
-    const { count: c } = await supabase.from("signal_profile_fields").select("id", { count: "exact", head: true }).eq("profile_id", prof!.id);
-    if (c) return "exist";
+    const { data: existing } = await supabase.from("signal_profile_fields").select("field_key, value").eq("profile_id", prof!.id);
+    const hasNodes = (existing?.length ?? 0) > 0;
+    const seedVer = Number((existing ?? []).find((r) => r.field_key === "_seed_version")?.value) || 0;
+    if (hasNodes && seedVer >= SEED_NODES_VERSION) return "current";
     // [key, label, statement, vector, weight, parent]
     const N: [string, string, string, string, number, string | null][] = [
       // ---- CORE — what we are; every focus reads from this ----
@@ -236,12 +243,15 @@ export async function loadDemoData(supabase: SupabaseClient, orgId: string): Pro
       ["ind_agentic_reg", "Agent standards & safety rules", "Standards for autonomous agents — NIST's agent-standards initiative on security, interoperability, and identity is the U.S. marker — will define what enterprises require from agentic software: identity, audit trails, human oversight. Our ratification trail is a head start that standards can turn into a moat. What matters: draft standards, provider policy changes, and identity or audit requirements entering frameworks. Watch standards-body announcements, provider policy posts, and compliance-industry analysis.", "technology", 1, "arch_tech_ind"],
       ["ind_compute", "AI pricing & compute costs", "API pricing and compute economics move our margins and what we can afford to embed — the recent two-thirds cut in flagship-tier pricing materially changed our synthesis and Build-run costs. Price moves also signal where providers want workloads to go. What matters: per-token price changes, new pricing tiers or caching discounts, and compute-cost trend data. Watch provider pricing pages, API announcements, and cost-analysis coverage.", "technology", 1, "arch_tech_ind"],
     ];
-    const { error } = await supabase.from("signal_profile_fields").insert(
-      N.map(([field_key, label, value, vector, weight, parent_key], i) => ({
-        org_id: orgId, profile_id: prof!.id, field_key, label, value, vector, weight, parent_key, position: i, origin: "human",
-      })));
+    const rows = N.map(([field_key, label, value, vector, weight, parent_key], i) => ({
+      org_id: orgId, profile_id: prof!.id, field_key, label, value, vector, weight, parent_key, position: i, origin: "human",
+    }));
+    rows.push({ org_id: orgId, profile_id: prof!.id, field_key: "_seed_version", label: "Seed version", value: String(SEED_NODES_VERSION), vector: "meta", weight: 1, parent_key: null, position: rows.length, origin: "human" });
+    // Fresh org: plain insert. Existing org on an older seed: upsert lands the
+    // new labels/statements on the seeded keys and stamps the new version.
+    const { error } = await supabase.from("signal_profile_fields").upsert(rows, { onConflict: "profile_id,field_key" });
     if (error) throw error;
-    return `+${N.length} nodes`;
+    return hasNodes ? `rewrote ${N.length} nodes (v${seedVer}→v${SEED_NODES_VERSION})` : `+${N.length} nodes`;
   });
 
 
