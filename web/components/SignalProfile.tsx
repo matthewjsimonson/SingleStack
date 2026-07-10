@@ -27,10 +27,10 @@ import { edgeErrorMessage } from "@/lib/edgeError";
 // level; the coverage map makes the gaps visible.
 export type Vector = "core" | "competitive" | "market" | "technology";
 const VECTORS: { key: Vector; label: string; blurb: string }[] = [
-  { key: "core", label: "Core — what we are", blurb: "The center: essence, positioning, wedge. Every focus builds on this." },
-  { key: "competitive", label: "Competitive", blurb: "Competing products — the attributes that pinpoint the right rivals and aim the competitor search." },
-  { key: "market", label: "Market", blurb: "The applicable market: industries, personas, and market news." },
-  { key: "technology", label: "Technology", blurb: "What powers the product, what powers building it, and what powers GTM — frontier and open-source models across all three." },
+  { key: "core", label: "Core — what we are", blurb: "What you are. Every focus builds on this." },
+  { key: "competitive", label: "Competitive", blurb: "Who you compete with, and how directly." },
+  { key: "market", label: "Market", blurb: "Your segments, buyers, and demand." },
+  { key: "technology", label: "Technology", blurb: "The tech under the product, the build, and GTM." },
 ];
 const vectorMeta = (v?: string) => VECTORS.find((x) => x.key === v) ?? VECTORS[0];
 // Where each vector PUSHES — the intel area that applies it to search/analyze.
@@ -105,43 +105,6 @@ export default function SignalProfile({ scope, competitorId, competitorName, vec
       return { ...f, field_key: k };
     });
     return renamed.size ? out.map((f) => (f.parent_key && renamed.has(f.parent_key) ? { ...f, parent_key: renamed.get(f.parent_key)! } : f)) : out;
-  }
-
-  // Draft the WHOLE profile — STAGED, one vector at a time, with visible
-  // progress: core first (everything builds on it), then each vector. A failed
-  // stage reports its real error and the rest still run. Landscape only.
-  async function draftAllStaged() {
-    if (busy || vecBusy) return;
-    setBusy("ai"); setError(null); setNote(null);
-    const order: Vector[] = ["core", "competitive", "market", "technology"];
-    setStages(order.map((v) => ({ v, status: "pending" })));
-    let acc = fields;
-    let failed = 0, total = 0;
-    for (const v of order) {
-      setStages((s) => s.map((x) => (x.v === v ? { ...x, status: "running" } : x)));
-      try {
-        const { data, error } = await supabase.functions.invoke("synthesize-profile", { body: { scope: "landscape", vector: v, current: currentPayload(acc) } });
-        if (error) throw error;
-        if (data?.error) throw new Error(data.error);
-        const keep = acc.filter((f) => (f.vector ?? "core") !== v);
-        const incoming: Field[] = dedupeKeys(
-          (data?.draft?.fields ?? []).map((f: Field) => ({ ...f, origin: "ai", vector: v, weight: f.weight ?? 2, parent_key: f.parent_key ?? null })),
-          new Set(keep.map((f) => f.field_key)));
-        acc = [...keep, ...incoming];
-        if (v === "core" && data?.draft?.headline) setHeadline(data.draft.headline);
-        setFields(acc); setDirty(true);
-        total += incoming.length;
-        setStages((s) => s.map((x) => (x.v === v ? { ...x, status: "done", count: incoming.length } : x)));
-      } catch (e) {
-        failed++;
-        const msg = await edgeErrorMessage(e, "synthesize-profile");
-        setStages((s) => s.map((x) => (x.v === v ? { ...x, status: "error", msg } : x)));
-      }
-    }
-    setNote(failed
-      ? `Drafted ${total} node(s); ${failed} vector(s) failed — their errors are shown above. Review and Save what landed.`
-      : `Drafted ${total} node(s) across the profile. Review each vector and Save.`);
-    setBusy(null);
   }
 
   // Draft ONE vector — returns PROPOSALS: nothing lands until the human
@@ -311,7 +274,7 @@ export default function SignalProfile({ scope, competitorId, competitorName, vec
         <div className="row-between" style={{ gap: 12, flexWrap: "wrap", marginBottom: 10 }}>
           <div style={{ minWidth: 0 }}>
             <div style={{ fontSize: 13.5, fontWeight: 660 }}>Signals profile · {short}</div>
-            <div className="t-sub t-muted" style={{ fontSize: 12, marginTop: 2 }}>{vm.blurb} Drawn from your central signals profile.</div>
+            <div className="t-sub t-muted" style={{ fontSize: 12, marginTop: 2 }}>{vm.blurb}</div>
           </div>
           <a className="btn btn-secondary btn-sm" href="/signals" style={{ flexShrink: 0 }} title="The signals profile lives on the Signals home">Edit on Signals →</a>
         </div>
@@ -339,10 +302,10 @@ export default function SignalProfile({ scope, competitorId, competitorName, vec
     );
   }
 
-  const title = scope === "landscape" ? "Signals profile — what to find, track & analyze" : `Signal Profile — ${competitorName ?? "competitor"} (the raw battlecard)`;
+  const title = scope === "landscape" ? "Signals profile" : `${competitorName ?? "Competitor"} profile`;
   const blurb = scope === "landscape"
-    ? "Your intelligence profile, built from your product & GTM records: a core (what you are) plus three vectors — competitive, market, technology. Each node is a weighted statement that aims search; the intelligence tabs draw on their vector. Editable by hand; it sharpens as signals come in."
-    : "Where you stand against this competitor — carried over from setup, then sharpened with internal (deals, calls) + external (public) signals. Editable by hand.";
+    ? "A core plus competitive, market, and technology focuses. Each node aims search; edit any by hand."
+    : "Your standing against this competitor, sharpened by internal and public signals.";
 
   if (!profile) {
     return (
@@ -368,8 +331,13 @@ export default function SignalProfile({ scope, competitorId, competitorName, vec
           <div className="t-sub t-muted" style={{ fontSize: 12, marginTop: 2 }}>{blurb}</div>
         </div>
         <div className="row gap-2" style={{ flexShrink: 0 }}>
-          <button className="btn btn-secondary btn-sm" onClick={scope === "landscape" ? draftAllStaged : draftAllCompetitor} disabled={busy === "ai" || vecBusy !== null} style={{ color: "var(--ac-text)" }}
-            title={scope === "landscape" ? "Draft/refresh the whole profile, one vector at a time with visible progress" : "Synthesize this competitor's profile from its signals + your records"}>{busy === "ai" ? "Drafting…" : scope === "landscape" ? "Draft all vectors" : "Draft / refresh with AI"}</button>
+          {/* Landscape builds per-focus via "Build with AI" inside each tab —
+              no separate all-vectors button. Competitor profiles keep a single
+              draft/refresh action. */}
+          {scope === "competitor" && (
+            <button className="btn btn-secondary btn-sm" onClick={draftAllCompetitor} disabled={busy === "ai" || vecBusy !== null} style={{ color: "var(--ac-text)" }}
+              title="Synthesize this competitor's profile from its signals + your records">{busy === "ai" ? "Drafting…" : "Draft / refresh with AI"}</button>
+          )}
           {scope === "competitor" && (
             <button className="btn btn-secondary btn-sm" onClick={fillBattlecard} disabled={busy === "battlecard" || dirty}
               title={dirty ? "Save first" : "This profile is the raw battlecard — the analyst refines it into evidence-cited items (through review), then the messenger drafts the GTM battlecard copy"}>

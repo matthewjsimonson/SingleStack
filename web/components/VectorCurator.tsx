@@ -10,11 +10,14 @@
 
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { createClient } from "@/lib/supabase/client";
+import { getOrgId } from "@/lib/org";
 import type { Vector } from "@/components/SignalProfile";
 import NodeSources from "@/components/NodeSources";
-import { Modal } from "@/components/ui";
+import { Modal, SubTabs } from "@/components/ui";
 import { compileVectorBrief, compileNodeBrief } from "@/lib/profileBrief";
 import { edgeErrorMessage } from "@/lib/edgeError";
+
+const VECTOR_DOMAIN: Record<string, string> = { competitive: "competitive", market: "market", technology: "capability", core: "signals" };
 
 type Field = { field_key: string; label: string; value: string; origin?: string; vector?: Vector; weight?: number; parent_key?: string | null };
 type Turn = { role: "q" | "a"; text: string };
@@ -86,9 +89,11 @@ export default function VectorCurator({
   // in a tall centered window than in an inline card).
   const [interviewOpen, setInterviewOpen] = useState(false);
 
-  // Which node's editor pop-up is open.
+  // Which node's editor pop-up is open, and which tab of it.
   const [openKey, setOpenKey] = useState<string | null>(null);
+  const [nodeTab, setNodeTab] = useState<"node" | "signals">("node");
   const [refineText, setRefineText] = useState("");
+  const [refineOpen, setRefineOpen] = useState(false); // instruction box shown?
 
   // Guided add pop-up.
   const [adding, setAdding] = useState(false);
@@ -188,24 +193,51 @@ export default function VectorCurator({
   // pulling yet, which is exactly what the curator needs to see.
   const [nodeSigs, setNodeSigs] = useState<EvSig[] | null>(null);
   const [nodeSigCount, setNodeSigCount] = useState(0);
+  const loadNodeSigs = useCallback(async (key: string) => {
+    const { data, count } = await supabase.from("signals")
+      .select("id, title, why, observed_at, metadata", { count: "exact" })
+      .eq("metadata->>node_key", key)
+      .order("observed_at", { ascending: false, nullsFirst: false })
+      .limit(12);
+    setNodeSigCount(count ?? data?.length ?? 0);
+    setNodeSigs((data ?? []).map((s) => {
+      const m = (s.metadata ?? {}) as { url?: string; source?: string };
+      return { id: s.id as string, title: s.title as string, why: (s.why as string | null) ?? null, observed_at: (s.observed_at as string | null) ?? null, url: m.url, source: m.source };
+    }));
+  }, [supabase]);
   useEffect(() => {
     if (!openKey) { setNodeSigs(null); setNodeSigCount(0); return; }
     let live = true;
-    (async () => {
-      const { data, count } = await supabase.from("signals")
-        .select("id, title, why, observed_at, metadata", { count: "exact" })
-        .eq("metadata->>node_key", openKey)
-        .order("observed_at", { ascending: false, nullsFirst: false })
-        .limit(12);
-      if (!live) return;
-      setNodeSigCount(count ?? data?.length ?? 0);
-      setNodeSigs((data ?? []).map((s) => {
-        const m = (s.metadata ?? {}) as { url?: string; source?: string };
-        return { id: s.id as string, title: s.title as string, why: (s.why as string | null) ?? null, observed_at: (s.observed_at as string | null) ?? null, url: m.url, source: m.source };
-      }));
-    })();
+    setNodeSigs(null);
+    (async () => { const k = openKey; await loadNodeSigs(k); if (!live) setNodeSigs(null); })();
     return () => { live = false; };
-  }, [openKey, supabase]);
+  }, [openKey, loadNodeSigs]);
+
+  // Log a signal straight onto THIS node — stamped with the node's vector +
+  // key so it lands on the node's page and in its pulled-signals list, exactly
+  // like a harvested one. This is the manual entry point (there is no page-wide
+  // "log signal" anymore — a signal always belongs to a node).
+  const [logOpen, setLogOpen] = useState(false);
+  const [logForm, setLogForm] = useState({ title: "", why: "", conf: "0.7" });
+  const [logBusy, setLogBusy] = useState(false);
+  async function logNodeSignal(nodeKey: string) {
+    if (!logForm.title.trim()) return;
+    setLogBusy(true); setErr(null);
+    try {
+      const orgId = await getOrgId(); if (!orgId) throw new Error("Could not resolve your organization.");
+      const lvl = parseFloat(logForm.conf);
+      const { error } = await supabase.from("signals").insert({
+        org_id: orgId, scope: "org", title: logForm.title.trim(), why: logForm.why.trim() || null,
+        conf_level: lvl, conf_label: lvl >= 0.85 ? "High" : lvl >= 0.6 ? "Medium" : "Low",
+        origin: "internal", observed_at: new Date().toISOString(),
+        metadata: { domain: VECTOR_DOMAIN[vector] ?? "signals", vector, node_key: nodeKey, source: "logged by hand" },
+      });
+      if (error) throw error;
+      setLogForm({ title: "", why: "", conf: "0.7" }); setLogOpen(false);
+      await loadNodeSigs(nodeKey);
+    } catch (e) { setErr(e instanceof Error ? e.message : "Could not log the signal."); }
+    finally { setLogBusy(false); }
+  }
   async function resolveRec(id: string, verdict: "accept" | "reject") {
     setRecBusy(id); setErr(null);
     try {
@@ -294,7 +326,7 @@ export default function VectorCurator({
         title={`Build the ${label} focus`}>
         <div style={{ height: "100%", display: "flex", flexDirection: "column" }}>
           <div className="stack-3" style={{ flex: 1, minHeight: 0, overflowY: "auto", paddingRight: 2 }}>
-            <div className="t-sub t-muted" style={{ fontSize: 12.5 }}>{blurb} It reads your records first and only asks what they don&apos;t answer — answer, skip, or stop anytime; then it proposes nodes you accept one by one.</div>
+            <div className="t-sub t-muted" style={{ fontSize: 12.5 }}>{blurb} Answer, skip, or stop anytime; it proposes nodes you accept one by one.</div>
             {transcript.filter((t) => t.role === "a").length > 0 && (
               <div className="stack-2" style={{ background: "var(--panel-2)", border: "1px solid var(--border)", borderRadius: "var(--radius)", padding: "10px 12px" }}>
                 {transcript.map((t, k) => (
@@ -364,7 +396,7 @@ export default function VectorCurator({
                 </div>
                 <ul className="otree">
                   {bandRoots.map((e) => <OrgNode key={e.f.field_key} entry={e} kidsOf={forest.kidsOf}
-                    onOpen={(k) => { setOpenKey(k); setRefineText(""); }} onAddChild={(k, cw) => startAdd(k, cw)} seen={new Set()} />)}
+                    onOpen={(k) => { setOpenKey(k); setRefineText(""); setRefineOpen(false); setNodeTab("node"); }} onAddChild={(k, cw) => startAdd(k, cw)} seen={new Set()} />)}
                   <li><button className="otree-add" onClick={() => startAdd("", w)} title={`Start a new ${VOCAB[w].toLowerCase()} branch`}>+ {VOCAB[w]}</button></li>
                 </ul>
               </div>
@@ -416,88 +448,118 @@ export default function VectorCurator({
       {openEntry && (() => {
         const { f, i } = openEntry;
         const parent = f.parent_key ? parentOf(f.parent_key) : null;
+        const nrecs = recsForNode(f.field_key);
         return (
           <Modal open onClose={() => setOpenKey(null)} title={f.label || "Node"} width={640} tall>
-            <div className="stack-3">
-              <label className="field"><span className="t-label">Name</span>
-                <input className="input" value={f.label} onChange={(ev) => setField(i, { label: ev.target.value })} /></label>
-              <label className="field"><span className="t-label">Statement <span className="t-muted" style={{ fontWeight: 400, textTransform: "none", letterSpacing: 0 }}>— what it is · why it matters to you · what changes to catch · where the signal lives</span></span>
-                <textarea className="textarea" rows={9} value={f.value} onChange={(ev) => setField(i, { value: ev.target.value })} placeholder="A short analyst brief: what this is (name real examples), why it matters to you specifically, which concrete changes are worth catching, and where that signal lives." /></label>
-              <div className="row gap-2" style={{ flexWrap: "wrap" }}>
-                <label className="field" style={{ flex: 1, minWidth: 180 }}><span className="t-label">Level</span>
-                  <select className="select" value={W_OF(f.weight)} onChange={(ev) => setField(i, { weight: Number(ev.target.value) })}>
-                    {[3, 2, 1].map((w) => <option key={w} value={w}>{VOCAB[w]} — {WHY_WEIGHT[w]}</option>)}
-                  </select></label>
-                <label className="field" style={{ flex: 1, minWidth: 180 }}><span className="t-label">Branches off</span>
-                  <select className="select" value={parent ? f.parent_key! : ""} onChange={(ev) => setField(i, { parent_key: ev.target.value || null })}>
-                    <option value="">The {label} focus</option>
-                    {entries.filter((e2) => e2.f.field_key !== f.field_key).map(({ f: p }) => <option key={p.field_key} value={p.field_key}>{p.label}</option>)}
-                  </select></label>
-              </div>
-              {/* ---- What this node caught — its OWN pulled signals, then the
-                      recommendations whose evidence came from them. Placed
-                      right under the statement: the statement is the aim,
-                      this is what the aim brought back. ---- */}
-              {(() => {
-                const nrecs = recsForNode(f.field_key);
-                return (
-                  <div className="card card-pad" style={{ background: "var(--panel-2)" }}>
-                    <div className="t-label" style={{ marginBottom: 8 }}>Signals this node pulled{nodeSigs ? ` · ${nodeSigCount}` : ""} <span className="t-muted" style={{ fontWeight: 400, textTransform: "none", letterSpacing: 0 }}>— the real catch from this node&apos;s aimed sources{nodeSigCount > 12 ? "; newest 12 shown" : ""}</span></div>
-                    {nodeSigs === null ? (
-                      <div className="t-sub t-muted" style={{ fontSize: 12 }}>Loading…</div>
-                    ) : nodeSigs.length === 0 ? (
-                      <div className="t-sub t-muted" style={{ fontSize: 12, lineHeight: 1.5 }}>Nothing pulled for this node yet — check its web sources below and that the heartbeat is running. A node that never catches anything needs a sharper statement or a source.</div>
-                    ) : (
-                      <div className="stack-2">{nodeSigs.map((s) => <SignalLine key={s.id} s={s} />)}</div>
-                    )}
-                    {nrecs.length > 0 && (
-                      <div style={{ marginTop: 12 }}>
-                        <div className="t-label" style={{ marginBottom: 8 }}>Recommendations · {nrecs.length} <span className="t-muted" style={{ fontWeight: 400, textTransform: "none", letterSpacing: 0 }}>— built on this node&apos;s signals; accepting pushes each to its area</span></div>
-                        <div className="stack-2">
-                          {nrecs.map((r) => (
-                            <div key={r.id} style={{ borderTop: "1px solid var(--border)", paddingTop: 8 }}>
-                              <div className="row-between" style={{ gap: 8, alignItems: "baseline" }}>
-                                <div style={{ minWidth: 0 }}>
-                                  <span style={{ fontSize: 12.5, lineHeight: 1.5 }}>{r.summary}</span>
-                                  <span className="t-mono-xs t-muted" style={{ marginLeft: 8 }}>{r.kind.replace(/_/g, " ")}</span>
-                                </div>
-                                <div className="row gap-2" style={{ flexShrink: 0 }}>
-                                  <button className="btn btn-secondary btn-sm" disabled={recBusy === r.id} onClick={() => resolveRec(r.id, "reject")} style={{ color: "var(--rd-text)" }}>Dismiss</button>
-                                  <button className="btn btn-sm" disabled={recBusy === r.id} onClick={() => resolveRec(r.id, "accept")}>{recBusy === r.id ? "…" : "Accept → push"}</button>
-                                </div>
-                              </div>
-                              <div className="stack-1" style={{ marginTop: 4, paddingLeft: 10, borderLeft: "2px solid var(--border)" }}>
-                                {r.evidence.map((s) => <SignalLine key={s.id} s={s} compact />)}
-                              </div>
-                            </div>
-                          ))}
-                        </div>
-                      </div>
-                    )}
+            {/* Two tabs: what the node IS (the aim) vs. what it CAUGHT (signals). */}
+            <SubTabs active={nodeTab} onChange={setNodeTab} tabs={[
+              { key: "node", label: "Node" },
+              { key: "signals", label: `Signals${nodeSigCount ? ` · ${nodeSigCount}` : ""}${nrecs.length ? ` · ${nrecs.length} rec` : ""}` },
+            ]} />
+            {err && <div className="banner banner-err" style={{ marginBottom: 10 }}>{err}</div>}
+
+            {nodeTab === "node" ? (
+              <div className="stack-3">
+                <label className="field"><span className="t-label">Name</span>
+                  <input className="input" value={f.label} onChange={(ev) => setField(i, { label: ev.target.value })} /></label>
+                <label className="field"><span className="t-label">Statement <span className="t-muted" style={{ fontWeight: 400, textTransform: "none", letterSpacing: 0 }}>— what it is · why it matters to you · what changes to catch · where the signal lives</span></span>
+                  <textarea className="textarea" rows={9} value={f.value} onChange={(ev) => setField(i, { value: ev.target.value })} placeholder="A short analyst brief: what this is (name real examples), why it matters to you specifically, which concrete changes are worth catching, and where that signal lives." /></label>
+                {/* Sharpen sits right under the statement: one tap to sharpen, or
+                    open a box to steer the edit. */}
+                <div>
+                  <div className="row gap-2">
+                    <button className="btn btn-sm" onClick={() => refineNode(i, "")} disabled={refining}>{refining && !refineOpen ? "Sharpening…" : "Sharpen with AI"}</button>
+                    <button className="btn btn-secondary btn-sm" onClick={() => setRefineOpen((v) => !v)} aria-expanded={refineOpen}>{refineOpen ? "Cancel" : "Sharpen with instructions"}</button>
                   </div>
-                );
-              })()}
-              <div className="card card-pad" style={{ background: "var(--panel-2)" }}>
-                <div className="t-label" style={{ marginBottom: 6 }}>Refine with AI</div>
-                <textarea className="textarea" rows={3} value={refineText} onChange={(ev) => setRefineText(ev.target.value)} placeholder="Optional: how to change it — e.g. 'more specific', 'split out the adjacent angle', 'this is indirect, not direct'." />
-                <div className="row gap-2" style={{ marginTop: 8 }}>
-                  <button className="btn btn-sm" onClick={() => refineNode(i, refineText)} disabled={refining}>{refining ? "Refining…" : refineText.trim() ? "Apply" : "Sharpen"}</button>
-                  <span className="t-sub t-muted" style={{ fontSize: 11.5, alignSelf: "center" }}>grounded in your records</span>
+                  {refineOpen && (
+                    <div className="row gap-2" style={{ marginTop: 8, alignItems: "flex-start" }}>
+                      <input className="input" style={{ flex: 1 }} value={refineText} autoFocus onChange={(ev) => setRefineText(ev.target.value)}
+                        onKeyDown={(ev) => { if (ev.key === "Enter" && refineText.trim() && !refining) refineNode(i, refineText); }}
+                        placeholder="How to change it — e.g. 'more specific', 'this is indirect, not direct'" />
+                      <button className="btn btn-sm" onClick={() => refineNode(i, refineText)} disabled={refining || !refineText.trim()}>{refining ? "…" : "Apply"}</button>
+                    </div>
+                  )}
+                </div>
+                <div className="row gap-2" style={{ flexWrap: "wrap" }}>
+                  <label className="field" style={{ flex: 1, minWidth: 180 }}><span className="t-label">Level</span>
+                    <select className="select" value={W_OF(f.weight)} onChange={(ev) => setField(i, { weight: Number(ev.target.value) })}>
+                      {[3, 2, 1].map((w) => <option key={w} value={w}>{VOCAB[w]} — {WHY_WEIGHT[w]}</option>)}
+                    </select></label>
+                  <label className="field" style={{ flex: 1, minWidth: 180 }}><span className="t-label">Branches off</span>
+                    <select className="select" value={parent ? f.parent_key! : ""} onChange={(ev) => setField(i, { parent_key: ev.target.value || null })}>
+                      <option value="">The {label} focus</option>
+                      {entries.filter((e2) => e2.f.field_key !== f.field_key).map(({ f: p }) => <option key={p.field_key} value={p.field_key}>{p.label}</option>)}
+                    </select></label>
+                </div>
+                <details>
+                  <summary className="t-sub t-muted" style={{ fontSize: 11.5, cursor: "pointer" }}>What this node tells the brain (the live pull steer)</summary>
+                  <div className="t-mono-xs" style={{ whiteSpace: "pre-wrap", color: "var(--ts)", lineHeight: 1.55, marginTop: 6, background: "var(--panel-2)", border: "1px solid var(--border)", borderRadius: "var(--radius-sm)", padding: "8px 10px" }}>{compileNodeBrief(fieldsOnly, f.field_key) || "Give the node a statement — that statement becomes the search steer."}</div>
+                </details>
+                <NodeSources vector={vector} nodeKey={f.field_key} seed={compileNodeBrief(fieldsOnly, f.field_key)} />
+                <div className="row-between" style={{ paddingTop: 4 }}>
+                  <button className="btn btn-secondary btn-sm" onClick={() => { removeField(i); setOpenKey(null); }} style={{ color: "var(--rd-text)" }}>Remove node</button>
+                  <div className="row gap-2">
+                    <button className="btn btn-secondary btn-sm" onClick={() => startAdd(f.field_key)}>+ Branch off this node</button>
+                    <button className="btn btn-sm" onClick={onSave} disabled={!dirty || savingBusy}>{savingBusy ? "Saving…" : dirty ? "Save" : "Saved"}</button>
+                  </div>
                 </div>
               </div>
-              <details>
-                <summary className="t-sub t-muted" style={{ fontSize: 11.5, cursor: "pointer" }}>What this node tells the brain (the live pull steer)</summary>
-                <div className="t-mono-xs" style={{ whiteSpace: "pre-wrap", color: "var(--ts)", lineHeight: 1.55, marginTop: 6, background: "var(--panel-2)", border: "1px solid var(--border)", borderRadius: "var(--radius-sm)", padding: "8px 10px" }}>{compileNodeBrief(fieldsOnly, f.field_key) || "Give the node a statement — that statement becomes the search steer."}</div>
-              </details>
-              <NodeSources vector={vector} nodeKey={f.field_key} seed={compileNodeBrief(fieldsOnly, f.field_key)} />
-              <div className="row-between" style={{ paddingTop: 4 }}>
-                <button className="btn btn-secondary btn-sm" onClick={() => { removeField(i); setOpenKey(null); }} style={{ color: "var(--rd-text)" }}>Remove node</button>
-                <div className="row gap-2">
-                  <button className="btn btn-secondary btn-sm" onClick={() => startAdd(f.field_key)}>+ Branch off this node</button>
-                  <button className="btn btn-sm" onClick={onSave} disabled={!dirty || savingBusy}>{savingBusy ? "Saving…" : dirty ? "Save" : "Saved"}</button>
+            ) : (
+              /* SIGNALS TAB — the real catch, its recommendations, and the
+                 by-hand entry point (a logged signal belongs to a node). */
+              <div className="stack-3">
+                <div className="row-between" style={{ alignItems: "center" }}>
+                  <div className="t-label">Signals this node pulled{nodeSigs ? ` · ${nodeSigCount}` : ""} <span className="t-muted" style={{ fontWeight: 400, textTransform: "none", letterSpacing: 0 }}>{nodeSigCount > 12 ? "newest 12 shown" : "the real catch from this node’s sources"}</span></div>
+                  <button className="btn btn-secondary btn-sm" onClick={() => { setLogOpen((v) => !v); setLogForm({ title: "", why: "", conf: "0.7" }); }}>{logOpen ? "Cancel" : "+ Log a signal"}</button>
                 </div>
+                {logOpen && (
+                  <div className="card card-pad" style={{ background: "var(--panel-2)" }}>
+                    <label className="field"><span className="t-label">What&apos;s the signal?</span>
+                      <input className="input" autoFocus value={logForm.title} onChange={(e) => setLogForm({ ...logForm, title: e.target.value })} placeholder="What you saw, in one line" /></label>
+                    <label className="field"><span className="t-label">Why it matters</span>
+                      <textarea className="textarea" rows={3} value={logForm.why} onChange={(e) => setLogForm({ ...logForm, why: e.target.value })} placeholder="Context, evidence, implication." /></label>
+                    <div className="row gap-2" style={{ alignItems: "flex-end" }}>
+                      <label className="field" style={{ width: 160 }}><span className="t-label">Confidence</span>
+                        <select className="select" value={logForm.conf} onChange={(e) => setLogForm({ ...logForm, conf: e.target.value })}>
+                          <option value="0.9">High</option><option value="0.7">Medium</option><option value="0.4">Low</option>
+                        </select></label>
+                      <button className="btn btn-sm" onClick={() => logNodeSignal(f.field_key)} disabled={logBusy || !logForm.title.trim()}>{logBusy ? "Logging…" : "Log signal"}</button>
+                    </div>
+                  </div>
+                )}
+                {nodeSigs === null ? (
+                  <div className="t-sub t-muted" style={{ fontSize: 12 }}>Loading…</div>
+                ) : nodeSigs.length === 0 ? (
+                  <div className="t-sub t-muted" style={{ fontSize: 12, lineHeight: 1.5 }}>Nothing pulled yet. Check the node’s search on the Node tab, or log one by hand above. A node that never catches anything wants a sharper statement or a source.</div>
+                ) : (
+                  <div className="stack-2">{nodeSigs.map((s) => <SignalLine key={s.id} s={s} />)}</div>
+                )}
+                {nrecs.length > 0 && (
+                  <div className="card card-pad" style={{ background: "var(--panel-2)" }}>
+                    <div className="t-label" style={{ marginBottom: 8 }}>Recommendations · {nrecs.length} <span className="t-muted" style={{ fontWeight: 400, textTransform: "none", letterSpacing: 0 }}>— built on these signals; accepting pushes each to its area</span></div>
+                    <div className="stack-2">
+                      {nrecs.map((r) => (
+                        <div key={r.id} style={{ borderTop: "1px solid var(--border)", paddingTop: 8 }}>
+                          <div className="row-between" style={{ gap: 8, alignItems: "baseline" }}>
+                            <div style={{ minWidth: 0 }}>
+                              <span style={{ fontSize: 12.5, lineHeight: 1.5 }}>{r.summary}</span>
+                              <span className="t-mono-xs t-muted" style={{ marginLeft: 8 }}>{r.kind.replace(/_/g, " ")}</span>
+                            </div>
+                            <div className="row gap-2" style={{ flexShrink: 0 }}>
+                              <button className="btn btn-secondary btn-sm" disabled={recBusy === r.id} onClick={() => resolveRec(r.id, "reject")} style={{ color: "var(--rd-text)" }}>Dismiss</button>
+                              <button className="btn btn-sm" disabled={recBusy === r.id} onClick={() => resolveRec(r.id, "accept")}>{recBusy === r.id ? "…" : "Accept → push"}</button>
+                            </div>
+                          </div>
+                          <div className="stack-1" style={{ marginTop: 4, paddingLeft: 10, borderLeft: "2px solid var(--border)" }}>
+                            {r.evidence.map((s) => <SignalLine key={s.id} s={s} compact />)}
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
               </div>
-            </div>
+            )}
           </Modal>
         );
       })()}

@@ -49,8 +49,10 @@ export default function SectionedFields({ target, excludeSection }: { target: Ta
   const [newVal, setNewVal] = useState("");
   const [newKind, setNewKind] = useState<"narrative" | "metric">("narrative");
   const [newUnit, setNewUnit] = useState("");
-  // density controls — collapse a whole section, or expand a long field value
+  // density controls — collapse a whole section, collapse a single field, or
+  // expand a soft-clamped long value.
   const [collapsed, setCollapsed] = useState<Set<string>>(new Set());
+  const [fieldCollapsed, setFieldCollapsed] = useState<Set<string>>(new Set());
   const [expanded, setExpanded] = useState<Set<string>>(new Set());
   const toggle = (set: Set<string>, k: string) => { const n = new Set(set); n.has(k) ? n.delete(k) : n.add(k); return n; };
 
@@ -269,16 +271,25 @@ export default function SectionedFields({ target, excludeSection }: { target: Ta
               </div>
               {!isCollapsed && (
               <div className="card" style={{ overflow: "hidden" }}>
-                {items.map((f, i) => (
+                {items.map((f, i) => {
+                  const fCollapsed = fieldCollapsed.has(f.id);
+                  return (
                   <div key={f.id} style={{ padding: "20px 22px", borderTop: i === 0 ? "none" : "1px solid var(--border)" }}>
-                    <div className="row-between" style={{ marginBottom: 8, alignItems: "center" }}>
-                      <div className="row gap-2" style={{ alignItems: "center" }}>
-                        <span className="t-label" style={{ fontSize: 11.5, color: "var(--tm)" }}>{f.label}</span>
-                        {isMetric(f) && <span className="chip" style={{ fontSize: 10 }}>metric</span>}
-                      </div>
-                      {!isMetric(f) && editing !== f.id && <button className="btn btn-secondary btn-sm" onClick={() => { setEditing(f.id); setDraft(f.value ?? ""); }}>Edit</button>}
+                    <div className="row-between" style={{ marginBottom: fCollapsed ? 0 : 8, alignItems: "center" }}>
+                      {/* The label toggles the field open/closed — collapse any
+                          field on any record to skim the whole section. */}
+                      <button onClick={() => setFieldCollapsed((s) => toggle(s, f.id))} title={fCollapsed ? "Expand" : "Collapse"}
+                        style={{ background: "none", border: "none", cursor: "pointer", textAlign: "left", padding: 0, flex: 1, minWidth: 0 }}>
+                        <div className="row gap-2" style={{ alignItems: "center" }}>
+                          <span className="t-muted" style={{ display: "inline-block", transition: "transform 0.15s", transform: fCollapsed ? "rotate(-90deg)" : "none", fontSize: 10 }}>▾</span>
+                          <span className="t-label" style={{ fontSize: 11.5, color: "var(--tm)" }}>{f.label}</span>
+                          {isMetric(f) && <span className="chip" style={{ fontSize: 10 }}>metric</span>}
+                          {fCollapsed && !isMetric(f) && f.value && <span className="t-sub t-muted" style={{ fontSize: 12, minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", flex: 1 }}>— {f.value.slice(0, 120)}</span>}
+                        </div>
+                      </button>
+                      {!isMetric(f) && !fCollapsed && editing !== f.id && <button className="btn btn-secondary btn-sm" onClick={() => { setEditing(f.id); setDraft(f.value ?? ""); }}>Edit</button>}
                     </div>
-                    {isMetric(f) ? (
+                    {fCollapsed ? null : isMetric(f) ? (
                       <MetricField fieldId={f.id} unit={f.metric_unit} />
                     ) : editing === f.id ? (
                       <div>
@@ -286,20 +297,21 @@ export default function SectionedFields({ target, excludeSection }: { target: Ta
                         <div className="row gap-2"><button className="btn btn-sm" onClick={() => save(f.id)}>Save</button><button className="btn btn-secondary btn-sm" onClick={() => setEditing(null)}>Cancel</button></div>
                       </div>
                     ) : (() => {
-                      // Read-first: show the value in full, comfortable prose at a
-                      // readable measure. Only the genuinely huge get a soft clamp.
-                      const long = (f.value ?? "").length > 1100;
+                      // Read-first: the value fills the width of the record. Only
+                      // the genuinely huge get a soft clamp with Show more.
+                      const long = (f.value ?? "").length > 1400;
                       const isExp = expanded.has(f.id);
                       const clamp = long && !isExp ? { display: "-webkit-box", WebkitLineClamp: 12, WebkitBoxOrient: "vertical" as const, overflow: "hidden" } : {};
                       return (
                         <div>
-                          <div className="t-body" style={{ fontSize: 14.5, lineHeight: 1.75, whiteSpace: "pre-wrap", maxWidth: "68ch", ...clamp }}>{f.value}</div>
+                          <div className="t-body" style={{ fontSize: 14.5, lineHeight: 1.75, whiteSpace: "pre-wrap", ...clamp }}>{f.value}</div>
                           {long && <button onClick={() => setExpanded((s) => toggle(s, f.id))} style={{ background: "none", border: "none", cursor: "pointer", color: "var(--ac-text, var(--ac))", fontWeight: 600, fontSize: 12, padding: "6px 0 0" }}>{isExp ? "Show less" : "Show more"}</button>}
                         </div>
                       );
                     })()}
                   </div>
-                ))}
+                  );
+                })}
                 {addingIn === sName && (
                   <div style={{ padding: "12px 18px", borderTop: "1px solid var(--border)" }}>
                     <div className="row gap-2" style={{ marginBottom: 8, flexWrap: "wrap" }}>
