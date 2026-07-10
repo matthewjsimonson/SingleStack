@@ -5,7 +5,7 @@
 // each node pulls (and manual entries) live INSIDE the node. The signals
 // themselves surface on the intelligence pages they feed — Competitive,
 // Market, Technology.
-import { useEffect, useState, useCallback } from "react";
+import { useEffect, useRef, useState, useCallback } from "react";
 import { createClient } from "@/lib/supabase/client";
 import { Banner } from "@/components/ui";
 import PageBar from "@/components/PageBar";
@@ -15,21 +15,25 @@ import { useAgentRun, AgentProgress } from "@/components/AgentProgress";
 
 export default function SignalsView() {
   const supabase = createClient();
-  const [signalCount, setSignalCount] = useState(0);
   const [error, setError] = useState<string | null>(null);
   const synthRun = useAgentRun("synthesize");
+  const autoRan = useRef(false);
 
-  const load = useCallback(async () => {
-    const { count } = await supabase.from("signals").select("id", { count: "exact", head: true });
-    setSignalCount(count ?? 0);
-  }, [supabase]);
-  useEffect(() => { load(); }, [load]);
-
-  // Synthesize: fold pulled signals into themes + proposals. Results are
-  // ratified inside the nodes; the themes land on the strategy boards.
-  async function synthesize() {
-    setError(null);
+  // Synthesis is no longer a button — the brain runs it itself. Fold the pulled
+  // signals into themes + recommendations in the background whenever there are
+  // signals but no pending recommendations yet. Gated to once per browser
+  // session so it can never loop when a run legitimately produces nothing.
+  const maybeSynthesize = useCallback(async () => {
+    if (autoRan.current || synthRun.active) return;
+    autoRan.current = true;
     try {
+      if (sessionStorage.getItem("ss-auto-synth")) return;
+      const [{ count: sigs }, { count: recs }] = await Promise.all([
+        supabase.from("signals").select("id", { count: "exact", head: true }),
+        supabase.from("intel_updates").select("id", { count: "exact", head: true }).eq("status", "pending"),
+      ]);
+      if ((sigs ?? 0) === 0 || (recs ?? 0) > 0) return;
+      sessionStorage.setItem("ss-auto-synth", "1");
       await synthRun.go(async () => {
         const { data: s } = await supabase.auth.getSession();
         const token = s.session?.access_token;
@@ -38,19 +42,14 @@ export default function SignalsView() {
         });
         if (error) throw error;
         if (data?.error) throw new Error(data.error);
-        await load();
       });
-    } catch (e) { setError(e instanceof Error ? e.message : "Synthesis failed."); }
-  }
+    } catch (e) { setError(e instanceof Error ? e.message : "Background synthesis failed."); }
+  }, [supabase, synthRun]);
+  useEffect(() => { maybeSynthesize(); }, [maybeSynthesize]);
 
   return (
     <div>
-      <PageBar actions={
-        synthRun.active
-          ? <AgentProgress run={synthRun} compact />
-          : <button className="btn btn-sm" disabled={signalCount === 0} onClick={synthesize}
-              title="Fold pulled signals into themes and proposals">Synthesize</button>
-      } />
+      <PageBar actions={synthRun.active ? <AgentProgress run={synthRun} compact /> : undefined} />
       <div className="t-sub t-muted" style={{ margin: "-6px 0 var(--sp-4)", fontSize: 12.5 }}>
         Set up what the brain hunts. Signals land where they belong: <a href="/competitive" style={{ color: "var(--ac-text)" }}>Competitive</a>, <a href="/market" style={{ color: "var(--ac-text)" }}>Market</a>, <a href="/frontier" style={{ color: "var(--ac-text)" }}>Technology</a>.
       </div>

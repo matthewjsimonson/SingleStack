@@ -211,6 +211,33 @@ Deno.serve(async (req: Request) => {
       const sgs = (rawSigs ?? []).filter((s: any) => s.metadata?.domain !== "capability").slice(0, 10);
       if (can("signals")) {
         grounding.push(`Recent signals: ${sgs.map((s) => s.title).join("; ") || "none yet"}`);
+        // The SIGNALS PROFILE — the node hierarchy that aims every pull. This
+        // is what the operator sets up on /signals; ground the agent in the
+        // actual nodes so it can reason about coverage, weights, and gaps.
+        const { data: prof } = await supabase.from("signal_profiles").select("id").eq("scope", "landscape").is("competitor_id", null).maybeSingle();
+        if (prof) {
+          const { data: nodes } = await supabase.from("signal_profile_fields")
+            .select("label, value, vector, weight").eq("profile_id", prof.id).neq("vector", "meta")
+            .order("vector").order("weight", { ascending: false });
+          const real = (nodes ?? []).filter((n) => (n.value ?? "").trim());
+          if (real.length) {
+            const byVec: Record<string, string[]> = {};
+            for (const n of real) {
+              const w = n.weight ?? 2;
+              const lvl = w >= 3 ? "direct" : w <= 1 ? "indirect" : "adjacent";
+              (byVec[n.vector ?? "core"] ??= []).push(`  - [${lvl}] ${n.label}: ${(n.value ?? "").slice(0, 220)}`);
+            }
+            grounding.push("Signals profile — the node hierarchy that aims every pull (the operator edits this on /signals):\n" +
+              Object.entries(byVec).map(([v, ls]) => `${v}:\n${ls.join("\n")}`).join("\n"));
+          }
+        }
+        // Pending RECOMMENDATIONS from what the pulls brought back — the queue
+        // the operator accepts/dismisses inside each node.
+        const { data: recs } = await supabase.from("intel_updates").select("kind, summary").eq("status", "pending").limit(20);
+        if ((recs ?? []).length) {
+          grounding.push(`Pending recommendations (${recs!.length}) from signals, awaiting accept/dismiss in their nodes:\n` +
+            recs!.map((r) => `  - [${(r.kind ?? "").replace(/_/g, " ")}] ${r.summary ?? ""}`).join("\n"));
+        }
         if ((themes ?? []).length) {
           grounding.push(
             "Active intelligence themes:\n" +
