@@ -9,7 +9,6 @@ import { useEffect, useState, useCallback } from "react";
 import { createClient } from "@/lib/supabase/client";
 import { getOrgId } from "@/lib/org";
 import { Section, Chip, Banner, Confidence, ConfirmDialog, SubTabs } from "@/components/ui";
-import TrackingTopics from "@/components/TrackingTopics";
 import SourceManager from "@/components/SourceManager";
 import CapabilityCellDrawer, { type Cell } from "@/components/CapabilityCellDrawer";
 import CompetitiveGrid from "@/components/CompetitiveGrid";
@@ -18,7 +17,7 @@ import SignalProfile from "@/components/SignalProfile";
 import CompetitorFinalize from "@/components/CompetitorFinalize";
 import ProfileReadiness from "@/components/ProfileReadiness";
 import BattlecardItemDrawer, { type CardItem } from "@/components/BattlecardItemDrawer";
-import { signalDomain, SIGNAL_DOMAIN } from "@/lib/signals";
+import { signalDomain, SIGNAL_DOMAIN, groupByNode, sourceNameOf, sourceUrlOf, type NodeMeta } from "@/lib/signals";
 import { useProductScope } from "@/lib/ProductContext";
 import { standUpCompetitiveAgents } from "@/lib/standUpCompetitive";
 
@@ -26,7 +25,7 @@ type Competitor = { id: string; name: string; relationship: string; website: str
 type Capability = { id: string; name: string; category: string | null };
 type Score = { id: string; capability_id: string; competitor_id: string | null; score: number; scored_by: string | null; evidence_at: string | null };
 type Card = { id: string; competitor_id: string | null; kind: string; title: string; detail: string | null; proposed_by: string | null; signal_ids: string[] | null; updated_at: string | null; audience: string | null };
-type Signal = { id: string; title: string; why: string | null; conf_label: string | null; conf_level: number | null; observed_at: string | null; origin: string | null; competitor_id: string | null; metadata: { domain?: string; competitor_id?: string; channel?: string } | null; source_id: string | null };
+type Signal = { id: string; title: string; why: string | null; conf_label: string | null; conf_level: number | null; observed_at: string | null; origin: string | null; competitor_id: string | null; metadata: { domain?: string; competitor_id?: string; channel?: string; node_key?: string; source?: string; url?: string } | null; source_id: string | null };
 type Theme = { id: string; title: string; summary: string | null; recommendation: string | null; category: string; competitor_id: string | null; conf_level: number | null; state: string };
 // The competitor a signal is about — first-class column, with a fallback to the
 // legacy metadata link for any pre-Phase-4 rows the backfill couldn't resolve.
@@ -89,7 +88,7 @@ export default function CompetitiveView() {
         : tab === "dashboard" ? <Dashboard competitors={scopedCompetitors} capabilities={capabilities} scores={scores} compSignals={compSignals} themes={themes} overview={overview} reload={load} setError={setError} />
         : tab === "profile" ? <ProfileTab productId={scopedProductId} reload={load} />
         : tab === "competitors" ? <Competitors competitors={scopedCompetitors} cards={cards} overview={overview} capabilities={capabilities} scores={scores} compSignals={compSignals} themes={themes} newProductId={scopedProductId} reload={load} setError={setError} />
-        : <Feed signals={signals} competitors={scopedCompetitors} reload={load} />}
+        : <Feed signals={signals} competitors={scopedCompetitors} />}
     </div>
   );
 }
@@ -1031,121 +1030,68 @@ function Competitors({ competitors, cards, overview, capabilities, scores, compS
   );
 }
 
-// ---------- Signal feed — internal vs external, filterable, with capture ----------
-// Competitive intel is BOTH internal (what our own teams hear — deals, calls,
-// win/loss) and external (public — reviews, launches, pricing). The Signal
-// Profile synthesizes across both, so capture them here with origin + competitor.
-function Feed({ signals, competitors, reload }: { signals: Signal[]; competitors: Competitor[]; reload: () => void }) {
+// ---------- Signal feed — what the competitive focus pulled in ----------
+// Competitive intel is BOTH internal (deals, calls, win/loss) and external
+// (reviews, launches, pricing). The feed groups each signal under the profile
+// node that caught it (setup lives on Signals); a competitor chip still shows
+// when a signal is about a specific rival.
+function Feed({ signals, competitors }: { signals: Signal[]; competitors: Competitor[] }) {
   const supabase = createClient();
-  const [originTab, setOriginTab] = useState<"external" | "internal">("external");
-  const [compFilter, setCompFilter] = useState<string>("all");
-  // Tier filter: keeps the stream readable as the tracked set grows.
-  const [relTier, setRelTier] = useState<string>("all");
-  const tierOf = (id: string | null) => competitors.find((c) => c.id === id)?.relationship ?? null;
-  const [logging, setLogging] = useState(false);
-  const [form, setForm] = useState({ title: "", why: "", origin: "internal", competitor_id: "", channel: "", conf: "0.7" });
-  const [busy, setBusy] = useState(false);
-  const [err, setErr] = useState<string | null>(null);
+  const [originTab, setOriginTab] = useState<"all" | "external" | "internal">("all");
+  const [nodes, setNodes] = useState<NodeMeta[]>([]);
+  useEffect(() => {
+    (async () => {
+      const { data: prof } = await supabase.from("signal_profiles").select("id").eq("scope", "landscape").is("competitor_id", null).maybeSingle();
+      if (prof) {
+        const { data: ns } = await supabase.from("signal_profile_fields").select("field_key, label, weight, parent_key").eq("profile_id", prof.id).eq("vector", "competitive");
+        setNodes((ns ?? []) as NodeMeta[]);
+      }
+    })();
+  }, [supabase]);
 
-  const compName = (id?: string) => competitors.find((c) => c.id === id)?.name;
+  const compName = (id?: string | null) => competitors.find((c) => c.id === id)?.name;
   const all = signals.filter((s) => signalDomain(s) === SIGNAL_DOMAIN.competitive);
-  const feed = all.filter((s) => (originTab === "internal" ? s.origin === "internal" : s.origin !== "internal"))
-    .filter((s) => compFilter === "all" || sigComp(s) === compFilter)
-    .filter((s) => relTier === "all" || tierOf(sigComp(s)) === relTier);
-  const counts = { internal: all.filter((s) => s.origin === "internal").length, external: all.filter((s) => s.origin !== "internal").length };
-  const CHANNELS = form.origin === "internal" ? ["Gong call", "Salesforce opp", "Win/loss", "Support", "Field note"] : ["Website", "Pricing page", "G2 / reviews", "Launch / release", "Job posting", "News"];
-
-  async function log(e: React.FormEvent) {
-    e.preventDefault(); if (!form.title.trim()) return;
-    setBusy(true); setErr(null);
-    try {
-      const orgId = await getOrgId(); if (!orgId) throw new Error("Could not resolve your organization.");
-      const lvl = parseFloat(form.conf);
-      const { error } = await supabase.from("signals").insert({
-        org_id: orgId, scope: "org", title: form.title.trim(), why: form.why.trim() || null,
-        conf_level: isNaN(lvl) ? null : lvl, conf_label: isNaN(lvl) ? null : lvl >= 0.75 ? "High" : lvl >= 0.5 ? "Medium" : "Low",
-        observed_at: new Date().toISOString(), origin: form.origin,
-        // First-class link drives synthesis; metadata stays mirrored for the
-        // legacy readers (capability cell drawer, synthesize-profile).
-        competitor_id: form.competitor_id || null,
-        metadata: { domain: "competitive", competitor_id: form.competitor_id || undefined, channel: form.channel || undefined },
-      });
-      if (error) throw error;
-      setLogging(false); setForm({ title: "", why: "", origin: form.origin, competitor_id: "", channel: "", conf: "0.7" }); reload();
-    } catch (e) { setErr(e instanceof Error ? e.message : "Could not log the signal."); }
-    finally { setBusy(false); }
-  }
+  const feed = all.filter((s) => originTab === "all" || (originTab === "internal" ? s.origin === "internal" : s.origin !== "internal"));
+  const counts = { all: all.length, internal: all.filter((s) => s.origin === "internal").length, external: all.filter((s) => s.origin !== "internal").length };
+  const groups = groupByNode(feed, nodes);
 
   return (
     <div>
-      <SourceManager title="Competitive sources" />
-      <TrackingTopics category="competitive" suggestions={["Competitor pricing & packaging changes", "New competitor launches", "Win/loss themes vs top rivals", "Competitor messaging shifts"]} />
-
-      <Section label="Competitive signals" action={<button className="btn btn-sm" onClick={() => setLogging((v) => !v)} style={{ background: "var(--ac)", color: "#fff" }}>{logging ? "Close" : "+ Log signal"}</button>}>
-        <Banner>{err}</Banner>
-        {logging && (
-          <form onSubmit={log} className="card card-pad" style={{ marginBottom: "var(--sp-3)", background: "var(--panel-2)" }}>
-            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: "var(--sp-3)" }}>
-              <label className="field"><span className="t-label">Origin</span>
-                <select className="select" value={form.origin} onChange={(e) => setForm({ ...form, origin: e.target.value, channel: "" })}>
-                  <option value="internal">Internal — what we hear</option>
-                  <option value="external">External — public</option>
-                </select></label>
-              <label className="field"><span className="t-label">Competitor</span>
-                <select className="select" value={form.competitor_id} onChange={(e) => setForm({ ...form, competitor_id: e.target.value })}>
-                  <option value="">— none / general —</option>
-                  {competitors.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
-                </select></label>
-              <label className="field"><span className="t-label">Channel</span>
-                <select className="select" value={form.channel} onChange={(e) => setForm({ ...form, channel: e.target.value })}>
-                  <option value="">— where from —</option>
-                  {CHANNELS.map((c) => <option key={c} value={c}>{c}</option>)}
-                </select></label>
-            </div>
-            <label className="field"><span className="t-label">What happened</span><input className="input" autoFocus value={form.title} onChange={(e) => setForm({ ...form, title: e.target.value })} placeholder={form.origin === "internal" ? "e.g. Acme undercut us 20% in the Globex deal" : "e.g. Acme shipped SSO/SAML on the Team plan"} /></label>
-            <label className="field"><span className="t-label">Why it matters <span className="t-muted" style={{ fontWeight: 400 }}>— optional</span></span><input className="input" value={form.why} onChange={(e) => setForm({ ...form, why: e.target.value })} placeholder="So what for our positioning / strategy?" /></label>
-            <div className="row gap-2"><button className="btn btn-sm" type="submit" disabled={busy}>{busy ? "Logging…" : "Log signal"}</button><button className="btn btn-secondary btn-sm" type="button" onClick={() => setLogging(false)}>Cancel</button></div>
-          </form>
-        )}
-
-        {/* Internal vs external + competitor filter */}
-        <div className="row-between" style={{ alignItems: "center", marginBottom: "var(--sp-3)", gap: 8, flexWrap: "wrap" }}>
-          <div className="row" style={{ border: "1px solid var(--border)", borderRadius: 8, overflow: "hidden" }}>
-            {(["external", "internal"] as const).map((o) => (
-              <button key={o} onClick={() => setOriginTab(o)} className="btn-sm" style={{ border: "none", background: originTab === o ? "var(--ac)" : "var(--panel)", color: originTab === o ? "#fff" : "var(--ts)", fontWeight: 600, padding: "6px 14px", cursor: "pointer", textTransform: "capitalize" }}>{o} · {counts[o]}</button>
-            ))}
-          </div>
-          <span className="row" style={{ gap: 2, alignItems: "center" }}>
-            {[["all", "All"], ...REL_TIERS.map((t) => [t, t.charAt(0).toUpperCase() + t.slice(1)])].map(([k, label]) => {
-              const n = k === "all" ? competitors.length : competitors.filter((c) => c.relationship === k).length;
-              if (k !== "all" && n === 0) return null;
-              return (
-                <button key={k} onClick={() => setRelTier(k as string)} className="t-mono-xs"
-                  style={{ padding: "3px 9px", borderRadius: 6, border: "none", cursor: "pointer", background: relTier === k ? "var(--ac)" : "var(--fill)", color: relTier === k ? "#fff" : "var(--tm)", fontWeight: 600 }}>{label}</button>
-              );
-            })}
-          </span>
-          <select className="select" value={compFilter} onChange={(e) => setCompFilter(e.target.value)} style={{ maxWidth: 220 }}>
-            <option value="all">All competitors</option>
-            {competitors.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
-          </select>
+      <Section label="Competitive signals">
+        <div className="row" style={{ border: "1px solid var(--border)", borderRadius: 8, overflow: "hidden", width: "fit-content", marginBottom: "var(--sp-3)" }}>
+          {(["all", "external", "internal"] as const).map((o) => (
+            <button key={o} onClick={() => setOriginTab(o)} className="btn-sm" style={{ border: "none", background: originTab === o ? "var(--ac)" : "var(--panel)", color: originTab === o ? "#fff" : "var(--ts)", fontWeight: 600, padding: "6px 14px", cursor: "pointer", textTransform: "capitalize" }}>{o} · {counts[o]}</button>
+          ))}
         </div>
 
         {feed.length === 0 ? (
-          <div className="t-sub t-muted">No {originTab} competitive signals{compFilter !== "all" ? ` for ${compName(compFilter)}` : ""} yet. {originTab === "internal" ? "Log what your teams hear in deals and calls." : "Log public moves or add sources above."}</div>
+          <div className="t-sub t-muted">No {originTab === "all" ? "" : `${originTab} `}competitive signals yet. Set up the competitive focus of your signals profile on <a href="/signals" style={{ color: "var(--ac-text)", fontWeight: 600 }}>Signals</a> — its nodes aim the search, and what they catch shows up here.</div>
         ) : (
           <div className="stack-3">
-            {feed.map((s) => (
-              <div key={s.id} className="card card-pad" style={{ borderLeft: `3px solid ${s.origin === "internal" ? "var(--ac)" : "var(--vl)"}` }}>
-                <div className="row-between" style={{ gap: 12, alignItems: "flex-start", marginBottom: 5 }}>
-                  <span style={{ fontSize: 14.5, fontWeight: 620 }}>{s.title}</span>
-                  <Confidence label={s.conf_label} level={s.conf_level} />
+            {groups.map((g) => (
+              <div key={g.key}>
+                <div className="row gap-2" style={{ alignItems: "baseline", marginBottom: 8 }}>
+                  <span style={{ fontSize: 13.5, fontWeight: 680 }}>{g.label}</span>
+                  <span className="t-sub t-muted" style={{ fontSize: 12 }}>{g.signals.length}</span>
                 </div>
-                {s.why && <p className="t-sub" style={{ lineHeight: 1.5 }}>{s.why}</p>}
-                <div className="row gap-2" style={{ marginTop: 6, flexWrap: "wrap", alignItems: "center" }}>
-                  <Chip tone={s.origin === "internal" ? "accent" : "violet"}>{s.origin === "internal" ? "internal" : "external"}</Chip>
-                  {sigComp(s) && <Chip>{compName(sigComp(s) ?? undefined) ?? "competitor"}</Chip>}
-                  {s.metadata?.channel && <span className="t-mono-xs t-muted">{s.metadata.channel}</span>}
+                <div className="stack-2">
+                  {g.signals.map((s) => {
+                    const src = sourceNameOf(s); const url = sourceUrlOf(s);
+                    return (
+                      <div key={s.id} className="card card-pad" style={{ borderLeft: `3px solid ${s.origin === "internal" ? "var(--ac)" : "var(--vl)"}` }}>
+                        <div className="row-between" style={{ gap: 12, alignItems: "flex-start", marginBottom: 5 }}>
+                          <span style={{ fontSize: 14.5, fontWeight: 620 }}>{url ? <a href={url} target="_blank" rel="noreferrer" style={{ color: "var(--ac-text)", textDecoration: "none" }}>{s.title} ↗</a> : s.title}</span>
+                          <Confidence label={s.conf_label} level={s.conf_level} />
+                        </div>
+                        {s.why && <p className="t-sub" style={{ lineHeight: 1.5 }}>{s.why}</p>}
+                        <div className="row gap-2" style={{ marginTop: 6, flexWrap: "wrap", alignItems: "center" }}>
+                          <Chip tone={s.origin === "internal" ? "accent" : "violet"}>{s.origin === "internal" ? "internal" : "external"}</Chip>
+                          {sigComp(s) && <Chip>{compName(sigComp(s)) ?? "competitor"}</Chip>}
+                          {src && <span className="t-mono-xs t-muted">{src}</span>}
+                        </div>
+                      </div>
+                    );
+                  })}
                 </div>
               </div>
             ))}
