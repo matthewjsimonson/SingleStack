@@ -20,6 +20,7 @@ import { Markdown } from "@/components/Markdown";
 import VectorCurator from "@/components/VectorCurator";
 import { compileVectorBrief } from "@/lib/profileBrief";
 import { edgeErrorMessage } from "@/lib/edgeError";
+import { recordsChangedSince, since } from "@/lib/profileFreshness";
 
 // The signals profile: a CORE (what we are) plus THREE FOCUSES, each covered
 // at three LEVELS of directness — direct (your ground), adjacent (one step
@@ -41,7 +42,7 @@ const PUSH: Partial<Record<Vector, { label: string; href: string }>> = {
 };
 
 type Field = { field_key: string; label: string; value: string; origin?: string; vector?: Vector; weight?: number; parent_key?: string | null };
-type Profile = { id: string; headline: string | null };
+type Profile = { id: string; headline: string | null; updated_at: string | null };
 type Stage = { v: Vector; status: "pending" | "running" | "done" | "error"; msg?: string; count?: number };
 
 export default function SignalProfile({ scope, competitorId, competitorName, vectorFilter }: { scope: "landscape" | "competitor"; competitorId?: string; competitorName?: string; vectorFilter?: Vector }) {
@@ -63,7 +64,7 @@ export default function SignalProfile({ scope, competitorId, competitorName, vec
 
   const load = useCallback(async () => {
     setLoading(true);
-    let qb = supabase.from("signal_profiles").select("id, headline").eq("scope", scope);
+    let qb = supabase.from("signal_profiles").select("id, headline, updated_at").eq("scope", scope);
     qb = scope === "competitor" ? qb.eq("competitor_id", competitorId!) : qb.is("competitor_id", null);
     const { data: p } = await qb.maybeSingle();
     if (p) {
@@ -74,6 +75,22 @@ export default function SignalProfile({ scope, competitorId, competitorName, vec
     setDirty(false); setLoading(false);
   }, [supabase, scope, competitorId]);
   useEffect(() => { load(); }, [load]);
+
+  // Freshness — is the profile stale vs the records it was built from? Landscape
+  // only (the competitor dossier has its own refresh). Recomputed whenever the
+  // profile reloads; dismissal is remembered per-change so we don't nag.
+  const [fresh, setFresh] = useState<{ changed: boolean; lastChange: string | null }>({ changed: false, lastChange: null });
+  useEffect(() => {
+    if (scope !== "landscape" || !profile) { setFresh({ changed: false, lastChange: null }); return; }
+    let live = true;
+    recordsChangedSince(supabase, profile.updated_at).then((r) => { if (live) setFresh(r); });
+    return () => { live = false; };
+  }, [supabase, scope, profile]);
+  const staleDismissKey = profile ? `ss-profile-stale-dismissed-${profile.id}` : "";
+  const [dismissedChange, setDismissedChange] = useState<string | null>(null);
+  useEffect(() => { if (staleDismissKey) setDismissedChange(localStorage.getItem(staleDismissKey)); }, [staleDismissKey]);
+  const showStale = scope === "landscape" && fresh.changed && fresh.lastChange !== dismissedChange;
+  function dismissStale() { if (staleDismissKey && fresh.lastChange) { localStorage.setItem(staleDismissKey, fresh.lastChange); setDismissedChange(fresh.lastChange); } }
 
   async function createProfile() {
     setBusy("create"); setError(null);
@@ -354,6 +371,21 @@ export default function SignalProfile({ scope, competitorId, competitorName, vec
 
       <Banner>{error}</Banner>
       {note && <div className="banner" style={{ marginBottom: 12 }}>{note}</div>}
+
+      {/* Records changed since this profile was built — nudge a refresh so
+          search stays aimed at the current product & GTM (records drive the
+          nodes and their weights). Only when actually stale; dismissable. */}
+      {showStale && (
+        <div className="card card-pad" style={{ marginBottom: 12, borderLeft: "3px solid var(--am-text)", background: "var(--panel-2)" }}>
+          <div className="row-between" style={{ gap: 12, alignItems: "flex-start", flexWrap: "wrap" }}>
+            <div style={{ minWidth: 0 }}>
+              <div style={{ fontSize: 13.5, fontWeight: 660 }}>Your records changed {since(fresh.lastChange)}</div>
+              <div className="t-sub t-muted" style={{ fontSize: 12.5, marginTop: 2, lineHeight: 1.5 }}>Product or GTM records have moved since this profile was last built. Open each focus and use <strong>Build with AI</strong> to re-derive its nodes and weights from the current records — you review every proposal.</div>
+            </div>
+            <button className="btn btn-secondary btn-sm" onClick={dismissStale} style={{ flexShrink: 0 }}>Dismiss</button>
+          </div>
+        </div>
+      )}
 
       {/* Staged draft progress — you always see where it is and what failed. */}
       {stages.length > 0 && (
