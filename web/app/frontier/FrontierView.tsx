@@ -10,26 +10,15 @@
 import { useCallback, useEffect, useState } from "react";
 import { createClient } from "@/lib/supabase/client";
 import { getOrgId } from "@/lib/org";
-import { fireWorkflows } from "@/lib/triggers";
-import { signalDomain, SIGNAL_DOMAIN } from "@/lib/signals";
+import { signalDomain, SIGNAL_DOMAIN, groupByNode, sourceNameOf, sourceUrlOf, type NodeMeta } from "@/lib/signals";
 import { Section, Chip, Banner } from "@/components/ui";
 import CapabilityDrawer, { type DrawerCapability } from "@/components/CapabilityDrawer";
 import SignalProfile from "@/components/SignalProfile";
 
-type Cap = { id: string; title: string; why: string | null; observed_at: string | null; metadata: { domain?: string; provider?: string; area?: string; url?: string } | null };
+type Cap = { id: string; title: string; why: string | null; observed_at: string | null; metadata: { domain?: string; provider?: string; area?: string; url?: string; node_key?: string; source?: string; channel?: string } | null };
 type Agent = { id: string; key: string; name: string };
 type Skill = { id: string; name: string };
 type Workflow = { id: string; name: string; trigger: string; is_active: boolean; agent_id: string | null; skill_ids: string[] | null };
-
-const PROVIDERS: { key: string; label: string; tone: "accent" | "violet" | "green" | "default" }[] = [
-  { key: "anthropic", label: "Anthropic", tone: "accent" },
-  { key: "openai", label: "OpenAI", tone: "green" },
-  { key: "google", label: "Google", tone: "violet" },
-  { key: "meta", label: "Meta", tone: "default" },
-  { key: "xai", label: "xAI", tone: "default" },
-  { key: "platform", label: "Platform", tone: "violet" },
-  { key: "other", label: "Other", tone: "default" },
-];
 
 function ago(iso: string | null) {
   if (!iso) return "";
@@ -41,6 +30,7 @@ function ago(iso: string | null) {
 export default function FrontierView() {
   const supabase = createClient();
   const [caps, setCaps] = useState<Cap[]>([]);
+  const [nodes, setNodes] = useState<NodeMeta[]>([]);
   const [agents, setAgents] = useState<Agent[]>([]);
   const [skills, setSkills] = useState<Skill[]>([]);
   const [workflows, setWorkflows] = useState<Workflow[]>([]);
@@ -49,8 +39,6 @@ export default function FrontierView() {
   const [error, setError] = useState<string | null>(null);
   const [openCap, setOpenCap] = useState<DrawerCapability | null>(null);
 
-  const [logging, setLogging] = useState(false);
-  const [cap, setCap] = useState({ title: "", summary: "", provider: "anthropic", area: "", url: "" });
   const [creatingWf, setCreatingWf] = useState(false);
   const [wf, setWf] = useState<{ name: string; agent_id: string; skill_ids: string[] }>({ name: "", agent_id: "", skill_ids: [] });
   const [busy, setBusy] = useState(false);
@@ -66,6 +54,13 @@ export default function FrontierView() {
     setCaps(((sigs ?? []) as Cap[]).filter((s) => signalDomain(s) === SIGNAL_DOMAIN.capability));
     setAgents(ag ?? []); setSkills(sk ?? []); setWorkflows((wfs ?? []) as Workflow[]);
     setWatchingIds(new Set((conns ?? []).map((c) => c.agent_id).filter(Boolean)));
+    // The technology focus of the landscape profile — so capabilities group
+    // under the node that pulled them.
+    const { data: prof } = await supabase.from("signal_profiles").select("id").eq("scope", "landscape").is("competitor_id", null).maybeSingle();
+    if (prof) {
+      const { data: ns } = await supabase.from("signal_profile_fields").select("field_key, label, weight, parent_key").eq("profile_id", prof.id).eq("vector", "technology");
+      setNodes((ns ?? []) as NodeMeta[]);
+    }
     setLoading(false);
   }, [supabase]);
   useEffect(() => { load(); }, [load]);
@@ -73,24 +68,6 @@ export default function FrontierView() {
   const agentName = (id: string | null) => agents.find((a) => a.id === id)?.name ?? "—";
   const skillName = (id: string) => skills.find((s) => s.id === id)?.name;
   function toggleSkill(id: string) { setWf((f) => ({ ...f, skill_ids: f.skill_ids.includes(id) ? f.skill_ids.filter((x) => x !== id) : [...f.skill_ids, id] })); }
-
-  async function logCap(e: React.FormEvent) {
-    e.preventDefault(); if (!cap.title.trim()) return;
-    setBusy(true); setError(null);
-    try {
-      const orgId = await getOrgId(); if (!orgId) throw new Error("Could not resolve your organization.");
-      const { data: sig, error } = await supabase.from("signals").insert({
-        org_id: orgId, scope: "org", title: cap.title.trim(), why: cap.summary.trim() || null, observed_at: new Date().toISOString(),
-        metadata: { domain: "capability", provider: cap.provider, area: cap.area.trim() || null, url: cap.url.trim() || null },
-      }).select("id").single();
-      if (error) throw error;
-      // A new capability is a real event — fire on_capability_update workflows
-      // (propose-only: enqueues runs for human ratification in Agents).
-      await fireWorkflows(supabase, orgId, "on_capability_update", { label: cap.title.trim(), capabilityId: sig?.id });
-      setLogging(false); setCap({ title: "", summary: "", provider: "anthropic", area: "", url: "" }); await load();
-    } catch (e) { setError(e instanceof Error ? e.message : "Could not log capability."); }
-    finally { setBusy(false); }
-  }
 
   async function createWf(e: React.FormEvent) {
     e.preventDefault(); if (!wf.name.trim() || !wf.agent_id) { setError("Name and an agent are required."); return; }
@@ -121,53 +98,39 @@ export default function FrontierView() {
         <SignalProfile scope="landscape" vectorFilter="technology" />
       </div>
 
-      {/* 1. Capabilities radar — aimed by the technology vector of the central
-          signals profile (on the Signals home). */}
-      <Section label="Capabilities" action={<button className="btn btn-secondary btn-sm" onClick={() => setLogging((v) => !v)}>{logging ? "Cancel" : "+ Log capability"}</button>}>
-        {logging && (
-          <form onSubmit={logCap} className="card card-pad" style={{ marginBottom: "var(--sp-3)" }}>
-            <div style={{ display: "grid", gridTemplateColumns: "2fr 1fr", gap: "var(--sp-3)" }}>
-              <label className="field"><span className="t-label">Capability</span><input className="input" autoFocus value={cap.title} onChange={(e) => setCap({ ...cap, title: e.target.value })} placeholder="e.g. Tool orchestration" /></label>
-              <label className="field"><span className="t-label">Provider</span>
-                <select className="select" value={cap.provider} onChange={(e) => setCap({ ...cap, provider: e.target.value })}>{PROVIDERS.map((p) => <option key={p.key} value={p.key}>{p.label}</option>)}</select></label>
-            </div>
-            <div style={{ display: "grid", gridTemplateColumns: "1fr 2fr", gap: "var(--sp-3)" }}>
-              <label className="field"><span className="t-label">Area</span><input className="input" value={cap.area} onChange={(e) => setCap({ ...cap, area: e.target.value })} placeholder="orchestration · coding · memory" /></label>
-              <label className="field"><span className="t-label">Link (optional)</span><input className="input mono" value={cap.url} onChange={(e) => setCap({ ...cap, url: e.target.value })} placeholder="https://…" /></label>
-            </div>
-            <label className="field"><span className="t-label">What it is &amp; how we could leverage it</span><textarea className="textarea" rows={3} value={cap.summary} onChange={(e) => setCap({ ...cap, summary: e.target.value })} placeholder="Plain-English summary and the opportunity." /></label>
-            <button className="btn btn-sm" type="submit" disabled={busy}>{busy ? "Logging…" : "Log capability"}</button>
-          </form>
-        )}
-        {loading ? <div className="t-sub t-muted">Loading…</div> : caps.length === 0 && !logging ? (
-          <div className="t-sub t-muted">No capabilities tracked yet. Log a frontier or platform release and your agents can act on it.</div>
+      {/* 1. Capabilities radar — what the technology focus of your signals
+          profile pulled in, grouped under the node that caught it. Setup
+          lives on Signals. */}
+      <Section label="Capabilities">
+        {loading ? <div className="t-sub t-muted">Loading…</div> : caps.length === 0 ? (
+          <div className="t-sub t-muted">No capabilities tracked yet. Set up the technology focus of your signals profile on <a href="/signals" style={{ color: "var(--ac-text)", fontWeight: 600 }}>Signals</a> — its nodes aim the search, and releases they catch show up here.</div>
         ) : (
           <div className="stack-3">
-            {PROVIDERS.filter((p) => caps.some((c) => (c.metadata?.provider ?? "other") === p.key)).map((p) => {
-              const list = caps.filter((c) => (c.metadata?.provider ?? "other") === p.key);
-              return (
-                <div key={p.key}>
-                  <div className="row gap-2" style={{ marginBottom: 8, alignItems: "center" }}>
-                    <span style={{ width: 8, height: 8, borderRadius: 999, background: p.tone === "accent" ? "var(--ac)" : p.tone === "green" ? "var(--gn)" : p.tone === "violet" ? "var(--vl)" : "var(--border-strong)" }} />
-                    <span style={{ fontSize: 13.5, fontWeight: 680 }}>{p.label}</span>
-                    <span className="t-sub t-muted" style={{ fontSize: 12 }}>{list.length}</span>
-                  </div>
-                  <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(258px, 1fr))", gap: "var(--sp-3)" }}>
-                    {list.map((c) => (
-                      <div key={c.id} className="card card-pad card-link signal-card" style={{ cursor: "pointer", borderLeft: `3px solid ${p.tone === "accent" ? "var(--ac)" : p.tone === "green" ? "var(--gn)" : p.tone === "violet" ? "var(--vl)" : "var(--border-strong)"}` }} onClick={() => setOpenCap(c)} title="Drill in & leverage">
-                        <div className="row gap-2" style={{ marginBottom: 6, flexWrap: "wrap" }}>
+            {groupByNode(caps, nodes).map((g) => (
+              <div key={g.key}>
+                <div className="row gap-2" style={{ marginBottom: 8, alignItems: "baseline" }}>
+                  <span style={{ fontSize: 13.5, fontWeight: 680 }}>{g.label}</span>
+                  <span className="t-sub t-muted" style={{ fontSize: 12 }}>{g.signals.length}</span>
+                </div>
+                <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(258px, 1fr))", gap: "var(--sp-3)" }}>
+                  {g.signals.map((c) => {
+                    const src = sourceNameOf(c);
+                    return (
+                      <div key={c.id} className="card card-pad card-link signal-card" style={{ cursor: "pointer" }} onClick={() => setOpenCap(c)} title="Drill in & leverage">
+                        <div className="row gap-2" style={{ marginBottom: 6, flexWrap: "wrap", alignItems: "center" }}>
                           {c.metadata?.area && <Chip>{c.metadata.area}</Chip>}
+                          {src && <span className="t-mono-xs t-muted">{src}</span>}
                           {c.observed_at && <span className="t-mono-xs" style={{ marginLeft: "auto" }}>{ago(c.observed_at)}</span>}
                         </div>
                         <div style={{ fontSize: 14, fontWeight: 640, lineHeight: 1.35, marginBottom: 4 }}>{c.title}</div>
                         {c.why && <div className="t-sub t-muted" style={{ fontSize: 12.5, lineHeight: 1.45, marginBottom: 8 }}>{c.why}</div>}
                         <span className="t-sub" style={{ fontSize: 12, color: "var(--ac-text)", fontWeight: 600 }}>Drill in & leverage →</span>
                       </div>
-                    ))}
-                  </div>
+                    );
+                  })}
                 </div>
-              );
-            })}
+              </div>
+            ))}
           </div>
         )}
       </Section>

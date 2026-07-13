@@ -1,25 +1,20 @@
 "use client";
 
-// Market intel — a Perplexity-style DISCOVER feed of market stories, filtered by
-// INDUSTRY and PERSONA. You SET signals (internal or external observations) and
-// they serve up as story cards; open one for the full story and DEEPEN it with
-// the analyst (an in-context play — a specific function, rendered inline, not a
-// floating box). Backed by signals where metadata.domain='market'.
+// Market intel — a DISCOVER feed of market stories the signals profile pulled
+// in. Setup lives on Signals (the market focus, as nodes); this page CONSUMES
+// what those nodes catch, grouped under the node that pulled each story, and
+// lets you DEEPEN one with the analyst inline. Backed by signals where
+// domain='market'.
 import { useEffect, useState, useCallback } from "react";
 import { createClient } from "@/lib/supabase/client";
-import { getOrgId } from "@/lib/org";
-import { fireWorkflows } from "@/lib/triggers";
-import { Chip, Banner, Confidence, Modal } from "@/components/ui";
+import { Chip, Banner, Confidence } from "@/components/ui";
 import { fetchAgentKey, errText } from "@/lib/strategy";
-import { signalDomain, SIGNAL_DOMAIN } from "@/lib/signals";
+import { signalDomain, SIGNAL_DOMAIN, groupByNode, sourceNameOf, sourceUrlOf, type NodeMeta } from "@/lib/signals";
 import { LiveReply, useAliveReply, streamAgentChat } from "@/components/alive";
 import { Markdown } from "@/components/Markdown";
-import SourceManager from "@/components/SourceManager";
-import TrackingTopics from "@/components/TrackingTopics";
-import MarketSetup from "@/components/MarketSetup";
 import SignalProfile from "@/components/SignalProfile";
 
-type Meta = { domain?: string; lens?: string; industry?: string; persona?: string } | null;
+type Meta = { domain?: string; node_key?: string; source?: string; channel?: string; url?: string } | null;
 type Signal = { id: string; title: string; why: string | null; conf_label: string | null; conf_level: number | null; observed_at: string | null; origin: string; metadata: Meta };
 
 function ago(iso: string | null) {
@@ -31,80 +26,41 @@ function ago(iso: string | null) {
 export default function MarketView() {
   const supabase = createClient();
   const [signals, setSignals] = useState<Signal[]>([]);
+  const [nodes, setNodes] = useState<NodeMeta[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [open, setOpen] = useState<Signal | null>(null);
-  const [composing, setComposing] = useState(false);
   const [agentKey, setAgentKey] = useState<string | null>(null);
 
   const [fOrigin, setFOrigin] = useState<"all" | "internal" | "external">("all");
-  const [fIndustry, setFIndustry] = useState("all");
-  const [fPersona, setFPersona] = useState("all");
-
-  const [form, setForm] = useState({ title: "", why: "", origin: "external", industry: "", persona: "", conf: "0.7" });
-  const [busy, setBusy] = useState(false);
   const [deep, setDeep] = useState<string | null>(null);
   const [deepBusy, setDeepBusy] = useState(false);
   const reply = useAliveReply();
-
-  // The lenses come from OUR GTM record (industries / personas we actually sell
-  // to), not a generic seed — so the market view reflects who we serve.
-  const [recIndustries, setRecIndustries] = useState<string[]>([]);
-  const [recPersonas, setRecPersonas] = useState<string[]>([]);
 
   const load = useCallback(async () => {
     const { data } = await supabase.from("signals").select("id, title, why, conf_label, conf_level, observed_at, origin, metadata").order("observed_at", { ascending: false, nullsFirst: false });
     setSignals(((data ?? []) as Signal[]).filter((s) => signalDomain(s) === SIGNAL_DOMAIN.market));
     setAgentKey(await fetchAgentKey(supabase));
-    // GTM-record-driven lenses
-    const { data: gtm } = await supabase.from("gtm_records").select("id").order("created_at").limit(1).maybeSingle();
-    if (gtm) {
-      const { data: gf } = await supabase.from("record_fields").select("field_key, value").eq("gtm_record_id", gtm.id).in("field_key", ["industries", "primary_persona", "icp"]);
-      const split = (v?: string | null) => (v ?? "").split(/[,;\n·]+/).map((x) => x.trim()).filter((x) => x && x.length < 40);
-      setRecIndustries(split(gf?.find((f) => f.field_key === "industries")?.value));
-      setRecPersonas([...split(gf?.find((f) => f.field_key === "primary_persona")?.value), ...split(gf?.find((f) => f.field_key === "icp")?.value)]);
+    // The market focus of the landscape profile — so stories group under the
+    // node that pulled them, in the profile's own order.
+    const { data: prof } = await supabase.from("signal_profiles").select("id").eq("scope", "landscape").is("competitor_id", null).maybeSingle();
+    if (prof) {
+      const { data: ns } = await supabase.from("signal_profile_fields").select("field_key, label, weight, parent_key").eq("profile_id", prof.id).eq("vector", "market");
+      setNodes((ns ?? []) as NodeMeta[]);
     }
     setLoading(false);
   }, [supabase]);
   useEffect(() => { load(); }, [load]);
 
-  const distinct = (k: "industry" | "persona") => Array.from(new Set(signals.map((s) => s.metadata?.[k]).filter((v): v is string => !!v)));
-  // Lenses come ONLY from this org's own data — the GTM record's industries/personas
-  // and whatever the existing signals are tagged with. No generic seed: the platform
-  // makes no assumption about who you serve; you define that in your GTM record.
-  const industries = Array.from(new Set([...distinct("industry"), ...recIndustries]));
-  const personas = Array.from(new Set([...distinct("persona"), ...recPersonas]));
-
-  const feed = signals.filter((s) =>
-    (fOrigin === "all" || s.origin === fOrigin) &&
-    (fIndustry === "all" || s.metadata?.industry === fIndustry) &&
-    (fPersona === "all" || s.metadata?.persona === fPersona));
-
-  async function setSignal(e: React.FormEvent) {
-    e.preventDefault(); if (!form.title.trim()) return;
-    setBusy(true); setError(null);
-    try {
-      const orgId = await getOrgId(); if (!orgId) throw new Error("Could not resolve your organization.");
-      const lvl = parseFloat(form.conf);
-      const { data: sig, error } = await supabase.from("signals").insert({
-        org_id: orgId, scope: "org", origin: form.origin, title: form.title.trim(), why: form.why.trim() || null,
-        conf_level: isNaN(lvl) ? null : lvl, conf_label: isNaN(lvl) ? null : lvl >= 0.75 ? "High" : lvl >= 0.5 ? "Medium" : "Low",
-        observed_at: new Date().toISOString(),
-        metadata: { domain: "market", industry: form.industry.trim() || undefined, persona: form.persona.trim() || undefined },
-      }).select("id").single();
-      if (error) throw error;
-      await fireWorkflows(supabase, orgId, "on_signal", { label: form.title.trim(), why: form.why.trim() || undefined, signalId: sig?.id });
-      setComposing(false); setForm({ title: "", why: "", origin: "external", industry: "", persona: "", conf: "0.7" }); await load();
-    } catch (e) { setError(errText(e, "Could not set the signal.")); } finally { setBusy(false); }
-  }
+  const feed = signals.filter((s) => fOrigin === "all" || s.origin === fOrigin);
+  const groups = groupByNode(feed, nodes);
 
   // In-context PLAY: the analyst deepens the story into a briefing (real agent-chat).
   async function deepen(s: Signal) {
     setDeepBusy(true); setDeep(null); setError(null); reply.begin();
     try {
       if (!agentKey) throw new Error("No analyst available (seed agents first).");
-      const tags = [s.metadata?.industry, s.metadata?.persona].filter(Boolean).join(" / ");
-      const prompt = `You are a market analyst. Expand this market signal into a tight briefing (4–6 sentences): what's happening, why it matters for our product and positioning, and the specific implication${tags ? ` for ${tags}` : ""}. Return only the briefing prose.\n\nSignal: ${s.title}${s.why ? `\nContext: ${s.why}` : ""}\nSource: ${s.origin}`;
+      const prompt = `You are a market analyst. Expand this market signal into a tight briefing (4–6 sentences): what's happening, why it matters for our product and positioning, and the specific implication. Return only the briefing prose.\n\nSignal: ${s.title}${s.why ? `\nContext: ${s.why}` : ""}\nSource: ${s.origin}`;
       const { data: sess } = await supabase.auth.getSession();
       await streamAgentChat({ agentKey, messages: [{ role: "user", content: prompt }], token: sess.session?.access_token, onChunk: reply.onChunk, onThinking: reply.onThinking, fnName: "agent-run", fallbackFnName: "agent-chat" });
       reply.finish();
@@ -115,94 +71,65 @@ export default function MarketView() {
     if (!deepBusy && !reply.typing && reply.display) { setDeep(reply.display); reply.reset(); }
   }, [deepBusy, reply.typing, reply.display, reply.reset]);
 
-  const Pills = ({ value, set, options }: { value: string; set: (v: string) => void; options: string[] }) => (
-    <div className="row gap-2" style={{ flexWrap: "wrap" }}>
-      <button className={`btn btn-sm ${value === "all" ? "" : "btn-secondary"}`} onClick={() => set("all")}>All</button>
-      {options.map((o) => <button key={o} className={`btn btn-sm ${value === o ? "" : "btn-secondary"}`} onClick={() => set(o)}>{o}</button>)}
-    </div>
-  );
+  const card = (s: Signal) => {
+    const src = sourceNameOf(s); const url = sourceUrlOf(s);
+    return (
+      <button key={s.id} onClick={() => { setOpen(s); setDeep(null); reply.reset(); }} className="card card-link" style={{ textAlign: "left", padding: 0, overflow: "hidden", display: "flex", flexDirection: "column" }}>
+        <div style={{ padding: "14px 16px", flex: 1 }}>
+          <div className="row gap-2" style={{ marginBottom: 8, flexWrap: "wrap" }}>
+            <Chip tone={s.origin === "external" ? "violet" : "default"}>{s.origin}</Chip>
+            {src && <span className="t-mono-xs t-muted">{src}</span>}
+          </div>
+          <div style={{ fontSize: 15, fontWeight: 660, lineHeight: 1.3, marginBottom: 6 }}>{s.title}</div>
+          {s.why && <div className="t-sub t-muted" style={{ fontSize: 12.5, lineHeight: 1.5, display: "-webkit-box", WebkitLineClamp: 4, WebkitBoxOrient: "vertical", overflow: "hidden" }}>{s.why}</div>}
+        </div>
+        <div className="row-between" style={{ padding: "10px 16px", borderTop: "1px solid var(--border)", alignItems: "center" }}>
+          <Confidence label={s.conf_label} level={s.conf_level} />
+          <div className="row gap-2" style={{ alignItems: "center" }}>
+            {url && <span className="t-mono-xs" style={{ color: "var(--ac-text)" }}>↗ source</span>}
+            {s.observed_at && <span className="t-mono-xs t-muted">{ago(s.observed_at)}</span>}
+          </div>
+        </div>
+      </button>
+    );
+  };
 
   return (
     <div>
       <div className="row-between" style={{ alignItems: "flex-end", marginBottom: "var(--sp-4)" }}>
-        <div><h1 className="t-page">Market intel</h1><div className="t-sub t-muted" style={{ fontSize: 12.5 }}>What&apos;s happening across industries and personas — internal and external signals, served as stories.</div></div>
-        <button className="btn" onClick={() => setComposing(true)}>+ Set signal</button>
+        <div><h1 className="t-page">Market intel</h1><div className="t-sub t-muted" style={{ fontSize: 12.5 }}>Market stories your signals profile pulled in, grouped by the node that caught them.</div></div>
       </div>
       <Banner>{error}</Banner>
 
-      {/* Configurable ingestion: connect web-search / market sources (incl. MCP)
-          and declare what to watch. Market signals feed BOTH strategy boards. */}
-      {/* Guided, alignment-aware setup — watches keyed to what we actually serve.
-          It reads the industry + persona vectors of the central signals profile
-          (on the Signals home) to aim discovery. */}
-      <MarketSetup onDone={load} />
-
-      {/* The market vector of the central signals profile — the slice of the
-          brain that aims this tab's discovery (industries, personas, market
-          news; direct → adjacent → indirect). Tuned on the Signals home. */}
+      {/* The market focus of your signals profile — the slice of the brain that
+          aims this tab. Read-only here; set it up on Signals. */}
       <div style={{ marginBottom: "var(--sp-4)" }}>
         <SignalProfile scope="landscape" vectorFilter="market" />
       </div>
 
-      <SourceManager title="Market sources" />
-      <TrackingTopics category="market" suggestions={["Category & market-size shifts", "Buyer/persona behavior changes", "Regulatory or platform changes", "Emerging entrants & substitutes"]} />
-      <div className="t-sub t-muted" style={{ fontSize: 11.5, margin: "0 0 var(--sp-4)" }}>Market signals flow into <strong>Product strategy</strong> and <strong>GTM strategy</strong> themes — synthesize there to fold them into your strategy.</div>
-
-      <div className="card card-pad" style={{ marginBottom: "var(--sp-4)" }}>
-        <div className="stack-2">
-          <div className="row gap-2" style={{ alignItems: "center" }}><span className="t-label" style={{ width: 72 }}>Source</span><Pills value={fOrigin} set={(v) => setFOrigin(v as "all" | "internal" | "external")} options={["internal", "external"]} /></div>
-          <div className="row gap-2" style={{ alignItems: "center" }}><span className="t-label" style={{ width: 72 }}>Industry</span><Pills value={fIndustry} set={setFIndustry} options={industries} /></div>
-          <div className="row gap-2" style={{ alignItems: "center" }}><span className="t-label" style={{ width: 72 }}>Persona</span><Pills value={fPersona} set={setFPersona} options={personas} /></div>
-        </div>
+      <div className="row gap-2" style={{ alignItems: "center", marginBottom: "var(--sp-4)" }}>
+        <span className="t-label" style={{ width: 56 }}>Source</span>
+        <button className={`btn btn-sm ${fOrigin === "all" ? "" : "btn-secondary"}`} onClick={() => setFOrigin("all")}>All</button>
+        {(["internal", "external"] as const).map((o) => <button key={o} className={`btn btn-sm ${fOrigin === o ? "" : "btn-secondary"}`} onClick={() => setFOrigin(o)}>{o}</button>)}
       </div>
 
       {loading ? <div className="t-sub t-muted">Loading…</div> : feed.length === 0 ? (
-        signals.length > 0
-          ? <div className="empty"><div className="t-body" style={{ fontWeight: 600, marginBottom: 6 }}>No stories match your filters</div><div className="t-sub" style={{ maxWidth: 460, marginInline: "auto" }}>Clear or change the source / industry / persona filters above to see your market signals.</div></div>
-          : <div className="empty"><div className="t-body" style={{ fontWeight: 600, marginBottom: 6 }}>No stories yet</div><div className="t-sub" style={{ maxWidth: 460, marginInline: "auto" }}>Set a signal — an internal or external observation about an industry or persona — or connect a web-search source above, and it shows up here as a story.</div></div>
+        <div className="empty"><div className="t-body" style={{ fontWeight: 600, marginBottom: 6 }}>No market stories yet</div><div className="t-sub" style={{ maxWidth: 480, marginInline: "auto" }}>Set up the market focus of your signals profile on <a href="/signals" style={{ color: "var(--ac-text)" }}>Signals</a> — its nodes aim the search, and what they catch shows up here.</div></div>
       ) : (
-        <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(300px, 1fr))", gap: "var(--sp-4)" }}>
-          {feed.map((s) => (
-            <button key={s.id} onClick={() => { setOpen(s); setDeep(null); reply.reset(); }} className="card card-link" style={{ textAlign: "left", padding: 0, overflow: "hidden", display: "flex", flexDirection: "column" }}>
-              <div style={{ padding: "14px 16px", flex: 1 }}>
-                <div className="row gap-2" style={{ marginBottom: 8, flexWrap: "wrap" }}>
-                  <Chip tone={s.origin === "external" ? "violet" : "default"}>{s.origin}</Chip>
-                  {s.metadata?.industry && <Chip tone="accent">{s.metadata.industry}</Chip>}
-                  {s.metadata?.persona && <Chip>{s.metadata.persona}</Chip>}
-                </div>
-                <div style={{ fontSize: 15, fontWeight: 660, lineHeight: 1.3, marginBottom: 6 }}>{s.title}</div>
-                {s.why && <div className="t-sub t-muted" style={{ fontSize: 12.5, lineHeight: 1.5, display: "-webkit-box", WebkitLineClamp: 4, WebkitBoxOrient: "vertical", overflow: "hidden" }}>{s.why}</div>}
+        <div>
+          {groups.map((g) => (
+            <div key={g.key}>
+              <div className="row gap-2" style={{ alignItems: "baseline", marginBottom: 10 }}>
+                <span style={{ fontSize: 13.5, fontWeight: 680 }}>{g.label}</span>
+                <span className="t-sub t-muted" style={{ fontSize: 12 }}>{g.signals.length}</span>
               </div>
-              <div className="row-between" style={{ padding: "10px 16px", borderTop: "1px solid var(--border)", alignItems: "center" }}>
-                <Confidence label={s.conf_label} level={s.conf_level} />
-                {s.observed_at && <span className="t-mono-xs t-muted">{ago(s.observed_at)}</span>}
+              <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(300px, 1fr))", gap: "var(--sp-4)", marginBottom: "var(--sp-4)" }}>
+                {g.signals.map(card)}
               </div>
-            </button>
+            </div>
           ))}
         </div>
       )}
-
-      {/* Set-signal composer */}
-      <Modal open={composing} onClose={() => setComposing(false)} title="Set a market signal" width={540}>
-        <form onSubmit={setSignal}>
-          <div className="row gap-2" style={{ marginBottom: 10 }}>
-            {(["external", "internal"] as const).map((o) => <button key={o} type="button" className={`btn btn-sm ${form.origin === o ? "" : "btn-secondary"}`} onClick={() => setForm({ ...form, origin: o })}>{o === "external" ? "External" : "Internal"}</button>)}
-            <span className="t-sub t-muted" style={{ fontSize: 11.5, alignSelf: "center" }}>{form.origin === "external" ? "from the market / outside" : "from our own tools & engagements"}</span>
-          </div>
-          <input className="input" autoFocus placeholder="What did you observe? (the headline)" value={form.title} onChange={(e) => setForm({ ...form, title: e.target.value })} style={{ marginBottom: 8 }} />
-          <textarea className="textarea" rows={3} placeholder="The story — why it matters" value={form.why} onChange={(e) => setForm({ ...form, why: e.target.value })} style={{ marginBottom: 8 }} />
-          <div className="row gap-2" style={{ marginBottom: 8, flexWrap: "wrap" }}>
-            <input className="input" list="md-industries" placeholder="Industry" value={form.industry} onChange={(e) => setForm({ ...form, industry: e.target.value })} style={{ flex: "1 1 160px" }} />
-            <datalist id="md-industries">{industries.map((i) => <option key={i} value={i} />)}</datalist>
-            <input className="input" list="md-personas" placeholder="Persona" value={form.persona} onChange={(e) => setForm({ ...form, persona: e.target.value })} style={{ flex: "1 1 160px" }} />
-            <datalist id="md-personas">{personas.map((p) => <option key={p} value={p} />)}</datalist>
-            <select className="select" value={form.conf} onChange={(e) => setForm({ ...form, conf: e.target.value })} style={{ flex: "0 0 130px" }}>
-              <option value="0.9">High conf.</option><option value="0.7">Medium conf.</option><option value="0.4">Low conf.</option>
-            </select>
-          </div>
-          <div className="row gap-2"><button className="btn btn-sm" type="submit" disabled={busy}>{busy ? "Setting…" : "Set signal"}</button><button className="btn btn-secondary btn-sm" type="button" onClick={() => setComposing(false)}>Cancel</button></div>
-        </form>
-      </Modal>
 
       {/* Story detail */}
       {open && (
@@ -210,15 +137,14 @@ export default function MarketView() {
           <div onClick={() => setOpen(null)} style={{ position: "fixed", inset: 0, background: "rgba(11,12,14,0.32)", zIndex: 40 }} />
           <aside style={{ position: "fixed", top: 0, right: 0, height: "100vh", width: 520, maxWidth: "94vw", background: "var(--panel)", borderLeft: "1px solid var(--border)", boxShadow: "var(--shadow-md)", zIndex: 41, padding: 22, overflowY: "auto" }}>
             <div className="row-between" style={{ marginBottom: 14 }}>
-              <div className="row gap-2" style={{ flexWrap: "wrap" }}>
+              <div className="row gap-2" style={{ flexWrap: "wrap", alignItems: "center" }}>
                 <Chip tone={open.origin === "external" ? "violet" : "default"}>{open.origin}</Chip>
-                {open.metadata?.industry && <Chip tone="accent">{open.metadata.industry}</Chip>}
-                {open.metadata?.persona && <Chip>{open.metadata.persona}</Chip>}
+                {sourceNameOf(open) && <span className="t-mono-xs t-muted">{sourceNameOf(open)}</span>}
               </div>
               <button className="btn btn-secondary btn-sm" onClick={() => setOpen(null)}>Close</button>
             </div>
             <h2 className="t-h2" style={{ marginBottom: 8, fontSize: 19, lineHeight: 1.25 }}>{open.title}</h2>
-            <div className="row gap-2" style={{ marginBottom: 16 }}><Confidence label={open.conf_label} level={open.conf_level} />{open.observed_at && <span className="t-mono-xs t-muted">{ago(open.observed_at)}</span>}</div>
+            <div className="row gap-2" style={{ marginBottom: 16, alignItems: "center" }}><Confidence label={open.conf_label} level={open.conf_level} />{open.observed_at && <span className="t-mono-xs t-muted">{ago(open.observed_at)}</span>}{sourceUrlOf(open) && <a href={sourceUrlOf(open)!} target="_blank" rel="noreferrer" className="t-mono-xs" style={{ color: "var(--ac-text)" }}>↗ open source</a>}</div>
             {open.why && <p className="t-body" style={{ lineHeight: 1.6, marginBottom: 18 }}>{open.why}</p>}
 
             {/* In-context play — a specific function, inline, not a floating box */}
