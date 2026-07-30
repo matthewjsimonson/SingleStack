@@ -181,8 +181,10 @@ export default function RecordWorkspace({ target, recordName, excludeSection }: 
       {loading ? <div className="t-sub t-muted" style={{ marginBottom: "var(--sp-6)" }}>Loading…</div>
         : <RecordAdvisors target={target} recordName={recordName} agents={agents} pendingByName={pendingByName} onRan={refresh} openReviewNonce={reviewNonce} />}
 
-      {/* Structured content */}
-      <SectionedFields key={fieldsNonce} target={target} excludeSection={excludeSection} />
+      {/* Structured content. onProposed reloads proposal counts (the "N waiting"
+          pill) without remounting the panel, so a proposed metric reading shows
+          up live while keeping the field's own confirmation visible. */}
+      <SectionedFields key={fieldsNonce} target={target} excludeSection={excludeSection} onProposed={load} />
 
       {/* Pending proposals live in the Advisors' side drawer (the "N waiting" pill).
           Only resolved proposals are logged here, as history. */}

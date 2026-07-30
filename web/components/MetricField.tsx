@@ -16,15 +16,25 @@ type Latest = { period: string; value_num: number; prev_value: number | null; mo
 const monthLabel = (iso: string) => new Date(iso + "T00:00:00").toLocaleDateString(undefined, { month: "short", year: "numeric" });
 const firstOfMonth = (d: Date) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-01`;
 
-export default function MetricField({ fieldId, unit }: { fieldId: string; unit?: string | null }) {
+type MetricTarget = { kind: "product" | "gtm" | "module"; id: string };
+
+export default function MetricField({ fieldId, unit, label, target, onProposed }: { fieldId: string; unit?: string | null; label?: string; target?: MetricTarget; onProposed?: () => void }) {
   const supabase = createClient();
   const [readings, setReadings] = useState<Reading[]>([]);
   const [latest, setLatest] = useState<Latest | null>(null);
   const [adding, setAdding] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [note, setNote] = useState<string | null>(null); // success note (e.g. "proposed for review")
   // entry draft — provenance is REQUIRED (mirrors the DB CHECK)
   const [d, setD] = useState({ period: firstOfMonth(new Date()), value: "", origin: "source", source_label: "", source_ref: "", note: "" });
+
+  // A reading can land two ways, mirroring narrative fields: a human enters it
+  // directly (they are their own gate), or it goes to the review queue as a
+  // proposal to be ratified through the SAME accept_proposal() gate. Proposals
+  // target a product or GTM record — module-level metrics only support direct add.
+  const canPropose = target && target.kind !== "module";
+  const targetCol = target?.kind === "gtm" ? "gtm_record_id" : "product_id";
 
   const load = useCallback(async () => {
     const [{ data: rs }, { data: lt }] = await Promise.all([
@@ -40,10 +50,21 @@ export default function MetricField({ fieldId, unit }: { fieldId: string; unit?:
   const provenanceOk = d.source_label.trim().length > 0 && d.source_ref.trim().length > 0;
   const valueOk = d.value.trim() !== "" && !Number.isNaN(Number(d.value));
 
+  function resetDraft() {
+    setAdding(false);
+    setD({ period: firstOfMonth(new Date()), value: "", origin: "source", source_label: "", source_ref: "", note: "" });
+  }
+
+  function checkDraft(): boolean {
+    setError(null); setNote(null);
+    if (!valueOk) { setError("Enter a number for this period."); return false; }
+    if (!provenanceOk) { setError("A metric needs a source and a backup reference — no unsourced numbers."); return false; }
+    return true;
+  }
+
+  // Direct add: the human is their own gate. Writes straight to record_metrics.
   async function addReading() {
-    setError(null);
-    if (!valueOk) { setError("Enter a number for this period."); return; }
-    if (!provenanceOk) { setError("A metric needs a source and a backup reference — no unsourced numbers."); return; }
+    if (!checkDraft()) return;
     setBusy(true);
     try {
       const orgId = await getOrgId(); if (!orgId) throw new Error("Could not resolve your organization.");
@@ -52,12 +73,42 @@ export default function MetricField({ fieldId, unit }: { fieldId: string; unit?:
         origin: d.origin, source_label: d.source_label.trim(), source_ref: d.source_ref.trim(), note: d.note.trim() || null,
       });
       if (error) throw error;
-      setAdding(false);
-      setD({ period: firstOfMonth(new Date()), value: "", origin: "source", source_label: "", source_ref: "", note: "" });
+      resetDraft();
       await load();
     } catch (e) {
       const msg = e instanceof Error ? e.message : "Could not save reading.";
       setError(/record_metrics_field_period_uniq|duplicate/i.test(msg) ? "A reading for that period already exists — edit or pick another month." : msg);
+    } finally { setBusy(false); }
+  }
+
+  // Propose for review: the reading lands in the record's review queue as a
+  // metric_reading proposal. Accepting it runs the same accept_proposal() gate,
+  // which writes the provenance-bound record_metrics row linked to the proposal.
+  async function proposeReading() {
+    if (!target) return;
+    if (!checkDraft()) return;
+    setBusy(true);
+    try {
+      const orgId = await getOrgId(); if (!orgId) throw new Error("Could not resolve your organization.");
+      const { data: prop, error: pErr } = await supabase.from("proposals").insert({
+        org_id: orgId, [targetCol]: target.id,
+        title: `${label || "Metric"} · ${monthLabel(d.period)}`,
+        rationale: `Proposed reading of ${d.value}${unit && unit !== "NPS" ? unit : ""} for ${monthLabel(d.period)}, sourced from ${d.source_label.trim()}.`,
+        proposed_by: "You",
+      }).select("id").single();
+      if (pErr) throw pErr;
+      const { error: cErr } = await supabase.from("proposal_changes").insert({
+        org_id: orgId, proposal_id: prop.id, change_kind: "metric_reading",
+        record_field_id: fieldId, metric_period: d.period, metric_value: Number(d.value),
+        metric_origin: d.origin, metric_source_label: d.source_label.trim(),
+        metric_source_ref: d.source_ref.trim(), metric_note: d.note.trim() || null,
+      });
+      if (cErr) throw cErr;
+      resetDraft();
+      setNote(`Proposed for review — accept it in Advisors ▸ the “waiting” queue to apply it.`);
+      onProposed?.();
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Could not propose reading.");
     } finally { setBusy(false); }
   }
 
@@ -67,6 +118,7 @@ export default function MetricField({ fieldId, unit }: { fieldId: string; unit?:
   return (
     <div style={{ marginLeft: 26 }}>
       {error && <div className="t-sub" style={{ color: "var(--rd-text, var(--rd-text))", marginBottom: 8 }}>{error}</div>}
+      {note && <div className="t-sub" style={{ color: "var(--gn-text)", marginBottom: 8 }}>{note}</div>}
 
       {latest ? (
         <div className="row gap-2" style={{ alignItems: "baseline", marginBottom: readings.length ? 8 : 0 }}>
@@ -90,7 +142,7 @@ export default function MetricField({ fieldId, unit }: { fieldId: string; unit?:
       )}
 
       {!adding ? (
-        <button className="btn btn-secondary btn-sm" onClick={() => setAdding(true)}>+ Add reading</button>
+        <button className="btn btn-secondary btn-sm" onClick={() => { setNote(null); setError(null); setAdding(true); }}>+ Add reading</button>
       ) : (
         <div className="card card-pad" style={{ marginTop: 4 }}>
           <div className="row gap-2" style={{ marginBottom: 8, flexWrap: "wrap" }}>
@@ -111,9 +163,11 @@ export default function MetricField({ fieldId, unit }: { fieldId: string; unit?:
             <input className="input" placeholder="https://… or doc reference" value={d.source_ref} onChange={(e) => setD({ ...d, source_ref: e.target.value })} /></label>
           {!provenanceOk && <div className="t-mono-xs t-muted" style={{ marginBottom: 8 }}>A source and a backup reference are required — metrics are never unsourced.</div>}
           <div className="row gap-2">
-            <button className="btn btn-sm" disabled={busy || !valueOk || !provenanceOk} onClick={addReading}>{busy ? "Saving…" : "Add reading"}</button>
+            <button className="btn btn-sm" disabled={busy || !valueOk || !provenanceOk} onClick={addReading}>{busy ? "Saving…" : "Add directly"}</button>
+            {canPropose && <button className="btn btn-secondary btn-sm" disabled={busy || !valueOk || !provenanceOk} onClick={proposeReading} title="Send this reading to the review queue for ratification">{busy ? "…" : "Propose for review"}</button>}
             <button className="btn btn-secondary btn-sm" onClick={() => { setAdding(false); setError(null); }}>Cancel</button>
           </div>
+          {canPropose && <div className="t-mono-xs t-muted" style={{ marginTop: 6 }}>Add directly if you’re the source of record. Propose for review to route it through ratification — the same gate as agent proposals.</div>}
         </div>
       )}
     </div>

@@ -14,12 +14,16 @@ import { PulseDots, streamStructured } from "@/components/alive";
 type Advisor = { key: string; name: string; short: string; accent: string };
 type Change = {
   id: string;                          // proposal_changes.id — so HITL edits can persist
-  label: string; kind: "add" | "update"; proposed_value: string;
+  label: string; kind: "add" | "update" | "metric"; proposed_value: string;
   // Identity + drift detection: which field this targets, the value it was drafted
   // against (old_value), and the field's CURRENT value — so the queue can flag a
   // change that's stale (the record moved) or that collides with a sibling.
+  // A metric reading (kind "metric") carries none of these — it's an upsert by
+  // period with no drift concept — and proposed_value holds a read-only display.
   fieldIdent: string | null; oldValue: string | null; currentValue: string | null;
 };
+
+const monthLabel = (iso: string) => new Date(iso + "T00:00:00").toLocaleDateString(undefined, { month: "short", year: "numeric" });
 type Pending = {
   id: string; title: string; rationale: string | null; conf_label: string | null;
   conf_level: number | null; proposed_by: string; created_at: string; changes: Change[];
@@ -62,22 +66,34 @@ export default function ProposeDrawer({ open, onClose, mode, target, advisors, o
   const loadPending = useCallback(async () => {
     const { data } = await supabase
       .from("proposals")
-      .select("id, title, rationale, conf_label, conf_level, proposed_by, created_at, proposal_changes ( id, change_kind, label, proposed_value, record_field_id, field_key, old_value, record_fields ( label, value ) )")
+      .select("id, title, rationale, conf_label, conf_level, proposed_by, created_at, proposal_changes ( id, change_kind, label, proposed_value, record_field_id, field_key, old_value, metric_period, metric_value, metric_origin, metric_source_label, record_fields ( label, value, metric_unit ) )")
       .eq(idKey, target.id).eq("status", "pending").order("created_at", { ascending: false });
     // deno-lint-ignore no-explicit-any
     const list: Pending[] = (data ?? []).map((p: any) => ({
       id: p.id, title: p.title, rationale: p.rationale, conf_label: p.conf_label, conf_level: p.conf_level, proposed_by: p.proposed_by, created_at: p.created_at,
       // deno-lint-ignore no-explicit-any
-      changes: (p.proposal_changes ?? []).map((c: any) => ({
-        id: c.id,
-        label: c.label ?? c.record_fields?.label ?? "Field",
-        kind: c.change_kind === "add_field" ? "add" : "update",
-        proposed_value: c.proposed_value,
-        // A field's identity: the existing field id (update) or add:<key> (new field).
-        fieldIdent: c.record_field_id ?? (c.field_key ? `add:${c.field_key}` : null),
-        oldValue: c.old_value ?? null,
-        currentValue: c.record_fields?.value ?? null,
-      })),
+      changes: (p.proposal_changes ?? []).map((c: any) => {
+        if (c.change_kind === "metric_reading") {
+          const u = c.record_fields?.metric_unit && c.record_fields.metric_unit !== "NPS" ? c.record_fields.metric_unit : "";
+          const src = c.metric_source_label ? ` · ${c.metric_source_label}` : "";
+          const manual = c.metric_origin === "manual" ? " (manual)" : "";
+          return {
+            id: c.id, label: c.record_fields?.label ?? "Metric", kind: "metric" as const,
+            proposed_value: `${c.metric_value}${u} · ${monthLabel(c.metric_period)}${src}${manual}`,
+            fieldIdent: null, oldValue: null, currentValue: null,
+          };
+        }
+        return {
+          id: c.id,
+          label: c.label ?? c.record_fields?.label ?? "Field",
+          kind: (c.change_kind === "add_field" ? "add" : "update") as "add" | "update",
+          proposed_value: c.proposed_value,
+          // A field's identity: the existing field id (update) or add:<key> (new field).
+          fieldIdent: c.record_field_id ?? (c.field_key ? `add:${c.field_key}` : null),
+          oldValue: c.old_value ?? null,
+          currentValue: c.record_fields?.value ?? null,
+        };
+      }),
     }));
     setPending(list); setLoaded(true);
   }, [supabase, idKey, target.id]);
@@ -226,19 +242,25 @@ export default function ProposeDrawer({ open, onClose, mode, target, advisors, o
                     {p.changes.map((c, i) => (
                       <div key={i} style={{ borderLeft: `2px solid ${isStale(c) ? "var(--am-text)" : isOverlap(c) ? "var(--vl)" : "var(--border)"}`, paddingLeft: 10 }}>
                         <div className="row gap-2" style={{ marginBottom: 2, alignItems: "center", flexWrap: "wrap" }}>
-                          <Chip tone={c.kind === "add" ? "green" : "accent"}>{c.kind === "add" ? "New field" : "Update"}</Chip>
+                          <Chip tone={c.kind === "add" ? "green" : c.kind === "metric" ? "violet" : "accent"}>{c.kind === "add" ? "New field" : c.kind === "metric" ? "Metric reading" : "Update"}</Chip>
                           <span style={{ fontSize: 12.5, fontWeight: 620 }}>{c.label}</span>
                           {isStale(c) && <Chip tone="amber">field moved since drafted</Chip>}
                           {!isStale(c) && isOverlap(c) && <Chip tone="violet">also in another proposal</Chip>}
                           {edits[c.id] !== undefined && edits[c.id] !== c.proposed_value && <Chip tone="accent">edited</Chip>}
                         </div>
-                        {/* Editable before accepting — a not-quite-right proposal can be
-                            made into a good update by hand, then accepted. */}
-                        <textarea className="textarea" disabled={acting === p.id}
-                          rows={Math.max(2, Math.min(10, Math.ceil((edits[c.id] ?? c.proposed_value ?? "").length / 80)))}
-                          value={edits[c.id] ?? c.proposed_value ?? ""}
-                          onChange={(e) => setEdits((m) => ({ ...m, [c.id]: e.target.value }))}
-                          style={{ fontSize: 12, lineHeight: 1.5 }} />
+                        {/* A metric reading is a sourced number (value lives in metric_value,
+                            not proposed_value) — show it read-only, not as an editable field. */}
+                        {c.kind === "metric" ? (
+                          <div className="t-mono" style={{ fontSize: 13, fontWeight: 600 }}>{c.proposed_value}</div>
+                        ) : (
+                          /* Editable before accepting — a not-quite-right proposal can be
+                             made into a good update by hand, then accepted. */
+                          <textarea className="textarea" disabled={acting === p.id}
+                            rows={Math.max(2, Math.min(10, Math.ceil((edits[c.id] ?? c.proposed_value ?? "").length / 80)))}
+                            value={edits[c.id] ?? c.proposed_value ?? ""}
+                            onChange={(e) => setEdits((m) => ({ ...m, [c.id]: e.target.value }))}
+                            style={{ fontSize: 12, lineHeight: 1.5 }} />
+                        )}
                       </div>
                     ))}
                   </div>

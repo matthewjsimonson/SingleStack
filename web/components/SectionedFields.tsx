@@ -30,7 +30,7 @@ function guides(kind: TargetKind) {
   return { sectionBlurb, fieldHint };
 }
 
-export default function SectionedFields({ target, excludeSection }: { target: Target; excludeSection?: string }) {
+export default function SectionedFields({ target, excludeSection, onProposed }: { target: Target; excludeSection?: string; onProposed?: () => void }) {
   const supabase = createClient();
   const [fields, setFields] = useState<Field[]>([]);
   const [loading, setLoading] = useState(true);
@@ -290,7 +290,7 @@ export default function SectionedFields({ target, excludeSection }: { target: Ta
                       {!isMetric(f) && !fCollapsed && editing !== f.id && <button className="btn btn-secondary btn-sm" onClick={() => { setEditing(f.id); setDraft(f.value ?? ""); }}>Edit</button>}
                     </div>
                     {fCollapsed ? null : isMetric(f) ? (
-                      <MetricField fieldId={f.id} unit={f.metric_unit} />
+                      <MetricField fieldId={f.id} unit={f.metric_unit} label={f.label} target={target} onProposed={onProposed} />
                     ) : editing === f.id ? (
                       <div>
                         <textarea className="textarea" rows={7} autoFocus value={draft} onChange={(e) => setDraft(e.target.value)} style={{ marginBottom: 8, fontSize: 14.5, lineHeight: 1.7 }} />
