@@ -12,7 +12,6 @@ import { fetchAgentKey, errText } from "@/lib/strategy";
 import { signalDomain, SIGNAL_DOMAIN, groupByNode, sourceNameOf, sourceUrlOf, type NodeMeta } from "@/lib/signals";
 import { LiveReply, useAliveReply, streamAgentChat } from "@/components/alive";
 import { Markdown } from "@/components/Markdown";
-import SignalProfile from "@/components/SignalProfile";
 
 type Meta = { domain?: string; node_key?: string; source?: string; channel?: string; url?: string } | null;
 type Signal = { id: string; title: string; why: string | null; conf_label: string | null; conf_level: number | null; observed_at: string | null; origin: string; metadata: Meta };
@@ -97,15 +96,9 @@ export default function MarketView() {
   return (
     <div>
       <div className="row-between" style={{ alignItems: "flex-end", marginBottom: "var(--sp-4)" }}>
-        <div><h1 className="t-page">Market intel</h1><div className="t-sub t-muted" style={{ fontSize: 12.5 }}>Market stories your signals profile pulled in, grouped by the node that caught them.</div></div>
+        <div><h1 className="t-page">Market Intel</h1><div className="t-sub t-muted" style={{ fontSize: 12.5 }}>Market stories your signals profile pulled in, grouped by the node that caught them.</div></div>
       </div>
       <Banner>{error}</Banner>
-
-      {/* The market focus of your signals profile — the slice of the brain that
-          aims this tab. Read-only here; set it up on Signals. */}
-      <div style={{ marginBottom: "var(--sp-4)" }}>
-        <SignalProfile scope="landscape" vectorFilter="market" />
-      </div>
 
       <div className="row gap-2" style={{ alignItems: "center", marginBottom: "var(--sp-4)" }}>
         <span className="t-label" style={{ width: 56 }}>Source</span>

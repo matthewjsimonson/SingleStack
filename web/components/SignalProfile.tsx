@@ -37,7 +37,7 @@ const vectorMeta = (v?: string) => VECTORS.find((x) => x.key === v) ?? VECTORS[0
 // Where each vector PUSHES — the intel area that applies it to search/analyze.
 const PUSH: Partial<Record<Vector, { label: string; href: string }>> = {
   competitive: { label: "Competitive", href: "/competitive" },
-  market: { label: "Market intel", href: "/market" },
+  market: { label: "Market Intel", href: "/market" },
   technology: { label: "Frontier", href: "/frontier" },
 };
 

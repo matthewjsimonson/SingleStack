@@ -67,7 +67,7 @@ const NAV: { id: NavItem; label: string }[] = [
 // The five evidence buckets, in display order.
 type Bucket = "market" | "competitive" | "frontier" | "release" | "record";
 const BUCKETS: { id: Bucket; label: string }[] = [
-  { id: "market", label: "Market intel" },
+  { id: "market", label: "Market Intel" },
   { id: "competitive", label: "Competitive" },
   { id: "frontier", label: "Frontier models" },
   { id: "release", label: "Product release" },
