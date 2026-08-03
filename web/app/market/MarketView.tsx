@@ -2,14 +2,14 @@
 
 // Market intel — a DISCOVER feed of market stories the signals profile pulled
 // in. Setup lives on Signals (the market focus, as nodes); this page CONSUMES
-// what those nodes catch, grouped under the node that pulled each story, and
-// lets you DEEPEN one with the analyst inline. Backed by signals where
-// domain='market'.
+// what those nodes catch, grouped by the DIRECTNESS of the node that pulled
+// each story (direct → adjacent → indirect), and lets you DEEPEN one with the
+// analyst inline. Backed by signals where domain='market'.
 import { useEffect, useState, useCallback } from "react";
 import { createClient } from "@/lib/supabase/client";
 import { Chip, Banner, Confidence } from "@/components/ui";
 import { fetchAgentKey, errText } from "@/lib/strategy";
-import { signalDomain, SIGNAL_DOMAIN, groupByNode, sourceNameOf, sourceUrlOf, type NodeMeta } from "@/lib/signals";
+import { signalDomain, SIGNAL_DOMAIN, groupByLevel, sourceNameOf, sourceUrlOf, nodeLabelOf, type NodeMeta } from "@/lib/signals";
 import { LiveReply, useAliveReply, streamAgentChat } from "@/components/alive";
 import { Markdown } from "@/components/Markdown";
 
@@ -52,7 +52,10 @@ export default function MarketView() {
   useEffect(() => { load(); }, [load]);
 
   const feed = signals.filter((s) => fOrigin === "all" || s.origin === fOrigin);
-  const groups = groupByNode(feed, nodes);
+  const groups = groupByLevel(feed, nodes);
+  // Directness reads as an ink ramp, not a hue: direct is nearest/darkest, the
+  // horizon fades out. Load-bearing (it encodes the level), never decorative.
+  const LEVEL_TONE: Record<string, string> = { direct: "var(--tp)", adjacent: "var(--ts)", indirect: "var(--tm)", other: "var(--border-strong)" };
 
   // In-context PLAY: the analyst deepens the story into a briefing (real agent-chat).
   async function deepen(s: Signal) {
@@ -70,19 +73,21 @@ export default function MarketView() {
     if (!deepBusy && !reply.typing && reply.display) { setDeep(reply.display); reply.reset(); }
   }, [deepBusy, reply.typing, reply.display, reply.reset]);
 
-  const card = (s: Signal) => {
-    const src = sourceNameOf(s); const url = sourceUrlOf(s);
+  const card = (s: Signal, tone: string) => {
+    const src = sourceNameOf(s); const url = sourceUrlOf(s); const node = nodeLabelOf(s, nodes);
+    const meta = [src, node].filter(Boolean).join(" · "); // provenance + the node that caught it
     return (
-      <button key={s.id} onClick={() => { setOpen(s); setDeep(null); reply.reset(); }} className="card card-link" style={{ textAlign: "left", padding: 0, overflow: "hidden", display: "flex", flexDirection: "column" }}>
-        <div style={{ padding: "14px 16px", flex: 1 }}>
-          <div className="row gap-2" style={{ marginBottom: 8, flexWrap: "wrap" }}>
+      <button key={s.id} onClick={() => { setOpen(s); setDeep(null); reply.reset(); }} className="card card-link"
+        style={{ textAlign: "left", padding: 0, overflow: "hidden", display: "flex", flexDirection: "column", borderColor: "var(--border-strong)", borderLeftWidth: 3, borderLeftColor: tone }}>
+        <div style={{ padding: "10px 12px", flex: 1 }}>
+          <div className="row gap-2" style={{ marginBottom: 5, flexWrap: "wrap", alignItems: "center" }}>
             <Chip tone={s.origin === "external" ? "violet" : "default"}>{s.origin}</Chip>
-            {src && <span className="t-mono-xs t-muted">{src}</span>}
+            {meta && <span className="t-mono-xs t-muted" style={{ minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }} title={meta}>{meta}</span>}
           </div>
-          <div style={{ fontSize: 15, fontWeight: 660, lineHeight: 1.3, marginBottom: 6 }}>{s.title}</div>
-          {s.why && <div className="t-sub t-muted" style={{ fontSize: 12.5, lineHeight: 1.5, display: "-webkit-box", WebkitLineClamp: 4, WebkitBoxOrient: "vertical", overflow: "hidden" }}>{s.why}</div>}
+          <div style={{ fontSize: 13.5, fontWeight: 660, lineHeight: 1.3, marginBottom: 4, color: "var(--tp)" }}>{s.title}</div>
+          {s.why && <div className="t-sub t-muted" style={{ fontSize: 12, lineHeight: 1.45, display: "-webkit-box", WebkitLineClamp: 2, WebkitBoxOrient: "vertical", overflow: "hidden" }}>{s.why}</div>}
         </div>
-        <div className="row-between" style={{ padding: "10px 16px", borderTop: "1px solid var(--border)", alignItems: "center" }}>
+        <div className="row-between" style={{ padding: "7px 12px", borderTop: "1px solid var(--border)", alignItems: "center" }}>
           <Confidence label={s.conf_label} level={s.conf_level} />
           <div className="row gap-2" style={{ alignItems: "center" }}>
             {url && <span className="t-mono-xs" style={{ color: "var(--ac-text)" }}>↗ source</span>}
@@ -96,7 +101,7 @@ export default function MarketView() {
   return (
     <div>
       <div className="row-between" style={{ alignItems: "flex-end", marginBottom: "var(--sp-4)" }}>
-        <div><h1 className="t-page">Market Intel</h1><div className="t-sub t-muted" style={{ fontSize: 12.5 }}>Market stories your signals profile pulled in, grouped by the node that caught them.</div></div>
+        <div><h1 className="t-page">Market Intel</h1><div className="t-sub t-muted" style={{ fontSize: 12.5 }}>Market stories your signals profile pulled in, grouped by directness — direct, adjacent, indirect.</div></div>
       </div>
       <Banner>{error}</Banner>
 
@@ -110,17 +115,22 @@ export default function MarketView() {
         <div className="empty"><div className="t-body" style={{ fontWeight: 600, marginBottom: 6 }}>No market stories yet</div><div className="t-sub" style={{ maxWidth: 480, marginInline: "auto" }}>Set up the market focus of your signals profile on <a href="/signals" style={{ color: "var(--ac-text)" }}>Signals</a> — its nodes aim the search, and what they catch shows up here.</div></div>
       ) : (
         <div>
-          {groups.map((g) => (
-            <div key={g.key}>
-              <div className="row gap-2" style={{ alignItems: "baseline", marginBottom: 10 }}>
-                <span style={{ fontSize: 13.5, fontWeight: 680 }}>{g.label}</span>
-                <span className="t-sub t-muted" style={{ fontSize: 12 }}>{g.signals.length}</span>
+          {groups.map((g) => {
+            const tone = LEVEL_TONE[g.key] ?? "var(--border-strong)";
+            return (
+              <div key={g.key} style={{ marginBottom: "var(--sp-4)" }}>
+                <div className="row gap-2" style={{ alignItems: "center", marginBottom: 8 }}>
+                  <span style={{ width: 9, height: 9, borderRadius: "50%", background: tone, flexShrink: 0 }} />
+                  <span style={{ fontSize: 13.5, fontWeight: 700, color: "var(--tp)" }}>{g.label}</span>
+                  <span className="t-mono-xs t-muted">{g.signals.length}</span>
+                  <span className="t-sub t-muted" style={{ fontSize: 12 }}>· {g.blurb}</span>
+                </div>
+                <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(240px, 1fr))", gap: "var(--sp-3)" }}>
+                  {g.signals.map((s) => card(s, tone))}
+                </div>
               </div>
-              <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(300px, 1fr))", gap: "var(--sp-4)", marginBottom: "var(--sp-4)" }}>
-                {g.signals.map(card)}
-              </div>
-            </div>
-          ))}
+            );
+          })}
         </div>
       )}
 

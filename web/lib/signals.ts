@@ -57,3 +57,46 @@ export function groupByNode<T extends { metadata?: { node_key?: string } | null 
   // Direct (weight 3) first … indirect (1) … then the Other bucket (weight 0).
   return out.sort((a, b) => b.weight - a.weight || a.label.localeCompare(b.label));
 }
+
+// ---- Directness levels -----------------------------------------------------
+// A node's weight IS its directness (mirrors lib/profileBrief.ts `W`): direct
+// (≥3, your ground), adjacent (2, one step out), indirect (≤1, the horizon).
+export type Level = "direct" | "adjacent" | "indirect";
+export const levelOf = (weight?: number | null): Level =>
+  (weight ?? 2) >= 3 ? "direct" : (weight ?? 2) <= 1 ? "indirect" : "adjacent";
+
+export const LEVELS: { key: Level; label: string; blurb: string }[] = [
+  { key: "direct", label: "Direct", blurb: "Your ground — closest to what you are and do." },
+  { key: "adjacent", label: "Adjacent", blurb: "One step out." },
+  { key: "indirect", label: "Indirect", blurb: "The horizon." },
+];
+
+// Group signals by the DIRECTNESS LEVEL of the node that pulled them
+// (direct → adjacent → indirect) — the same three levels the signals profile
+// is built on. Signals whose node isn't live fall into a trailing "Other"
+// bucket. Empty levels are dropped so the feed stays tight.
+export function groupByLevel<T extends { metadata?: { node_key?: string } | null }>(
+  signals: T[], nodes: NodeMeta[],
+): { key: string; label: string; blurb: string; signals: T[] }[] {
+  const byKey = new Map(nodes.map((n) => [n.field_key, n]));
+  const buckets = new Map<string, T[]>();
+  for (const s of signals) {
+    const k = nodeKeyOf(s);
+    const n = k ? byKey.get(k) : undefined;
+    const key: string = n ? levelOf(n.weight) : "other";
+    (buckets.get(key) ?? buckets.set(key, []).get(key)!).push(s);
+  }
+  const out: { key: string; label: string; blurb: string; signals: T[] }[] =
+    LEVELS.filter((l) => buckets.has(l.key)).map((l) => ({ key: l.key, label: l.label, blurb: l.blurb, signals: buckets.get(l.key)! }));
+  if (buckets.has("other")) out.push({ key: "other", label: "Other", blurb: "Not tied to a live profile node.", signals: buckets.get("other")! });
+  return out;
+}
+
+// The node (label) that pulled a signal — small context on a card, now that the
+// feed groups by level rather than by node.
+export function nodeLabelOf(
+  s: { metadata?: { node_key?: string } | null }, nodes: NodeMeta[],
+): string | null {
+  const k = nodeKeyOf(s);
+  return (k && nodes.find((n) => n.field_key === k)?.label) || null;
+}
