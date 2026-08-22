@@ -17,7 +17,9 @@ These are absolute. A migration that violates any of them does not ship, even if
 
 **1.1 The Product Record is the hub.** Every meaningful artifact in SingleStack ultimately belongs to a Product Record — directly via foreign key, or indirectly through one hop (e.g., a Feature belongs to a Product Record; a Ratification belongs to a Feature). No artifact floats free. If you cannot trace an artifact to a Product Record in ≤2 joins, the model is wrong.
 
-**1.2 Every table carries `org_id`.** No exceptions. Not auxiliary tables, not enums-as-tables, not pivot tables. `org_id` is the multi-tenancy boundary, the RLS predicate, and the leading column of every composite index. A table without `org_id` is a future security incident.
+**1.2 Every table that holds tenant data carries `org_id`.** Not auxiliary tables, not enums-as-tables, not pivot tables — if a row belongs to somebody, it carries the column. `org_id` is the multi-tenancy boundary, the RLS predicate, and the leading column of every composite index. A tenant table without `org_id` is a future security incident.
+
+The one carve-out is *instance-level operational metadata* — rows about the machine, not about any org (`heartbeat_ticks` is the only current example: one row per cron tick, no org data, no secrets). Such a table still enables RLS and still ships an explicit policy; it simply has no tenant to scope to. Reach for this only when you can state plainly why no org owns the row, and say so in the migration header. If you are hesitating, the answer is `org_id`.
 
 **1.3 Provenance is a first-class concern, not a column.** Sources are a table, not a string. Anything an AI agent generated, retrieved, or referenced is linked to a Source row. The Source table earns its keep by being queryable, joinable, and versionable. A `source_url TEXT` column is a code smell.
 

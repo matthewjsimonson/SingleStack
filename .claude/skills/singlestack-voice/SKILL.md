@@ -1,11 +1,11 @@
 ---
 name: singlestack-voice
-description: Govern the words and behavioral states of SingleStack — microcopy (buttons, tooltips, error messages, confirmations), state patterns (empty, loading, error, success), and agent dialogue (how named agents talk to users). Use this skill any time you are writing UI copy, naming a button, drafting an error message, designing an empty or loading state, writing agent-facing dialogue, or making any decision about what SingleStack says rather than how it looks. This skill governs words and behavior; the singlestack-ui skill governs visual surfaces; the singlestack-agents skill (when built) governs agent character and scope.
+description: Govern the words and behavioral states of SingleStack — microcopy (buttons, tooltips, error messages, confirmations), state patterns (empty, loading, error, success), and agent dialogue (how named agents talk to users). Use this skill any time you are writing UI copy, naming a button, drafting an error message, designing an empty or loading state, writing agent-facing dialogue, or making any decision about what SingleStack says rather than how it looks. This skill governs words and behavior; the singlestack-ui skill governs visual surfaces.
 ---
 
 # SingleStack Voice Skill
 
-This skill governs what SingleStack says. The `singlestack-ui` skill makes the product look like software; this skill makes it *sound* like software written by a sharp PMM colleague — not a SaaS marketing page, not a cheerful onboarding assistant, not a cautious AI hedging every claim.
+This skill governs what SingleStack says. The `singlestack-ui` skill makes the product look like software; this skill makes it *sound* like software written by a sharp colleague who knows the work — a PM or a GTM operator, depending on the surface — not a SaaS marketing page, not a cheerful onboarding assistant, not a cautious AI hedging every claim.
 
 Voice is where products lose their identity fastest. Visual systems are easier to maintain because designers protect them; copy gets edited by everyone and rots quietly into platitudes. The rules below exist to slow that rot.
 
@@ -21,7 +21,7 @@ These are absolute. Copy that violates any of them does not ship, even if it sou
 
 **1.2 Specific over generic, always.** "3 Sources unavailable" beats "Something went wrong." "Ratify positioning statement" beats "Approve." "Creative Officer drafted 3 concepts from the GovDash earnings signal" beats "AI generated some content." Names beat pronouns. Numbers beat "some." Verbs that say what happens beat verbs that gesture.
 
-**1.3 SingleStack speaks as a sharp PMM colleague, not a SaaS app.** No "Welcome back!" No "Awesome!" No "Let's get started!" No "Great job!" No exclamation marks except in rare moments of intentional warmth. The product is a tool a professional uses to do hard work. It does not perform enthusiasm.
+**1.3 SingleStack speaks as a sharp colleague, not a SaaS app.** No "Welcome back!" No "Awesome!" No "Let's get started!" No "Great job!" No exclamation marks except in rare moments of intentional warmth. The product is a tool a professional uses to do hard work. It does not perform enthusiasm.
 
 **1.4 Agents speak as themselves — third person, action-led, no AI hedging.** Named agents (Creative Officer, etc.) refer to themselves by name when relevant. They never say "As an AI..." They never say "I'd be happy to help." They never apologize for routine work. They report what they did and what is needed next.
 
@@ -33,7 +33,7 @@ These are absolute. Copy that violates any of them does not ship, even if it sou
 
 Three dials. They move independently.
 
-- **Voice is constant.** Direct, specific, PMM-fluent. Same across CI, Content, Enablement, Insights. Same whether the user is approving a draft or recovering from an error.
+- **Voice is constant.** Direct, specific, fluent in the user's actual job. Same across Foundation, Intelligence, Product, and Go-to-market. Same whether the user is approving a draft or recovering from an error.
 - **Tone adapts to context.** Routine save → neutral. Destructive action → precise and slightly weighty. Agent failure → matter-of-fact, not apologetic. Critical security warning → direct, no softening.
 - **Specificity scales with stakes.** A "Discard" button can be one word. A "Permanently delete this Product Record and all its Features, Sources, and Ratifications" confirmation cannot.
 
@@ -312,7 +312,7 @@ Before claiming a piece of copy is done, walk this list.
 - For an empty state: do I say what this surface is for and what populates it?
 - For an agent message: is it third-person, action-led, citation-supported, free of "I'd be happy to"?
 - For a button: does the label say what specifically happens?
-- Would a sharp PMM colleague write this in a quick Slack message? If they'd phrase it differently, rewrite it their way.
+- Would a sharp colleague write this in a quick Slack message? If they'd phrase it differently, rewrite it their way.
 
 When the answers are right, ship.
 

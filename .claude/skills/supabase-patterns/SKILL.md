@@ -1,6 +1,6 @@
 ---
 name: supabase-patterns
-description: Govern how SingleStack ships on Supabase — RLS policies, migration conventions, multi-tenant safety, trigger functions, indexes, pgvector setup, realtime patterns, and the rules for promoting changes from local to staging to production. Use this skill any time you are writing a Supabase migration, adding or modifying an RLS policy, setting up auth or memberships, working with pgvector embeddings, configuring realtime subscriptions, generating types, or doing anything that touches the database layer. This skill governs implementation safety; the singlestack-schema skill governs structure; the singlestack-ui skill governs surfaces.
+description: Govern how SingleStack ships on Supabase — RLS policies, migration conventions, multi-tenant safety, trigger functions, indexes, pgvector setup, realtime patterns, and the rules for promoting changes from local to the Dev and Demo tiers. Use this skill any time you are writing a Supabase migration, adding or modifying an RLS policy, setting up auth or memberships, working with pgvector embeddings, configuring realtime subscriptions, generating types, or doing anything that touches the database layer. This skill governs implementation safety; the singlestack-schema skill governs structure; the singlestack-ui skill governs surfaces.
 ---
 
 # Supabase Patterns Skill for SingleStack
@@ -13,13 +13,21 @@ The non-negotiables come first. Everything else is in service of them.
 
 ## 1. The Five Non-Negotiables
 
-These are absolute. A migration that violates any of them does not ship to staging, let alone production.
+These are absolute. A migration that violates any of them does not ship to Dev, let alone Demo.
 
 **1.1 RLS is on. Always. On every table.** No exceptions for "internal" tables, "system" tables, or "we'll fix it later" tables. Row Level Security is the security boundary; without it, a leaked anon key means full database read. Every `create table` is followed in the same migration by `alter table <name> enable row level security;`.
 
 **1.2 The `org_id` boundary is enforced by RLS, never by application code.** Application code can be bypassed, forgotten, or refactored around. RLS cannot. Every policy on every table predicates on `org_id` membership — even tables you "know" only admins will touch.
 
-**1.3 Every migration is idempotent and committed to git.** Migrations run with `create table if not exists`, `create policy if not exists` (or `drop policy if exists` followed by `create policy`), and `create index if not exists`. They are checked into the repo before they run anywhere. The Supabase dashboard SQL editor is for inspection, not for changes.
+**1.3 Every migration is idempotent and committed to git.** Migrations run with `create table if not exists` and `create index if not exists`. They are checked into the repo before they run anywhere. The Supabase dashboard SQL editor is for inspection, not for changes.
+
+Postgres has no `create policy if not exists`. Make policies idempotent one of two ways — `drop policy if exists <name> on <table>;` followed by `create policy`, or the wrapper this repo uses most:
+
+```sql
+do $$ begin
+  create policy <name> on <table> for select to authenticated using (true);
+exception when others then null; end $$;
+```
 
 **1.4 Every new table ships with its RLS policies in the same migration.** A migration that creates a table without policies leaves a table with RLS enabled but no policies — which means *nobody can read or write it*, including the service role for end-user requests. The policies are part of the table definition, not a follow-up.
 
@@ -27,15 +35,17 @@ These are absolute. A migration that violates any of them does not ship to stagi
 
 ---
 
-## 2. Mental Model: Three Environments, One Migration Path
+## 2. Mental Model: Local, Then Two Deployed Tiers
 
-SingleStack runs in three environments, and a change must flow through all three in order.
+SingleStack runs on the Supabase free tier, which allows two projects. There is no staging environment and no production environment — do not write migrations, checklists, or docs that assume them.
 
-- **Local** — Supabase running in Docker on your machine (`supabase start`). All migrations are written and tested here first. Migrations live in `supabase/migrations/`. Reset frequently with `supabase db reset`.
-- **Staging** — A separate Supabase project. Migrations are applied with `supabase db push --linked` against the staging linked project. Real data shape, test data only.
-- **Production** — The live Supabase project. Migrations applied via the same CLI flow, or via Supabase's branching feature for review. Never edited via dashboard.
+- **Local** — Supabase in Docker on your machine (`supabase start`). Every migration is written and tested here first. Migrations live in `supabase/migrations/`. Reset frequently with `supabase db reset`.
+- **Dev** — the `singlestack-dev` project, behind the `development` GitHub Environment. Fed by pushes to `develop`. Throwaway data.
+- **Demo** — the long-lived project behind the `demo` GitHub Environment. Fed by pushes to `main`. Holds the GrowthStudio demo data, so treat it as real.
 
-**The rule:** a migration that has not run cleanly against a fresh local database does not get pushed to staging. A migration that has not been exercised in staging does not get pushed to production. There is no `LOCAL → PROD` shortcut, even for trivial changes.
+**Migrations are applied by CI, never by hand.** The `deploy-supabase` Action runs `supabase db push` for the tier the branch maps to (`develop`→Dev, `main`→Demo) and deploys edge functions in the same run. You do not run `supabase db push --linked` against a remote project, and you do not apply SQL through the dashboard. The Action has no path filter: it runs on *every* push to those branches and re-applies the full migration set, so a later green run supersedes an earlier red one.
+
+**The rule:** a migration that has not run cleanly against a fresh local database does not get pushed to `develop`. Promotion to Demo happens by merging `develop` → `main`, which is a deliberate, explicitly-requested act — see the branch rule in `CLAUDE.md`.
 
 ---
 
@@ -50,7 +60,7 @@ Examples:
 - `20260602133000_add_rls_to_sources.sql`
 - `20260603090000_add_position_to_features.sql`
 
-**One migration, one concern.** A migration creates *one* table and its associated policies, indexes, and triggers — not five tables. A migration adds *one* column or *one* policy. This keeps rollbacks safe and review readable.
+**One migration, one concern.** "Concern" means one coherent change, not strictly one table: a feature that needs three tables to make sense ships them together with their policies, indexes, and triggers. What a migration must not do is bundle unrelated work — a new table plus an unrelated column rename plus a backfill. If you cannot state the migration's purpose in one sentence in its header comment, split it.
 
 **Standard migration structure for a new table:**
 
@@ -400,7 +410,7 @@ Refuse on sight:
 - **`grant all on schema public to anon;`** — The anon role should only have explicitly-granted access, mediated by RLS. Broad grants defeat the security model.
 - **Embedding the service role key in client code.** This is the worst possible mistake. Service role bypasses RLS — it belongs only in trusted server contexts.
 - **Migrations that drop and recreate a table to "rename a column."** Use `alter table ... rename column`. Drop-and-recreate loses RLS, indexes, triggers, FKs, and the row data unless explicitly preserved.
-- **Editing migrations after they have been applied to staging or production.** Migrations are immutable once applied anywhere. Need to change something? Write a new migration.
+- **Editing migrations after they have been applied to a deployed tier.** Migrations are immutable once applied anywhere. Need to change something? Write a new migration. This matters more here than in most repos: the Action re-applies the whole set on every push, so an edited migration silently diverges from what already ran.
 - **Policies without `WITH CHECK` on INSERT or UPDATE.** Half a policy is a security hole. Always include both halves.
 - **Generic policy names like `"allow_all"` or `"users_can_read"`.** Policy names are documentation. Use `<table>_<operation>_<who>` consistently.
 - **Functions without `set search_path`.** A subtle but real privilege-escalation surface. Always set it explicitly.
@@ -410,7 +420,7 @@ Refuse on sight:
 
 ## 13. Pre-Migration Checklist
 
-Before running a migration against staging or production, answer all of these in writing.
+Before pushing a migration to `develop`, answer all of these in writing.
 
 1. Does the migration have a clear single purpose stated in a comment header?
 2. Are all `create` statements idempotent (`if not exists`)?
@@ -423,7 +433,7 @@ Before running a migration against staging or production, answer all of these in
 9. If realtime is needed: is the table added to the `supabase_realtime` publication?
 10. If a function is created: is `search_path` set, is volatility (`stable`/`immutable`) declared, and is the security mode (`invoker` vs `definer`) deliberate?
 
-A migration without all ten yes-answers is not ready for staging.
+A migration without all ten yes-answers is not ready to push.
 
 ---
 
@@ -431,7 +441,7 @@ A migration without all ten yes-answers is not ready for staging.
 
 Before claiming a database change is done, walk this list. Any "no" or "not sure" means it is not done.
 
-- Has the migration been applied successfully to local and staging, in that order?
+- Has the migration run cleanly against a fresh local `supabase db reset`?
 - Have I tested at least one read, one insert, one update, and one delete with a non-service-role user in the relevant org?
 - Have I confirmed that a user in a *different* org cannot see, modify, or delete the new data?
 - Are generated types in sync with the schema?
@@ -439,7 +449,7 @@ Before claiming a database change is done, walk this list. Any "no" or "not sure
 - If this change affects an existing artifact (Ratifications, Sources, etc.), did I confirm existing rows still respect the new constraints?
 - If this change touches a customer-facing surface, did the `singlestack-ui` skill also get applied to whatever UI was added?
 
-When everything is yes, the change is ready for production. Apply it via the CLI, never via the dashboard.
+When everything is yes, push to `develop` and confirm the `deploy-supabase` Action went green — a green Vercel build says nothing about the database. Never apply the change by hand, via the CLI or the dashboard.
 
 ---
 
@@ -449,7 +459,7 @@ The most common SingleStack-on-Supabase failures and their first-look fixes:
 
 - **"No rows returned but I know they exist."** RLS is doing its job; the requesting user is not in the row's `org_id`. Check `auth.uid()` against `org_memberships`.
 - **"Insert fails with `new row violates row-level security policy`."** The `WITH CHECK` clause on the insert policy is being violated. Usually means the inserted `org_id` doesn't match the user's memberships.
-- **"Migration fails on staging but worked locally."** Almost always means staging has data the migration didn't account for. Add a backfill step or a conditional column add.
+- **"Migration fails in CI but worked locally."** Almost always means the deployed tier has data the migration didn't account for. Add a backfill step or a conditional column add. Check the `deploy-supabase` run for the failing statement.
 - **"Realtime not firing."** Table isn't in the `supabase_realtime` publication, or RLS is filtering the row out for the subscribing client.
 - **"`auth.uid()` is null in a function."** The function is being called by the service role, which has no `auth.uid()`. Pass the user ID explicitly or use `security definer` carefully.
 

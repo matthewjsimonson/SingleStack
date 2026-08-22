@@ -1,11 +1,11 @@
 ---
 name: singlestack-ui
-description: Build the frontend and UX for SingleStack — an agentic platform where humans and AI agents co-maintain product marketing artifacts. Use this skill any time you are writing HTML, React, Tailwind, or CSS for SingleStack, designing a new module, prototyping a screen in foundation.html, or making UX decisions about how agents and humans share work. Triggers on requests like "build a screen for X," "design the Y view," "what should this component look like," "style this," or any frontend code generation against the SingleStack schema (Product Records, Modules, Features, GTM Records, Signals, Sources, Agents, Ratifications).
+description: Build the frontend and UX for SingleStack — a product-led growth platform where humans and AI agents co-maintain the artifacts of the PLG loop (sense → decide → build → sell → learn), for product managers and GTM alike. Use this skill any time you are writing React or CSS for SingleStack, designing a new module, or making UX decisions about how agents and humans share work. Triggers on requests like "build a screen for X," "design the Y view," "what should this component look like," "style this," or any frontend code generation against the SingleStack schema (Product Records, Modules, Features, GTM Records, Signals, Sources, Agents, Ratifications).
 ---
 
 # SingleStack UI Skill
 
-This skill governs how SingleStack looks, feels, and behaves. It is opinionated on purpose. The product is an agentic platform for product marketers; the interface is the trust layer between humans and the AI agents acting on their behalf. Get the interface wrong and the agents do not matter.
+This skill governs how SingleStack looks, feels, and behaves. It is opinionated on purpose. The product is a product-led growth platform used by product managers and GTM alike — Build is a first-class module where PMs prototype for real, not a document drafter. The interface is the trust layer between humans and the AI agents acting on their behalf. Get the interface wrong and the agents do not matter.
 
 The non-negotiables come first. Everything else is in service of them.
 
@@ -21,7 +21,7 @@ These are absolute. If a screen violates any of them, it ships broken even if it
 
 **1.3 The user can always interrupt.** Any in-flight agent action exposes a visible Stop control. Users must be able to pause, override, or take the wheel without hunting. Agents are co-workers, not authorities.
 
-**1.4 The agent's reasoning is one click away.** Never one-click-deep. Never never. If the user wants to know *why* the agent did something, they reach it in a single deliberate gesture — a hover, a click, a keystroke. Reasoning is summarized, not buried under raw chain-of-thought.
+**1.4 The agent's reasoning is one gesture away.** If the user wants to know *why* the agent did something, they reach it in a single deliberate gesture — a hover, a click, a keystroke. Never two. Reasoning is summarized, not buried under raw chain-of-thought.
 
 **1.5 Status is always answerable.** "What is happening right now?" must have a visible answer in every state: idle, working, blocked, done, failed. No silent UIs. No mystery spinners. If an agent is thinking, the user sees what it is thinking about.
 
@@ -62,9 +62,9 @@ SingleStack's visual language sits in the lineage of **Frame.io, Linear, Figma, 
 The fastest way to keep the product on-brand is to refuse the following on sight.
 
 - **No purple-to-pink gradients.** Period. Not on buttons, not on backgrounds, not on hero sections. This is the single clearest "AI slop" tell on the web today.
-- **No system fonts.** Never `font-family: system-ui` or Arial or unconfigured Tailwind defaults. Pick a typeface and own it.
+- **No unchosen type.** Never ship a bare `font-family: system-ui`, Arial, or a framework default as the face. Pick a typeface and own it — the app loads Inter and JetBrains Mono. System fonts belong in the fallback stack after your chosen face, never as the choice.
 - **No walls of text.** If a UI surface needs more than ~60 words of body copy, it is the wrong surface. Use progressive disclosure, hover panels, or a side rail.
-- **No decorative emoji in UI chrome.** Functional icons only. Lucide, Phosphor, or a custom set. Never 🚀 or ✨ in a button label.
+- **No decorative emoji in UI chrome.** Functional icons only, drawn as inline SVG (the app ships no icon library). Never 🚀 or ✨ in a button label.
 - **No marketing copy in the product.** "Unlock your potential," "Supercharge your workflow," etc. Replace with what the surface actually does.
 - **No bouncy animations on data.** Numbers do not spring into place. Tables do not fade-slide-rotate. Data appears.
 - **No skeleton loaders longer than 400ms without status text.** If something takes longer, the user gets a sentence about what is happening.
@@ -119,8 +119,8 @@ These are the starting tokens. Use CSS custom properties; never hardcode. If a s
   /* Add more agent colors as agents are added. */
 
   /* Type */
-  --font-sans: "Inter Display", "Söhne", "Geist", system-ui, sans-serif;
-  --font-mono: "Geist Mono", "JetBrains Mono", ui-monospace, monospace;
+  --font-sans: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
+  --font-mono: 'JetBrains Mono', ui-monospace, monospace;
   --text-xs: 12px;
   --text-sm: 13px;
   --text-base: 14px;
@@ -183,9 +183,9 @@ These are the patterns that distinguish SingleStack from a generic SaaS app. Eve
 
 **Reasoning Rail.** A right-side panel that shows the agent's current thinking in plain prose, not raw chain-of-thought. Summarized, scannable, with the ability to expand to full reasoning. Always reachable, never auto-opens.
 
-**Concept Card.** The Recording Studio pattern: a card that surfaces a market signal as a proposed action. Has three zones — the signal (what triggered it), the proposed concept (what the agent thinks), the human controls (accept, modify, dismiss). Cards stack chronologically; dismissed cards fade but remain reachable.
+**Concept Card.** A card that surfaces a signal as a proposed action. Has three zones — the signal (what triggered it), the proposed concept (what the agent thinks), the human controls (accept, modify, dismiss). Cards stack chronologically; dismissed cards fade but remain reachable.
 
-**Diff Surface.** When an agent edits an existing value, the UI always shows what changed. Inline strikethrough for removed text, inline highlight for added text. Never a wholesale "new version" with no comparison. This is non-negotiable for Content and CI modules.
+**Diff Surface.** When an agent edits an existing value, the UI always shows what changed. Inline strikethrough for removed text, inline highlight for added text. Never a wholesale "new version" with no comparison. This is non-negotiable anywhere an agent rewrites a ratified field — Records, Competitive, and Campaigns above all.
 
 **Source-Grounded Drafting.** When an agent drafts content using retrieved sources, each sentence (or claim) carries a small superscript number that links to the source chunk. This is the inline-citation pattern from research tools, applied to product marketing artifacts. Hover reveals the source chunk verbatim.
 
@@ -193,29 +193,34 @@ These are the patterns that distinguish SingleStack from a generic SaaS app. Eve
 
 ## 9. Module-Specific Notes
 
-**Competitive Intelligence.** The Non-Reversible Claim Rule applies to UI text, not just battlecard content: any claim displayed in CI must be sourced and dated. UI should never let an unsourced claim appear in a customer-shareable view.
+The nav groups four areas (see `web/components/Shell.tsx` for the live IA).
 
-**Recording Studio.** Three-step workspace: Frames → Treatment → Handoff. Each step is a distinct surface, not a tab. Progress is visible. The Descript handoff is a real button, not a teaser.
+**Foundation — Product records (`/products`), GTM records (`/gtm`).** The hub. Records are long-lived and field-ratified, so the diff surface and provenance chips matter more here than anywhere else. Full-width, collapsible sections.
 
-**Content.** RAG-grounded drafting per pattern 8 (Source-Grounded Drafting). The chunk attribution panel is always visible while drafting; it does not auto-collapse.
+**Intelligence — Signals (`/signals`), Competitive (`/competitive`), Market (`/market`), Technology (`/frontier`).** Evidence-first. Any claim displayed must be sourced and dated; never let an unsourced claim reach a shareable view. Feeds group by directness and carry their node context.
 
-**Enablement.** Card-based, scannable, optimized for a salesperson reading on a laptop between calls. Avoid long-form prose blocks.
+**Product — Strategy (`/strategy`), Roadmap (`/roadmap`), Ship (`/ship`), Build (`/product-flow`).** Build is the differentiator: PMs prototype for real here, so the surface must treat generated artifacts as working things, not documents about things. Task cards click through to their Build Item.
 
-**Insights.** Tabular monospace for all numbers. Charts are restrained, axis-labeled, and never use a rainbow palette. Sparkline-first; full charts only when zooming in.
+**Go-to-market — GTM (`/gtm-flow`), Campaigns (`/campaigns`), GTM Org (`/gtm-org`).** Card-based and scannable, optimized for someone reading between calls. Avoid long-form prose blocks.
+
+**Numbers, anywhere.** Tabular monospace for all figures. Charts are restrained, axis-labeled, and never rainbow-palette. Sparkline-first; full charts only when zooming in.
 
 ---
 
 ## 10. Implementation Stack
 
-Default to:
-- **React** with functional components and hooks.
-- **Tailwind CSS** using the CSS variables above mapped into the theme.
-- **shadcn/ui** as the primitive layer (Radix under the hood for accessibility). Customize, don't accept defaults.
-- **Lucide** for icons. One icon set, never mixed.
-- **Framer Motion** for non-trivial motion; CSS transitions for everything else.
-- **TanStack Table** for any non-trivial data table.
+This is the stack as it actually is. Do not introduce a library from habit — the app deliberately ships almost none.
 
-For prototype HTML files like `foundation.html`, use vanilla HTML/CSS with the CSS variables block above; no framework required.
+- **Next.js 15 (App Router) + React 19**, function components and hooks.
+- **Styling is a hand-rolled design system in `web/app/globals.css`** — CSS custom properties plus a small component class layer. Compose those classes. There is no Tailwind, no CSS-in-JS, and no ad-hoc inline styles for anything reusable.
+- **No component library.** No shadcn/ui, no Radix, no Material. Primitives are written here; if you need one that doesn't exist, add it to the component layer rather than pulling in a dependency.
+- **Icons are inline SVG.** No icon package is installed.
+- **Motion is CSS transitions.** No Framer Motion.
+- **Tables are hand-built.** No TanStack Table.
+- **TipTap** for rich-text editing (`@tiptap/react`, `tiptap-markdown`).
+- **Supabase** via `@supabase/supabase-js` and `@supabase/ssr` for data and auth.
+
+Adding a dependency is a real decision with a real cost. If a task seems to need one, say so and get agreement before installing it.
 
 ---
 

@@ -3,8 +3,6 @@
 ## What it is
 A product-led growth platform spanning the full loop — sense → decide → build → sell → learn — for product managers and GTM alike. The Build module is first-class: PMs use AI to produce real, working prototypes, not just documents. Marketing/GTM artifacts are one surface among several, not the product's identity.
 
-`.claude/skills/singlestack-ui` and `.claude/skills/singlestack-voice` still describe SingleStack as a product-marketing tool for PMMs. They are stale; this section wins.
-
 ## Branches
 All work happens on `develop`. Never push to, sync, or create another branch — not `main`, not `claude/*` — unless the user says so in that message. Nothing enforces this; it is on you.
 
@@ -22,5 +20,3 @@ Two independent surfaces. Vercel builds the web app; the `deploy-supabase` Actio
 
 ## Migrations
 Before altering an existing table, read its full history — every `alter table <name>` across `supabase/migrations/`, not just the `create table`. Columns, constraints, and nullability drift over time; assuming the original shape is how you ship redundant columns and contradictory constraints.
-
-`create policy if not exists` is not valid Postgres. This repo wraps policy creation in `do $$ begin ... exception when others then null; end $$;` — follow that, not `.claude/skills/supabase-patterns` §1.3.
