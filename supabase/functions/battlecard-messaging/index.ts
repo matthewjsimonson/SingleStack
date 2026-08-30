@@ -25,11 +25,9 @@ import Anthropic from "npm:@anthropic-ai/sdk@0.69.0";
 import { createClient, type SupabaseClient } from "npm:@supabase/supabase-js@2";
 import { resolveModelPolicy } from "../_shared/ai_policy.ts";
 import { FIELD_WRITING_RULES } from "../_shared/field_writing.ts";
+import { PRICING } from "../_shared/ai_usage.ts";
 
 const MODEL = "claude-opus-5";
-const PRICING: Record<string, { input: number; output: number }> = {
-  "claude-opus-5": { input: 5, output: 25 },
-};
 const CORS = {
   "Access-Control-Allow-Origin": "*",
   "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type, x-supabase-api-version",

@@ -6,6 +6,7 @@
 // arrive (streamed, gateway-buffered into one blob, or a JSON { reply }).
 import { useCallback, useEffect, useRef, useState, type CSSProperties } from "react";
 import { Markdown } from "./Markdown";
+import { applyEvent, createParser, emptyActivity, type Activity } from "@/lib/agentStream";
 
 export const CHAT_PHASES = ["Reading your question", "Pulling the context", "Thinking it through", "Writing the reply"];
 export const RUN_PHASES = ["Reading the context", "Weighing the evidence", "Forming the take", "Structuring the output"];
@@ -145,15 +146,20 @@ export async function streamAgentChat(opts: {
   }
 }
 
-// Like streamAgentChat, but for STRUCTURED functions (run-workflow / agent-propose):
-// the stream is the real reasoning, then ANSWER_MARK, then the final JSON result.
-// onThinking() gets the live reasoning; the parsed result is returned. Falls back
-// to the plain JSON response if the function isn't streaming yet.
+// Like streamAgentChat, but for STRUCTURED functions (run-workflow / agent-propose).
+//
+// Speaks BOTH stream protocols via the shared parser in lib/agentStream:
+//   • activity (current) — typed step/source/think/answer events
+//   • legacy             — raw reasoning, an ANSWER_MARK, then the JSON result
+// onActivity() receives the folded activity so a caller can render the step
+// list; onThinking() still receives raw reasoning deltas for callers that only
+// want the trace. The parsed result is returned either way.
 export async function streamStructured<T = unknown>(opts: {
   fnName: string;
   body: Record<string, unknown>;
   token?: string;
-  onThinking: (s: string) => void;
+  onThinking?: (s: string) => void;
+  onActivity?: (a: Activity) => void;
 }): Promise<T> {
   const base = process.env.NEXT_PUBLIC_SUPABASE_URL ?? "";
   const resp = await fetch(`${base}/functions/v1/${opts.fnName}`, {
@@ -174,20 +180,26 @@ export async function streamStructured<T = unknown>(opts: {
   if (!resp.body) throw new Error("no response body");
   const reader = resp.body.getReader();
   const dec = new TextDecoder();
-  let inResult = false;
+
+  let activity = emptyActivity();
   let resultBuf = "";
+  let streamError: string | undefined;
+  const parser = createParser((e) => {
+    if (e.t === "answer") resultBuf += e.text;
+    if (e.t === "error") streamError = e.message;
+    if (e.t === "think") opts.onThinking?.(e.text);
+    activity = applyEvent(activity, e);
+    opts.onActivity?.(activity);
+  });
+
   for (;;) {
     const { done, value } = await reader.read();
     if (done) break;
-    const s = dec.decode(value, { stream: true });
-    if (!s) continue;
-    if (inResult) { resultBuf += s; continue; }
-    const idx = s.indexOf(ANSWER_MARK);
-    if (idx === -1) { opts.onThinking(s); continue; }
-    if (idx > 0) opts.onThinking(s.slice(0, idx));
-    inResult = true;
-    resultBuf += s.slice(idx + ANSWER_MARK.length);
+    parser.push(dec.decode(value, { stream: true }));
   }
+  parser.end();
+
+  if (streamError) throw new Error(streamError);
   const parsed = JSON.parse(resultBuf || "{}");
   if (parsed?.error) throw new Error(parsed.error);
   return parsed as T;

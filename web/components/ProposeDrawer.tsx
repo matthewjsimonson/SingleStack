@@ -10,6 +10,8 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { createClient } from "@/lib/supabase/client";
 import { Chip, Confidence } from "@/components/ui";
 import { PulseDots, streamStructured } from "@/components/alive";
+import AgentActivity from "@/components/AgentActivity";
+import { emptyActivity, type Activity } from "@/lib/agentStream";
 
 type Advisor = { key: string; name: string; short: string; accent: string };
 type Change = {
@@ -49,6 +51,7 @@ export default function ProposeDrawer({ open, onClose, mode, target, advisors, o
 }) {
   const supabase = createClient();
   const [thinking, setThinking] = useState("");
+  const [activity, setActivity] = useState<Activity>(emptyActivity());
   const [busy, setBusy] = useState(false);
   const [pending, setPending] = useState<Pending[]>([]);
   const [loaded, setLoaded] = useState(false);
@@ -58,7 +61,6 @@ export default function ProposeDrawer({ open, onClose, mode, target, advisors, o
   const [confirmClear, setConfirmClear] = useState(false);
   const [edits, setEdits] = useState<Record<string, string>>({}); // change.id -> HITL-edited value
   const [freshIds, setFreshIds] = useState<Set<string>>(new Set()); // proposals drafted in THIS session (run mode shows only these)
-  const traceRef = useRef<HTMLDivElement>(null);
   const started = useRef(false);
 
   const idKey = target.kind === "product" ? "product_id" : "gtm_record_id";
@@ -99,7 +101,7 @@ export default function ProposeDrawer({ open, onClose, mode, target, advisors, o
   }, [supabase, idKey, target.id]);
 
   const run = useCallback(async () => {
-    setBusy(true); setThinking(""); setError(null);
+    setBusy(true); setThinking(""); setActivity(emptyActivity()); setError(null);
     try {
       const { data: sess } = await supabase.auth.getSession();
       const res = await streamStructured<{ proposal_id?: string }>({
@@ -107,6 +109,7 @@ export default function ProposeDrawer({ open, onClose, mode, target, advisors, o
         token: sess.session?.access_token,
         body: { agent_keys: advisors.map((a) => a.key), agent_key: advisors[0]?.key, [idKey]: target.id },
         onThinking: (s) => setThinking((p) => p + s),
+        onActivity: setActivity,
       });
       if (res?.proposal_id) setFreshIds((prev) => new Set(prev).add(res.proposal_id as string));
       await loadPending();
@@ -116,11 +119,10 @@ export default function ProposeDrawer({ open, onClose, mode, target, advisors, o
 
   // On open: load what's waiting, and (run mode) kick off a fresh proposal once.
   useEffect(() => {
-    if (!open) { started.current = false; setThinking(""); setBusy(false); setError(null); setPending([]); setLoaded(false); setFreshIds(new Set()); setEdits({}); setConfirmClear(false); return; }
+    if (!open) { started.current = false; setThinking(""); setActivity(emptyActivity()); setBusy(false); setError(null); setPending([]); setLoaded(false); setFreshIds(new Set()); setEdits({}); setConfirmClear(false); return; }
     loadPending();
     if (mode === "run" && !started.current) { started.current = true; run(); }
   }, [open, mode, loadPending, run]);
-  useEffect(() => { traceRef.current?.scrollTo({ top: traceRef.current.scrollHeight }); }, [thinking]);
 
   async function accept(id: string) {
     setActing(id); setError(null); setNotice(null);
@@ -198,13 +200,11 @@ export default function ProposeDrawer({ open, onClose, mode, target, advisors, o
           {error && <div className="banner banner-error" style={{ marginBottom: 12 }}>{error}</div>}
           {notice && <div className="banner" style={{ background: "var(--am-fill)", color: "var(--am-text)", marginBottom: 12 }}>{notice}</div>}
 
-          {/* live reasoning while a new proposal is drafted */}
-          {(busy || (mode === "run" && thinking)) && (
+          {/* What the officers are actually doing, step by step, as it happens. */}
+          {(busy || (mode === "run" && (activity.steps.length > 0 || thinking))) && (
             <div style={{ marginBottom: 16 }}>
-              <div className="t-label" style={{ color: "var(--ac)", marginBottom: 6 }}>{busy ? <>{names} are working<PulseDots /></> : "How they got here"}</div>
-              <div ref={traceRef} style={{ fontSize: 11.5, lineHeight: 1.5, fontStyle: "italic", whiteSpace: "pre-wrap", color: "var(--tm)", borderLeft: "2px solid var(--border)", paddingLeft: 10, maxHeight: busy ? 300 : 120, overflowY: "auto" }}>
-                {thinking || "Thinking it through…"}
-              </div>
+              <div className="t-label" style={{ color: "var(--ac)", marginBottom: 8 }}>{busy ? <>{names} are working<PulseDots /></> : "How they got here"}</div>
+              <AgentActivity activity={activity} busy={busy} who={names} />
             </div>
           )}
 

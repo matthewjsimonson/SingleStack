@@ -23,26 +23,16 @@ import Anthropic from "npm:@anthropic-ai/sdk@0.69.0";
 import { createClient, type SupabaseClient } from "npm:@supabase/supabase-js@2";
 import { resolveModelPolicy } from "../_shared/ai_policy.ts";
 import { FIELD_WRITING_RULES } from "../_shared/field_writing.ts";
+import { PRICING } from "../_shared/ai_usage.ts";
+import { noProgress, type Progress, progress } from "../_shared/progress.ts";
 const DEFAULT_CLAUDE_MODEL = "claude-opus-5";
 const DEFAULT_TOP_K = 6;
-
-// Per-1M-token prices (USD) for cost accounting. Unknown models → cost left null.
-const PRICING: Record<string, { input: number; output: number }> = {
-  "claude-opus-5": { input: 5, output: 25 },
-  "claude-opus-4-7": { input: 5, output: 25 },
-  "claude-sonnet-5": { input: 3, output: 15 },
-  "claude-haiku-4-5": { input: 1, output: 5 },
-};
 
 const CORS = {
   "Access-Control-Allow-Origin": "*",
   "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type, x-supabase-api-version",
   "Access-Control-Allow-Methods": "POST, OPTIONS",
 };
-
-// Separates the streamed reasoning trace from the final JSON result (the client
-// splits on the same glyph). Won't occur in normal model output.
-const ANSWER_MARK = "␞";
 
 // The shape we ask Claude to return (structured outputs guarantee valid JSON).
 // Mirrors proposals + proposal_changes. conf_level range is clamped in code
@@ -108,6 +98,7 @@ Deno.serve(async (req: Request) => {
     gtm_record_id?: string;
     instruction?: string;
     top_k?: number;
+    stream?: boolean;
   };
   try {
     input = await req.json();
@@ -142,6 +133,9 @@ Deno.serve(async (req: Request) => {
   if (!agent) return json({ error: `no active agent with key '${primaryKey}'` }, 404);
 
   const orgId = agent.org_id as string;
+  // Capture past the null-check: TS re-widens `agent` inside nested closures.
+  const agentName = agent.name as string;
+  const agentId = agent.id as string;
   const pol = await resolveModelPolicy(supabase, { task: "agent_propose", agentId: agent.id as string, fallback: { model: (agent.model as string) || DEFAULT_CLAUDE_MODEL, effort: "high" } });
   const model = pol.model;
 
@@ -154,24 +148,26 @@ Deno.serve(async (req: Request) => {
   if (runErr) return json({ error: `could not start run: ${runErr.message}` }, 500);
   const runId = run.id as string;
 
-  // From here on, failures are recorded on the run before returning.
-  const fail = async (message: string, status = 500) => {
-    await supabase
-      .from("agent_runs")
-      .update({ status: "failed", error: message, finished_at: new Date().toISOString() })
-      .eq("id", runId);
-    return json({ error: message, run_id: runId }, status);
-  };
+  // A 404 has to survive being thrown out of execute().
+  class HttpError extends Error {
+    status: number;
+    constructor(message: string, status = 500) { super(message); this.status = status; }
+  }
 
-  try {
+  // The whole job, narrating itself through `p`. One implementation serves both
+  // the streaming and the plain-JSON callers — the only difference is whether
+  // `p` writes to a stream or discards. Throws on failure; the caller records
+  // that on the run.
+  const execute = async (p: Progress) => {
     // ---- load the target record + its fields --------------------------------
+    p.step("record", `Reading the ${product_id ? "product" : "GTM"} record`);
     const { data: record, error: recErr } = await supabase
       .from(targetTable)
       .select("*")
       .eq("id", targetId)
       .maybeSingle();
     if (recErr) throw new Error(`record lookup failed: ${recErr.message}`);
-    if (!record) return await fail(`no ${targetTable} with id '${targetId}'`, 404);
+    if (!record) throw new HttpError(`no ${targetTable} with id '${targetId}'`, 404);
 
     const { data: fields, error: fieldsErr } = await supabase
       .from("record_fields")
@@ -179,6 +175,9 @@ Deno.serve(async (req: Request) => {
       .eq(fieldFk, targetId)
       .order("position", { ascending: true });
     if (fieldsErr) throw new Error(`fields lookup failed: ${fieldsErr.message}`);
+    p.done("record", `${(fields ?? []).length} fields`);
+
+    p.step("context", "Recalling its skills and connected areas");
 
     // ---- the agent's skills + connected areas (mirror agent-chat) -----------
     // The officer proposes USING its playbooks, grounded in the intelligence of
@@ -197,11 +196,15 @@ Deno.serve(async (req: Request) => {
     const areas = declaredAreas.length ? declaredAreas : ["products", "gtm", "signals", "capabilities", "records"];
     const seesSignals = areas.includes("signals") || areas.includes("records");
     const seesCaps = areas.includes("capabilities") || seesSignals;
+    p.done("context", `${skills.length} ${skills.length === 1 ? "skill" : "skills"} · ${areas.length} ${areas.length === 1 ? "area" : "areas"}`);
 
     // ---- intelligence grounding, scoped to the agent's areas ----------------
+    p.step("intel", "Reviewing the intelligence");
     const intel: string[] = [];
+    let signalsRead = 0;
     if (gtm_record_id) {
       const { data: gsigs } = await supabase.from("signals").select("title, why").eq("gtm_record_id", targetId).order("observed_at", { ascending: false }).limit(10);
+      signalsRead += (gsigs ?? []).length;
       if ((gsigs ?? []).length) intel.push("SIGNALS ON THIS RECORD:\n" + (gsigs ?? []).map((s) => `• ${s.title}${s.why ? ` (${s.why})` : ""}`).join("\n"));
     }
     if (seesSignals || seesCaps) {
@@ -216,14 +219,15 @@ Deno.serve(async (req: Request) => {
       if (seesSignals && (themes ?? []).length) intel.push("ACTIVE THEMES:\n" + (themes ?? []).map((t) => `• [${t.state}/${t.momentum}] ${t.title}${t.summary ? ` — ${t.summary}` : ""}${t.recommendation ? ` → ${t.recommendation}` : ""}`).join("\n"));
       if (seesCaps && caps.length) intel.push("FRONTIER MODEL CAPABILITIES TO LEVERAGE (act on these in your own domain):\n" + caps.map((s) => `• ${s.metadata?.provider ? `[${s.metadata.provider}${s.metadata?.area ? `/${s.metadata.area}` : ""}] ` : ""}${s.title}${s.why ? ` — ${s.why}` : ""}`).join("\n"));
       if (seesSignals && sgs.length) intel.push("RECENT SIGNALS:\n" + sgs.map((s) => `• ${s.title}${s.why ? ` (${s.why})` : ""}`).join("\n"));
+      signalsRead += (rawSigs ?? []).length;
     }
+    p.done("intel", signalsRead ? `${signalsRead} signals` : "nothing new in your areas");
 
     // ---- retrieval (RAG) parked: Anthropic-only ----------------------------
     // RAG needs an embedding model and Anthropic has no embeddings API, so the
     // agent reasons from the record + its fields alone. The documents /
     // document_chunks tables and match_document_chunks RPC remain in place, so
     // retrieval can be re-enabled later without schema changes.
-    const chunks: Array<Record<string, unknown>> = [];
 
     // ---- ask Claude for a proposal ------------------------------------------
     const anthropic = new Anthropic({ apiKey: anthropicKey });
@@ -266,6 +270,7 @@ Deno.serve(async (req: Request) => {
       const { data: adv } = await supabase.from("agents").select("id, name, model, system_prompt").eq("key", advKey).eq("is_active", true).maybeSingle();
       if (!adv) continue;
       advisorNames.push(adv.name as string);
+      p.step(`advisor:${advKey}`, `Consulting ${adv.name}`);
       const { data: advSkillRows } = await supabase.from("agent_skills").select("skills ( name, instructions )").eq("agent_id", adv.id);
       // deno-lint-ignore no-explicit-any
       const advSkills = (advSkillRows ?? []).map((r: any) => r.skills).filter(Boolean);
@@ -289,7 +294,12 @@ Deno.serve(async (req: Request) => {
         } as any)) as Anthropic.Message;
         const t = advMsg.content.find((b) => b.type === "text");
         if (t && t.type === "text" && t.text.trim()) lenses.push(`### ${adv.name}'s lens\n${t.text.trim()}`);
-      } catch { /* skip a failed advisor */ }
+        p.done(`advisor:${advKey}`, "lens added");
+      } catch {
+        // An advisor failing never sinks the proposal — but say so rather than
+        // quietly dropping a contributor the user was told would weigh in.
+        p.fail(`advisor:${advKey}`, "unavailable");
+      }
     }
 
     const userText = [
@@ -312,22 +322,28 @@ Deno.serve(async (req: Request) => {
     // instead of leaving it in the review queue. Default propose_only ⇒ pending.
     // (review_policies; absent row = propose_only.)
     let autoAccepted = false;
-    async function maybeAutoAccept(pid: string) {
+    async function maybeAutoAccept(pid: string, p: Progress) {
       const { data: pol } = await supabase.from("review_policies").select("mode").eq("org_id", orgId).eq("surface", "records").maybeSingle();
       if (pol?.mode === "autonomous") {
         // Conflict-aware: accept_proposal returns 'accepted' | 'conflicted'. Only
         // a clean apply counts as auto-accepted; a 'conflicted' result means the
         // record moved since drafting — it stays flagged for human re-review,
         // never silently applied (optimistic concurrency holds even autonomously).
-        const { data: result, error } = await supabase.rpc("accept_proposal", { p_proposal: pid, p_ratifier: `${agent.name} (autonomous policy)` });
+        const { data: result, error } = await supabase.rpc("accept_proposal", { p_proposal: pid, p_ratifier: `${agentName} (autonomous policy)` });
         if (!error && result === "accepted") autoAccepted = true;
+        // A 'conflicted' result means the record moved while the agent drafted;
+        // say which happened rather than reporting a bare success.
+        p.done("land", autoAccepted ? "ratified under the autonomous policy" : "held for review — the record changed while drafting");
+        return;
       }
+      p.done("land", "waiting for your review");
     }
 
     // Persist a parsed proposal + its field changes; returns a compact summary
     // (including a readable change list) used by both the streaming and JSON paths.
     // deno-lint-ignore no-explicit-any
-    async function persist(proposal: any, usage: { input_tokens: number; output_tokens: number }) {
+    async function persist(proposal: any, usage: { input_tokens: number; output_tokens: number }, p: Progress) {
+      p.step("land", "Landing the proposal");
       const confLevel = Math.min(1, Math.max(0, Number(proposal.conf_level) || 0));
       const { data: createdProposal, error: propErr } = await supabase
         .from("proposals").insert({
@@ -354,180 +370,72 @@ Deno.serve(async (req: Request) => {
         const { error: chErr } = await supabase.from("proposal_changes").insert(rows);
         if (chErr) { await supabase.from("proposals").delete().eq("id", pid); throw new Error(`could not save changes: ${chErr.message}`); }
       }
-      await maybeAutoAccept(pid);
+      await maybeAutoAccept(pid, p);
       const price = PRICING[model];
       const cost = price ? (usage.input_tokens * price.input + usage.output_tokens * price.output) / 1_000_000 : null;
       await supabase.from("agent_runs").update({ status: "succeeded", output: JSON.stringify(proposal), input_tokens: usage.input_tokens, output_tokens: usage.output_tokens, cost_usd: cost, finished_at: new Date().toISOString() }).eq("id", runId);
       return { run_id: runId, proposal_id: pid, auto_accepted: autoAccepted, proposal: { title: proposal.title, rationale: proposal.rationale, conf_level: confLevel, conf_label: proposal.conf_label, proposed_by: jointBy, changes: display } };
     }
 
-    // Streaming path: emit the author's REAL reasoning, then a marker, then the
-    // persisted proposal as JSON. (Advisor lenses above already ran.)
-    if (input.stream) {
-      const enc = new TextEncoder();
-      const stream = new ReadableStream({
-        async start(controller) {
-          try {
-            // deno-lint-ignore no-explicit-any
-            const s = anthropic.messages.stream(requestBody as any);
-            // deno-lint-ignore no-explicit-any
-            for await (const ev of s as any) {
-              if (ev.type === "content_block_delta" && ev.delta?.type === "thinking_delta" && ev.delta.thinking) {
-                controller.enqueue(enc.encode(ev.delta.thinking));
-              }
-            }
-            const message = await s.finalMessage();
-            const tb = message.content.find((b: { type: string }) => b.type === "text");
-            if (!tb || tb.type !== "text") throw new Error(`no proposal returned (stop_reason: ${message.stop_reason})`);
-            if (message.stop_reason === "max_tokens") throw new Error("The proposal ran out of room before finishing (hit the token cap). Try again, or narrow what you asked for.");
-            let parsed;
-            try { parsed = JSON.parse(tb.text); } catch { throw new Error("The proposal came back malformed — likely truncated. Try again, or narrow what you asked for."); }
-            const summary = await persist(parsed, message.usage);
-            controller.enqueue(enc.encode(ANSWER_MARK + JSON.stringify(summary)));
-          } catch (e) {
-            const msg = e instanceof Error ? e.message : String(e);
-            await supabase.from("agent_runs").update({ status: "failed", error: msg, finished_at: new Date().toISOString() }).eq("id", runId);
-            controller.enqueue(enc.encode(ANSWER_MARK + JSON.stringify({ error: msg })));
-          } finally { controller.close(); }
-        },
-      });
-      return new Response(stream, { headers: { ...CORS, "content-type": "text/plain; charset=utf-8", "cache-control": "no-cache" } });
-    }
-
-    // Cast the body to `any`: adaptive thinking / output_config / effort may be
-    // newer than the pinned SDK's request types, but the SDK forwards the body
-    // verbatim, so the API receives them. Response is a (non-streaming) Message.
-    const message = (await anthropic.messages.create({
-      model,
-      max_tokens: 24000,
-      thinking: { type: "adaptive", display: "summarized" },
-      output_config: {
-        effort: pol.effort,
-        format: { type: "json_schema", schema: PROPOSAL_SCHEMA },
-      },
-      system: [{ type: "text", text: systemText, cache_control: { type: "ephemeral" } }],
-      messages: [{ role: "user", content: userText }],
-      // deno-lint-ignore no-explicit-any
-    } as any)) as Anthropic.Message;
-
-    const textBlock = message.content.find((b) => b.type === "text");
-    if (!textBlock || textBlock.type !== "text") {
-      throw new Error(`Claude returned no text (stop_reason: ${message.stop_reason})`);
-    }
-    if (message.stop_reason === "max_tokens") throw new Error("The proposal ran out of room before finishing (hit the token cap). Try again, or narrow what you asked for.");
-    const proposal = JSON.parse(textBlock.text) as {
-      title: string;
-      rationale: string;
-      conf_level: number;
-      conf_label: string;
-      changes: Array<{
-        change_kind: "update_field" | "add_field";
-        record_field_id: string | null;
-        field_key: string | null;
-        label: string | null;
-        proposed_value: string;
-      }>;
-    };
-
-    // ---- persist the proposal + its field-level changes ---------------------
-    const confLevel = Math.min(1, Math.max(0, Number(proposal.conf_level) || 0));
-    const { data: createdProposal, error: propErr } = await supabase
-      .from("proposals")
-      .insert({
-        org_id: orgId,
-        product_id: product_id ?? null,
-        gtm_record_id: gtm_record_id ?? null,
-        title: proposal.title,
-        rationale: proposal.rationale,
-        conf_level: confLevel,
-        conf_label: proposal.conf_label,
-        proposed_by: [agent.name, ...advisorNames].join(" + "), // joint authorship
-      })
-      .select("id")
-      .single();
-    if (propErr) throw new Error(`could not create proposal: ${propErr.message}`);
-    const proposalId = createdProposal.id as string;
-
-    type ChangeRow = {
-      org_id: string;
-      proposal_id: string;
-      change_kind: "update_field" | "add_field";
-      record_field_id: string | null;
-      old_value: string | null;
-      field_key: string | null;
-      label: string | null;
-      proposed_value: string;
-    };
-
-    const knownFieldIds = new Set((fields ?? []).map((f) => f.id));
-    const changeRows: ChangeRow[] = (proposal.changes ?? [])
-      .map((c): ChangeRow | null => {
-        if (c.change_kind === "update_field" && c.record_field_id && knownFieldIds.has(c.record_field_id)) {
-          const existing = (fields ?? []).find((f) => f.id === c.record_field_id);
-          return {
-            org_id: orgId,
-            proposal_id: proposalId,
-            change_kind: "update_field",
-            record_field_id: c.record_field_id,
-            old_value: existing?.value ?? null,
-            field_key: null,
-            label: null,
-            proposed_value: c.proposed_value,
-          };
-        }
-        if (c.change_kind === "add_field" && c.field_key && c.label) {
-          return {
-            org_id: orgId,
-            proposal_id: proposalId,
-            change_kind: "add_field",
-            record_field_id: null,
-            old_value: null,
-            field_key: c.field_key,
-            label: c.label,
-            proposed_value: c.proposed_value,
-          };
-        }
-        return null; // drop changes that don't satisfy the table's shape constraint
-      })
-      .filter((r): r is ChangeRow => r !== null);
-
-    if (changeRows.length > 0) {
-      const { error: changesErr } = await supabase.from("proposal_changes").insert(changeRows);
-      if (changesErr) {
-        // Compensating cleanup: don't leave an orphaned proposal with no changes.
-        await supabase.from("proposals").delete().eq("id", proposalId);
-        throw new Error(`could not save changes: ${changesErr.message}`);
+    // ---- draft the proposal -------------------------------------------------
+    // Always streamed from the API: it is how the reasoning reaches `p` while
+    // the model works, and it keeps a 24k-token response off the HTTP timeout.
+    p.step("draft", "Drafting the proposal");
+    // deno-lint-ignore no-explicit-any
+    const streamed = anthropic.messages.stream(requestBody as any);
+    // deno-lint-ignore no-explicit-any
+    for await (const ev of streamed as any) {
+      if (ev.type === "content_block_delta" && ev.delta?.type === "thinking_delta" && ev.delta.thinking) {
+        p.think(ev.delta.thinking);
       }
     }
-    await maybeAutoAccept(proposalId);
+    const message = await streamed.finalMessage();
+    const tb = message.content.find((b: { type: string }) => b.type === "text");
+    if (!tb || tb.type !== "text") throw new Error(`no proposal returned (stop_reason: ${message.stop_reason})`);
+    if (message.stop_reason === "max_tokens") throw new Error("The proposal ran out of room before finishing (hit the token cap). Try again, or narrow what you asked for.");
+    let parsed;
+    try { parsed = JSON.parse(tb.text); } catch { throw new Error("The proposal came back malformed — likely truncated. Try again, or narrow what you asked for."); }
+    p.done("draft", parsed?.title ? String(parsed.title) : undefined);
 
-    // ---- close out the run --------------------------------------------------
-    const usage = message.usage;
-    const price = PRICING[model];
-    const cost = price
-      ? (usage.input_tokens * price.input + usage.output_tokens * price.output) / 1_000_000
-      : null;
+    return await persist(parsed, message.usage, p);
+  };
 
-    await supabase
-      .from("agent_runs")
-      .update({
-        status: "succeeded",
-        output: JSON.stringify(proposal),
-        input_tokens: usage.input_tokens,
-        output_tokens: usage.output_tokens,
-        cost_usd: cost,
-        finished_at: new Date().toISOString(),
-      })
+  // ---- dispatch -------------------------------------------------------------
+  const failRun = async (msg: string) => {
+    await supabase.from("agent_runs")
+      .update({ status: "failed", error: msg, finished_at: new Date().toISOString() })
       .eq("id", runId);
+  };
 
-    return json({
-      run_id: runId,
-      proposal_id: proposalId,
-      auto_accepted: autoAccepted,
-      retrieved: (chunks ?? []).length,
-      proposal: { ...proposal, conf_level: confLevel, changes_saved: changeRows.length },
+  // Streaming caller: the activity protocol. The stream opens BEFORE any of the
+  // slow work, so consulting advisors and drafting are narrated as they happen
+  // rather than reported once they are already over.
+  if (input.stream) {
+    const stream = new ReadableStream({
+      async start(controller) {
+        const p = progress(controller);
+        try {
+          const summary = await execute(p);
+          p.answer(JSON.stringify(summary));
+        } catch (e) {
+          const msg = e instanceof Error ? e.message : String(e);
+          await failRun(msg);
+          p.error(msg);
+        } finally {
+          controller.close();
+        }
+      },
     });
+    return new Response(stream, { headers: { ...CORS, "content-type": "text/plain; charset=utf-8", "cache-control": "no-cache" } });
+  }
+
+  // Plain-JSON caller: same code path, narration discarded.
+  try {
+    return json(await execute(noProgress()));
   } catch (e) {
-    return await fail(e instanceof Error ? e.message : String(e));
+    const msg = e instanceof Error ? e.message : String(e);
+    const status = (e as { status?: number })?.status ?? 500;
+    await failRun(msg);
+    return json({ error: msg, run_id: runId }, status);
   }
 });

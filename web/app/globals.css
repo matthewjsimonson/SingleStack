@@ -412,3 +412,55 @@ body[data-sb="1"] .app-aside {
 .tiptap-host .ProseMirror code { font-family: var(--font-mono, ui-monospace, monospace); font-size: 12.5px; background: var(--fill); padding: 1px 5px; border-radius: 4px; }
 /* Empty-doc affordance so the editor never looks broken when a field is blank. */
 .tiptap-host .ProseMirror p.is-editor-empty:first-child::before { content: attr(data-placeholder); color: var(--tm); float: left; height: 0; pointer-events: none; }
+
+/* ============================================================================
+   Agent activity — the live step list (components/AgentActivity.tsx).
+   Every row is a real event from the edge function; nothing here is animated
+   on a schedule except the spinner on the step that is genuinely running.
+   ============================================================================ */
+.agent-activity { display: flex; flex-direction: column; gap: 2px; }
+
+.agent-step { display: grid; grid-template-columns: 16px 1fr; gap: 9px; align-items: start; padding: 3px 0; }
+.agent-step-glyph { display: inline-flex; align-items: center; justify-content: center; height: 18px; }
+.agent-step-body { display: flex; flex-direction: column; gap: 4px; min-width: 0; }
+.agent-step-label { font-size: 12.5px; color: var(--ts); line-height: 1.45; }
+.agent-step.is-running .agent-step-label { color: var(--tp); font-weight: 600; }
+.agent-step.is-fail .agent-step-label { color: var(--rd-text); }
+.agent-step-detail { color: var(--tm); font-weight: 400; }
+
+.agent-tick { color: var(--gn-text); font-weight: 700; font-size: 11px; line-height: 1; }
+.agent-cross { color: var(--rd-text); font-weight: 700; font-size: 11px; line-height: 1; }
+.agent-spin {
+  width: 9px; height: 9px; border-radius: 50%;
+  border: 2px solid var(--ac); border-top-color: transparent;
+  animation: agent-spin 0.7s linear infinite;
+}
+@keyframes agent-spin { to { transform: rotate(360deg); } }
+
+/* The tail of the model's real reasoning, under the step it belongs to. */
+.agent-reason {
+  font-size: 11.5px; line-height: 1.5; color: var(--tm); font-style: italic;
+  border-left: 2px solid var(--border); padding-left: 9px;
+  max-height: 66px; overflow: hidden;
+  display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 3;
+}
+
+.agent-srcs { display: flex; flex-wrap: wrap; gap: 4px; }
+.agent-src {
+  display: inline-flex; align-items: center; gap: 5px;
+  font-family: 'JetBrains Mono', ui-monospace, monospace; font-size: 10.5px;
+  background: var(--fill); border: 1px solid var(--border);
+  border-radius: 4px; padding: 1px 6px; color: var(--ts);
+}
+.agent-src svg { width: 10px; height: 10px; flex: none; opacity: 0.85; }
+.agent-src-initial {
+  width: 10px; height: 10px; flex: none; display: inline-flex;
+  align-items: center; justify-content: center;
+  font-size: 8px; font-weight: 700; border-radius: 2px;
+  background: var(--fill-2); color: var(--tm);
+}
+.agent-src-n { color: var(--tm); font-variant-numeric: tabular-nums; }
+
+@media (prefers-reduced-motion: reduce) {
+  .agent-spin { animation: none; border-top-color: var(--ac); opacity: 0.65; }
+}
