@@ -23,7 +23,7 @@ import { createClient, type SupabaseClient } from "npm:@supabase/supabase-js@2";
 import { logUsage } from "../_shared/ai_usage.ts";
 import { resolveModelPolicy } from "../_shared/ai_policy.ts";
 
-const MODEL = "claude-opus-4-8";
+const MODEL = "claude-opus-5";
 const MAX_CHANGES = 5;       // hard cap on proposed changes per run (anti-over-rotation)
 const RECENT_DAYS = 7;       // skills evolved within this window are skipped
 const CORS = {
@@ -185,7 +185,7 @@ Deno.serve(async (req: Request) => {
     const resp = (await anthropic.messages.create({
       model: pol.model,
       max_tokens: 6000,
-      thinking: { type: "adaptive" },
+      thinking: { type: "adaptive", display: "summarized" },
       output_config: { effort: pol.effort, format: { type: "json_schema", schema: SCHEMA } },
       system: [{ type: "text", text: system, cache_control: { type: "ephemeral" } }],
       messages: [{ role: "user", content: userMsg }],

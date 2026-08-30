@@ -27,7 +27,7 @@ import { logUsage } from "../_shared/ai_usage.ts";
 import { resolveModelPolicy } from "../_shared/ai_policy.ts";
 import { FIELD_WRITING_RULES } from "../_shared/field_writing.ts";
 
-const MODEL = "claude-opus-4-8";
+const MODEL = "claude-opus-5";
 const MAX_CHARS = 200_000; // cap the source so a huge paste can't blow the token budget
 
 const CORS = {
@@ -179,7 +179,7 @@ Deno.serve(async (req: Request) => {
     const message = (await anthropic.messages.create({
       model: pol.model,
       max_tokens: 16000,
-      thinking: { type: "adaptive" },
+      thinking: { type: "adaptive", display: "summarized" },
       output_config: { effort: pol.effort, format: { type: "json_schema", schema: PROPOSAL_SCHEMA } },
       system: [{ type: "text", text: system, cache_control: { type: "ephemeral" } }],
       messages: [{ role: "user", content: userText }],

@@ -18,23 +18,23 @@ export type Effort = "low" | "medium" | "high" | "xhigh" | "max";
 export type Lever = { model: string; effort: Effort };
 
 export const MODELS = {
-  opus: "claude-opus-4-8",
-  sonnet: "claude-sonnet-4-6",
+  opus: "claude-opus-5",
+  sonnet: "claude-sonnet-5",
   haiku: "claude-haiku-4-5",
 } as const;
 
 export const MODEL_LABEL: Record<string, string> = {
-  "claude-opus-4-8": "Opus 4.8",
+  "claude-opus-5": "Opus 4.8",
   "claude-opus-4-7": "Opus 4.7",
-  "claude-sonnet-4-6": "Sonnet 4.6",
+  "claude-sonnet-5": "Sonnet 4.6",
   "claude-haiku-4-5": "Haiku 4.5",
 };
 
 // Per-1M-token USD prices — mirror of _shared/ai_usage.ts PRICING.
 export const PRICING: Record<string, { input: number; output: number }> = {
-  "claude-opus-4-8": { input: 5, output: 25 },
+  "claude-opus-5": { input: 5, output: 25 },
   "claude-opus-4-7": { input: 5, output: 25 },
-  "claude-sonnet-4-6": { input: 3, output: 15 },
+  "claude-sonnet-5": { input: 3, output: 15 },
   "claude-haiku-4-5": { input: 1, output: 5 },
 };
 const CACHE_READ_MULT = 0.1;
@@ -122,7 +122,7 @@ export const PRESETS: { key: Exclude<Preset, "custom">; label: string; blurb: st
 ];
 
 const MODEL_RANK: Record<string, number> = {
-  "claude-haiku-4-5": 0, "claude-sonnet-4-6": 1, "claude-opus-4-8": 2, "claude-opus-4-7": 2,
+  "claude-haiku-4-5": 0, "claude-sonnet-5": 1, "claude-opus-5": 2, "claude-opus-4-7": 2,
 };
 const EFFORT_ORDER: Effort[] = ["low", "medium", "high", "xhigh", "max"];
 const modelRank = (m: string) => (m in MODEL_RANK ? MODEL_RANK[m] : 2);

@@ -24,7 +24,7 @@ import { createClient, type SupabaseClient } from "npm:@supabase/supabase-js@2";
 import { logUsage } from "../_shared/ai_usage.ts";
 import { resolveModelPolicy } from "../_shared/ai_policy.ts";
 
-const MODEL = "claude-opus-4-8";
+const MODEL = "claude-opus-5";
 const CORS = {
   "Access-Control-Allow-Origin": "*",
   "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type, x-supabase-api-version",

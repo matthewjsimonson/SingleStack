@@ -23,14 +23,14 @@ import Anthropic from "npm:@anthropic-ai/sdk@0.69.0";
 import { createClient, type SupabaseClient } from "npm:@supabase/supabase-js@2";
 import { resolveModelPolicy } from "../_shared/ai_policy.ts";
 import { FIELD_WRITING_RULES } from "../_shared/field_writing.ts";
-const DEFAULT_CLAUDE_MODEL = "claude-opus-4-8";
+const DEFAULT_CLAUDE_MODEL = "claude-opus-5";
 const DEFAULT_TOP_K = 6;
 
 // Per-1M-token prices (USD) for cost accounting. Unknown models → cost left null.
 const PRICING: Record<string, { input: number; output: number }> = {
-  "claude-opus-4-8": { input: 5, output: 25 },
+  "claude-opus-5": { input: 5, output: 25 },
   "claude-opus-4-7": { input: 5, output: 25 },
-  "claude-sonnet-4-6": { input: 3, output: 15 },
+  "claude-sonnet-5": { input: 3, output: 15 },
   "claude-haiku-4-5": { input: 1, output: 5 },
 };
 
@@ -281,7 +281,7 @@ Deno.serve(async (req: Request) => {
         const advMsg = (await anthropic.messages.create({
           model: advPol.model,
           max_tokens: 1200,
-          thinking: { type: "adaptive" },
+          thinking: { type: "adaptive", display: "summarized" },
           output_config: { effort: advPol.effort },
           system: [{ type: "text", text: advSystem, cache_control: { type: "ephemeral" } }],
           messages: [{ role: "user", content: recordIntelText }],
@@ -400,7 +400,7 @@ Deno.serve(async (req: Request) => {
     const message = (await anthropic.messages.create({
       model,
       max_tokens: 24000,
-      thinking: { type: "adaptive" },
+      thinking: { type: "adaptive", display: "summarized" },
       output_config: {
         effort: pol.effort,
         format: { type: "json_schema", schema: PROPOSAL_SCHEMA },

@@ -25,7 +25,7 @@ import { createClient, type SupabaseClient } from "npm:@supabase/supabase-js@2";
 import { logUsage } from "../_shared/ai_usage.ts";
 import { resolveModelPolicy } from "../_shared/ai_policy.ts";
 
-const MODEL = "claude-opus-4-8";
+const MODEL = "claude-opus-5";
 const MAX_PER_TICK = 10;
 const CORS = {
   "Access-Control-Allow-Origin": "*",
@@ -101,7 +101,7 @@ async function checkOne(supabase: SupabaseClient, anthropic: Anthropic, o: Outco
   const resp = (await anthropic.messages.create({
     model: pol.model,
     max_tokens: 2000,
-    thinking: { type: "adaptive" },
+    thinking: { type: "adaptive", display: "summarized" },
     output_config: { effort: pol.effort, format: { type: "json_schema", schema: SCHEMA } },
     system: [{ type: "text", text: system, cache_control: { type: "ephemeral" } }],
     messages: [{ role: "user", content: userText }],

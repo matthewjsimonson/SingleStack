@@ -22,7 +22,7 @@ import { resolveModelPolicy } from "../_shared/ai_policy.ts";
 import { FIELD_WRITING_RULES } from "../_shared/field_writing.ts";
 import { assertSafeUrl, fetchTextSafe, screenForInjection, wrapUntrusted } from "../_shared/security.ts";
 
-const MODEL = "claude-opus-4-8";
+const MODEL = "claude-opus-5";
 const MAX_CHARS = 200_000; // cap an optional pasted/fetched source
 const CORS = {
   "Access-Control-Allow-Origin": "*",
@@ -167,7 +167,7 @@ Deno.serve(async (req: Request) => {
     const message = (await anthropic.messages.create({
       model: pol.model,
       max_tokens: 16000,
-      thinking: { type: "adaptive" },
+      thinking: { type: "adaptive", display: "summarized" },
       output_config: { effort: pol.effort, format: { type: "json_schema", schema: SCHEMA } },
       system: [{ type: "text", text: system, cache_control: { type: "ephemeral" } }],
       messages: [{ role: "user", content: userText }],

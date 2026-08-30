@@ -20,7 +20,7 @@ import { logUsage } from "../_shared/ai_usage.ts";
 import { loadMessagingMap } from "../_shared/messaging.ts";
 import { resolveModelPolicy } from "../_shared/ai_policy.ts";
 
-const MODEL = "claude-opus-4-8";
+const MODEL = "claude-opus-5";
 const CORS = {
   "Access-Control-Allow-Origin": "*",
   "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type, x-supabase-api-version",
@@ -147,7 +147,7 @@ Deno.serve(async (req: Request) => {
     const pol = await resolveModelPolicy(supabase, { task: "setup_market", fallback: { model: MODEL, effort: "high" } });
     const message = (await anthropic.messages.create({
       model: pol.model, max_tokens: 6000,
-      thinking: { type: "adaptive" },
+      thinking: { type: "adaptive", display: "summarized" },
       output_config: { effort: pol.effort, format: { type: "json_schema", schema: SCHEMA } },
       system: [{ type: "text", text: system, cache_control: { type: "ephemeral" } }],
       messages: [{ role: "user", content: userText }],

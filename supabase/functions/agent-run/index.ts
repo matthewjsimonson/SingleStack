@@ -25,12 +25,12 @@ import { createClient, type SupabaseClient } from "npm:@supabase/supabase-js@2";
 import { resolveModelPolicy } from "../_shared/ai_policy.ts";
 import { FIELD_WRITING_RULES } from "../_shared/field_writing.ts";
 
-const DEFAULT_MODEL = "claude-opus-4-8";
+const DEFAULT_MODEL = "claude-opus-5";
 const MAX_STEPS = 8; // bounded agent loop — stability over open-endedness
 const PRICING: Record<string, { input: number; output: number }> = {
-  "claude-opus-4-8": { input: 5, output: 25 },
+  "claude-opus-5": { input: 5, output: 25 },
   "claude-opus-4-7": { input: 5, output: 25 },
-  "claude-sonnet-4-6": { input: 3, output: 15 },
+  "claude-sonnet-5": { input: 3, output: 15 },
   "claude-haiku-4-5": { input: 1, output: 5 },
 };
 

@@ -31,8 +31,8 @@ export type Lever = { model: string; effort: Effort };
 
 // Canonical model ids (provider-agnostic strings; priced in ai_usage.ts PRICING).
 export const MODELS = {
-  opus: "claude-opus-4-8",
-  sonnet: "claude-sonnet-4-6",
+  opus: "claude-opus-5",
+  sonnet: "claude-sonnet-5",
   haiku: "claude-haiku-4-5",
 } as const;
 
@@ -125,12 +125,14 @@ export const PRESET_MATRIX: Record<Exclude<Preset, "custom">, Record<Tier, Lever
 // --- Ranking + floor clamp --------------------------------------------------
 const MODEL_RANK: Record<string, number> = {
   [MODELS.haiku]: 0,
-  "claude-haiku-4-5": 0,
   [MODELS.sonnet]: 1,
-  "claude-sonnet-4-6": 1,
   [MODELS.opus]: 2,
+  // Superseded ids still seen on stored agent rows. Ranked so a legacy choice is
+  // never clamped downward. Never repeat a current id from MODELS here — that is
+  // a duplicate key and fails typecheck (TS1117).
   "claude-opus-4-8": 2,
   "claude-opus-4-7": 2,
+  "claude-sonnet-4-6": 1,
 };
 const EFFORT_ORDER: Effort[] = ["low", "medium", "high", "xhigh", "max"];
 

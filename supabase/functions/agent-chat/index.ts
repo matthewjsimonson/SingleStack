@@ -26,11 +26,11 @@ import Anthropic from "npm:@anthropic-ai/sdk@0.69.0";
 import { createClient, type SupabaseClient } from "npm:@supabase/supabase-js@2";
 import { resolveModelPolicy } from "../_shared/ai_policy.ts";
 
-const DEFAULT_MODEL = "claude-opus-4-8";
+const DEFAULT_MODEL = "claude-opus-5";
 const PRICING: Record<string, { input: number; output: number }> = {
-  "claude-opus-4-8": { input: 5, output: 25 },
+  "claude-opus-5": { input: 5, output: 25 },
   "claude-opus-4-7": { input: 5, output: 25 },
-  "claude-sonnet-4-6": { input: 3, output: 15 },
+  "claude-sonnet-5": { input: 3, output: 15 },
   "claude-haiku-4-5": { input: 1, output: 5 },
 };
 
@@ -309,7 +309,7 @@ Deno.serve(async (req: Request) => {
     const anthropic = new Anthropic({ apiKey: anthropicKey });
 
     // Streaming path: emit the model's REAL reasoning (extended-thinking deltas)
-    // first, then a 0x00 separator, then the answer deltas — so the UI can show the
+    // first, then an ANSWER_MARK separator, then the answer deltas — so the UI can show
     // actual work as it forms, then type the answer. Logs the run when done.
     if (stream) {
       const encoder = new TextEncoder();
@@ -350,7 +350,7 @@ Deno.serve(async (req: Request) => {
               finished_at: new Date().toISOString(),
             });
           } catch (e) {
-            controller.enqueue(encoder.encode(` [error: ${e instanceof Error ? e.message : String(e)}]`));
+            controller.enqueue(encoder.encode(ANSWER_MARK + `[error: ${e instanceof Error ? e.message : String(e)}]`));
           } finally {
             controller.close();
           }
@@ -362,7 +362,7 @@ Deno.serve(async (req: Request) => {
     const resp = (await anthropic.messages.create({
       model,
       max_tokens: 2000,
-      thinking: { type: "adaptive" },
+      thinking: { type: "adaptive", display: "summarized" },
       output_config: { effort: pol.effort },
       system: [{ type: "text", text: system, cache_control: { type: "ephemeral" } }],
       messages: messages.map((m) => ({ role: m.role, content: m.content })),

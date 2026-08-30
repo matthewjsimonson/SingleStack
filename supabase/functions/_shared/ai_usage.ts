@@ -8,10 +8,14 @@
 
 // Per-1M-token USD prices. Unknown models → cost left null (still logs tokens).
 export const PRICING: Record<string, { input: number; output: number }> = {
+  // current
+  "claude-opus-5": { input: 5, output: 25 },
+  "claude-sonnet-5": { input: 2, output: 10 },
+  "claude-haiku-4-5": { input: 1, output: 5 },
+  // superseded — kept so historical ai_usage rows still cost out correctly
   "claude-opus-4-8": { input: 5, output: 25 },
   "claude-opus-4-7": { input: 5, output: 25 },
   "claude-sonnet-4-6": { input: 3, output: 15 },
-  "claude-haiku-4-5": { input: 1, output: 5 },
 };
 
 // Anthropic cache pricing relative to input: reads ~0.1x, writes ~1.25x.
