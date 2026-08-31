@@ -24,18 +24,25 @@ export const MODELS = {
 } as const;
 
 export const MODEL_LABEL: Record<string, string> = {
-  "claude-opus-5": "Opus 4.8",
-  "claude-opus-4-7": "Opus 4.7",
-  "claude-sonnet-5": "Sonnet 4.6",
+  "claude-opus-5": "Opus 5",
+  "claude-sonnet-5": "Sonnet 5",
   "claude-haiku-4-5": "Haiku 4.5",
+  // superseded — still shown for agents and usage rows pinned to an older id
+  "claude-opus-4-8": "Opus 4.8",
+  "claude-opus-4-7": "Opus 4.7",
+  "claude-sonnet-4-6": "Sonnet 4.6",
 };
 
 // Per-1M-token USD prices — mirror of _shared/ai_usage.ts PRICING.
 export const PRICING: Record<string, { input: number; output: number }> = {
+  // current
   "claude-opus-5": { input: 5, output: 25 },
-  "claude-opus-4-7": { input: 5, output: 25 },
-  "claude-sonnet-5": { input: 3, output: 15 },
+  "claude-sonnet-5": { input: 2, output: 10 },
   "claude-haiku-4-5": { input: 1, output: 5 },
+  // superseded — kept so historical ai_usage rows still cost out in the UI
+  "claude-opus-4-8": { input: 5, output: 25 },
+  "claude-opus-4-7": { input: 5, output: 25 },
+  "claude-sonnet-4-6": { input: 3, output: 15 },
 };
 const CACHE_READ_MULT = 0.1;
 const CACHE_WRITE_MULT = 1.25;

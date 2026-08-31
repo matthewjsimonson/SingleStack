@@ -15,7 +15,7 @@ export async function ensureTeam(supabase: SupabaseClient): Promise<void> {
   const haveKeys = new Set((have ?? []).map((a: { key: string }) => a.key));
   const toAdd = EXECUTIVE_TEAM.filter((e) => !haveKeys.has(e.key)).map((e) => ({
     org_id: orgId, key: e.key, name: e.name, role: e.role,
-    model: "claude-opus-4-8", system_prompt: e.system_prompt, is_active: true,
+    model: "claude-opus-5", system_prompt: e.system_prompt, is_active: true,
   }));
   if (toAdd.length) await supabase.from("agents").insert(toAdd);
 }

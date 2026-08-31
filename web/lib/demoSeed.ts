@@ -35,7 +35,7 @@ export async function loadDemoData(supabase: SupabaseClient, orgId: string): Pro
   await step("agents", async () => {
     const { data: ag0 } = await supabase.from("agents").select("key").eq("is_active", true);
     const have = new Set((ag0 ?? []).map((a) => a.key));
-    const toAdd = EXECUTIVE_TEAM.filter((e) => !have.has(e.key)).map((e) => ({ org_id: orgId, key: e.key, name: e.name, role: e.role, model: "claude-opus-4-8", system_prompt: e.system_prompt, is_active: true }));
+    const toAdd = EXECUTIVE_TEAM.filter((e) => !have.has(e.key)).map((e) => ({ org_id: orgId, key: e.key, name: e.name, role: e.role, model: "claude-opus-5", system_prompt: e.system_prompt, is_active: true }));
     if (toAdd.length) { const { error } = await supabase.from("agents").insert(toAdd); if (error) throw error; }
     return toAdd.length ? `+${toAdd.length}` : "exist";
   });
