@@ -110,3 +110,51 @@ export function noProgress(): Progress {
     meta: () => {}, error: () => {},
   };
 }
+
+/**
+ * The dispatch every migrated function shares.
+ *
+ * `run` is the job, written once, narrating through `p`. Called with a live
+ * Progress when the client asked to stream and with a discarding one otherwise,
+ * so there is never a second implementation to keep in sync. The result is
+ * serialized as the answer, and a throw becomes an error event rather than a
+ * dead stream — a client waiting on a stream that just closes has no way to
+ * tell failure from success.
+ */
+export function dispatch(
+  streaming: boolean,
+  cors: Record<string, string>,
+  run: (p: Progress) => Promise<unknown>,
+  opts: { onFail?: (message: string) => Promise<void> | void } = {},
+): Promise<Response> | Response {
+  if (streaming) {
+    const stream = new ReadableStream({
+      async start(controller) {
+        const p = progress(controller);
+        try {
+          p.answer(JSON.stringify(await run(p)));
+        } catch (e) {
+          const msg = e instanceof Error ? e.message : String(e);
+          try { await opts.onFail?.(msg); } catch { /* reporting must not mask the cause */ }
+          p.error(msg);
+        } finally {
+          controller.close();
+        }
+      },
+    });
+    return new Response(stream, {
+      headers: { ...cors, "content-type": "text/plain; charset=utf-8", "cache-control": "no-cache" },
+    });
+  }
+  return (async () => {
+    try {
+      const out = await run(noProgress());
+      return new Response(JSON.stringify(out), { headers: { ...cors, "content-type": "application/json" } });
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : String(e);
+      try { await opts.onFail?.(msg); } catch { /* as above */ }
+      const status = (e as { status?: number })?.status ?? 500;
+      return new Response(JSON.stringify({ error: msg }), { status, headers: { ...cors, "content-type": "application/json" } });
+    }
+  })();
+}

@@ -22,7 +22,14 @@ export const PRICING: Record<string, { input: number; output: number }> = {
 const CACHE_READ_MULT = 0.1;
 const CACHE_WRITE_MULT = 1.25;
 
-type Usage = { input_tokens?: number; output_tokens?: number; cache_read_input_tokens?: number; cache_creation_input_tokens?: number } | null | undefined;
+// The SDK reports absent cache counters as null, not undefined — accept both,
+// or every logUsage() call site fails to typecheck against a real Message.
+type Usage = {
+  input_tokens?: number | null;
+  output_tokens?: number | null;
+  cache_read_input_tokens?: number | null;
+  cache_creation_input_tokens?: number | null;
+} | null | undefined;
 
 export function costOf(model: string, u: Usage): number | null {
   const p = PRICING[model];

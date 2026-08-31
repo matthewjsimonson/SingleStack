@@ -65,6 +65,25 @@ jobs:
           fi
           echo "Deploying to project ref: ${PROJECT_REF}"
 
+      # Nothing ran deno check or the tests before a deploy, so the edge
+      # functions typechecked at 10/35 and a duplicate-key error had silently
+      # blocked the whole test suite. Both are cheap to catch here and neither
+      # touches the database, so a failure stops the deploy before it starts.
+      - uses: denoland/setup-deno@v2
+        with:
+          deno-version: v2.x
+
+      - name: Typecheck the edge functions
+        run: |
+          fail=0
+          for f in supabase/functions/*/index.ts; do
+            deno check "$f" || fail=1
+          done
+          exit $fail
+
+      - name: Run the edge function tests
+        run: deno test --allow-all supabase/functions/_shared/
+
       - uses: supabase/setup-cli@v1
         with:
           version: latest

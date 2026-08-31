@@ -170,7 +170,13 @@ Deno.serve(async (req: Request) => {
       // deno-lint-ignore no-explicit-any
     } as any);
 
-    const text = resp.content.filter((b: { type: string }) => b.type === "text").map((b: { text: string }) => b.text).join("");
+    // A real type guard, not a cast: content now carries thinking blocks too
+    // (display:"summarized"), and the old annotation claimed every block had
+    // `.text`. The filter was already correct at runtime; the types were not.
+    const text = resp.content
+      .filter((b): b is Anthropic.TextBlock => b.type === "text")
+      .map((b) => b.text)
+      .join("");
     const out = JSON.parse(text) as { rationale: string; conf_level: number; fields: { field_key: string; value: string }[] };
     const drafts = (out.fields ?? []).filter((f) => f.value?.trim());
     if (!drafts.length) return await fail("the model returned no field drafts");

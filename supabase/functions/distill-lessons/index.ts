@@ -17,6 +17,7 @@ import Anthropic from "npm:@anthropic-ai/sdk@0.69.0";
 import { createClient, type SupabaseClient } from "npm:@supabase/supabase-js@2";
 import { logUsage } from "../_shared/ai_usage.ts";
 import { resolveModelPolicy } from "../_shared/ai_policy.ts";
+import { dispatch, type Progress } from "../_shared/progress.ts";
 
 const MODEL = "claude-opus-5";
 const CORS = {
@@ -57,9 +58,12 @@ Deno.serve(async (req: Request) => {
     { global: { headers: { Authorization: authHeader } } },
   );
 
-  try {
+  const body = await req.json().catch(() => ({})) as { stream?: boolean };
+
+  const execute = async (p: Progress) => {
+    p.step("read", "Reading your resolved feedback");
     const { data: orgId } = await supabase.rpc("current_org_id");
-    if (!orgId) return json({ error: "could not resolve org" }, 400);
+    if (!orgId) throw new Error("could not resolve org");
 
     // The feedback corpus: resolved updates that carry human context.
     const { data: resolved } = await supabase
@@ -93,11 +97,15 @@ Deno.serve(async (req: Request) => {
       "supported_by = how many feedback items back each lesson.",
     ].join("\n");
 
+    p.done("read", `${(resolved ?? []).length} decisions`);
+
     const userMsg = `EXISTING LESSONS:\n${existingText}\n\nFEEDBACK CORPUS:\n${corpus}\n\nDistill the consolidated lesson set.`;
 
     const anthropic = new Anthropic({ apiKey: key });
     const pol = await resolveModelPolicy(supabase, { task: "distill_lessons", fallback: { model: MODEL, effort: "high" } });
-    const resp = (await anthropic.messages.create({
+    p.step("distill", "Finding the patterns in your judgments");
+    // Streamed so the reasoning reaches `p` while the model works.
+    const streamed = anthropic.messages.stream({
       model: pol.model,
       max_tokens: 1500,
       thinking: { type: "adaptive", display: "summarized" },
@@ -105,13 +113,20 @@ Deno.serve(async (req: Request) => {
       system: [{ type: "text", text: system, cache_control: { type: "ephemeral" } }],
       messages: [{ role: "user", content: userMsg }],
       // deno-lint-ignore no-explicit-any
-    } as any)) as Anthropic.Message;
+    } as any);
+    // deno-lint-ignore no-explicit-any
+    for await (const ev of streamed as any) {
+      if (ev.type === "content_block_delta" && ev.delta?.type === "thinking_delta" && ev.delta.thinking) p.think(ev.delta.thinking);
+    }
+    const resp = await streamed.finalMessage();
     await logUsage(supabase, { task: "distill_lessons", model: pol.model, usage: resp.usage });
 
     const block = resp.content.find((b) => b.type === "text");
     if (!block || block.type !== "text") throw new Error("no lessons returned");
     const parsed = JSON.parse(block.text) as { lessons?: { lesson: string; supported_by: number }[] };
     const lessons = (parsed.lessons ?? []).filter((l) => l.lesson && l.lesson.trim());
+    p.done("distill", `${lessons.length} ${lessons.length === 1 ? "lesson" : "lessons"}`);
+    p.step("save", "Replacing the distilled set");
 
     // Replace the distilled set: retire prior distilled lessons, insert the fresh
     // consolidated set. Human-added lessons (source='human') are left untouched.
@@ -124,8 +139,9 @@ Deno.serve(async (req: Request) => {
       })));
     }
 
-    return json({ lessons: lessons.length });
-  } catch (e) {
-    return json({ error: e instanceof Error ? e.message : String(e) }, 500);
-  }
+    p.done("save");
+    return { lessons: lessons.length };
+  };
+
+  return dispatch(body.stream === true, CORS, execute);
 });
