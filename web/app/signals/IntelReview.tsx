@@ -11,7 +11,9 @@ import { useEffect, useState, useCallback } from "react";
 import { createClient } from "@/lib/supabase/client";
 import { getOrgId } from "@/lib/org";
 import { Section, Chip, Banner, Modal } from "@/components/ui";
-import { useAgentRun, AgentProgress } from "@/components/AgentProgress";
+import AgentActivity from "@/components/AgentActivity";
+import { streamStructured, useRunAbort, isAbortError } from "@/components/alive";
+import { emptyActivity, type Activity } from "@/lib/agentStream";
 import { useProductScope } from "@/lib/ProductContext";
 import { edgeErrorMessage } from "@/lib/edgeError";
 
@@ -57,7 +59,9 @@ export default function IntelReview({ onApplied, productFilter = "all" }: { onAp
   const [reviewIdx, setReviewIdx] = useState<number | null>(null);
   const [draft, setDraft] = useState<{ rationale: string; tags: string[]; edit: string; lines: string[]; score: number | null }>({ rationale: "", tags: [], edit: "", lines: [], score: null });
   const [busy, setBusy] = useState(false);
-  const distillRun = useAgentRun("distill");
+  const beginRun = useRunAbort();
+  const [distilling, setDistilling] = useState(false);
+  const [activity, setActivity] = useState<Activity>(emptyActivity());
   const [misses, setMisses] = useState<Miss[]>([]);
   const lineName = (id: string) => products.find((p) => p.id === id)?.name ?? "a line";
 
@@ -133,17 +137,20 @@ export default function IntelReview({ onApplied, productFilter = "all" }: { onAp
   async function distill() {
     setError(null);
     try {
-      await distillRun.go(async () => {
-        const { data: s } = await supabase.auth.getSession();
-        const token = s.session?.access_token;
-        const { data, error } = await supabase.functions.invoke("distill-lessons", {
-          body: {}, headers: token ? { Authorization: `Bearer ${token}` } : undefined,
-        });
-        if (error) throw error;
-        if (data?.error) throw new Error(data.error);
-        await load();
+      setDistilling(true); setActivity(emptyActivity());
+      const { data: s } = await supabase.auth.getSession();
+      await streamStructured({
+        signal: beginRun(),
+        fnName: "distill-lessons",
+        body: {},
+        token: s.session?.access_token,
+        onActivity: setActivity,
       });
-    } catch (e) { setError(e instanceof Error ? e.message : "Could not distill lessons."); }
+      await load();
+    } catch (e) {
+      if (isAbortError(e)) return;
+      setError(e instanceof Error ? e.message : "Could not distill lessons.");
+    } finally { setDistilling(false); }
   }
 
   // Teach directly: a human-stated preference becomes an active lesson the
@@ -340,7 +347,7 @@ export default function IntelReview({ onApplied, productFilter = "all" }: { onAp
       {(lessons.length > 0 || acceptRate || updates.length === 0) && (
         <Section
           label="Learning"
-          action={distillRun.active ? <AgentProgress run={distillRun} compact /> : <button className="btn btn-secondary btn-sm" onClick={distill}>Distill lessons</button>}
+          action={distilling ? <AgentActivity activity={activity} busy who="The analyst" /> : <button className="btn btn-secondary btn-sm" onClick={distill}>Distill lessons</button>}
         >
           <div className="t-sub t-muted" style={{ marginBottom: "var(--sp-3)" }}>
             {acceptRate ? `${acceptRate.rate}% of proposals accepted · ${acceptRate.n} reviewed.` : "No reviewed proposals yet."} What the engine has learned from your feedback:

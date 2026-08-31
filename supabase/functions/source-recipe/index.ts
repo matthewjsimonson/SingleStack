@@ -17,6 +17,7 @@ import Anthropic from "npm:@anthropic-ai/sdk@0.69.0";
 import { createClient, type SupabaseClient } from "npm:@supabase/supabase-js@2";
 import { logUsage } from "../_shared/ai_usage.ts";
 import { resolveModelPolicy } from "../_shared/ai_policy.ts";
+import { dispatch, type Progress } from "../_shared/progress.ts";
 
 const MODEL = "claude-opus-5";
 const CORS = {
@@ -87,13 +88,18 @@ Deno.serve(async (req: Request) => {
     { global: { headers: { Authorization: authHeader } } },
   );
 
-  try {
-    const { description, answer } = await req.json().catch(() => ({}));
-    if (!description || typeof description !== "string" || description.trim().length < 4) {
-      return json({ error: "Describe the signal you want to watch (a sentence is plenty)." }, 400);
-    }
+  // The body is read once here: it carries both the request and the stream flag,
+  // and a Request body can only be consumed a single time.
+  const body = await req.json().catch(() => ({})) as { description?: string; answer?: string; stream?: boolean };
+  const { description, answer } = body;
+  if (!description || typeof description !== "string" || description.trim().length < 4) {
+    return json({ error: "Describe the signal you want to watch (a sentence is plenty)." }, 400);
+  }
+
+  const execute = async (p: Progress) => {
+    p.step("read", "Reading what you want to track");
     const { data: orgId } = await supabase.rpc("current_org_id");
-    if (!orgId) return json({ error: "could not resolve org" }, 400);
+    if (!orgId) throw new Error("could not resolve org");
 
     const kindList = KINDS.map((k) => `• ${k.kind}${k.liveNow ? " (pulls today)" : " (configured now, pulls when its connector lands)"} — ${k.note}`).join("\n");
 
@@ -113,9 +119,12 @@ Deno.serve(async (req: Request) => {
       answer ? `The user already answered a prior clarifying question with: "${answer}". Incorporate it; do not ask again.` : "",
     ].filter(Boolean).join("\n");
 
+    p.done("read");
+    p.step("draft", "Choosing a connector and a cadence");
     const anthropic = new Anthropic({ apiKey: key });
     const pol = await resolveModelPolicy(supabase, { task: "source_recipe", fallback: { model: MODEL, effort: "medium" } });
-    const resp = (await anthropic.messages.create({
+    // Streamed so the reasoning reaches `p` while the model works.
+    const streamed = anthropic.messages.stream({
       model: pol.model,
       max_tokens: 1200,
       thinking: { type: "adaptive", display: "summarized" },
@@ -123,7 +132,12 @@ Deno.serve(async (req: Request) => {
       system: [{ type: "text", text: system, cache_control: { type: "ephemeral" } }],
       messages: [{ role: "user", content: `The user wants to track: "${description.trim()}"` }],
       // deno-lint-ignore no-explicit-any
-    } as any)) as Anthropic.Message;
+    } as any);
+    // deno-lint-ignore no-explicit-any
+    for await (const ev of streamed as any) {
+      if (ev.type === "content_block_delta" && ev.delta?.type === "thinking_delta" && ev.delta.thinking) p.think(ev.delta.thinking);
+    }
+    const resp = await streamed.finalMessage();
     await logUsage(supabase, { task: "source_recipe", model: pol.model, usage: resp.usage });
 
     const block = resp.content.find((b) => b.type === "text");
@@ -135,8 +149,9 @@ Deno.serve(async (req: Request) => {
     // Clamp the budget server-side too — defense in depth against overload.
     out.recipe.max_per_pull = Math.min(20, Math.max(1, Number(out.recipe.max_per_pull) || 6));
 
-    return json(out);
-  } catch (e) {
-    return json({ error: e instanceof Error ? e.message : String(e) }, 500);
-  }
+    p.done("draft", out.recipe?.label ? String(out.recipe.label) : undefined);
+    return out;
+  };
+
+  return dispatch(body.stream === true, CORS, execute);
 });

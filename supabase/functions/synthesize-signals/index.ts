@@ -28,6 +28,7 @@ import { createClient, type SupabaseClient } from "npm:@supabase/supabase-js@2";
 import { inferScope, selectRelevantThemes, capCandidates, linesPresent } from "../_shared/synthesis.ts"; // tested, bounded-prompt logic
 import { logUsage } from "../_shared/ai_usage.ts";
 import { resolveModelPolicy } from "../_shared/ai_policy.ts";
+import { dispatch, type Progress } from "../_shared/progress.ts";
 
 const MODEL = "claude-opus-5";
 const CORS = {
@@ -135,9 +136,12 @@ Deno.serve(async (req: Request) => {
   const ev = (theme_id: string, kind: string, detail: Record<string, unknown>, orgId: string) =>
     supabase.from("theme_events").insert({ org_id: orgId, theme_id, kind, detail, actor: "synthesis" });
 
-  try {
+  const body = await req.json().catch(() => ({})) as Record<string, unknown> & { stream?: boolean };
+
+  const execute = async (p: Progress) => {
+    p.step("read", "Reading your signals");
     const { data: orgId } = await supabase.rpc("current_org_id");
-    if (!orgId) return json({ error: "could not resolve org" }, 400);
+    if (!orgId) throw new Error("could not resolve org");
 
     // Autonomy dial for the 'intelligence' surface. Default propose_only:
     // judgment-call deltas queue for review. autonomous: the AI creates NEW
@@ -149,7 +153,6 @@ Deno.serve(async (req: Request) => {
     // Optional LENS scope: run synthesis for one strategy lens so product and GTM
     // themes are reconciled separately (no cross-lens bleed). Absent → all lenses
     // (legacy behavior). 'product' = product/both/unsorted; 'gtm' = gtm/both.
-    const body = await req.json().catch(() => ({}));
     const lens: "product" | "gtm" | null = body?.lens === "gtm" ? "gtm" : body?.lens === "product" ? "product" : null;
     const inLens = (cat: string | null | undefined) => !lens || (lens === "gtm" ? (cat === "gtm" || cat === "both") : cat !== "gtm");
 
@@ -178,7 +181,8 @@ Deno.serve(async (req: Request) => {
 
     // First run with no themes and no signals: nothing to do.
     if ((themes ?? []).length === 0 && candidates.length === 0) {
-      return json({ themes: 0, message: "No signals to synthesize yet." });
+      p.done("read", "nothing new");
+      return { themes: 0, message: "No signals to synthesize yet." };
     }
 
     // BOUNDED PROMPT: reason only over themes the new signals could plausibly
@@ -227,7 +231,10 @@ Deno.serve(async (req: Request) => {
 
     const anthropic = new Anthropic({ apiKey: key });
     const pol = await resolveModelPolicy(supabase, { task: "synthesize_signals", fallback: { model: MODEL, effort: "high" } });
-    const resp = (await anthropic.messages.create({
+    p.done("read", `${candidates.length} candidate signals`);
+    p.step("synth", "Finding the patterns");
+    // Streamed so the reasoning reaches `p` while the model works.
+    const streamed = anthropic.messages.stream({
       model: pol.model,
       max_tokens: 4000,
       thinking: { type: "adaptive", display: "summarized" },
@@ -235,7 +242,14 @@ Deno.serve(async (req: Request) => {
       system: [{ type: "text", text: system, cache_control: { type: "ephemeral" } }],
       messages: [{ role: "user", content: `EXISTING THEMES:\n${themeList}\n\nNEW SIGNALS:\n${sigList}\n\nReconcile.` }],
       // deno-lint-ignore no-explicit-any
-    } as any)) as Anthropic.Message;
+    } as any);
+    // deno-lint-ignore no-explicit-any
+    for await (const ev of streamed as any) {
+      if (ev.type === "content_block_delta" && ev.delta?.type === "thinking_delta" && ev.delta.thinking) p.think(ev.delta.thinking);
+    }
+    const resp = await streamed.finalMessage();
+    p.done("synth");
+    p.step("reconcile", "Reconciling against existing themes");
     await logUsage(supabase, { task: "synthesize_signals", model: pol.model, usage: resp.usage });
 
     const block = resp.content.find((b) => b.type === "text");
@@ -379,7 +393,8 @@ Deno.serve(async (req: Request) => {
       await supabase.from("signal_themes").update(patch).eq("id", t.id);
     }
 
-    return json({
+    p.done("reconcile");
+    return {
       themes: (liveThemes ?? []).length,
       attached, categorized,
       proposed,          // high-judgment changes queued for review
@@ -389,8 +404,8 @@ Deno.serve(async (req: Request) => {
       themesConsidered: promptThemes.length,
       themesTotal: (themes ?? []).length,
       candidatesConsidered: candidates.length,
-    });
-  } catch (e) {
-    return json({ error: e instanceof Error ? e.message : String(e) }, 500);
-  }
+    };
+  };
+
+  return dispatch(body.stream === true, CORS, execute);
 });
