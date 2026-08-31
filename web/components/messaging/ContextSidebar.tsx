@@ -7,12 +7,14 @@
 // feel (old selection vs proposed), an "Apply to selection" button (the parent
 // replaces the stored selection range), and Dismiss. Works without a selection
 // too: general "help with this element" using the full element as context.
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useState } from "react";
 import { createClient } from "@/lib/supabase/client";
 import { Markdown } from "@/components/Markdown";
 import { PulseDots, streamAgentChat } from "@/components/alive";
 import { EXEC_BY_KEY } from "@/lib/team";
 import type { RosterAgent } from "./AgentPickerModal";
+import AgentActivity from "@/components/AgentActivity";
+import { emptyActivity, type Activity } from "@/lib/agentStream";
 
 export default function ContextSidebar({
   agent,
@@ -38,13 +40,12 @@ export default function ContextSidebar({
   const short = ex?.short ?? name.slice(0, 2).toUpperCase();
 
   const [thinking, setThinking] = useState("");
+  const [activity, setActivity] = useState<Activity>(emptyActivity());
   const [rewrite, setRewrite] = useState("");
   const [busy, setBusy] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [showReason, setShowReason] = useState(false);
   const [extra, setExtra] = useState("");
-  const traceRef = useRef<HTMLDivElement>(null);
-  useEffect(() => { traceRef.current?.scrollTo({ top: traceRef.current.scrollHeight }); }, [thinking]);
 
   async function run(instruction?: string) {
     if (!agent.key) { setError("This agent has no key."); setBusy(false); return; }
@@ -71,6 +72,7 @@ export default function ContextSidebar({
         context, token: s.session?.access_token,
         onChunk: (c) => setRewrite((p) => p + c),
         onThinking: (t) => setThinking((p) => p + t),
+        onActivity: setActivity,
         fnName: "agent-chat",
       });
     } catch (e) {
@@ -111,9 +113,7 @@ export default function ContextSidebar({
           {busy && (
             <div style={{ marginBottom: 12 }}>
               <div className="t-label" style={{ color: "var(--ac)", marginBottom: 6 }}>{name.split(" ").slice(-1)[0]} is working<PulseDots /></div>
-              {thinking
-                ? <div ref={traceRef} style={{ fontSize: 11.5, lineHeight: 1.5, fontStyle: "italic", whiteSpace: "pre-wrap", color: "var(--tm)", borderLeft: "2px solid var(--border)", paddingLeft: 10, maxHeight: 140, overflowY: "auto" }}>{thinking}</div>
-                : <div className="t-sub t-muted" style={{ fontSize: 12 }}>Reading the context<PulseDots /></div>}
+              <AgentActivity activity={activity} busy={busy} who={name.split(" ").slice(-1)[0]} />
             </div>
           )}
 

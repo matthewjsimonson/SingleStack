@@ -85,7 +85,7 @@ export default function DraftChatModal({
       const { data: s } = await supabase.auth.getSession();
       await streamAgentChat({
         agentKey, messages: next, context, token: s.session?.access_token,
-        onChunk: reply.onChunk, onThinking: reply.onThinking, fnName: "agent-chat",
+        onChunk: reply.onChunk, onThinking: reply.onThinking, onActivity: reply.onActivity, fnName: "agent-chat",
       });
       reply.finish();
     } catch (e) {
@@ -141,7 +141,7 @@ export default function DraftChatModal({
         ))}
         {(busy || reply.typing) && (
           <div ref={liveRef} className="card card-pad" style={{ background: "var(--panel-2)", marginRight: 32 }}>
-            <LiveReply officer={agentName.split(" ").slice(-1)[0]} thinking={reply.thinking} display={reply.display} typing={reply.typing} busy={busy} />
+            <LiveReply officer={agentName.split(" ").slice(-1)[0]} thinking={reply.thinking} activity={reply.activity} display={reply.display} typing={reply.typing} busy={busy} />
           </div>
         )}
       </div>

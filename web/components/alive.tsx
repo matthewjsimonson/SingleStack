@@ -6,6 +6,7 @@
 // arrive (streamed, gateway-buffered into one blob, or a JSON { reply }).
 import { useCallback, useEffect, useRef, useState, type CSSProperties } from "react";
 import { Markdown } from "./Markdown";
+import AgentActivity from "./AgentActivity";
 import { applyEvent, createParser, emptyActivity, type Activity } from "@/lib/agentStream";
 
 export const CHAT_PHASES = ["Reading your question", "Pulling the context", "Thinking it through", "Writing the reply"];
@@ -80,10 +81,9 @@ export function useTypewriter() {
   return { display, typing, begin, push, finish, reset };
 }
 
-const ANSWER_MARK = "␞"; // separates the reasoning trace from the answer (matches agent-chat)
 
 // Call agent-chat with streaming on. The stream is the model's REAL reasoning,
-// then ANSWER_MARK, then the answer — so onThinking() gets the live work and
+// then the answer separator, so onThinking() gets the live work and
 // onChunk() gets the answer. Falls back to JSON { reply } if the streaming
 // function isn't deployed yet (then there's no reasoning trace).
 export async function streamAgentChat(opts: {
@@ -93,6 +93,7 @@ export async function streamAgentChat(opts: {
   token?: string;
   onChunk: (s: string) => void;
   onThinking?: (s: string) => void;
+  onActivity?: (a: Activity) => void;   // typed step list, when the function speaks it
   fnName?: string;          // which function to hit (default "agent-chat")
   fallbackFnName?: string;  // retried once if the primary fails BEFORE any output (e.g. not deployed)
 }): Promise<void> {
@@ -121,21 +122,29 @@ export async function streamAgentChat(opts: {
     if (!resp.body) return;
     const reader = resp.body.getReader();
     const dec = new TextDecoder();
-    let inAnswer = false;
+
+    // One parser for both protocols — see lib/agentStream. A function that has
+    // not migrated still arrives as think/answer events via the legacy path.
+    let activity = emptyActivity();
+    let streamError: string | undefined;
+    const parser = createParser((e) => {
+      if (e.t === "think") onThinking(e.text);
+      else if (e.t === "answer") onChunk(e.text);
+      else if (e.t === "error") streamError = e.message;
+      // A step the user has already seen counts as output: falling back after
+      // one would restart the run underneath visible progress.
+      else emitted = true;
+      activity = applyEvent(activity, e);
+      opts.onActivity?.(activity);
+    });
+
     for (;;) {
       const { done, value } = await reader.read();
       if (done) break;
-      const s = dec.decode(value, { stream: true });
-      if (!s) continue;
-      if (inAnswer) { onChunk(s); continue; }
-      const idx = s.indexOf(ANSWER_MARK);
-      if (idx === -1) { onThinking(s); continue; } // still reasoning
-      const before = s.slice(0, idx);
-      const after = s.slice(idx + ANSWER_MARK.length);
-      if (before) onThinking(before);
-      inAnswer = true;
-      if (after) onChunk(after);
+      parser.push(dec.decode(value, { stream: true }));
     }
+    parser.end();
+    if (streamError) throw new Error(streamError);
   }
 
   try {
@@ -209,16 +218,19 @@ export async function streamStructured<T = unknown>(opts: {
 export function useAliveReply() {
   const tw = useTypewriter();
   const [thinking, setThinking] = useState("");
-  const begin = useCallback(() => { setThinking(""); tw.begin(); }, [tw]);
+  const [activity, setActivity] = useState<Activity>(emptyActivity());
+  const begin = useCallback(() => { setThinking(""); setActivity(emptyActivity()); tw.begin(); }, [tw]);
   const onThinking = useCallback((s: string) => setThinking((p) => p + s), []);
-  const reset = useCallback(() => { setThinking(""); tw.reset(); }, [tw]);
-  return { thinking, display: tw.display, typing: tw.typing, begin, onThinking, onChunk: tw.push, finish: tw.finish, reset };
+  const onActivity = useCallback((a: Activity) => setActivity(a), []);
+  const reset = useCallback(() => { setThinking(""); setActivity(emptyActivity()); tw.reset(); }, [tw]);
+  return { thinking, activity, display: tw.display, typing: tw.typing, begin, onThinking, onActivity, onChunk: tw.push, finish: tw.finish, reset };
 }
 
 // Renders an in-flight AI reply: the live reasoning trace while it works, then a
 // collapsible "reasoning" + the answer typing out.
-export function LiveReply({ officer, thinking, display, typing, busy }: {
+export function LiveReply({ officer, thinking, display, typing, busy, activity }: {
   officer?: string; thinking: string; display: string; typing: boolean; busy: boolean;
+  activity?: Activity;
 }) {
   const traceRef = useRef<HTMLDivElement>(null);
   const [showReason, setShowReason] = useState(false);
@@ -229,10 +241,14 @@ export function LiveReply({ officer, thinking, display, typing, busy }: {
     <div>
       {working ? (
         <div>
-          <div className="t-label" style={{ color: "var(--ac)", marginBottom: 6 }}>{officer ?? "Agent"} is working<PulseDots /></div>
-          {thinking
-            ? <div ref={traceRef} style={{ ...traceStyle, maxHeight: 120, overflowY: "auto" }}>{thinking}</div>
-            : <div className="t-sub t-muted" style={{ fontSize: 12 }}>Thinking it through<PulseDots /></div>}
+          <div className="t-label" style={{ color: "var(--ac)", marginBottom: 8 }}>{officer ?? "Agent"} is working<PulseDots /></div>
+          {/* The step list when the function speaks the activity protocol; the
+              raw trace is the fallback for one that has not migrated yet. */}
+          {activity && (activity.steps.length > 0 || activity.thinking)
+            ? <AgentActivity activity={activity} busy={busy} who={officer} />
+            : thinking
+              ? <div ref={traceRef} style={{ ...traceStyle, maxHeight: 120, overflowY: "auto" }}>{thinking}</div>
+              : <div className="t-sub t-muted" style={{ fontSize: 12 }}>Thinking it through<PulseDots /></div>}
         </div>
       ) : (
         <>

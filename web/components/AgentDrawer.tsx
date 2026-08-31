@@ -128,7 +128,7 @@ export default function AgentDrawer({
     try {
       const { data: s } = await supabase.auth.getSession();
       const token = s.session?.access_token;
-      await streamAgentChat({ agentKey: exec.key, messages: next, context: runCtx, token, onChunk: reply.onChunk, onThinking: reply.onThinking, fnName: runner, fallbackFnName: runner ? "agent-chat" : undefined });
+      await streamAgentChat({ agentKey: exec.key, messages: next, context: runCtx, token, onChunk: reply.onChunk, onThinking: reply.onThinking, onActivity: reply.onActivity, fnName: runner, fallbackFnName: runner ? "agent-chat" : undefined });
       reply.finish();
     } catch (e) {
       reply.reset();
@@ -218,7 +218,7 @@ export default function AgentDrawer({
                 {(busy || reply.typing) && (
                   <div ref={liveRef} style={{ display: "flex", justifyContent: "flex-start" }}>
                     <div style={{ maxWidth: "92%", padding: "10px 12px", borderRadius: 12, borderBottomLeftRadius: 4, background: "var(--fill)", color: "var(--tp)", fontSize: 13.5 }}>
-                      <LiveReply officer={exec.name.split(" ").slice(-1)[0]} thinking={reply.thinking} display={reply.display} typing={reply.typing} busy={busy} />
+                      <LiveReply officer={exec.name.split(" ").slice(-1)[0]} thinking={reply.thinking} activity={reply.activity} display={reply.display} typing={reply.typing} busy={busy} />
                     </div>
                   </div>
                 )}

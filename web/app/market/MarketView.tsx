@@ -64,7 +64,7 @@ export default function MarketView() {
       if (!agentKey) throw new Error("No analyst available (seed agents first).");
       const prompt = `You are a market analyst. Expand this market signal into a tight briefing (4–6 sentences): what's happening, why it matters for our product and positioning, and the specific implication. Return only the briefing prose.\n\nSignal: ${s.title}${s.why ? `\nContext: ${s.why}` : ""}\nSource: ${s.origin}`;
       const { data: sess } = await supabase.auth.getSession();
-      await streamAgentChat({ agentKey, messages: [{ role: "user", content: prompt }], token: sess.session?.access_token, onChunk: reply.onChunk, onThinking: reply.onThinking, fnName: "agent-run", fallbackFnName: "agent-chat" });
+      await streamAgentChat({ agentKey, messages: [{ role: "user", content: prompt }], token: sess.session?.access_token, onChunk: reply.onChunk, onThinking: reply.onThinking, onActivity: reply.onActivity, fnName: "agent-run", fallbackFnName: "agent-chat" });
       reply.finish();
     } catch (e) { reply.reset(); setError(errText(e, "Deepen failed.")); } finally { setDeepBusy(false); }
   }
@@ -158,7 +158,7 @@ export default function MarketView() {
               </div>
               {(deepBusy || reply.typing) ? (
                 <div className="t-body" style={{ lineHeight: 1.6, background: "var(--fill-2)", border: "1px solid var(--border)", borderRadius: 8, padding: 14 }}>
-                  <LiveReply officer="Analyst" thinking={reply.thinking} display={reply.display} typing={reply.typing} busy={deepBusy} />
+                  <LiveReply officer="Analyst" thinking={reply.thinking} activity={reply.activity} display={reply.display} typing={reply.typing} busy={deepBusy} />
                 </div>
               ) : deep ? (
                 <Markdown className="t-body" style={{ lineHeight: 1.6, background: "var(--fill-2)", border: "1px solid var(--border)", borderRadius: 8, padding: 14 }} text={deep} />

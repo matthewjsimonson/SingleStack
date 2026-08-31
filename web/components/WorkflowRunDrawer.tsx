@@ -9,6 +9,8 @@ import { createClient } from "@/lib/supabase/client";
 import { Chip } from "@/components/ui";
 import { PulseDots, streamStructured } from "@/components/alive";
 import { Markdown } from "@/components/Markdown";
+import AgentActivity from "@/components/AgentActivity";
+import { emptyActivity, type Activity } from "@/lib/agentStream";
 
 type Section = { title: string; body: string; evidence?: string[] };
 type Artifact = { title?: string; payload: { headline?: string; sections?: Section[]; recommendations?: string[]; confidence?: string } };
@@ -23,10 +25,10 @@ export default function WorkflowRunDrawer({ open, onClose, workflow, target, onR
 }) {
   const supabase = createClient();
   const [thinking, setThinking] = useState("");
+  const [activity, setActivity] = useState<Activity>(emptyActivity());
   const [busy, setBusy] = useState(false);
   const [result, setResult] = useState<Result | null>(null);
   const [error, setError] = useState<string | null>(null);
-  const traceRef = useRef<HTMLDivElement>(null);
   const started = useRef(false);
 
   const run = useCallback(async () => {
@@ -39,6 +41,7 @@ export default function WorkflowRunDrawer({ open, onClose, workflow, target, onR
         token: sess.session?.access_token,
         body: { workflow_id: workflow.id, ...(target ? { target_type: target.type, target_id: target.id } : {}) },
         onThinking: (s) => setThinking((p) => p + s),
+        onActivity: setActivity,
       });
       setResult(res); onRan?.();
     } catch (e) { setError(e instanceof Error ? e.message : "Workflow run failed."); }
@@ -49,7 +52,6 @@ export default function WorkflowRunDrawer({ open, onClose, workflow, target, onR
     if (!open) { started.current = false; setThinking(""); setResult(null); setError(null); setBusy(false); return; }
     if (started.current) return; started.current = true; run();
   }, [open, run]);
-  useEffect(() => { traceRef.current?.scrollTo({ top: traceRef.current.scrollHeight }); }, [thinking]);
 
   if (!open || !workflow) return null;
   const p = result?.artifact?.payload;
@@ -68,12 +70,10 @@ export default function WorkflowRunDrawer({ open, onClose, workflow, target, onR
         <div style={{ flex: 1, overflowY: "auto", padding: 20 }}>
           {error && <div className="banner banner-error" style={{ marginBottom: 12 }}>{error}</div>}
 
-          {(busy || thinking) && (
+          {(busy || activity.steps.length > 0 || thinking) && (
             <div style={{ marginBottom: result ? 16 : 0 }}>
               <div className="t-label" style={{ color: "var(--ac)", marginBottom: 6 }}>{busy ? <>Working through the steps<PulseDots /></> : "How it ran"}</div>
-              <div ref={traceRef} style={{ fontSize: 11.5, lineHeight: 1.5, fontStyle: "italic", whiteSpace: "pre-wrap", color: "var(--tm)", borderLeft: "2px solid var(--border)", paddingLeft: 10, maxHeight: busy ? 340 : 140, overflowY: "auto" }}>
-                {thinking || "Reading the signals…"}
-              </div>
+              <AgentActivity activity={activity} busy={busy} who="The chain" />
             </div>
           )}
 

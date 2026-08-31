@@ -26,6 +26,7 @@ import Anthropic from "npm:@anthropic-ai/sdk@0.69.0";
 import { createClient, type SupabaseClient } from "npm:@supabase/supabase-js@2";
 import { resolveModelPolicy } from "../_shared/ai_policy.ts";
 import { PRICING } from "../_shared/ai_usage.ts";
+import { progress } from "../_shared/progress.ts";
 
 const DEFAULT_MODEL = "claude-opus-5";
 
@@ -35,10 +36,6 @@ const CORS = {
   "Access-Control-Allow-Methods": "POST, OPTIONS",
 };
 
-// Marker the streaming response uses to separate the reasoning trace from the
-// answer. A Record-Separator glyph — won't occur in normal model output. The
-// client splits on the same constant.
-const ANSWER_MARK = "␞";
 
 function json(body: unknown, status = 200): Response {
   return new Response(JSON.stringify(body), { status, headers: { ...CORS, "content-type": "application/json" } });
@@ -303,15 +300,13 @@ Deno.serve(async (req: Request) => {
 
     const anthropic = new Anthropic({ apiKey: anthropicKey });
 
-    // Streaming path: emit the model's REAL reasoning (extended-thinking deltas)
-    // first, then an ANSWER_MARK separator, then the answer deltas — so the UI can show
-    // actual work as it forms, then type the answer. Logs the run when done.
+    // Streaming path: the model's REAL reasoning as it forms, then the answer,
+    // over the activity protocol. Logs the run when done.
     if (stream) {
-      const encoder = new TextEncoder();
       const body = new ReadableStream({
         async start(controller) {
+          const p = progress(controller);
           let full = "";
-          let inAnswer = false;
           try {
             const s = anthropic.messages.stream({
               model,
@@ -326,14 +321,12 @@ Deno.serve(async (req: Request) => {
             for await (const ev of s as any) {
               if (ev.type !== "content_block_delta") continue;
               if (ev.delta?.type === "thinking_delta" && ev.delta.thinking) {
-                controller.enqueue(encoder.encode(ev.delta.thinking)); // reasoning trace
+                p.think(ev.delta.thinking);
               } else if (ev.delta?.type === "text_delta" && ev.delta.text) {
-                if (!inAnswer) { inAnswer = true; controller.enqueue(encoder.encode(ANSWER_MARK)); } // marks reasoning -> answer
                 full += ev.delta.text;
-                controller.enqueue(encoder.encode(ev.delta.text));
+                p.answer(ev.delta.text);
               }
             }
-            if (!inAnswer) controller.enqueue(encoder.encode(ANSWER_MARK)); // ensure marker even with no thinking
             const finalMsg = await s.finalMessage();
             const u = finalMsg.usage;
             const price = PRICING[model];
@@ -345,7 +338,7 @@ Deno.serve(async (req: Request) => {
               finished_at: new Date().toISOString(),
             });
           } catch (e) {
-            controller.enqueue(encoder.encode(ANSWER_MARK + `[error: ${e instanceof Error ? e.message : String(e)}]`));
+            p.error(e instanceof Error ? e.message : String(e));
           } finally {
             controller.close();
           }

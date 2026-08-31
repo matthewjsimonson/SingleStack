@@ -25,6 +25,7 @@ import { createClient, type SupabaseClient } from "npm:@supabase/supabase-js@2";
 import { resolveModelPolicy } from "../_shared/ai_policy.ts";
 import { FIELD_WRITING_RULES } from "../_shared/field_writing.ts";
 import { PRICING } from "../_shared/ai_usage.ts";
+import { noProgress, type Progress, progress } from "../_shared/progress.ts";
 
 const DEFAULT_MODEL = "claude-opus-5";
 const MAX_STEPS = 8; // bounded agent loop — stability over open-endedness
@@ -34,7 +35,6 @@ const CORS = {
   "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type, x-supabase-api-version",
   "Access-Control-Allow-Methods": "POST, OPTIONS",
 };
-const ANSWER_MARK = "␞";
 const json = (b: unknown, s = 200) => new Response(JSON.stringify(b), { status: s, headers: { ...CORS, "content-type": "application/json" } });
 
 // The officer's tool surface. Small, real, RLS-scoped.
@@ -149,6 +149,8 @@ Deno.serve(async (req: Request) => {
   const { data: agent } = await supabase.from("agents").select("id, org_id, name, role, model, system_prompt").eq("key", agent_key).eq("is_active", true).maybeSingle();
   if (!agent) return json({ error: `no active agent '${agent_key}'` }, 404);
   const orgId = agent.org_id as string;
+  // Capture past the null-check: TS re-widens `agent` inside nested closures.
+  const agentName = agent.name as string;
   const pol = await resolveModelPolicy(supabase, { task: "agent_run", agentId: agent.id as string, fallback: { model: (agent.model as string) || DEFAULT_MODEL, effort: "high" } });
   const model = pol.model;
 
@@ -316,8 +318,22 @@ Deno.serve(async (req: Request) => {
 
   const anthropic = new Anthropic({ apiKey: key });
 
-  // ---- the bounded agent loop, emitting reasoning + tool narration -----------
-  async function runLoop(emit: (s: string) => void): Promise<{ answer: string; inTok: number; outTok: number }> {
+  // What each tool is called in the activity feed. The user should read what the
+  // officer is DOING, not the name of the function it happens to call.
+  const TOOL_LABELS: Record<string, string> = {
+    get_record: "Reading the record",
+    list_modules: "Reading the product modules",
+    list_competitors: "Listing the competitors",
+    list_themes: "Reviewing the signal themes",
+    list_initiatives: "Reviewing the initiatives",
+    list_frontier_capabilities: "Checking frontier capabilities",
+    search_signals: "Searching the signals",
+    read_skill: "Consulting a skill",
+    propose_change: "Proposing a change",
+  };
+
+  // ---- the bounded agent loop, narrating itself through `p` ------------------
+  async function runLoop(p: Progress): Promise<{ answer: string; inTok: number; outTok: number }> {
     // deno-lint-ignore no-explicit-any
     const messages: any[] = convo.map((m) => ({ role: m.role, content: m.content }));
     let inTok = 0, outTok = 0;
@@ -351,7 +367,8 @@ Deno.serve(async (req: Request) => {
       } catch (e) {
         const msg = e instanceof Error ? e.message : String(e);
         if (mcpActive && /mcp server|mcp_server|communicating with mcp/i.test(msg)) {
-          emit(`\n⚠ A connector was unavailable — continuing without it.\n`);
+          p.step("mcp-degrade", "A connector was unavailable");
+          p.fail("mcp-degrade", "carrying on without it");
           mcpActive = false;
           resp = await callModel(false);
         } else throw e;
@@ -362,8 +379,16 @@ Deno.serve(async (req: Request) => {
       for (const b of resp.content) {
         // deno-lint-ignore no-explicit-any
         const bb = b as any;
-        if (bb.type === "thinking" && bb.thinking) emit(bb.thinking);
-        else if (bb.type === "mcp_tool_use") emit(`\n→ connector ${bb.server_name ?? ""}${bb.name ? `.${bb.name}` : ""}\n`);
+        if (bb.type === "thinking" && bb.thinking) p.think(bb.thinking);
+        else if (bb.type === "mcp_tool_use") {
+          // Anthropic runs MCP tools server-side, so we only see them once they
+          // are done — report them as completed rather than pretending to wait.
+          const server = String(bb.server_name ?? "connector");
+          const id = `mcp:${server}:${bb.id ?? Math.random().toString(36).slice(2)}`;
+          p.step(id, `Asked ${server}${bb.name ? ` for ${String(bb.name).replace(/_/g, " ")}` : ""}`);
+          p.source({ kind: "mcp", label: server });
+          p.done(id);
+        }
       }
 
       // pause_turn = a server-side tool (e.g. an MCP connector) hit the loop limit;
@@ -384,11 +409,17 @@ Deno.serve(async (req: Request) => {
       for (const tu of toolUses) {
         // deno-lint-ignore no-explicit-any
         const t = tu as any;
-        emit(`\n→ ${t.name}(${JSON.stringify(t.input)})\n`);
+        const stepId = `tool:${t.id ?? t.name}`;
+        p.step(stepId, TOOL_LABELS[t.name] ?? String(t.name).replace(/_/g, " "));
         let out = "";
         try {
           out = await runTool(t.name, t.input);
-        } catch (e) { out = `error: ${e instanceof Error ? e.message : String(e)}`; }
+          p.done(stepId);
+        } catch (e) {
+          const msg = e instanceof Error ? e.message : String(e);
+          out = `error: ${msg}`;
+          p.fail(stepId, msg);
+        }
         results.push({ type: "tool_result", tool_use_id: t.id, content: out });
       }
       messages.push({ role: "user", content: results });
@@ -480,7 +511,7 @@ Deno.serve(async (req: Request) => {
       const { data: created, error: pErr } = await supabase.from("proposals").insert({
         org_id: orgId, product_id, gtm_record_id,
         title: args.title, rationale: args.rationale ?? null, conf_level: conf, conf_label: args.conf_label ?? null,
-        proposed_by: agent.name,
+        proposed_by: agentName,
       }).select("id").single();
       if (pErr || !created) return `Could not create proposal: ${pErr?.message ?? "unknown error"}`;
       const pid = created.id as string;
@@ -514,15 +545,15 @@ Deno.serve(async (req: Request) => {
   };
 
   if (input.stream) {
-    const enc = new TextEncoder();
     const stream = new ReadableStream({
       async start(controller) {
+        const p = progress(controller);
         try {
-          const { answer, inTok, outTok } = await runLoop((s) => controller.enqueue(enc.encode(s)));
-          controller.enqueue(enc.encode(ANSWER_MARK + answer));
+          const { answer, inTok, outTok } = await runLoop(p);
+          p.answer(answer);
           await finish(answer, inTok, outTok);
         } catch (e) {
-          controller.enqueue(enc.encode(ANSWER_MARK + `Sorry — I hit an error: ${e instanceof Error ? e.message : String(e)}`));
+          p.error(e instanceof Error ? e.message : String(e));
         } finally { controller.close(); }
       },
     });
@@ -530,7 +561,7 @@ Deno.serve(async (req: Request) => {
   }
 
   try {
-    const { answer, inTok, outTok } = await runLoop(() => {});
+    const { answer, inTok, outTok } = await runLoop(noProgress());
     await finish(answer, inTok, outTok);
     return json({ reply: answer });
   } catch (e) {
