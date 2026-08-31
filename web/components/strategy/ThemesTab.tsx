@@ -9,7 +9,10 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { createClient } from "@/lib/supabase/client";
 import { getOrgId } from "@/lib/org";
 import { Chip, Banner, Modal, ConfirmDialog } from "@/components/ui";
-import { GROUPS, GTM_GROUPS, confText, errText, fetchAgentKey, authHeader, isProductSignal, isGtmSignal } from "@/lib/strategy";
+import { GROUPS, GTM_GROUPS, confText, errText, fetchAgentKey, authHeader, isProductSignal, isGtmSignal, accessToken } from "@/lib/strategy";
+import { askAgent } from "@/components/alive";
+import AgentActivity from "@/components/AgentActivity";
+import { emptyActivity, type Activity } from "@/lib/agentStream";
 
 type Theme = { id: string; title: string; summary: string | null; recommendation: string | null; conf_level: number | null; signal_ids: string[] | null; group_label: string | null; merged_by: string; watched: boolean; context: string | null; bundle_id: string | null };
 type Signal = { id: string; title: string; why: string | null; origin: string; category: string | null; metadata: { domain?: string } | null; conf_level: number | null; conf_label: string | null };
@@ -25,6 +28,7 @@ export default function ThemesTab({ onStartEpic, lens = "product" }: { onStartEp
   const signalFilter = isGtm ? isGtmSignal : isProductSignal;
   const lensWord = isGtm ? "GTM" : "product";
   const [themes, setThemes] = useState<Theme[]>([]);
+  const [activity, setActivity] = useState<Activity>(emptyActivity());
   const [signals, setSignals] = useState<Signal[]>([]);
   const [epics, setEpics] = useState<Epic[]>([]);
   const [agentKey, setAgentKey] = useState<string | null>(null);
@@ -124,9 +128,8 @@ export default function ThemesTab({ onStartEpic, lens = "product" }: { onStartEp
       if (!ung.length) { setBusy(null); setError("Every theme is already grouped."); return; }
       const list = ung.map((t) => `- ${t.id}: ${t.title}${t.summary ? ` — ${t.summary}` : ""}`).join("\n");
       const prompt = `Classify each ${lensWord} theme into exactly ONE strategic group from: ${GROUPS_L.map((g) => g.key).join(", ")}.\nReturn ONLY a JSON array, no prose: [{"id":"<theme id>","group":"<group key>"}].\n\nThemes:\n${list}`;
-      const { data, error } = await supabase.functions.invoke("agent-chat", { body: { agent_key: agentKey, messages: [{ role: "user", content: prompt }] }, headers: await authHeader(supabase) });
-      if (error) throw error; if (data?.error) throw new Error(data.error);
-      const m = String(data?.reply ?? "").match(/\[[\s\S]*\]/); if (!m) throw new Error("Couldn't parse the classification.");
+      const { text } = await askAgent({ agentKey, messages: [{ role: "user", content: prompt }], token: await accessToken(supabase), onActivity: setActivity });
+      const m = text.match(/\[[\s\S]*\]/); if (!m) throw new Error("Couldn't parse the classification.");
       const valid = new Set(GROUPS_L.map((g) => g.key));
       for (const u of (JSON.parse(m[0]) as { id: string; group: string }[]).filter((x) => x.id && valid.has(x.group))) await supabase.from("signal_themes").update({ group_label: u.group }).eq("id", u.id);
       await load();
@@ -173,6 +176,7 @@ export default function ThemesTab({ onStartEpic, lens = "product" }: { onStartEp
         <div className="card card-pad" style={{ marginBottom: "var(--sp-4)", background: "var(--panel-2)" }}>
           <div className="row-between" style={{ alignItems: "center", marginBottom: 8, gap: 8, flexWrap: "wrap" }}>
             <span className="t-label">Unsorted · {unsorted.length} <span className="t-muted" style={{ fontWeight: 400 }}>— not yet placed in a bucket</span></span>
+            {busy === "classify" && <AgentActivity activity={activity} busy who="The officer" />}
             <button className="btn btn-secondary btn-sm" disabled={busy === "classify"} onClick={aiClassify}>{busy === "classify" ? "Grouping…" : "✦ Group with AI"}</button>
           </div>
           <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(200px, 1fr))", gap: "var(--sp-2)" }}>

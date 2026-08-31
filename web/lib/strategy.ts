@@ -70,7 +70,11 @@ export async function fetchAgentKey(supabase: SupabaseClient): Promise<string | 
   return rows.find((a) => a.key === "cpo")?.key ?? rows[0]?.key ?? null;
 }
 
+export async function accessToken(supabase: SupabaseClient): Promise<string | undefined> {
+  return (await supabase.auth.getSession()).data.session?.access_token;
+}
+
 export async function authHeader(supabase: SupabaseClient): Promise<Record<string, string> | undefined> {
-  const t = (await supabase.auth.getSession()).data.session?.access_token;
+  const t = await accessToken(supabase);
   return t ? { Authorization: `Bearer ${t}` } : undefined;
 }

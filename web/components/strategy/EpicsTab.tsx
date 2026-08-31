@@ -9,7 +9,10 @@ import { createClient } from "@/lib/supabase/client";
 import { getOrgId } from "@/lib/org";
 import { Chip, Banner, SubTabs, Modal, ConfirmDialog } from "@/components/ui";
 import { spawnInitiative } from "@/lib/routing";
-import { SCORE_LABEL, PRIORITY_TONE, gapsOf, errText, fetchAgentKey, authHeader, type Cap, type Score, type Competitor } from "@/lib/strategy";
+import { SCORE_LABEL, PRIORITY_TONE, gapsOf, errText, fetchAgentKey, type Cap, type Score, type Competitor, accessToken } from "@/lib/strategy";
+import { askAgent } from "@/components/alive";
+import AgentActivity from "@/components/AgentActivity";
+import { emptyActivity, type Activity } from "@/lib/agentStream";
 
 type Epic = { id: string; title: string; problem: string | null; story: string | null; notes: string | null; priority: string };
 type Theme = { id: string; title: string; summary: string | null; recommendation: string | null; signal_ids: string[] | null; bundle_id: string | null };
@@ -18,6 +21,7 @@ type BundleCap = { bundle_id: string; capability_id: string };
 export default function EpicsTab({ initialEpicId, onChange }: { initialEpicId?: string | null; onChange?: () => void }) {
   const supabase = createClient();
   const [epics, setEpics] = useState<Epic[]>([]);
+  const [activity, setActivity] = useState<Activity>(emptyActivity());
   const [themes, setThemes] = useState<Theme[]>([]);
   const [caps, setCaps] = useState<Cap[]>([]);
   const [scores, setScores] = useState<Score[]>([]);
@@ -82,9 +86,8 @@ export default function EpicsTab({ initialEpicId, onChange }: { initialEpicId?: 
       if (!agentKey) throw new Error("No officer available (seed agents first).");
       const ev = [...evThemes.map((t) => `Theme: ${t.title}${t.summary ? ` — ${t.summary}` : ""}${t.recommendation ? ` (do: ${t.recommendation})` : ""}`), ...evGaps.map((g) => `Competitive gap: ${g.cap.name}${g.byName ? ` (behind ${g.byName})` : ""}`)].join("\n");
       const prompt = `You are drafting a product EPIC. Write a crisp story (3–5 sentences): what we'd build and the outcome it drives, grounded ONLY in the themes/gaps and context below. Return ONLY the story prose.\n\nTitle: ${draft.title || "(untitled)"}\nProblem: ${draft.problem || "(none yet)"}\nNotes: ${draft.notes || "(none)"}\n\nEvidence:\n${ev || "(none attached)"}`;
-      const { data, error } = await supabase.functions.invoke("agent-chat", { body: { agent_key: agentKey, messages: [{ role: "user", content: prompt }] }, headers: await authHeader(supabase) });
-      if (error) throw error; if (data?.error) throw new Error(data.error);
-      const reply = String(data?.reply ?? "").trim(); if (!reply) throw new Error("The officer returned nothing.");
+      const { text } = await askAgent({ agentKey, messages: [{ role: "user", content: prompt }], token: await accessToken(supabase), onActivity: setActivity });
+      const reply = text.trim(); if (!reply) throw new Error("The officer returned nothing.");
       setDraft({ ...draft, story: reply }); await saveField("story", reply); setTab("story");
     } catch (e) { setError(errText(e, "AI draft failed.")); } finally { setAiBusy(false); }
   }
@@ -145,6 +148,7 @@ export default function EpicsTab({ initialEpicId, onChange }: { initialEpicId?: 
               <select className="select" value={draft.priority} onChange={(e) => { setDraft({ ...draft, priority: e.target.value }); saveField("priority", e.target.value); }} style={{ flex: "0 0 110px" }}>
                 <option value="low">Low</option><option value="medium">Medium</option><option value="high">High</option>
               </select>
+              {aiBusy && <AgentActivity activity={activity} busy={aiBusy} who="The CPO" />}
               <button className="btn btn-secondary btn-sm" disabled={aiBusy} onClick={aiDraft} title="The CPO drafts the story from the attached themes & gaps">{aiBusy ? "Drafting…" : "✦ Draft with CPO"}</button>
               <div style={{ flex: 1 }} />
               <button className="btn btn-secondary btn-sm" onClick={() => setDelId(draft.id)} style={{ color: "var(--rd-text)" }}>Delete</button>

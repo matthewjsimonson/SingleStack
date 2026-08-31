@@ -331,12 +331,16 @@ Deno.serve(async (req: Request) => {
             const u = finalMsg.usage;
             const price = PRICING[model];
             const cost = price ? (u.input_tokens * price.input + u.output_tokens * price.output) / 1_000_000 : null;
-            await supabase.from("agent_runs").insert({
+            const { data: runRow } = await supabase.from("agent_runs").insert({
               org_id: orgId, agent_id: agent.id, status: "succeeded",
               input: { kind: "chat", messages, context: context ?? null, skills: skills.length, areas }, output: full, model,
               input_tokens: u.input_tokens, output_tokens: u.output_tokens, cost_usd: cost,
               finished_at: new Date().toISOString(),
-            });
+            }).select("id").single();
+            // Parity with the JSON response: the client attaches its
+            // helpful/not-helpful verdict to this id (the outcome loop that
+            // feeds skill evolution). Without it, streaming callers lose rating.
+            if (runRow?.id) p.meta({ run_id: runRow.id });
           } catch (e) {
             p.error(e instanceof Error ? e.message : String(e));
           } finally {

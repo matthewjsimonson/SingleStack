@@ -144,10 +144,32 @@ Deno.test("applyEvent ignores a duplicate open", () => {
   assertEquals(a.steps[0].label, "X");
 });
 
+Deno.test("meta carries out-of-band facts (run_id) to the client", () => {
+  const { out, controller } = capture();
+  const p = progress(controller);
+  p.answer("the reply");
+  p.meta({ run_id: "abc-123" });
+
+  const events = parse(out());
+  assertEquals(events[1], { t: "meta", data: { run_id: "abc-123" } });
+
+  let a = emptyActivity();
+  for (const e of events) a = applyEvent(a, e);
+  assertEquals(a.meta.run_id, "abc-123");
+  assertEquals(a.answer, "the reply"); // meta never pollutes the answer
+});
+
+Deno.test("meta merges across events rather than replacing", () => {
+  let a = emptyActivity();
+  a = applyEvent(a, { t: "meta", data: { run_id: "r1" } });
+  a = applyEvent(a, { t: "meta", data: { proposal_id: "p1" } });
+  assertEquals(a.meta, { run_id: "r1", proposal_id: "p1" });
+});
+
 Deno.test("noProgress discards without throwing", () => {
   const p = noProgress();
   p.step("a", "A"); p.done("a"); p.source({ kind: "k", label: "l" });
-  p.think("t"); p.answer("x"); p.error("e"); p.fail("a");
+  p.think("t"); p.answer("x"); p.meta({ a: 1 }); p.error("e"); p.fail("a");
 });
 
 Deno.test("a closed controller never breaks the caller", () => {

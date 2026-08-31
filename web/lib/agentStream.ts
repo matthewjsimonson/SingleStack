@@ -22,6 +22,7 @@ export type AgentEvent =
   | { t: "source"; kind: string; label: string; count?: number; url?: string }
   | { t: "think"; text: string }
   | { t: "answer"; text: string }
+  | { t: "meta"; data: Record<string, unknown> }
   | { t: "error"; message: string };
 
 /** A step as the UI shows it: label, live state, result, and what it read. */
@@ -37,10 +38,12 @@ export type Activity = {
   steps: ActivityStep[];
   thinking: string;
   answer: string;
+  /** Out-of-band facts from the run — `run_id`, and anything added later. */
+  meta: Record<string, unknown>;
   error?: string;
 };
 
-export const emptyActivity = (): Activity => ({ steps: [], thinking: "", answer: "" });
+export const emptyActivity = (): Activity => ({ steps: [], thinking: "", answer: "", meta: {} });
 
 /**
  * Fold one event into an activity. Returns a new object so React sees a change.
@@ -74,6 +77,7 @@ export function applyEvent(a: Activity, e: AgentEvent): Activity {
     }
     case "think":  return { ...a, thinking: a.thinking + e.text };
     case "answer": return { ...a, answer: a.answer + e.text };
+    case "meta":   return { ...a, meta: { ...a.meta, ...e.data } };
     case "error":  return { ...a, error: e.message };
   }
 }

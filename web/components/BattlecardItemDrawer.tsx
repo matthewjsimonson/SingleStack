@@ -8,6 +8,9 @@
 import { useEffect, useState } from "react";
 import { createClient } from "@/lib/supabase/client";
 import { Chip, Banner, Confidence } from "@/components/ui";
+import { askAgent } from "@/components/alive";
+import AgentActivity from "@/components/AgentActivity";
+import { emptyActivity, type Activity } from "@/lib/agentStream";
 
 export type CardItem = { id: string; competitor_id: string | null; kind: string; title: string; detail: string | null; proposed_by: string | null; signal_ids?: string[] | null; updated_at?: string | null; audience?: string | null };
 type Sig = { id: string; title: string; why: string | null; conf_label: string | null; conf_level: number | null };
@@ -19,6 +22,7 @@ export default function BattlecardItemDrawer({ item, competitorName, workflowId,
 }) {
   const supabase = createClient();
   const [evidence, setEvidence] = useState<Sig[]>([]);
+  const [activity, setActivity] = useState<Activity>(emptyActivity());
   const [agents, setAgents] = useState<Agent[]>([]);
   const [agentKey, setAgentKey] = useState("");
   const [chat, setChat] = useState<Msg[]>([]);
@@ -81,13 +85,14 @@ export default function BattlecardItemDrawer({ item, competitorName, workflowId,
       // specifically, while agent-chat's own grounding keeps the wider awareness.
       const cardCtx = `We are discussing one battlecard card vs ${competitorName}: [${item.kind}] "${item.title}"${item.detail ? ` — ${item.detail}` : ""}. Evidence: ${evidence.map((s) => s.title).join("; ") || "none cited"}.`;
       const { data: { session } } = await supabase.auth.getSession();
-      const { data, error } = await supabase.functions.invoke("agent-chat", {
-        body: { agent_key: agentKey, messages: [{ role: "user", content: `${cardCtx}\n\n${q}` }, ...next.slice(0, -1)].slice(-8), context: { area: "competitive" } },
-        headers: session?.access_token ? { Authorization: `Bearer ${session.access_token}` } : undefined,
+      const { text } = await askAgent({
+        agentKey,
+        messages: [{ role: "user", content: `${cardCtx}\n\n${q}` }, ...next.slice(0, -1)].slice(-8),
+        context: { area: "competitive" },
+        token: session?.access_token,
+        onActivity: setActivity,
       });
-      if (error) throw error;
-      const reply = (data as { reply?: string; content?: string })?.reply ?? (data as { content?: string })?.content ?? "(no reply)";
-      setChat([...next, { role: "assistant", content: reply }]);
+      setChat([...next, { role: "assistant", content: text || "(no reply)" }]);
     } catch (e) { setError(e instanceof Error ? e.message : "Chat failed."); }
     finally { setBusy(null); }
   }
@@ -196,7 +201,7 @@ export default function BattlecardItemDrawer({ item, competitorName, workflowId,
                   {m.content}
                 </div>
               ))}
-              {busy === "chat" && <div className="t-sub t-muted" style={{ fontSize: 12 }}>Thinking…</div>}
+              {busy === "chat" && <AgentActivity activity={activity} busy who="The analyst" />}
             </div>
             <form onSubmit={send} className="row gap-2">
               <input className="input" value={chatQ} onChange={(e) => setChatQ(e.target.value)} placeholder={`Ask about this ${item.kind} card…`} style={{ flex: 1 }} />

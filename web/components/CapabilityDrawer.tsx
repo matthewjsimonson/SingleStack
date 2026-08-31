@@ -11,6 +11,9 @@ import { getOrgId } from "@/lib/org";
 import { spawnInitiative } from "@/lib/routing";
 import { Chip } from "@/components/ui";
 import { Markdown } from "@/components/Markdown";
+import { askAgent } from "@/components/alive";
+import AgentActivity from "@/components/AgentActivity";
+import { emptyActivity, type Activity } from "@/lib/agentStream";
 
 export type DrawerCapability = {
   id: string; title: string; why: string | null; observed_at: string | null;
@@ -34,6 +37,7 @@ export default function CapabilityDrawer({ capability, onClose, onChanged }: { c
   const supabase = createClient();
   const open = !!capability;
   const [officerKey, setOfficerKey] = useState("ceng");
+  const [activity, setActivity] = useState<Activity>(emptyActivity());
   const [take, setTake] = useState<string | null>(null);
   const [thinking, setThinking] = useState(false);
   const [context, setContext] = useState("");
@@ -69,13 +73,11 @@ export default function CapabilityDrawer({ capability, onClose, onChanged }: { c
       const token = s.session?.access_token;
       const m = capability!.metadata ?? {};
       const prompt = `A new frontier-model capability is available:\n\n${capability!.title}${m.provider ? ` (${m.provider}${m.area ? ` · ${m.area}` : ""})` : ""}\n${capability!.why || ""}\n\nIn your domain, how does this apply to our product DELIVERY and our GTM motion — and what is the single most important, concrete way we should LEVERAGE it to execute (in our own operations)? Be specific; end with one recommended next step we could turn into an initiative.`;
-      const { data, error } = await supabase.functions.invoke("agent-chat", {
-        body: { agent_key: officer.key, messages: [{ role: "user", content: prompt }], context: { area: "capabilities" } },
-        headers: token ? { Authorization: `Bearer ${token}` } : undefined,
+      const { text } = await askAgent({
+        agentKey: officer.key, messages: [{ role: "user", content: prompt }],
+        context: { area: "capabilities" }, token, onActivity: setActivity,
       });
-      if (error) throw error;
-      if (data?.error) throw new Error(data.error);
-      setTake(data.reply);
+      setTake(text);
     } catch (e) { setError(e instanceof Error ? e.message : "Could not reach the officer."); }
     finally { setThinking(false); }
   }
@@ -167,6 +169,7 @@ export default function CapabilityDrawer({ capability, onClose, onChanged }: { c
               </select>
               <button className="btn btn-sm" onClick={ask} disabled={thinking} style={{ background: "var(--ac)", color: "#fff" }}>{thinking ? `${officer.name} is reading…` : `Ask ${officer.name}`}</button>
             </div>
+            {thinking && <AgentActivity activity={activity} busy={thinking} who={officer.name.split(" ").slice(-1)[0]} />}
             {take && <div className="card card-pad" style={{ background: "var(--panel)" }}><Markdown className="t-sub" style={{ fontSize: 13, lineHeight: 1.55 }} text={take} /></div>}
           </div>
 

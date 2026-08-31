@@ -8,7 +8,10 @@ import { useCallback, useEffect, useState } from "react";
 import { createClient } from "@/lib/supabase/client";
 import { Section, Chip, Banner } from "@/components/ui";
 import { Markdown } from "@/components/Markdown";
-import { fetchAgentKey, authHeader, errText } from "@/lib/strategy";
+import { fetchAgentKey, errText, accessToken } from "@/lib/strategy";
+import { askAgent } from "@/components/alive";
+import AgentActivity from "@/components/AgentActivity";
+import { emptyActivity, type Activity } from "@/lib/agentStream";
 
 type Field = { field_key: string; label: string; value: string | null };
 type Competitor = { id: string; name: string; relationship: string; notes: string | null };
@@ -38,6 +41,7 @@ function CopyBtn({ text }: { text: string }) {
 export default function SellDesk() {
   const supabase = createClient();
   const [view, setView] = useState<"battlecards" | "messaging">("battlecards");
+  const [activity, setActivity] = useState<Activity>(emptyActivity());
   const [gtms, setGtms] = useState<Gtm[]>([]);
   const [gtmId, setGtmId] = useState<string>("");
   const [fields, setFields] = useState<Field[]>([]);
@@ -87,10 +91,8 @@ export default function SellDesk() {
       const wins = cc.filter((x) => x.kind === "win").map((x) => x.title).join("; ");
       const objs = cc.filter((x) => x.kind === "objection").map((x) => x.title).join("; ");
       const prompt = `Write a tight TALK TRACK a sales rep can say out loud when a prospect is comparing us to "${c.name}". 3–4 sentences, confident, no fluff, specific. Ground it in:\nOur value: ${ours || "(see record)"}\nWhy we win: ${wins || "(n/a)"}\nObjections to preempt: ${objs || "(n/a)"}\nReturn only the talk track.`;
-      const { data, error } = await supabase.functions.invoke("agent-chat", { body: { agent_key: agentKey, messages: [{ role: "user", content: prompt }] }, headers: await authHeader(supabase) });
-      if (error) throw error;
-      if (data?.error) throw new Error(data.error);
-      setTalk((t) => ({ ...t, [c.id]: String(data?.reply ?? "") }));
+      const { text } = await askAgent({ agentKey, messages: [{ role: "user", content: prompt }], token: await accessToken(supabase), onActivity: setActivity });
+      setTalk((t) => ({ ...t, [c.id]: text }));
     } catch (e) { setError(errText(e, "Could not draft the talk track.")); }
     finally { setDrafting(null); }
   }
@@ -132,6 +134,7 @@ export default function SellDesk() {
             {selected && (<>
               <div className="row-between" style={{ alignItems: "center", marginBottom: "var(--sp-3)", gap: 8, flexWrap: "wrap" }}>
                 <div className="row gap-2" style={{ alignItems: "center" }}><span className="t-h2" style={{ fontSize: 15 }}>vs {selected.name}</span><Chip tone={selected.relationship === "direct" ? "accent" : "violet"}>{selected.relationship}</Chip></div>
+                {drafting === selected.id && <AgentActivity activity={activity} busy who="The officer" />}
                 <button className="btn btn-sm" disabled={drafting === selected.id} onClick={() => draftTalkTrack(selected)} style={{ background: "var(--ac)", color: "#fff" }}>{drafting === selected.id ? "Drafting…" : "✦ Draft talk track"}</button>
               </div>
               {talk[selected.id] && (

@@ -11,6 +11,9 @@ import { getOrgId } from "@/lib/org";
 import { spawnInitiative } from "@/lib/routing";
 import { Chip, Confidence } from "@/components/ui";
 import { Markdown } from "@/components/Markdown";
+import { askAgent } from "@/components/alive";
+import AgentActivity from "@/components/AgentActivity";
+import { emptyActivity, type Activity } from "@/lib/agentStream";
 
 type Theme = {
   id: string; title: string; summary: string | null; recommendation: string | null;
@@ -31,6 +34,7 @@ export default function ThemeDrawer({ themeId, onClose, onChanged }: { themeId: 
   const supabase = createClient();
   const open = !!themeId;
   const [theme, setTheme] = useState<Theme | null>(null);
+  const [activity, setActivity] = useState<Activity>(emptyActivity());
   const [signals, setSignals] = useState<Sig[]>([]);
   const [products, setProducts] = useState<{ id: string; name: string }[]>([]);
   const [gtms, setGtms] = useState<{ id: string; name: string }[]>([]);
@@ -75,13 +79,11 @@ export default function ThemeDrawer({ themeId, onClose, onChanged }: { themeId: 
     try {
       const { data: s } = await supabase.auth.getSession();
       const token = s.session?.access_token;
-      const { data, error } = await supabase.functions.invoke("agent-chat", {
-        body: { agent_key: officer.key, messages: payloadFor(next), context: { area: "signals" } },
-        headers: token ? { Authorization: `Bearer ${token}` } : undefined,
+      const { text, runId } = await askAgent({
+        agentKey: officer.key, messages: payloadFor(next),
+        context: { area: "signals" }, token, onActivity: setActivity,
       });
-      if (error) throw error;
-      if (data?.error) throw new Error(data.error);
-      setThread([...next, { role: "assistant", content: data.reply, runId: data.run_id ?? null }]);
+      setThread([...next, { role: "assistant", content: text, runId }]);
     } catch (e) { setError(e instanceof Error ? e.message : "Could not reach the officer."); }
     finally { setChatBusy(false); }
   }
@@ -107,9 +109,10 @@ export default function ThemeDrawer({ themeId, onClose, onChanged }: { themeId: 
       const { data: s } = await supabase.auth.getSession();
       const token = s.session?.access_token;
       const prompt = `Propose ONE product-led-growth initiative from this intelligence. It must span Build and GTM. Reply EXACTLY in this format, nothing else:\nINITIATIVE: <short name>\nBUILD: <one concrete product/build workstream>\nGTM: <one concrete go-to-market workstream>\nWHY: <one sentence tying it to the evidence>\n\nTheme: ${theme.title}\nSummary: ${theme.summary || "—"}\nRecommendation: ${theme.recommendation || "—"}\nSignals: ${signals.slice(0, 6).map((x) => x.title).join("; ")}`;
-      const { data, error } = await supabase.functions.invoke("agent-chat", { body: { agent_key: officer.key, messages: [{ role: "user", content: prompt }], context: { area: "signals" } }, headers: token ? { Authorization: `Bearer ${token}` } : undefined });
-      if (error) throw error; if (data?.error) throw new Error(data.error);
-      const txt: string = data.reply ?? "";
+      const { text: txt } = await askAgent({
+        agentKey: officer.key, messages: [{ role: "user", content: prompt }],
+        context: { area: "signals" }, token, onActivity: setActivity,
+      });
       const grab = (k: string) => (txt.match(new RegExp(`${k}:\\s*(.+)`, "i"))?.[1] ?? "").trim();
       setRec({ name: grab("INITIATIVE") || theme.title, build: grab("BUILD") || `Build: ${theme.title}`, gtm: grab("GTM") || `Position: ${theme.title}`, why: grab("WHY") || theme.recommendation || "" });
     } catch (e) { setError(e instanceof Error ? e.message : "Could not draft an initiative."); }
@@ -178,7 +181,7 @@ export default function ThemeDrawer({ themeId, onClose, onChanged }: { themeId: 
                     )}
                   </div>
                 ))}
-                {chatBusy && <div className="t-sub t-muted" style={{ fontSize: 12.5 }}>{officer.name} is thinking…</div>}
+                {chatBusy && <AgentActivity activity={activity} busy={chatBusy} who={officer.name.split(" ").slice(-1)[0]} />}
               </div>
             )}
 

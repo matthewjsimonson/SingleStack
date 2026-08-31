@@ -214,6 +214,43 @@ export async function streamStructured<T = unknown>(opts: {
   return parsed as T;
 }
 
+/**
+ * One-shot ask against agent-chat, streamed.
+ *
+ * The blocking `functions.invoke("agent-chat")` shape this replaces returned
+ * { reply, run_id } after an opaque wait. This returns the same two things, but
+ * reports activity while it works — so a caller that just wants the text gets
+ * progress for free, and one that wants the step list passes onActivity.
+ *
+ * `run_id` arrives as a meta event (see _shared/progress.ts); it is what the
+ * helpful/not-helpful verdict attaches to.
+ */
+export async function askAgent(opts: {
+  agentKey: string;
+  messages: { role: string; content: string }[];
+  context?: unknown;
+  token?: string;
+  onActivity?: (a: Activity) => void;
+  fnName?: string;
+}): Promise<{ text: string; runId: string | null }> {
+  let text = "";
+  let runId: string | null = null;
+  await streamAgentChat({
+    agentKey: opts.agentKey,
+    messages: opts.messages,
+    context: opts.context,
+    token: opts.token,
+    fnName: opts.fnName,
+    onChunk: (s) => { text += s; },
+    onActivity: (a) => {
+      const rid = a.meta?.run_id;
+      if (typeof rid === "string") runId = rid;
+      opts.onActivity?.(a);
+    },
+  });
+  return { text, runId };
+}
+
 // Bundles the reasoning trace + the typewriter answer for a single AI reply.
 export function useAliveReply() {
   const tw = useTypewriter();

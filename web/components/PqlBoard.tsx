@@ -10,7 +10,10 @@ import { createClient } from "@/lib/supabase/client";
 import { getOrgId } from "@/lib/org";
 import { Chip, Banner, Modal } from "@/components/ui";
 import { Markdown } from "@/components/Markdown";
-import { errText, authHeader, fetchAgentKey } from "@/lib/strategy";
+import { errText, authHeader, fetchAgentKey, accessToken } from "@/lib/strategy";
+import { askAgent } from "@/components/alive";
+import AgentActivity from "@/components/AgentActivity";
+import { emptyActivity, type Activity } from "@/lib/agentStream";
 
 type Account = {
   id: string; external_ref: string; name: string; domain: string | null; plan: string | null; status: string;
@@ -40,6 +43,7 @@ export default function PqlBoard() {
   const supabase = createClient();
   const ingestUrl = `${process.env.NEXT_PUBLIC_SUPABASE_URL ?? "<your-project>.supabase.co"}/functions/v1/usage-ingest`;
   const [accounts, setAccounts] = useState<Account[]>([]);
+  const [activity, setActivity] = useState<Activity>(emptyActivity());
   const [keys, setKeys] = useState<Key[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -106,10 +110,8 @@ export default function PqlBoard() {
       const recent = events.slice(0, 8).map((e) => `${e.kind}${e.value != null ? ` ×${e.value}` : ""}`).join(", ");
       const motion = a.pql_state === "at_risk" ? "retention / save" : a.pql_state === "expansion" ? "expansion" : "activation→sales";
       const prompt = `Account "${a.name}"${a.plan ? ` (${a.plan} plan)` : ""} just reached state: ${a.pql_state}. ${a.score_reason ?? ""} Recent usage: ${recent || "n/a"}.\nDraft a ${motion} outreach: (1) the play in one line, then (2) a 3–4 sentence email a rep can send, referencing the actual usage. Be concrete and specific. No preamble.`;
-      const { data, error } = await supabase.functions.invoke("agent-chat", { body: { agent_key: agentKey, messages: [{ role: "user", content: prompt }] }, headers: await authHeader(supabase) });
-      if (error) throw error;
-      if (data?.error) throw new Error(data.error);
-      setOutreach(String(data?.reply ?? ""));
+      const { text } = await askAgent({ agentKey, messages: [{ role: "user", content: prompt }], token: await accessToken(supabase), onActivity: setActivity });
+      setOutreach(text);
     } catch (e) { setError(errText(e, "Could not draft outreach.")); }
     finally { setDraftingOut(false); }
   }
@@ -208,6 +210,7 @@ export default function PqlBoard() {
             <button className="btn btn-secondary btn-sm" disabled={busy === openAcct.id} onClick={async () => { setBusy(openAcct.id); await supabase.functions.invoke("score-accounts", { body: { account_id: openAcct.id }, headers: await authHeader(supabase) }); setBusy(null); await load(); const fresh = (await supabase.from("accounts").select("id, external_ref, name, domain, plan, status, metrics, last_seen_at, activation_score, expansion_score, churn_risk, pql_state, score_reason, scored_at").eq("id", openAcct.id).maybeSingle()).data as Account | null; if (fresh) openEvidence(fresh); }}>↻ Rescore</button>
           </div>
           {openAcct.score_reason && <div className="card card-pad" style={{ background: "var(--panel-2)", marginBottom: 12 }}><div className="t-sub" style={{ fontSize: 12.5 }}>{openAcct.score_reason}</div></div>}
+          {draftingOut && <div style={{ marginBottom: 12 }}><AgentActivity activity={activity} busy={draftingOut} who="The officer" /></div>}
           {outreach && <div className="card card-pad" style={{ borderLeft: "3px solid var(--ac)", marginBottom: 12 }}><div className="t-label" style={{ marginBottom: 4 }}>Drafted outreach</div><Markdown className="t-sub" style={{ fontSize: 12.5, lineHeight: 1.55 }} text={outreach} /></div>}
 
           <div className="t-label" style={{ marginBottom: 6 }}>PQL signals · {signals.length}</div>

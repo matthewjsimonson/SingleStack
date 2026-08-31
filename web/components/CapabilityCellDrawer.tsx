@@ -10,6 +10,9 @@ import { createClient } from "@/lib/supabase/client";
 import { getOrgId } from "@/lib/org";
 import { Markdown } from "@/components/Markdown";
 import { Chip, Confidence } from "@/components/ui";
+import { askAgent } from "@/components/alive";
+import AgentActivity from "@/components/AgentActivity";
+import { emptyActivity, type Activity } from "@/lib/agentStream";
 
 export type Cell = {
   capabilityId: string; capabilityName: string; competitorId: string | null; who: string; score: number;
@@ -22,6 +25,7 @@ export default function CapabilityCellDrawer({ cell, onClose, onChanged }: { cel
   const supabase = createClient();
   const open = !!cell;
   const [selected, setSelected] = useState<number | null>(null);
+  const [activity, setActivity] = useState<Activity>(emptyActivity());
   const [take, setTake] = useState<string | null>(null);
   const [thinking, setThinking] = useState(false);
   const [busy, setBusy] = useState(false);
@@ -87,13 +91,11 @@ export default function CapabilityCellDrawer({ cell, onClose, onChanged }: { cel
       const token = s.session?.access_token;
       const subject = cell!.competitorId === null ? `OUR product${cell!.productValueProp ? ` (${cell!.productValueProp})` : ""}` : `the competitor "${cell!.who}"${cell!.competitorNotes ? ` (${cell!.competitorNotes})` : ""}`;
       const prompt = `Assess ${subject} on the capability "${cell!.capabilityName}". In 3–4 sentences give: (1) the reason it deserves a rating of — / Partial / Good / Strong, (2) what evidence or sources would back that, and (3) the implication for how we compete. Be specific and honest.`;
-      const { data, error } = await supabase.functions.invoke("agent-chat", {
-        body: { agent_key: "cro", messages: [{ role: "user", content: prompt }], context: { area: "signals" } },
-        headers: token ? { Authorization: `Bearer ${token}` } : undefined,
+      const { text } = await askAgent({
+        agentKey: "cro", messages: [{ role: "user", content: prompt }],
+        context: { area: "signals" }, token, onActivity: setActivity,
       });
-      if (error) throw error;
-      if (data?.error) throw new Error(data.error);
-      setTake(data.reply);
+      setTake(text);
     } catch (e) { setError(e instanceof Error ? e.message : "Could not reach the officer."); }
     finally { setThinking(false); }
   }
@@ -116,6 +118,7 @@ export default function CapabilityCellDrawer({ cell, onClose, onChanged }: { cel
           <div className="card card-pad" style={{ background: "var(--panel-2)" }}>
             <div className="t-label" style={{ color: "var(--tm)", marginBottom: 8 }}>Why this rating</div>
             <button className="btn btn-sm" onClick={ask} disabled={thinking} style={{ background: "var(--ac)", color: "#fff" }}>{thinking ? "CRO is assessing…" : "Ask the CRO: reasons, sources, implications"}</button>
+            {thinking && <div style={{ marginTop: 10 }}><AgentActivity activity={activity} busy={thinking} who="The officer" /></div>}
             {take && <div className="card card-pad" style={{ marginTop: 10, background: "var(--panel)" }}><Markdown className="t-sub" style={{ fontSize: 13, lineHeight: 1.55 }} text={take} /></div>}
           </div>
 

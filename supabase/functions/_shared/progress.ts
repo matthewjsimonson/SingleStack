@@ -38,6 +38,13 @@ export type AgentEvent =
   | { t: "think"; text: string }
   /** Final answer delta (prose) or the serialized result (structured functions). */
   | { t: "answer"; text: string }
+  /**
+   * Out-of-band facts the caller needs that are not part of the answer — the
+   * `run_id` a client attaches its helpful/not-helpful verdict to, above all.
+   * A blocking response could return these alongside the reply; a stream needs
+   * somewhere to put them.
+   */
+  | { t: "meta"; data: Record<string, unknown> }
   /** The run failed. Terminal; nothing follows but the close. */
   | { t: "error"; message: string };
 
@@ -52,6 +59,7 @@ export interface Progress {
   source(s: { kind: string; label: string; count?: number; url?: string }): void;
   think(text: string): void;
   answer(text: string): void;
+  meta(data: Record<string, unknown>): void;
   error(message: string): void;
 }
 
@@ -86,6 +94,7 @@ export function progress(
     source: (s) => write({ t: "source", ...s }),
     think: (text) => write({ t: "think", text }),
     answer: (text) => write({ t: "answer", text }),
+    meta: (data) => write({ t: "meta", data }),
     error: (message) => write({ t: "error", message }),
   };
 }
@@ -97,6 +106,7 @@ export function progress(
 export function noProgress(): Progress {
   return {
     step: () => {}, done: () => {}, fail: () => {},
-    source: () => {}, think: () => {}, answer: () => {}, error: () => {},
+    source: () => {}, think: () => {}, answer: () => {},
+    meta: () => {}, error: () => {},
   };
 }
