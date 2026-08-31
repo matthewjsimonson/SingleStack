@@ -6,6 +6,7 @@ import { HANDSHAKE, noProgress, progress } from "./progress.ts";
 import {
   type AgentEvent,
   applyEvent,
+  coalesce,
   createParser,
   emptyActivity,
 } from "../../../web/lib/agentStream.ts";
@@ -164,6 +165,87 @@ Deno.test("meta merges across events rather than replacing", () => {
   a = applyEvent(a, { t: "meta", data: { run_id: "r1" } });
   a = applyEvent(a, { t: "meta", data: { proposal_id: "p1" } });
   assertEquals(a.meta, { run_id: "r1", proposal_id: "p1" });
+});
+
+// ── update coalescing ───────────────────────────────────────────────────────
+// A deferring rAF, like a browser: callbacks queue and run at frame boundaries.
+function withFakeFrames<T>(body: (runFrame: () => void) => T): T {
+  const g = globalThis as unknown as { requestAnimationFrame?: (cb: () => void) => number };
+  const prev = g.requestAnimationFrame;
+  let queue: (() => void)[] = [];
+  g.requestAnimationFrame = (cb: () => void) => { queue.push(cb); return queue.length; };
+  try {
+    return body(() => { const q = queue; queue = []; for (const cb of q) cb(); });
+  } finally {
+    g.requestAnimationFrame = prev;
+  }
+}
+
+Deno.test("coalesce collapses a burst into one delivery per frame", () => {
+  withFakeFrames((runFrame) => {
+    const got: number[] = [];
+    const c = coalesce<number>((v) => got.push(v));
+    for (let i = 0; i < 100; i++) c.push(i);
+    runFrame();
+    assertEquals(got, [99], "only the newest state should reach the renderer");
+  });
+});
+
+Deno.test("coalesce delivers once per frame across several frames", () => {
+  withFakeFrames((runFrame) => {
+    const got: number[] = [];
+    const c = coalesce<number>((v) => got.push(v));
+    c.push(1); c.push(2); runFrame();
+    c.push(3); c.push(4); runFrame();
+    assertEquals(got, [2, 4]);
+  });
+});
+
+Deno.test("coalesce.flush delivers the tail that no frame would carry", () => {
+  withFakeFrames((runFrame) => {
+    const got: number[] = [];
+    const c = coalesce<number>((v) => got.push(v));
+    c.push(1); runFrame();
+    c.push(2);          // the closing events of a run land here
+    c.flush();
+    assertEquals(got, [1, 2], "the final state must never be dropped");
+  });
+});
+
+Deno.test("coalesce.flush is idempotent and a later frame is a no-op", () => {
+  withFakeFrames((runFrame) => {
+    const got: number[] = [];
+    const c = coalesce<number>((v) => got.push(v));
+    c.push(1);
+    c.flush(); c.flush();
+    runFrame();
+    assertEquals(got, [1], "flushing twice must not double-deliver");
+  });
+});
+
+Deno.test("coalesce with nothing pending delivers nothing", () => {
+  withFakeFrames((runFrame) => {
+    const got: number[] = [];
+    const c = coalesce<number>((v) => got.push(v));
+    c.flush(); runFrame();
+    assertEquals(got, []);
+  });
+});
+
+Deno.test("source attaches to the open step without scanning allocations", () => {
+  // Behavioural guard for the backwards scan that replaced map().lastIndexOf().
+  let a = emptyActivity();
+  a = applyEvent(a, { t: "step", id: "a", label: "A", state: "start" });
+  a = applyEvent(a, { t: "step", id: "a", label: "", state: "done" });
+  a = applyEvent(a, { t: "step", id: "b", label: "B", state: "start" });
+  a = applyEvent(a, { t: "source", kind: "web_search", label: "web" });
+  assertEquals(a.steps[0].sources.length, 0);
+  assertEquals(a.steps[1].sources.length, 1);
+
+  // With every step closed, the source lands on the most recent one.
+  a = applyEvent(a, { t: "step", id: "b", label: "", state: "done" });
+  a = applyEvent(a, { t: "source", kind: "manual", label: "manual" });
+  assertEquals(a.steps[1].sources.length, 2);
 });
 
 Deno.test("noProgress discards without throwing", () => {

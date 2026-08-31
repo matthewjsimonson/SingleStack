@@ -7,7 +7,7 @@ import { useEffect, useRef, useState } from "react";
 import { createClient } from "@/lib/supabase/client";
 import type { Exec } from "@/lib/team";
 import { Chip } from "@/components/ui";
-import { LiveReply, useAliveReply, streamAgentChat } from "@/components/alive";
+import { LiveReply, useAliveReply, streamAgentChat, useRunAbort, isAbortError } from "@/components/alive";
 import { Markdown } from "@/components/Markdown";
 import WorkflowRunDrawer from "@/components/WorkflowRunDrawer";
 
@@ -54,6 +54,7 @@ export default function AgentDrawer({
   runner?: string; // edge function to drive chat (default "agent-chat"); e.g. "agent-run" for the agentic loop
 }) {
   const supabase = createClient();
+  const beginRun = useRunAbort();
   const [messages, setMessages] = useState<Msg[]>([]);
   const [input, setInput] = useState("");
   const [busy, setBusy] = useState(false);
@@ -128,9 +129,9 @@ export default function AgentDrawer({
     try {
       const { data: s } = await supabase.auth.getSession();
       const token = s.session?.access_token;
-      await streamAgentChat({ agentKey: exec.key, messages: next, context: runCtx, token, onChunk: reply.onChunk, onThinking: reply.onThinking, onActivity: reply.onActivity, fnName: runner, fallbackFnName: runner ? "agent-chat" : undefined });
+      await streamAgentChat({ signal: beginRun(), agentKey: exec.key, messages: next, context: runCtx, token, onChunk: reply.onChunk, onThinking: reply.onThinking, onActivity: reply.onActivity, fnName: runner, fallbackFnName: runner ? "agent-chat" : undefined });
       reply.finish();
-    } catch (e) {
+    } catch (e) { if (isAbortError(e)) return;
       reply.reset();
       setError(e instanceof Error ? e.message : "Chat failed.");
     } finally { setBusy(false); }

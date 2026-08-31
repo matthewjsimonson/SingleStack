@@ -67,7 +67,12 @@ export function applyEvent(a: Activity, e: AgentEvent): Activity {
     }
     case "source": {
       // Attach to the step still open; if none is, to the most recent one.
-      let i = a.steps.map((s) => s.state).lastIndexOf("start");
+      // Scanned backwards rather than via map().lastIndexOf(), which allocated
+      // an array of every step's state on each source event.
+      let i = -1;
+      for (let k = a.steps.length - 1; k >= 0; k--) {
+        if (a.steps[k].state === "start") { i = k; break; }
+      }
       if (i === -1) i = a.steps.length - 1;
       if (i === -1) return a;
       const steps = a.steps.slice();
@@ -148,6 +153,51 @@ export function createParser(onEvent: (e: AgentEvent) => void) {
         try { onEvent(JSON.parse(buf) as AgentEvent); } catch { /* ignore */ }
       }
       buf = "";
+    },
+  };
+}
+
+/**
+ * Coalesce activity updates to one per animation frame.
+ *
+ * Every protocol event folds into a new Activity, and a reasoning trace is
+ * thousands of deltas — so notifying per event means thousands of React
+ * renders of a growing step list for one reply. The screen can only show 60 a
+ * second; this delivers the newest state at that rate and drops the rest.
+ *
+ * `flush()` is not optional: the last events of a run (the final answer, the
+ * closing step) usually land inside the final frame window, and without an
+ * explicit flush they would be dropped.
+ */
+export function coalesce<T>(deliver: (v: T) => void): { push: (v: T) => void; flush: () => void } {
+  let pending: T | undefined;
+  let queued = false;
+  // Reached through globalThis so this module also type-checks and runs where
+  // there is no DOM — Deno (the test/bench runner) and Next's server render.
+  const g = globalThis as unknown as { requestAnimationFrame?: (cb: () => void) => number };
+  const raf = (cb: () => void) =>
+    typeof g.requestAnimationFrame === "function"
+      ? g.requestAnimationFrame(cb)
+      : (setTimeout(cb, 16) as unknown as number);
+
+  const fire = () => {
+    queued = false;
+    if (pending === undefined) return;
+    const v = pending;
+    pending = undefined;
+    deliver(v);
+  };
+
+  return {
+    push(v: T) {
+      pending = v;
+      if (queued) return;
+      queued = true;
+      raf(fire);
+    },
+    flush() {
+      // Deliver synchronously; a queued frame afterwards becomes a no-op.
+      fire();
     },
   };
 }

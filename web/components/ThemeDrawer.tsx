@@ -11,7 +11,7 @@ import { getOrgId } from "@/lib/org";
 import { spawnInitiative } from "@/lib/routing";
 import { Chip, Confidence } from "@/components/ui";
 import { Markdown } from "@/components/Markdown";
-import { askAgent } from "@/components/alive";
+import { askAgent, useRunAbort, isAbortError } from "@/components/alive";
 import AgentActivity from "@/components/AgentActivity";
 import { emptyActivity, type Activity } from "@/lib/agentStream";
 
@@ -32,6 +32,7 @@ const PRESETS: { label: string; q: string }[] = [
 
 export default function ThemeDrawer({ themeId, onClose, onChanged }: { themeId: string | null; onClose: () => void; onChanged?: () => void }) {
   const supabase = createClient();
+  const beginRun = useRunAbort();
   const open = !!themeId;
   const [theme, setTheme] = useState<Theme | null>(null);
   const [activity, setActivity] = useState<Activity>(emptyActivity());
@@ -79,12 +80,12 @@ export default function ThemeDrawer({ themeId, onClose, onChanged }: { themeId: 
     try {
       const { data: s } = await supabase.auth.getSession();
       const token = s.session?.access_token;
-      const { text, runId } = await askAgent({
+      const { text, runId } = await askAgent({ signal: beginRun(),
         agentKey: officer.key, messages: payloadFor(next),
         context: { area: "signals" }, token, onActivity: setActivity,
       });
       setThread([...next, { role: "assistant", content: text, runId }]);
-    } catch (e) { setError(e instanceof Error ? e.message : "Could not reach the officer."); }
+    } catch (e) { if (isAbortError(e)) return; setError(e instanceof Error ? e.message : "Could not reach the officer."); }
     finally { setChatBusy(false); }
   }
   // Outcome loop: rate the officer's answer — feeds back into its future answers + skill evolution.
@@ -109,13 +110,13 @@ export default function ThemeDrawer({ themeId, onClose, onChanged }: { themeId: 
       const { data: s } = await supabase.auth.getSession();
       const token = s.session?.access_token;
       const prompt = `Propose ONE product-led-growth initiative from this intelligence. It must span Build and GTM. Reply EXACTLY in this format, nothing else:\nINITIATIVE: <short name>\nBUILD: <one concrete product/build workstream>\nGTM: <one concrete go-to-market workstream>\nWHY: <one sentence tying it to the evidence>\n\nTheme: ${theme.title}\nSummary: ${theme.summary || "—"}\nRecommendation: ${theme.recommendation || "—"}\nSignals: ${signals.slice(0, 6).map((x) => x.title).join("; ")}`;
-      const { text: txt } = await askAgent({
+      const { text: txt } = await askAgent({ signal: beginRun(),
         agentKey: officer.key, messages: [{ role: "user", content: prompt }],
         context: { area: "signals" }, token, onActivity: setActivity,
       });
       const grab = (k: string) => (txt.match(new RegExp(`${k}:\\s*(.+)`, "i"))?.[1] ?? "").trim();
       setRec({ name: grab("INITIATIVE") || theme.title, build: grab("BUILD") || `Build: ${theme.title}`, gtm: grab("GTM") || `Position: ${theme.title}`, why: grab("WHY") || theme.recommendation || "" });
-    } catch (e) { setError(e instanceof Error ? e.message : "Could not draft an initiative."); }
+    } catch (e) { if (isAbortError(e)) return; setError(e instanceof Error ? e.message : "Could not draft an initiative."); }
     finally { setRecBusy(false); }
   }
 

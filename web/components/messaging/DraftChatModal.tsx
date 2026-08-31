@@ -9,7 +9,7 @@ import { useEffect, useRef, useState } from "react";
 import { createClient } from "@/lib/supabase/client";
 import { Modal } from "@/components/ui";
 import { Markdown } from "@/components/Markdown";
-import { LiveReply, useAliveReply, streamAgentChat } from "@/components/alive";
+import { LiveReply, useAliveReply, streamAgentChat, useRunAbort, isAbortError } from "@/components/alive";
 import { EXEC_BY_KEY } from "@/lib/team";
 import type { RosterAgent } from "./AgentPickerModal";
 
@@ -43,6 +43,7 @@ export default function DraftChatModal({
   seedMessage?: string | null;
 }) {
   const supabase = createClient();
+  const beginRun = useRunAbort();
   const [messages, setMessages] = useState<Msg[]>([]);
   const [input, setInput] = useState("");
   const [busy, setBusy] = useState(false);
@@ -83,12 +84,12 @@ export default function DraftChatModal({
     requestAnimationFrame(() => liveRef.current?.scrollIntoView({ block: "start", behavior: "smooth" }));
     try {
       const { data: s } = await supabase.auth.getSession();
-      await streamAgentChat({
+      await streamAgentChat({ signal: beginRun(),
         agentKey, messages: next, context, token: s.session?.access_token,
         onChunk: reply.onChunk, onThinking: reply.onThinking, onActivity: reply.onActivity, fnName: "agent-chat",
       });
       reply.finish();
-    } catch (e) {
+    } catch (e) { if (isAbortError(e)) return;
       reply.reset();
       setError(e instanceof Error ? e.message : "The officer stalled.");
     } finally { setBusy(false); }

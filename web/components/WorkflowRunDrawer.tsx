@@ -7,7 +7,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { createClient } from "@/lib/supabase/client";
 import { Chip } from "@/components/ui";
-import { PulseDots, streamStructured } from "@/components/alive";
+import { PulseDots, streamStructured, useRunAbort, isAbortError } from "@/components/alive";
 import { Markdown } from "@/components/Markdown";
 import AgentActivity from "@/components/AgentActivity";
 import { emptyActivity, type Activity } from "@/lib/agentStream";
@@ -24,6 +24,7 @@ export default function WorkflowRunDrawer({ open, onClose, workflow, target, onR
   onRan?: () => void;
 }) {
   const supabase = createClient();
+  const beginRun = useRunAbort();
   const [thinking, setThinking] = useState("");
   const [activity, setActivity] = useState<Activity>(emptyActivity());
   const [busy, setBusy] = useState(false);
@@ -36,7 +37,7 @@ export default function WorkflowRunDrawer({ open, onClose, workflow, target, onR
     setBusy(true); setThinking(""); setResult(null); setError(null);
     try {
       const { data: sess } = await supabase.auth.getSession();
-      const res = await streamStructured<Result>({
+      const res = await streamStructured<Result>({ signal: beginRun(),
         fnName: "run-workflow",
         token: sess.session?.access_token,
         body: { workflow_id: workflow.id, ...(target ? { target_type: target.type, target_id: target.id } : {}) },
@@ -44,7 +45,7 @@ export default function WorkflowRunDrawer({ open, onClose, workflow, target, onR
         onActivity: setActivity,
       });
       setResult(res); onRan?.();
-    } catch (e) { setError(e instanceof Error ? e.message : "Workflow run failed."); }
+    } catch (e) { if (isAbortError(e)) return; setError(e instanceof Error ? e.message : "Workflow run failed."); }
     finally { setBusy(false); }
   }, [supabase, workflow, target, onRan]);
 

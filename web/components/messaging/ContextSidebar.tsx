@@ -10,7 +10,7 @@
 import { useEffect, useState } from "react";
 import { createClient } from "@/lib/supabase/client";
 import { Markdown } from "@/components/Markdown";
-import { PulseDots, streamAgentChat } from "@/components/alive";
+import { PulseDots, streamAgentChat, useRunAbort, isAbortError } from "@/components/alive";
 import { EXEC_BY_KEY } from "@/lib/team";
 import type { RosterAgent } from "./AgentPickerModal";
 import AgentActivity from "@/components/AgentActivity";
@@ -34,6 +34,7 @@ export default function ContextSidebar({
   onClose: () => void;
 }) {
   const supabase = createClient();
+  const beginRun = useRunAbort();
   const ex = agent.key ? EXEC_BY_KEY[agent.key] : undefined;
   const name = ex?.name ?? agent.name ?? agent.role ?? "Agent";
   const accent = ex?.accent ?? "var(--ac)";
@@ -66,7 +67,7 @@ export default function ContextSidebar({
     };
     try {
       const { data: s } = await supabase.auth.getSession();
-      await streamAgentChat({
+      await streamAgentChat({ signal: beginRun(),
         agentKey: agent.key,
         messages: [{ role: "user", content: ask }],
         context, token: s.session?.access_token,
@@ -75,7 +76,7 @@ export default function ContextSidebar({
         onActivity: setActivity,
         fnName: "agent-chat",
       });
-    } catch (e) {
+    } catch (e) { if (isAbortError(e)) return;
       setError(e instanceof Error ? e.message : "The agent stalled.");
     } finally { setBusy(false); }
   }

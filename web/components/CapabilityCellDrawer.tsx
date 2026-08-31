@@ -10,7 +10,7 @@ import { createClient } from "@/lib/supabase/client";
 import { getOrgId } from "@/lib/org";
 import { Markdown } from "@/components/Markdown";
 import { Chip, Confidence } from "@/components/ui";
-import { askAgent } from "@/components/alive";
+import { askAgent, useRunAbort, isAbortError } from "@/components/alive";
 import AgentActivity from "@/components/AgentActivity";
 import { emptyActivity, type Activity } from "@/lib/agentStream";
 
@@ -23,6 +23,7 @@ const heat = (s: number) => ["var(--fill)", "#FCE4C7", "#CDEBD6", "#9FD9B4"][s] 
 
 export default function CapabilityCellDrawer({ cell, onClose, onChanged }: { cell: Cell | null; onClose: () => void; onChanged: () => void }) {
   const supabase = createClient();
+  const beginRun = useRunAbort();
   const open = !!cell;
   const [selected, setSelected] = useState<number | null>(null);
   const [activity, setActivity] = useState<Activity>(emptyActivity());
@@ -91,12 +92,12 @@ export default function CapabilityCellDrawer({ cell, onClose, onChanged }: { cel
       const token = s.session?.access_token;
       const subject = cell!.competitorId === null ? `OUR product${cell!.productValueProp ? ` (${cell!.productValueProp})` : ""}` : `the competitor "${cell!.who}"${cell!.competitorNotes ? ` (${cell!.competitorNotes})` : ""}`;
       const prompt = `Assess ${subject} on the capability "${cell!.capabilityName}". In 3–4 sentences give: (1) the reason it deserves a rating of — / Partial / Good / Strong, (2) what evidence or sources would back that, and (3) the implication for how we compete. Be specific and honest.`;
-      const { text } = await askAgent({
+      const { text } = await askAgent({ signal: beginRun(),
         agentKey: "cro", messages: [{ role: "user", content: prompt }],
         context: { area: "signals" }, token, onActivity: setActivity,
       });
       setTake(text);
-    } catch (e) { setError(e instanceof Error ? e.message : "Could not reach the officer."); }
+    } catch (e) { if (isAbortError(e)) return; setError(e instanceof Error ? e.message : "Could not reach the officer."); }
     finally { setThinking(false); }
   }
 

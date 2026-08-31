@@ -11,7 +11,7 @@ import { getOrgId } from "@/lib/org";
 import { spawnInitiative } from "@/lib/routing";
 import { Chip } from "@/components/ui";
 import { Markdown } from "@/components/Markdown";
-import { askAgent } from "@/components/alive";
+import { askAgent, useRunAbort, isAbortError } from "@/components/alive";
 import AgentActivity from "@/components/AgentActivity";
 import { emptyActivity, type Activity } from "@/lib/agentStream";
 
@@ -35,6 +35,7 @@ const scopeLabel = (s: string) => (s === "gtm" ? "GTM" : s === "both" ? "Both" :
 
 export default function CapabilityDrawer({ capability, onClose, onChanged }: { capability: DrawerCapability | null; onClose: () => void; onChanged: () => void }) {
   const supabase = createClient();
+  const beginRun = useRunAbort();
   const open = !!capability;
   const [officerKey, setOfficerKey] = useState("ceng");
   const [activity, setActivity] = useState<Activity>(emptyActivity());
@@ -73,12 +74,12 @@ export default function CapabilityDrawer({ capability, onClose, onChanged }: { c
       const token = s.session?.access_token;
       const m = capability!.metadata ?? {};
       const prompt = `A new frontier-model capability is available:\n\n${capability!.title}${m.provider ? ` (${m.provider}${m.area ? ` · ${m.area}` : ""})` : ""}\n${capability!.why || ""}\n\nIn your domain, how does this apply to our product DELIVERY and our GTM motion — and what is the single most important, concrete way we should LEVERAGE it to execute (in our own operations)? Be specific; end with one recommended next step we could turn into an initiative.`;
-      const { text } = await askAgent({
+      const { text } = await askAgent({ signal: beginRun(),
         agentKey: officer.key, messages: [{ role: "user", content: prompt }],
         context: { area: "capabilities" }, token, onActivity: setActivity,
       });
       setTake(text);
-    } catch (e) { setError(e instanceof Error ? e.message : "Could not reach the officer."); }
+    } catch (e) { if (isAbortError(e)) return; setError(e instanceof Error ? e.message : "Could not reach the officer."); }
     finally { setThinking(false); }
   }
 

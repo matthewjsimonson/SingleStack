@@ -9,7 +9,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { createClient } from "@/lib/supabase/client";
 import { Chip, Confidence } from "@/components/ui";
-import { PulseDots, streamStructured } from "@/components/alive";
+import { PulseDots, streamStructured, useRunAbort, isAbortError } from "@/components/alive";
 import AgentActivity from "@/components/AgentActivity";
 import { emptyActivity, type Activity } from "@/lib/agentStream";
 
@@ -50,6 +50,7 @@ export default function ProposeDrawer({ open, onClose, mode, target, advisors, o
   onDone: () => void;
 }) {
   const supabase = createClient();
+  const beginRun = useRunAbort();
   const [thinking, setThinking] = useState("");
   const [activity, setActivity] = useState<Activity>(emptyActivity());
   const [busy, setBusy] = useState(false);
@@ -104,7 +105,7 @@ export default function ProposeDrawer({ open, onClose, mode, target, advisors, o
     setBusy(true); setThinking(""); setActivity(emptyActivity()); setError(null);
     try {
       const { data: sess } = await supabase.auth.getSession();
-      const res = await streamStructured<{ proposal_id?: string }>({
+      const res = await streamStructured<{ proposal_id?: string }>({ signal: beginRun(),
         fnName: "agent-propose",
         token: sess.session?.access_token,
         body: { agent_keys: advisors.map((a) => a.key), agent_key: advisors[0]?.key, [idKey]: target.id },
@@ -113,7 +114,7 @@ export default function ProposeDrawer({ open, onClose, mode, target, advisors, o
       });
       if (res?.proposal_id) setFreshIds((prev) => new Set(prev).add(res.proposal_id as string));
       await loadPending();
-    } catch (e) { setError(e instanceof Error ? e.message : "Proposal failed."); }
+    } catch (e) { if (isAbortError(e)) return; setError(e instanceof Error ? e.message : "Proposal failed."); }
     finally { setBusy(false); }
   }, [supabase, advisors, idKey, target.id, loadPending]);
 

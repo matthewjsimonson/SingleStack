@@ -7,7 +7,7 @@
 import { useCallback, useEffect, useRef, useState, type CSSProperties } from "react";
 import { Markdown } from "./Markdown";
 import AgentActivity from "./AgentActivity";
-import { applyEvent, createParser, emptyActivity, type Activity } from "@/lib/agentStream";
+import { applyEvent, coalesce, createParser, emptyActivity, type Activity } from "@/lib/agentStream";
 
 export const CHAT_PHASES = ["Reading your question", "Pulling the context", "Thinking it through", "Writing the reply"];
 export const RUN_PHASES = ["Reading the context", "Weighing the evidence", "Forming the take", "Structuring the output"];
@@ -86,6 +86,15 @@ export function useTypewriter() {
 // then the answer separator, so onThinking() gets the live work and
 // onChunk() gets the answer. Falls back to JSON { reply } if the streaming
 // function isn't deployed yet (then there's no reasoning trace).
+/**
+ * True for the rejection fetch raises when its signal is aborted. An abort is
+ * something we asked for — a closed drawer, a re-run — never a failure to
+ * report or retry.
+ */
+export function isAbortError(e: unknown): boolean {
+  return e instanceof DOMException ? e.name === "AbortError" : (e as { name?: string })?.name === "AbortError";
+}
+
 export async function streamAgentChat(opts: {
   agentKey: string;
   messages: { role: string; content: string }[];
@@ -96,6 +105,7 @@ export async function streamAgentChat(opts: {
   onActivity?: (a: Activity) => void;   // typed step list, when the function speaks it
   fnName?: string;          // which function to hit (default "agent-chat")
   fallbackFnName?: string;  // retried once if the primary fails BEFORE any output (e.g. not deployed)
+  signal?: AbortSignal;     // abort on unmount so a closed drawer stops the run
 }): Promise<void> {
   const base = process.env.NEXT_PUBLIC_SUPABASE_URL ?? "";
   let emitted = false; // once true, we're committed — no fallback mid-stream
@@ -111,6 +121,7 @@ export async function streamAgentChat(opts: {
         ...(opts.token ? { Authorization: `Bearer ${opts.token}` } : {}),
       },
       body: JSON.stringify({ agent_key: opts.agentKey, messages: opts.messages, context: opts.context, stream: true }),
+      signal: opts.signal,
     });
     if (!resp.ok) throw new Error((await resp.text().catch(() => "")) || `Chat failed (${resp.status}).`);
     if ((resp.headers.get("content-type") ?? "").includes("application/json")) {
@@ -127,6 +138,8 @@ export async function streamAgentChat(opts: {
     // not migrated still arrives as think/answer events via the legacy path.
     let activity = emptyActivity();
     let streamError: string | undefined;
+    // One render per frame, not one per event — see coalesce().
+    const paint = coalesce<Activity>((a) => opts.onActivity?.(a));
     const parser = createParser((e) => {
       if (e.t === "think") onThinking(e.text);
       else if (e.t === "answer") onChunk(e.text);
@@ -135,21 +148,30 @@ export async function streamAgentChat(opts: {
       // one would restart the run underneath visible progress.
       else emitted = true;
       activity = applyEvent(activity, e);
-      opts.onActivity?.(activity);
+      if (opts.onActivity) paint.push(activity);
     });
 
-    for (;;) {
-      const { done, value } = await reader.read();
-      if (done) break;
-      parser.push(dec.decode(value, { stream: true }));
+    try {
+      for (;;) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        parser.push(dec.decode(value, { stream: true }));
+      }
+      parser.end();
+    } finally {
+      paint.flush(); // the closing events land inside the last frame window
     }
-    parser.end();
     if (streamError) throw new Error(streamError);
   }
 
   try {
     await once(opts.fnName ?? "agent-chat");
   } catch (e) {
+    // An abort must not trigger the fallback: that would fire a second request
+    // for a run the caller has already walked away from. It is rethrown rather
+    // than swallowed so every helper reports abort the same way and no caller
+    // mistakes a cancelled run for an empty answer.
+    if (isAbortError(e)) throw e;
     if (opts.fallbackFnName && !emitted) { await once(opts.fallbackFnName); return; } // graceful degrade
     throw e;
   }
@@ -169,6 +191,7 @@ export async function streamStructured<T = unknown>(opts: {
   token?: string;
   onThinking?: (s: string) => void;
   onActivity?: (a: Activity) => void;
+  signal?: AbortSignal;
 }): Promise<T> {
   const base = process.env.NEXT_PUBLIC_SUPABASE_URL ?? "";
   const resp = await fetch(`${base}/functions/v1/${opts.fnName}`, {
@@ -179,6 +202,7 @@ export async function streamStructured<T = unknown>(opts: {
       ...(opts.token ? { Authorization: `Bearer ${opts.token}` } : {}),
     },
     body: JSON.stringify({ ...opts.body, stream: true }),
+    signal: opts.signal,
   });
   if (!resp.ok) throw new Error((await resp.text().catch(() => "")) || `${opts.fnName} failed (${resp.status}).`);
   if ((resp.headers.get("content-type") ?? "").includes("application/json")) {
@@ -193,20 +217,25 @@ export async function streamStructured<T = unknown>(opts: {
   let activity = emptyActivity();
   let resultBuf = "";
   let streamError: string | undefined;
+  const paint = coalesce<Activity>((a) => opts.onActivity?.(a));
   const parser = createParser((e) => {
     if (e.t === "answer") resultBuf += e.text;
     if (e.t === "error") streamError = e.message;
     if (e.t === "think") opts.onThinking?.(e.text);
     activity = applyEvent(activity, e);
-    opts.onActivity?.(activity);
+    if (opts.onActivity) paint.push(activity);
   });
 
-  for (;;) {
-    const { done, value } = await reader.read();
-    if (done) break;
-    parser.push(dec.decode(value, { stream: true }));
+  try {
+    for (;;) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      parser.push(dec.decode(value, { stream: true }));
+    }
+    parser.end();
+  } finally {
+    paint.flush();
   }
-  parser.end();
 
   if (streamError) throw new Error(streamError);
   const parsed = JSON.parse(resultBuf || "{}");
@@ -232,6 +261,7 @@ export async function askAgent(opts: {
   token?: string;
   onActivity?: (a: Activity) => void;
   fnName?: string;
+  signal?: AbortSignal;
 }): Promise<{ text: string; runId: string | null }> {
   let text = "";
   let runId: string | null = null;
@@ -241,6 +271,7 @@ export async function askAgent(opts: {
     context: opts.context,
     token: opts.token,
     fnName: opts.fnName,
+    signal: opts.signal,
     onChunk: (s) => { text += s; },
     onActivity: (a) => {
       const rid = a.meta?.run_id;
@@ -249,6 +280,35 @@ export async function askAgent(opts: {
     },
   });
   return { text, runId };
+}
+
+/**
+ * Ties in-flight runs to the component's lifetime.
+ *
+ * Without this, closing a drawer mid-run leaves the reader looping and calling
+ * setState on something React has unmounted — and the stream keeps costing
+ * tokens for output nobody will see.
+ *
+ * It deliberately does NOT abort a previous run when a new one starts. Aborting
+ * mid-flight rejects the old call, and its `finally` — which still runs after
+ * the catch returns — would clear the busy flag the new run had just set,
+ * dropping the spinner while work continued. The surfaces here already disable
+ * their trigger while busy, so racing runs are prevented at the button instead.
+ */
+export function useRunAbort() {
+  const live = useRef<Set<AbortController>>(new Set());
+  useEffect(() => {
+    const set = live.current;
+    return () => { for (const c of set) c.abort(); set.clear(); };
+  }, []);
+  return useCallback(() => {
+    // Prune controllers already aborted; a completed run's controller is only
+    // released at unmount, which costs one small object per run in this mount.
+    for (const c of live.current) if (c.signal.aborted) live.current.delete(c);
+    const c = new AbortController();
+    live.current.add(c);
+    return c.signal;
+  }, []);
 }
 
 // Bundles the reasoning trace + the typewriter answer for a single AI reply.

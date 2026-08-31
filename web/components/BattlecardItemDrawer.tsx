@@ -8,7 +8,7 @@
 import { useEffect, useState } from "react";
 import { createClient } from "@/lib/supabase/client";
 import { Chip, Banner, Confidence } from "@/components/ui";
-import { askAgent } from "@/components/alive";
+import { askAgent, useRunAbort, isAbortError } from "@/components/alive";
 import AgentActivity from "@/components/AgentActivity";
 import { emptyActivity, type Activity } from "@/lib/agentStream";
 
@@ -21,6 +21,7 @@ export default function BattlecardItemDrawer({ item, competitorName, workflowId,
   item: CardItem | null; competitorName: string; workflowId: string | null; onClose: () => void; onChanged: () => void;
 }) {
   const supabase = createClient();
+  const beginRun = useRunAbort();
   const [evidence, setEvidence] = useState<Sig[]>([]);
   const [activity, setActivity] = useState<Activity>(emptyActivity());
   const [agents, setAgents] = useState<Agent[]>([]);
@@ -85,7 +86,7 @@ export default function BattlecardItemDrawer({ item, competitorName, workflowId,
       // specifically, while agent-chat's own grounding keeps the wider awareness.
       const cardCtx = `We are discussing one battlecard card vs ${competitorName}: [${item.kind}] "${item.title}"${item.detail ? ` — ${item.detail}` : ""}. Evidence: ${evidence.map((s) => s.title).join("; ") || "none cited"}.`;
       const { data: { session } } = await supabase.auth.getSession();
-      const { text } = await askAgent({
+      const { text } = await askAgent({ signal: beginRun(),
         agentKey,
         messages: [{ role: "user", content: `${cardCtx}\n\n${q}` }, ...next.slice(0, -1)].slice(-8),
         context: { area: "competitive" },
@@ -93,7 +94,7 @@ export default function BattlecardItemDrawer({ item, competitorName, workflowId,
         onActivity: setActivity,
       });
       setChat([...next, { role: "assistant", content: text || "(no reply)" }]);
-    } catch (e) { setError(e instanceof Error ? e.message : "Chat failed."); }
+    } catch (e) { if (isAbortError(e)) return; setError(e instanceof Error ? e.message : "Chat failed."); }
     finally { setBusy(null); }
   }
 
