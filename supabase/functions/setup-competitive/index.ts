@@ -247,7 +247,7 @@ Deno.serve(async (req: Request) => {
       const resp = (await anthropic.messages.create({
         model: pol.model, max_tokens: 4000,
         output_config: { effort: pol.effort, format: { type: "json_schema", schema: INTERVIEW_SCHEMA } },
-        system: `You are SingleStack's competitive-profile interviewer. Your job: build a profile COMPLETE and ACCURATE enough that a search finds the RIGHT competitors. You report each dimension's status WITH EVIDENCE; the system computes readiness (don't invent a number).
+        system: [{ type: "text", cache_control: { type: "ephemeral" }, text: `You are SingleStack's competitive-profile interviewer. Your job: build a profile COMPLETE and ACCURATE enough that a search finds the RIGHT competitors. You report each dimension's status WITH EVIDENCE; the system computes readiness (don't invent a number).
 
 TEXT IS NOT TRUTH. A dimension is 'covered' ONLY if the records or an answer establish it FULLY, SPECIFICALLY, and ACCURATELY — a true, complete characterization. The mere existence of text does NOT make it covered: thin, generic, hedged, or MISCHARACTERIZED content is 'partial' or 'missing'. Re-examine EVERY dimension from scratch on every pass — never assume an area is done just because it has words in it. (Rubber-stamping every filled box is the exact failure you must avoid.)
 
@@ -260,12 +260,17 @@ WHY THESE DIMENSIONS — rivals cluster on more than what/who: the JOBS the prod
 
 LIVING PROFILE — there are NO maturity "stages" to grade against. Assess each dimension on its real evidence today; a young company will honestly have gaps (e.g. no deal-loss history yet) — mark those 'missing', don't excuse them. The profile is meant to be kept CURRENT and to GROW as the company learns more, so reflect exactly what's there now and let the score rise as it fills in.
 
-NEXT QUESTION — target the highest-WEIGHT dimension still 'missing' OR 'partial' that's worth asking (known rivals anchor the search — prioritize them early when missing). Write ONE specific, conversational question that pulls a CONCRETE answer — name the kind of detail you want (e.g. for pricing: "per-seat, usage, or platform fee — and what tier do most buyers land on?"; for GTM motion: "what's the core message and story you lead with to convince a buyer — the claims and the proof behind them?"). Sharpen a 'partial' as readily as you fill a 'missing'. If every weighted dimension is at least solidly covered, next_dimension='' and question=''. One question at a time.`,
+NEXT QUESTION — target the highest-WEIGHT dimension still 'missing' OR 'partial' that's worth asking (known rivals anchor the search — prioritize them early when missing). Write ONE specific, conversational question that pulls a CONCRETE answer — name the kind of detail you want (e.g. for pricing: "per-seat, usage, or platform fee — and what tier do most buyers land on?"; for GTM motion: "what's the core message and story you lead with to convince a buyer — the claims and the proof behind them?"). Sharpen a 'partial' as readily as you fill a 'missing'. If every weighted dimension is at least solidly covered, next_dimension='' and question=''. One question at a time.` }],
         messages: [{ role: "user", content: [
-          records ? `THE RECORDS (everything already known):\n${records}` : "THE RECORDS: (none yet)",
-          transcriptText ? `INTERVIEW SO FAR:\n${transcriptText}` : "INTERVIEW SO FAR: (not started)",
-          `\nQUESTION BUDGET: ${budget} total; ${asked} already asked.`,
-        ].join("\n\n") }],
+          // Stable for the whole interview — cached with the system prefix.
+          { type: "text", cache_control: { type: "ephemeral" },
+            text: records ? `THE RECORDS (everything already known):\n${records}` : "THE RECORDS: (none yet)" },
+          // Grows every turn — must stay after the last breakpoint.
+          { type: "text", text: [
+            transcriptText ? `INTERVIEW SO FAR:\n${transcriptText}` : "INTERVIEW SO FAR: (not started)",
+            `\nQUESTION BUDGET: ${budget} total; ${asked} already asked.`,
+          ].join("\n\n") },
+        ] }],
         // deno-lint-ignore no-explicit-any
       } as any)) as Anthropic.Message;
       const text = resp.content.filter((b) => b.type === "text").map((b) => (b as { text: string }).text).join("");
