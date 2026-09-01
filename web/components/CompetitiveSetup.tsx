@@ -12,7 +12,9 @@ import { useCallback, useEffect, useState } from "react";
 import { createClient } from "@/lib/supabase/client";
 import { getOrgId } from "@/lib/org";
 import { Chip, Banner, Modal } from "@/components/ui";
-import { useAgentRun, AgentProgress, AgentStepList } from "@/components/AgentProgress";
+import AgentActivity from "@/components/AgentActivity";
+import { streamStructured, useRunAbort, isAbortError } from "@/components/alive";
+import { emptyActivity, type Activity } from "@/lib/agentStream";
 import ProfileReadiness from "@/components/ProfileReadiness";
 import { CATALOG_BY_KIND } from "@/lib/sources";
 import { standUpCompetitiveAgents } from "@/lib/standUpCompetitive";
@@ -51,10 +53,14 @@ export default function CompetitiveSetup({ onDone, productId }: { onDone: () => 
   const [busy, setBusy] = useState<string | null>(null);
   // Staged progress for the capability proposal; the SEARCH gets REAL phase
   // status (phase + elapsed seconds + token usage) instead of a guessed cadence.
-  const capsRun = useAgentRun("setupCaps");
-  const askRun = useAgentRun("setupAsk");
-  const pullRun = useAgentRun("pullSource");
-  const pictureRun = useAgentRun("setupPicture");
+  const beginRun = useRunAbort();
+  const [capsAct, setCapsAct] = useState<Activity>(emptyActivity());
+  const [askAct, setAskAct] = useState<Activity>(emptyActivity());
+  const [pullAct, setPullAct] = useState<Activity>(emptyActivity());
+  const [pictureAct, setPictureAct] = useState<Activity>(emptyActivity());
+  const [asking, setAsking] = useState(false);
+  const [painting, setPainting] = useState(false);
+  const [pullingNow, setPullingNow] = useState(false);
   // The living search checklist: short, controlled steps that complete on REAL
   // transitions (request fired / phase resolved) — spinner on the active step,
   // ✓ as each one lands. No fake progress between events.
@@ -403,6 +409,20 @@ export default function CompetitiveSetup({ onDone, productId }: { onDone: () => 
 
   // invoke with REAL errors: a non-2xx from the function carries its message in
   // the response body — surface that, never the generic "non-2xx status code".
+  // Streaming twin of invoke() for the steps that now speak the activity
+  // protocol (interview, picture, capabilities). The plain invoke() below still
+  // serves landscape/competitors, which have not migrated.
+  const invokeStreamed = async <T,>(body: Record<string, unknown>, onActivity: (a: Activity) => void): Promise<T> => {
+    const { data: sess } = await supabase.auth.getSession();
+    return await streamStructured<T>({
+      signal: beginRun(),
+      fnName: "setup-competitive",
+      body,
+      token: sess.session?.access_token,
+      onActivity,
+    });
+  };
+
   const invoke = async (body: Record<string, unknown>) => {
     const { data: s } = await supabase.auth.getSession();
     const token = s.session?.access_token;
@@ -432,15 +452,21 @@ export default function CompetitiveSetup({ onDone, productId }: { onDone: () => 
   async function nextQuestion(history: { role: "q" | "a"; text: string }[]) {
     setChatBusy(true); setError(null);
     try {
-      const data = await askRun.go(() => invoke({ step: "interview", records: recordsDump, transcript: history, max_questions: maxQuestions }));
+      setAsking(true); setAskAct(emptyActivity());
+      // deno-lint-ignore no-explicit-any
+      const data = await invokeStreamed<any>({ step: "interview", records: recordsDump, transcript: history, max_questions: maxQuestions }, setAskAct);
       const r = Math.min(100, Math.max(0, Math.round(Number(data.readiness) || 0)));
       setReady((prev) => { setReadyDelta(prev !== null ? r - prev : null); return r; });
       setGaps((data.gaps as string) || "");
       if (Array.isArray(data.coverage)) setCoverage(data.coverage as Cov[]);
+      setAsking(false);
       if (data.done || !data.question) { setChatDone(true); setChatWhy(null); await paintPicture(history); }
       else { const next = [...history, { role: "q" as const, text: data.question }]; setChat(next); setChatWhy(data.why || null); void persistRun({ transcript: next }); }
-    } catch (e) { setError(e instanceof Error ? e.message : "The interviewer stalled."); }
-    finally { setChatBusy(false); }
+    } catch (e) {
+      if (isAbortError(e)) return;
+      setError(e instanceof Error ? e.message : "The interviewer stalled.");
+    }
+    finally { setChatBusy(false); setAsking(false); }
   }
   function openChat() {
     setChatOpen(true);
@@ -473,7 +499,9 @@ export default function CompetitiveSetup({ onDone, productId }: { onDone: () => 
   async function paintPicture(history: { role: "q" | "a"; text: string }[]) {
     setChatBusy(true); setError(null);
     try {
-      const data = await pictureRun.go(() => invoke({ step: "picture", records: recordsDump, transcript: history }));
+      setPainting(true); setPictureAct(emptyActivity());
+      // deno-lint-ignore no-explicit-any
+      const data = await invokeStreamed<any>({ step: "picture", records: recordsDump, transcript: history }, setPictureAct);
       setPicture(data.picture || "");
       // MERGE, don't overwrite: a field the picture returns fills its box; a
       // field it leaves empty keeps whatever the records/you already had — so
@@ -491,8 +519,11 @@ export default function CompetitiveSetup({ onDone, productId }: { onDone: () => 
       // Fill the FULL product & GTM record from what the interview surfaced —
       // empty fields auto-apply; differences to already-filled fields are proposed.
       if (history.length > 0) void applyRecordUpdates((data.record_updates ?? []) as { scope?: string; field_key?: string; value?: string }[]);
-    } catch (e) { setError(e instanceof Error ? e.message : "Could not paint the picture."); }
-    finally { setChatBusy(false); }
+    } catch (e) {
+      if (isAbortError(e)) return;
+      setError(e instanceof Error ? e.message : "Could not paint the picture.");
+    }
+    finally { setChatBusy(false); setPainting(false); }
   }
   const [profileNote, setProfileNote] = useState<string | null>(null);
   // Fill the FULL product & GTM record from what the interview surfaced. The
@@ -664,11 +695,14 @@ export default function CompetitiveSetup({ onDone, productId }: { onDone: () => 
   async function proposeCapabilities(rivals: string[]) {
     setBusy("caps"); setError(null);
     try {
-      await capsRun.go(async () => {
-        const data = await invoke({ step: "capabilities", market: marketCtx, product: { name: prod?.name, value_prop: prod?.value_prop }, competitors: rivals });
-        setCaps(((data.capabilities ?? []) as Omit<CapCand, "keep">[]).map((c) => ({ ...c, keep: true })));
-      });
-    } catch (e) { setError(e instanceof Error ? e.message : "Could not propose capabilities."); }
+      setCapsAct(emptyActivity());
+      // deno-lint-ignore no-explicit-any
+      const data = await invokeStreamed<any>({ step: "capabilities", market: marketCtx, product: { name: prod?.name, value_prop: prod?.value_prop }, competitors: rivals }, setCapsAct);
+      setCaps(((data.capabilities ?? []) as Omit<CapCand, "keep">[]).map((c) => ({ ...c, keep: true })));
+    } catch (e) {
+      if (isAbortError(e)) return;
+      setError(e instanceof Error ? e.message : "Could not propose capabilities.");
+    }
     finally { setBusy(null); }
   }
   async function confirmCapabilities() {
@@ -760,21 +794,26 @@ export default function CompetitiveSetup({ onDone, productId }: { onDone: () => 
     for (const src of createdSources.slice(0, 12)) {
       setPullLog((l) => [...l, { text: `${src.label}` }]);
       try {
-        await pullRun.go(async () => {
-          const { data, error } = await supabase.functions.invoke("connector-runner", {
-            body: { source_id: src.id }, headers: token ? { Authorization: `Bearer ${token}` } : undefined,
+        setPullingNow(true); setPullAct(emptyActivity());
+        {
+          // deno-lint-ignore no-explicit-any
+          const data = await streamStructured<any>({
+            signal: beginRun(),
+            fnName: "connector-runner",
+            body: { source_id: src.id },
+            token: token ?? undefined,
+            onActivity: setPullAct,
           });
-          if (error) throw error;
-          if (data?.error) throw new Error(data.error);
           const candidates = (data.created ?? 0) + (data.dropped ?? 0);
           setPullLog((l) => [...l.slice(0, -1), {
             text: `${src.label} — fetched ${data.fetched ?? 0} · ${data.quarantined ? `⚠ ${data.quarantined} quarantined · ` : ""}${candidates} distilled · ${data.dropped ?? 0} below the bar → ${data.created ?? 0} landed`, ok: true,
             signals: (data.signals ?? []) as { title: string; relevance: number }[],
           }]);
-        });
+        }
       } catch (e) {
+        if (isAbortError(e)) return;
         setPullLog((l) => [...l.slice(0, -1), { text: `${src.label} — ${e instanceof Error ? e.message : "failed"}`, ok: false }]);
-      }
+      } finally { setPullingNow(false); }
     }
     // Signals landed → synthesize immediately, so setup ends with CONTENT:
     // themes on the competitors, proposals in review — not just raw rows.
@@ -1003,8 +1042,8 @@ export default function CompetitiveSetup({ onDone, productId }: { onDone: () => 
                     </div>
                   ))}
                   {chatWhy && !chatDone && <div className="t-mono-xs t-muted">Why this question: {chatWhy}</div>}
-                  {askRun.active && <div className="card card-pad" style={{ background: "var(--panel-2)", marginRight: 32 }}><AgentStepList run={askRun} /></div>}
-                  {pictureRun.active && <div className="card card-pad" style={{ background: "var(--panel-2)", marginRight: 32 }}><AgentStepList run={pictureRun} /></div>}
+                  {asking && <div className="card card-pad" style={{ background: "var(--panel-2)", marginRight: 32 }}><AgentActivity activity={askAct} busy who="The interviewer" /></div>}
+                  {painting && <div className="card card-pad" style={{ background: "var(--panel-2)", marginRight: 32 }}><AgentActivity activity={pictureAct} busy who="The analyst" /></div>}
                   {chatDone && !chatBusy && (
                     <div className="card card-pad" style={{ borderLeft: "3px solid var(--gn-text, var(--gn-text))", fontSize: 12.5 }}>
                       Got what it needs — the full picture is on the setup screen. Review it, ✎ Edit anything (including any answer above), then ✦ Find my competitors.
@@ -1067,9 +1106,9 @@ export default function CompetitiveSetup({ onDone, productId }: { onDone: () => 
       {step === 3 && (
         <div className="stack-3">
           <div className="t-sub t-muted" style={{ fontSize: 12.5 }}>The matrix rows — the <b>standard, industry-recognized capability areas</b> buyers grade every vendor in your category on (verified against how the category is actually evaluated), not niche internal features. Scores then come from <b>evidence</b>, ratified by you.</div>
-          {capsRun.active && caps.length === 0 ? <div className="card card-pad" style={{ borderLeft: "3px solid var(--ac)" }}>
+          {busy === "caps" && caps.length === 0 ? <div className="card card-pad" style={{ borderLeft: "3px solid var(--ac)" }}>
             <div className="row-between" style={{ marginBottom: 8 }}><span className="t-label" style={{ color: "var(--tm)" }}>Designing your matrix</span></div>
-            <AgentStepList run={capsRun} />
+            <AgentActivity activity={capsAct} busy who="The analyst" />
           </div> : caps.map((c, i) => (
             <div key={i} className="card card-pad row gap-2" style={{ alignItems: "flex-start", opacity: c.keep ? 1 : 0.45 }}>
               <input type="checkbox" checked={c.keep} onChange={() => setCaps(caps.map((x, j) => j === i ? { ...x, keep: !x.keep } : x))} style={{ marginTop: 5 }} />
@@ -1192,8 +1231,8 @@ export default function CompetitiveSetup({ onDone, productId }: { onDone: () => 
           {createdSources.length > 0 && (
             <>
               <button className="btn btn-sm" disabled={busy === "ignite"} onClick={igniteAll}>{busy === "ignite" ? "Pulling…" : `⚡ Run the first pulls now (${Math.min(createdSources.length, 12)})`}</button>
-              {pullRun.active && (
-                <div className="card card-pad" style={{ borderLeft: "3px solid var(--ac)" }}><AgentStepList run={pullRun} /></div>
+              {pullingNow && (
+                <div className="card card-pad" style={{ borderLeft: "3px solid var(--ac)" }}><AgentActivity activity={pullAct} busy who="The connector" /></div>
               )}
               {pullLog.length > 0 && (
                 <div className="card card-pad" style={{ background: "var(--panel-2)" }}>

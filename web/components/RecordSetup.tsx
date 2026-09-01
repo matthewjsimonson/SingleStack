@@ -17,7 +17,9 @@ import { useEffect, useState } from "react";
 import { createClient } from "@/lib/supabase/client";
 import { getOrgId } from "@/lib/org";
 import { Chip, Banner } from "@/components/ui";
-import { useAgentRun, AgentStepList } from "@/components/AgentProgress";
+import AgentActivity from "@/components/AgentActivity";
+import { streamStructured, useRunAbort, isAbortError } from "@/components/alive";
+import { emptyActivity, type Activity } from "@/lib/agentStream";
 import { PRODUCT_TEMPLATE, GTM_TEMPLATE } from "@/lib/templates";
 import { MESSAGING_FRAMEWORK } from "@/lib/messagingFramework";
 
@@ -39,7 +41,9 @@ export default function RecordSetup({ onDone, mode = "both" }: { onDone: (produc
   const supabase = createClient();
   const [step, setStep] = useState<1 | 2 | 3>(1);
   const [error, setError] = useState<string | null>(null);
-  const draftRun = useAgentRun("draftRecords");
+  const beginRun = useRunAbort();
+  const [drafting, setDrafting] = useState(false);
+  const [activity, setActivity] = useState<Activity>(emptyActivity());
 
   // step 1 — materials
   const [materials, setMaterials] = useState<Material[]>([]);
@@ -163,16 +167,27 @@ export default function RecordSetup({ onDone, mode = "both" }: { onDone: (produc
   async function draft() {
     setError(null); setChatOpen(false);
     try {
-      await draftRun.go(async () => {
-        const data = await invoke({ step: "draft", materials, transcript: chat, template: templatePayload });
+      setDrafting(true); setActivity(emptyActivity());
+      {
+        const { data: sess } = await supabase.auth.getSession();
+        const data = await streamStructured<Record<string, unknown>>({
+          signal: beginRun(),
+          fnName: "setup-records",
+          body: { step: "draft", materials, transcript: chat, template: templatePayload },
+          token: sess.session?.access_token,
+          onActivity: setActivity,
+        });
         const byKey: Record<string, string> = {};
         for (const f of (data.fields ?? []) as { record: string; key: string; value: string }[]) byKey[`${f.record}:${f.key}`] = f.value ?? "";
         setFields(allFields.map((f) => ({ ...f, value: byKey[`${f.record}:${f.key}`] ?? "" })));
         setProdName((data.product_name as string) || "");
         setGtmName((data.gtm_name as string) || "");
         setStep(3);
-      });
-    } catch (e) { setError(e instanceof Error ? e.message : "Could not draft the records."); }
+      }
+    } catch (e) {
+      if (isAbortError(e)) return;
+      setError(e instanceof Error ? e.message : "Could not draft the records.");
+    } finally { setDrafting(false); }
   }
   const setField = (i: number, v: string) => setFields(fields.map((f, j) => (j === i ? { ...f, value: v } : f)));
 
@@ -277,10 +292,10 @@ export default function RecordSetup({ onDone, mode = "both" }: { onDone: (produc
           <div className="t-sub t-muted" style={{ fontSize: 12.5 }}>
             {chatDone ? "Interview complete — draft the records when ready." : "The drill-down is open in the side panel. It asks only what your materials don't answer."}
           </div>
-          {draftRun.active ? (
+          {drafting ? (
             <div className="card card-pad" style={{ borderLeft: "3px solid var(--ac)" }}>
               <div className="t-label" style={{ color: "var(--tm)", marginBottom: 8 }}>Drafting your records</div>
-              <AgentStepList run={draftRun} />
+              <AgentActivity activity={activity} busy={drafting} who="The analyst" />
             </div>
           ) : (
             <div className="row gap-2">

@@ -12,7 +12,9 @@
 // and light up when their credential connector lands.
 import { useEffect, useState, useCallback } from "react";
 import { createClient } from "@/lib/supabase/client";
-import { useAgentRun, AgentStepList } from "@/components/AgentProgress";
+import AgentActivity from "@/components/AgentActivity";
+import { streamStructured, useRunAbort, isAbortError } from "@/components/alive";
+import { emptyActivity, type Activity } from "@/lib/agentStream";
 import MonitoringStatus from "@/components/MonitoringStatus";
 import { getOrgId } from "@/lib/org";
 import { Chip, Modal } from "@/components/ui";
@@ -46,7 +48,8 @@ export default function SourceManager({ scope = {}, title = "Sources" }: { scope
   const [pulling, setPulling] = useState<Record<string, boolean>>({});
   // The brain at work during a pull: the pipeline stages walk while the runner
   // fetches→screens→distills→gates, and the result shows the REAL numbers.
-  const pullRun = useAgentRun("pullSource");
+  const beginRun = useRunAbort();
+  const [activity, setActivity] = useState<Activity>(emptyActivity());
   const [pullingId, setPullingId] = useState<string | null>(null);
   const [pullMsg, setPullMsg] = useState<Record<string, string>>({});
   // Source Recipe Builder — describe a signal in plain English, Claude drafts it.
@@ -106,10 +109,16 @@ export default function SourceManager({ scope = {}, title = "Sources" }: { scope
     setPulling((p) => ({ ...p, [s.id]: true })); setPullingId(s.id);
     setPullMsg((m) => ({ ...m, [s.id]: "" }));
     try {
-      await pullRun.go(async () => {
-        const { data, error } = await supabase.functions.invoke("connector-runner", { body: { source_id: s.id } });
-        if (error) throw new Error((data as { error?: string })?.error || error.message);
-        const d = data as { created: number; fetched: number; dropped: number; quarantined?: number; floor?: number };
+      setActivity(emptyActivity());
+      {
+        const { data: sess } = await supabase.auth.getSession();
+        const d = await streamStructured<{ created: number; fetched: number; dropped: number; quarantined?: number; floor?: number }>({
+          signal: beginRun(),
+          fnName: "connector-runner",
+          body: { source_id: s.id },
+          token: sess.session?.access_token,
+          onActivity: setActivity,
+        });
         // The pipeline, with its real numbers — exactly what happened to the bytes.
         setPullMsg((m) => ({ ...m, [s.id]: [
           `fetched ${d.fetched} doc${d.fetched === 1 ? "" : "s"}`,
@@ -118,9 +127,10 @@ export default function SourceManager({ scope = {}, title = "Sources" }: { scope
           d.dropped ? `${d.dropped} dropped below ${Math.round((d.floor ?? 0.55) * 100)}% relevance` : null,
           `→ ${d.created} signal${d.created === 1 ? "" : "s"} landed, tagged & feeding synthesis`,
         ].filter(Boolean).join(" · ") }));
-      });
+      }
       await load();
     } catch (e) {
+      if (isAbortError(e)) return;
       setPullMsg((m) => ({ ...m, [s.id]: e instanceof Error ? e.message : "Pull failed." }));
     } finally { setPulling((p) => ({ ...p, [s.id]: false })); setPullingId(null); }
   }
@@ -322,8 +332,8 @@ export default function SourceManager({ scope = {}, title = "Sources" }: { scope
                               {s.guidance ? ` · “${s.guidance}”` : ""}
                             </div>
                           )}
-                          {pullingId === s.id && pullRun.active && (
-                            <div className="card card-pad" style={{ marginTop: 6, background: "var(--panel-2)", padding: "8px 10px" }}><AgentStepList run={pullRun} /></div>
+                          {pullingId === s.id && (
+                            <div className="card card-pad" style={{ marginTop: 6, background: "var(--panel-2)", padding: "8px 10px" }}><AgentActivity activity={activity} busy who="The connector" /></div>
                           )}
                           {pullMsg[s.id] && <div className="t-sub" style={{ fontSize: 11.5, marginTop: 4, color: "var(--accent)" }}>{pullMsg[s.id]}</div>}
                         </div>

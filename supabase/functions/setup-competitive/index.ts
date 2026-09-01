@@ -23,6 +23,7 @@ import Anthropic from "npm:@anthropic-ai/sdk@0.69.0";
 import { createClient, type SupabaseClient } from "npm:@supabase/supabase-js@2";
 import { logUsage } from "../_shared/ai_usage.ts";
 import { resolveModelPolicy } from "../_shared/ai_policy.ts";
+import { dispatch, type Progress } from "../_shared/progress.ts";
 
 const MODEL = "claude-opus-5";
 const CORS = {
@@ -244,43 +245,54 @@ Deno.serve(async (req: Request) => {
       const budget = Math.max(0, Math.min(10, Math.round(Number((body as { max_questions?: number }).max_questions) || 6)));
       const asked = transcript.filter((t) => t.role === "q").length;
       const pol = await resolveModelPolicy(supabase, { task: "setup_competitive_interview", fallback: { model: MODEL, effort: "medium" } });
-      const resp = (await anthropic.messages.create({
-        model: pol.model, max_tokens: 4000,
-        output_config: { effort: pol.effort, format: { type: "json_schema", schema: INTERVIEW_SCHEMA } },
-        system: [{ type: "text", cache_control: { type: "ephemeral" }, text: `You are SingleStack's competitive-profile interviewer. Your job: build a profile COMPLETE and ACCURATE enough that a search finds the RIGHT competitors. You report each dimension's status WITH EVIDENCE; the system computes readiness (don't invent a number).
 
-TEXT IS NOT TRUTH. A dimension is 'covered' ONLY if the records or an answer establish it FULLY, SPECIFICALLY, and ACCURATELY — a true, complete characterization. The mere existence of text does NOT make it covered: thin, generic, hedged, or MISCHARACTERIZED content is 'partial' or 'missing'. Re-examine EVERY dimension from scratch on every pass — never assume an area is done just because it has words in it. (Rubber-stamping every filled box is the exact failure you must avoid.)
+      const ask = async (p: Progress) => {
+        p.step("read", "Reading everything you've given it");
+        p.done("read", `${transcript.length} answer${transcript.length === 1 ? "" : "s"} so far`);
+        p.step("gap", "Spotting the most decisive gap");
+        const streamed = anthropic.messages.stream({
+          model: pol.model, max_tokens: 4000,
+          output_config: { effort: pol.effort, format: { type: "json_schema", schema: INTERVIEW_SCHEMA } },
+          system: [{ type: "text", cache_control: { type: "ephemeral" }, text: `You are SingleStack's competitive-profile interviewer. Your job: build a profile COMPLETE and ACCURATE enough that a search finds the RIGHT competitors. You report each dimension's status WITH EVIDENCE; the system computes readiness (don't invent a number).
 
-CHALLENGE THE PRODUCT CHARACTERIZATION above all else. The product, its buyers, and its industries are ENTIRELY whatever THIS user's records define — make NO assumption about category, motion, or what it does; this platform serves any product, so read it only from their fields, modules, and features. If the records describe the product narrowly — one tidy category label — but its MODULES & FEATURES show it does materially more, then 'product', 'positioning', 'use_cases', and 'differentiation' are NOT covered: the label is hiding what the product actually is, and that mischaracterization is exactly why the search returns the wrong rivals. Characterize the product by EVERYTHING it actually does — every module, feature, and job — not a convenient label, and ask the questions that pin that down.
+  TEXT IS NOT TRUTH. A dimension is 'covered' ONLY if the records or an answer establish it FULLY, SPECIFICALLY, and ACCURATELY — a true, complete characterization. The mere existence of text does NOT make it covered: thin, generic, hedged, or MISCHARACTERIZED content is 'partial' or 'missing'. Re-examine EVERY dimension from scratch on every pass — never assume an area is done just because it has words in it. (Rubber-stamping every filled box is the exact failure you must avoid.)
 
-Assess EVERY dimension (one coverage entry each): ${DIMENSIONS.map((d) => `${d.key} (${d.label})`).join(", ")}.
-For each: status = covered (FULLY + ACCURATELY established) / partial (present but thin, generic, or only partly right) / missing (absent). source = records / answer / none. note = the actual evidence, TERSE (≤140 chars).
+  CHALLENGE THE PRODUCT CHARACTERIZATION above all else. The product, its buyers, and its industries are ENTIRELY whatever THIS user's records define — make NO assumption about category, motion, or what it does; this platform serves any product, so read it only from their fields, modules, and features. If the records describe the product narrowly — one tidy category label — but its MODULES & FEATURES show it does materially more, then 'product', 'positioning', 'use_cases', and 'differentiation' are NOT covered: the label is hiding what the product actually is, and that mischaracterization is exactly why the search returns the wrong rivals. Characterize the product by EVERYTHING it actually does — every module, feature, and job — not a convenient label, and ask the questions that pin that down.
 
-WHY THESE DIMENSIONS — rivals cluster on more than what/who: the JOBS the product is hired for (functional substitutes), the WEDGE that wins deals, how it's PRICED & packaged, and its GTM MOTION — meaning how they MESSAGE and convince: the value prop, the narrative, the claims and proof they lead with, how they talk about themselves to win the buyer (not merely the sales channel). Two products that pitch the same story to the same buyer are direct rivals even if built differently. These are usually the records' weakest spots, so they're often where the highest-value questions are.
+  Assess EVERY dimension (one coverage entry each): ${DIMENSIONS.map((d) => `${d.key} (${d.label})`).join(", ")}.
+  For each: status = covered (FULLY + ACCURATELY established) / partial (present but thin, generic, or only partly right) / missing (absent). source = records / answer / none. note = the actual evidence, TERSE (≤140 chars).
 
-LIVING PROFILE — there are NO maturity "stages" to grade against. Assess each dimension on its real evidence today; a young company will honestly have gaps (e.g. no deal-loss history yet) — mark those 'missing', don't excuse them. The profile is meant to be kept CURRENT and to GROW as the company learns more, so reflect exactly what's there now and let the score rise as it fills in.
+  WHY THESE DIMENSIONS — rivals cluster on more than what/who: the JOBS the product is hired for (functional substitutes), the WEDGE that wins deals, how it's PRICED & packaged, and its GTM MOTION — meaning how they MESSAGE and convince: the value prop, the narrative, the claims and proof they lead with, how they talk about themselves to win the buyer (not merely the sales channel). Two products that pitch the same story to the same buyer are direct rivals even if built differently. These are usually the records' weakest spots, so they're often where the highest-value questions are.
 
-NEXT QUESTION — target the highest-WEIGHT dimension still 'missing' OR 'partial' that's worth asking (known rivals anchor the search — prioritize them early when missing). Write ONE specific, conversational question that pulls a CONCRETE answer — name the kind of detail you want (e.g. for pricing: "per-seat, usage, or platform fee — and what tier do most buyers land on?"; for GTM motion: "what's the core message and story you lead with to convince a buyer — the claims and the proof behind them?"). Sharpen a 'partial' as readily as you fill a 'missing'. If every weighted dimension is at least solidly covered, next_dimension='' and question=''. One question at a time.` }],
-        messages: [{ role: "user", content: [
-          // Stable for the whole interview — cached with the system prefix.
-          { type: "text", cache_control: { type: "ephemeral" },
-            text: records ? `THE RECORDS (everything already known):\n${records}` : "THE RECORDS: (none yet)" },
-          // Grows every turn — must stay after the last breakpoint.
-          { type: "text", text: [
-            transcriptText ? `INTERVIEW SO FAR:\n${transcriptText}` : "INTERVIEW SO FAR: (not started)",
-            `\nQUESTION BUDGET: ${budget} total; ${asked} already asked.`,
-          ].join("\n\n") },
-        ] }],
+  LIVING PROFILE — there are NO maturity "stages" to grade against. Assess each dimension on its real evidence today; a young company will honestly have gaps (e.g. no deal-loss history yet) — mark those 'missing', don't excuse them. The profile is meant to be kept CURRENT and to GROW as the company learns more, so reflect exactly what's there now and let the score rise as it fills in.
+
+  NEXT QUESTION — target the highest-WEIGHT dimension still 'missing' OR 'partial' that's worth asking (known rivals anchor the search — prioritize them early when missing). Write ONE specific, conversational question that pulls a CONCRETE answer — name the kind of detail you want (e.g. for pricing: "per-seat, usage, or platform fee — and what tier do most buyers land on?"; for GTM motion: "what's the core message and story you lead with to convince a buyer — the claims and the proof behind them?"). Sharpen a 'partial' as readily as you fill a 'missing'. If every weighted dimension is at least solidly covered, next_dimension='' and question=''. One question at a time.` }],
+          messages: [{ role: "user", content: [
+            // Stable for the whole interview — cached with the system prefix.
+            { type: "text", cache_control: { type: "ephemeral" },
+              text: records ? `THE RECORDS (everything already known):\n${records}` : "THE RECORDS: (none yet)" },
+            // Grows every turn — must stay after the last breakpoint.
+            { type: "text", text: [
+              transcriptText ? `INTERVIEW SO FAR:\n${transcriptText}` : "INTERVIEW SO FAR: (not started)",
+              `\nQUESTION BUDGET: ${budget} total; ${asked} already asked.`,
+            ].join("\n\n") },
+          ] }],
         // deno-lint-ignore no-explicit-any
-      } as any)) as Anthropic.Message;
-      const text = resp.content.filter((b) => b.type === "text").map((b) => (b as { text: string }).text).join("");
-      await logUsage(supabase, { task: "setup_competitive_interview", model: pol.model, usage: resp.usage });
+        } as any);
+        // deno-lint-ignore no-explicit-any
+        for await (const ev of streamed as any) {
+          if (ev.type === "content_block_delta" && ev.delta?.type === "thinking_delta" && ev.delta.thinking) p.think(ev.delta.thinking);
+        }
+        const resp = await streamed.finalMessage();
+        const text = resp.content.filter((b) => b.type === "text").map((b) => (b as { text: string }).text).join("");
+        await logUsage(supabase, { task: "setup_competitive_interview", model: pol.model, usage: resp.usage });
       let out: { coverage: { dimension: string; status: string; source: string; note: string }[]; next_dimension: string; question: string; why: string };
       try { out = JSON.parse(text); }
       catch {
         // Truncated/invalid output must NOT block the flow: end the interview
         // gracefully so the picture step (the real synthesis) proceeds.
-        return json({ done: true, question: "", why: "", readiness: 75, gaps: "", coverage: [], partial: true });
+        p.done("gap", "ending the interview early");
+        return { done: true, question: "", why: "", readiness: 75, gaps: "", coverage: [], partial: true };
       }
       // COMPUTE readiness from the assessed coverage — the actual score: weighted,
       // reproducible, auditable. EVERY dimension counts (no stage exemptions), so the
@@ -301,35 +313,57 @@ NEXT QUESTION — target the highest-WEIGHT dimension still 'missing' OR 'partia
       // Done = budget spent, OR no worthwhile question, OR high score with no
       // high-weight gap left.
       const done = budgetSpent || !out.question?.trim() || (readiness >= 85 && topGapWeight < 1.5);
-      return json({
-        done, question: done ? "" : out.question, why: out.why ?? "", readiness,
-        gaps: budgetSpent && gapsArr.length ? `Budget reached — still thin: ${gaps}` : gaps,
-        coverage: cov.map((c) => ({ ...c, label: labelOf(c.dimension), weight: weightOf(c.dimension) })),
-      });
+        p.done("gap", done ? "interview complete" : `readiness ${readiness}%`);
+        return {
+          done, question: done ? "" : out.question, why: out.why ?? "", readiness,
+          gaps: budgetSpent && gapsArr.length ? `Budget reached — still thin: ${gaps}` : gaps,
+          coverage: cov.map((c) => ({ ...c, label: labelOf(c.dimension), weight: weightOf(c.dimension) })),
+        };
+      };
+
+      return dispatch((body as { stream?: boolean }).stream === true, CORS, ask);
     }
 
     if (step === "picture") {
       const pol = await resolveModelPolicy(supabase, { task: "setup_competitive_picture", fallback: { model: MODEL, effort: "medium" } });
-      const resp = (await anthropic.messages.create({
-        model: pol.model, max_tokens: 4000,
-        output_config: { effort: pol.effort, format: { type: "json_schema", schema: PICTURE_SCHEMA } },
-        system: `Synthesize the records + interview into the FULL PICTURE of this product and its market — the brief a competitive researcher needs to find exactly the right rivals, AND a complete fill of the product & GTM records. picture = 1-2 tight paragraphs: what it is, who buys it (personas + industries + segment), how it positions and what it replaces, the features that win deals, and any deal-loss/competitor hints from the interview. The structured fields = the same content, distilled. known_competitors = every rival the user NAMED in the records or interview (comma-separated; empty string if none) — these seed and anchor the search.
 
-record_updates = the COMPLETE record fill. For EACH canonical field below that the records + interview legitimately support, emit { scope, field_key, value } with a crisp, record-ready value. This is how setup leaves a full, complete product & GTM record — the interview asks about product strategy, GTM motion, pricing, and positioning precisely so these get filled. Rules: use ONLY these exact field_keys; ground every value in the records/transcript (NO embellishment, no guessing); OMIT a field entirely if there's nothing real to say; prefer the user's own words. If a field already appears in THE RECORDS, only include it when the interview genuinely adds or sharpens it.
+      const paint = async (p: Progress) => {
+        p.step("fold", "Folding the records and answers together");
+        p.done("fold", `${transcript.length} interview turn${transcript.length === 1 ? "" : "s"}`);
+        p.step("write", "Writing the full picture");
+        const streamed = anthropic.messages.stream({
+          model: pol.model, max_tokens: 4000,
+          output_config: { effort: pol.effort, format: { type: "json_schema", schema: PICTURE_SCHEMA } },
+          system: `Synthesize the records + interview into the FULL PICTURE of this product and its market — the brief a competitive researcher needs to find exactly the right rivals, AND a complete fill of the product & GTM records. picture = 1-2 tight paragraphs: what it is, who buys it (personas + industries + segment), how it positions and what it replaces, the features that win deals, and any deal-loss/competitor hints from the interview. The structured fields = the same content, distilled. known_competitors = every rival the user NAMED in the records or interview (comma-separated; empty string if none) — these seed and anchor the search.
 
-${RECORD_FIELD_CATALOG}`,
-        messages: [{ role: "user", content: [
-          records ? `THE RECORDS:\n${records}` : "THE RECORDS: (none)",
-          transcriptText ? `THE INTERVIEW:\n${transcriptText}` : "",
-        ].filter(Boolean).join("\n\n") }],
+  record_updates = the COMPLETE record fill. For EACH canonical field below that the records + interview legitimately support, emit { scope, field_key, value } with a crisp, record-ready value. This is how setup leaves a full, complete product & GTM record — the interview asks about product strategy, GTM motion, pricing, and positioning precisely so these get filled. Rules: use ONLY these exact field_keys; ground every value in the records/transcript (NO embellishment, no guessing); OMIT a field entirely if there's nothing real to say; prefer the user's own words. If a field already appears in THE RECORDS, only include it when the interview genuinely adds or sharpens it.
+
+  ${RECORD_FIELD_CATALOG}`,
+          messages: [{ role: "user", content: [
+            records ? `THE RECORDS:\n${records}` : "THE RECORDS: (none)",
+            transcriptText ? `THE INTERVIEW:\n${transcriptText}` : "",
+          ].filter(Boolean).join("\n\n") }],
         // deno-lint-ignore no-explicit-any
-      } as any)) as Anthropic.Message;
-      const text = resp.content.filter((b) => b.type === "text").map((b) => (b as { text: string }).text).join("");
-      await logUsage(supabase, { task: "setup_competitive_picture", model: pol.model, usage: resp.usage });
-      let picOut: unknown;
-      try { picOut = JSON.parse(text); }
-      catch { return json({ error: "The picture came back incomplete — try '✦ Drill down' again, or search directly from your records." }, 502); }
-      return json(picOut);
+        } as any);
+        // deno-lint-ignore no-explicit-any
+        for await (const ev of streamed as any) {
+          if (ev.type === "content_block_delta" && ev.delta?.type === "thinking_delta" && ev.delta.thinking) p.think(ev.delta.thinking);
+        }
+        const resp = await streamed.finalMessage();
+        const text = resp.content.filter((b) => b.type === "text").map((b) => (b as { text: string }).text).join("");
+        await logUsage(supabase, { task: "setup_competitive_picture", model: pol.model, usage: resp.usage });
+        p.done("write");
+        p.step("distil", "Distilling the profile fields");
+        let picOut: unknown;
+        try { picOut = JSON.parse(text); }
+        catch {
+          throw Object.assign(new Error("The picture came back incomplete — try '✦ Drill down' again, or search directly from your records."), { status: 502 });
+        }
+        p.done("distil", "queued for your review");
+        return picOut;
+      };
+
+      return dispatch((body as { stream?: boolean }).stream === true, CORS, paint);
     }
 
     // landscape: the LONG half (live web search) as its own request, so no
@@ -404,7 +438,11 @@ ${RECORD_FIELD_CATALOG}`,
       // areas — the feature-function areas review sites and analysts actually
       // grid every vendor on — then extract them. This stops the matrix from
       // being self-referential niche rows.
-      const { text: briefing } = await searchBriefing(
+      const caps = async (p: Progress) => {
+        p.step("read", "Reading your category and confirmed rivals");
+        p.done("read", rivalNames.length ? `${rivalNames.length} rival${rivalNames.length === 1 ? "" : "s"}` : "no rivals named yet");
+        p.step("grade", "Checking how the category is actually graded");
+        const { text: briefing } = await searchBriefing(
         supabase,
         key,
         `You are a software-category analyst. Identify the STANDARD capability / feature-function areas that buyers use to evaluate EVERY vendor in this category — the kind of rows a G2/Capterra feature grid or a Gartner/Forrester evaluation uses. Report 10-14 recognized, cross-vendor areas in INDUSTRY-STANDARD names (e.g. for CRM: pipeline & deal management, reporting & dashboards, workflow automation, integrations & API, mobile, security & compliance). These must apply to ALL the named rivals, not just one product. Avoid proprietary/marketing framings and hyper-niche rows.`,
@@ -414,8 +452,10 @@ ${RECORD_FIELD_CATALOG}`,
           rivalNames.length ? `VENDORS IN THIS CATEGORY (the rows must apply to all): ${rivalNames.join(", ")}` : "",
         ].filter(Boolean).join("\n"),
       );
-      const pol = await resolveModelPolicy(supabase, { task: "setup_competitive_capabilities", fallback: { model: MODEL, effort: "medium" } });
-      const resp = (await anthropic.messages.create({
+        p.done("grade");
+        p.step("select", "Selecting standard, cross-vendor areas");
+        const pol = await resolveModelPolicy(supabase, { task: "setup_competitive_capabilities", fallback: { model: MODEL, effort: "medium" } });
+        const streamed = anthropic.messages.stream({
         model: pol.model, max_tokens: 3000,
         output_config: { effort: pol.effort, format: { type: "json_schema", schema: CAPABILITIES_SCHEMA } },
         system: `You build a competitive capability matrix from the analyst briefing below. Select the 8–12 best ROWS — each a STANDARD, INDUSTRY-RECOGNIZED feature-function area for this category that applies to EVERY vendor (so we can score us AND each rival on it). Rules: use the category's conventional names from the briefing, not our product's internal/proprietary language; one row per distinct capability AREA (map specific features into the standard area they belong to — do NOT make a row per niche feature); each row must be scoreable across all named rivals. Mostly product capability areas; include 2–3 gtm/commercial vectors only when they genuinely decide deals in this category (e.g. integrations/ecosystem, security & compliance, pricing/packaging). name = the short standard area label (2–5 words); why = one line on why buyers weigh it. No buzzword or fluff rows.`,
@@ -425,14 +465,23 @@ ${RECORD_FIELD_CATALOG}`,
           rivalNames.length ? `\nVENDORS THE ROWS MUST APPLY TO: ${rivalNames.join(", ")}` : "",
         ].filter(Boolean).join("\n") }],
         // deno-lint-ignore no-explicit-any
-      } as any)) as Anthropic.Message;
-      const text = resp.content.filter((b) => b.type === "text").map((b) => (b as { text: string }).text).join("");
-      await logUsage(supabase, { task: "setup_competitive_capabilities", model: pol.model, usage: resp.usage });
-      let out: { capabilities: { name: string; category: string; why: string }[] };
-      try { out = JSON.parse(text); }
-      catch { return json({ error: "The matrix-row proposal came back incomplete — try again." }, 502); }
-      const capabilities = (out.capabilities ?? []).filter((c) => c.name?.trim()).map((c) => ({ ...c, name: c.name.trim(), category: c.category === "gtm" ? "gtm" : "product" }));
-      return json({ capabilities });
+        } as any);
+        // deno-lint-ignore no-explicit-any
+        for await (const ev of streamed as any) {
+          if (ev.type === "content_block_delta" && ev.delta?.type === "thinking_delta" && ev.delta.thinking) p.think(ev.delta.thinking);
+        }
+        const resp = await streamed.finalMessage();
+        const text = resp.content.filter((b) => b.type === "text").map((b) => (b as { text: string }).text).join("");
+        await logUsage(supabase, { task: "setup_competitive_capabilities", model: pol.model, usage: resp.usage });
+        let out: { capabilities: { name: string; category: string; why: string }[] };
+        try { out = JSON.parse(text); }
+        catch { throw Object.assign(new Error("The matrix-row proposal came back incomplete — try again."), { status: 502 }); }
+        const capabilities = (out.capabilities ?? []).filter((c) => c.name?.trim()).map((c) => ({ ...c, name: c.name.trim(), category: c.category === "gtm" ? "gtm" : "product" }));
+        p.done("select", `${capabilities.length} row${capabilities.length === 1 ? "" : "s"}`);
+        return { capabilities };
+      };
+
+      return dispatch((body as { stream?: boolean }).stream === true, CORS, caps);
     }
 
     return json({ error: "step must be one of: interview, picture, landscape, competitors, capabilities" }, 400);
