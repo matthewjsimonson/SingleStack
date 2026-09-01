@@ -14,7 +14,7 @@
 import Anthropic from "npm:@anthropic-ai/sdk@0.69.0";
 import { createClient, type SupabaseClient } from "npm:@supabase/supabase-js@2";
 import { resolveModelPolicy } from "../_shared/ai_policy.ts";
-import { PRICING } from "../_shared/ai_usage.ts";
+import { addUsage, costOf, emptyUsage, logUsage } from "../_shared/ai_usage.ts";
 import { noProgress, type Progress, progress } from "../_shared/progress.ts";
 
 const DEFAULT_MODEL = "claude-opus-5";
@@ -136,7 +136,7 @@ Deno.serve(async (req: Request) => {
   async function generate(p: Progress) {
     // deno-lint-ignore no-explicit-any
     const results: { agentName: string; skillName: string | null; payload: any }[] = [];
-    let inTok = 0, outTok = 0, cost = 0, prior = "";
+    let totals = emptyUsage(), cost = 0, prior = "";
     for (let idx = 0; idx < steps.length; idx++) {
       const step = steps[idx];
       const ag = agentById(step.agent_id);
@@ -187,8 +187,13 @@ Deno.serve(async (req: Request) => {
       try { payload = JSON.parse(block.text); } catch { throw new Error(`step ${idx + 1} (${ag.name}) returned malformed output — likely truncated. Try a tighter instruction.`); }
       p.done(stepId, typeof payload?.headline === "string" ? payload.headline : undefined);
       results.push({ agentName: ag.name as string, skillName: playSkill?.name ?? null, payload });
-      inTok += resp.usage.input_tokens; outTok += resp.usage.output_tokens;
-      const price = PRICING[aModel]; if (price) cost += (resp.usage.input_tokens * price.input + resp.usage.output_tokens * price.output) / 1_000_000;
+      // Each step is its own model call, on its own agent and possibly its own
+      // model — so it gets its own ledger row, and cost accrues per step at that
+      // step's price. costOf() includes the cache terms the old inline formula
+      // dropped, which mattered most here: every step re-sends the same prefix.
+      totals = addUsage(totals, resp.usage);
+      cost += costOf(aModel, resp.usage) ?? 0;
+      await logUsage(supabase, { task: "run_workflow", model: aModel, usage: resp.usage, agentId: ag.id as string });
       prior += `\n  • Step ${idx + 1} (${ag.name}): ${payload.headline ?? ""}${(payload.recommendations ?? []).length ? ` — next: ${(payload.recommendations as string[]).slice(0, 3).join("; ")}` : ""}`;
     }
 
@@ -224,7 +229,7 @@ Deno.serve(async (req: Request) => {
     const { data: run } = await supabase.from("agent_runs").insert({
       org_id: orgId, agent_id: firstAgentId, status: "succeeded",
       input: { kind: "workflow", workflow_id: wfId, steps: steps.length }, output: payload.headline ?? "(workflow)",
-      model: DEFAULT_MODEL, input_tokens: inTok, output_tokens: outTok, cost_usd: cost || null, finished_at: new Date().toISOString(),
+      model: DEFAULT_MODEL, input_tokens: totals.input_tokens, output_tokens: totals.output_tokens, cost_usd: cost || null, finished_at: new Date().toISOString(),
     }).select("id").single();
 
     const { data: artifact, error: artErr } = await supabase.from("agent_artifacts").insert({

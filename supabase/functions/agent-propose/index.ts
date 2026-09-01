@@ -23,7 +23,7 @@ import Anthropic from "npm:@anthropic-ai/sdk@0.69.0";
 import { createClient, type SupabaseClient } from "npm:@supabase/supabase-js@2";
 import { resolveModelPolicy } from "../_shared/ai_policy.ts";
 import { FIELD_WRITING_RULES } from "../_shared/field_writing.ts";
-import { PRICING } from "../_shared/ai_usage.ts";
+import { costOf, logUsage } from "../_shared/ai_usage.ts";
 import { noProgress, type Progress, progress } from "../_shared/progress.ts";
 const DEFAULT_CLAUDE_MODEL = "claude-opus-5";
 const DEFAULT_TOP_K = 6;
@@ -371,9 +371,11 @@ Deno.serve(async (req: Request) => {
         if (chErr) { await supabase.from("proposals").delete().eq("id", pid); throw new Error(`could not save changes: ${chErr.message}`); }
       }
       await maybeAutoAccept(pid, p);
-      const price = PRICING[model];
-      const cost = price ? (usage.input_tokens * price.input + usage.output_tokens * price.output) / 1_000_000 : null;
+      // costOf() prices the cache terms this used to omit; logUsage() is what
+      // puts an agent call in the ledger the spend dashboard reads.
+      const cost = costOf(model, usage);
       await supabase.from("agent_runs").update({ status: "succeeded", output: JSON.stringify(proposal), input_tokens: usage.input_tokens, output_tokens: usage.output_tokens, cost_usd: cost, finished_at: new Date().toISOString() }).eq("id", runId);
+      await logUsage(supabase, { task: "agent_propose", model, usage, agentId });
       return { run_id: runId, proposal_id: pid, auto_accepted: autoAccepted, proposal: { title: proposal.title, rationale: proposal.rationale, conf_level: confLevel, conf_label: proposal.conf_label, proposed_by: jointBy, changes: display } };
     }
 

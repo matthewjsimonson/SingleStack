@@ -363,7 +363,7 @@ Deno.serve(async (req: Request) => {
       try {
         const doc = await fetchViaMcp(key, source, mcpConn, mcpToken, pullPol);
         screenAndKeep(doc.label, doc.url, doc.text);
-        await logUsage(supabase, { task: "connector_pull", model: pullPol.model, usage: doc.usage });
+        await logUsage(supabase, { task: "connector_pull", model: pullPol.model, usage: doc.usage, orgId });
       } catch (e) { fetchErrors.push(`mcp: ${e instanceof Error ? e.message : String(e)}`); }
     } else if (source.kind === "web_search" || SEARCH_BACKED.has(source.kind)) {
       // Live web search via Anthropic's server-side tool. For a search-backed
@@ -381,7 +381,7 @@ Deno.serve(async (req: Request) => {
         }
         const doc = await fetchViaWebSearch(key, source, pullPol, framing);
         screenAndKeep(doc.label, doc.url, doc.text);
-        await logUsage(supabase, { task: "connector_pull", model: pullPol.model, usage: doc.usage });
+        await logUsage(supabase, { task: "connector_pull", model: pullPol.model, usage: doc.usage, orgId });
       } catch (e) { fetchErrors.push(`${source.kind}: ${e instanceof Error ? e.message : String(e)}`); }
     } else {
       // Resolve what to fetch: the source's url + each pointing TARGET of type url.
@@ -465,7 +465,7 @@ Deno.serve(async (req: Request) => {
       if (ev.type === "content_block_delta" && ev.delta?.type === "thinking_delta" && ev.delta.thinking) p.think(ev.delta.thinking);
     }
     const resp = await streamed.finalMessage();
-    await logUsage(supabase, { task: "connector_distill", model: distillPol.model, usage: resp.usage });
+    await logUsage(supabase, { task: "connector_distill", model: distillPol.model, usage: resp.usage, orgId });
 
     const block = resp.content.find((b) => b.type === "text");
     if (!block || block.type !== "text") throw new Error("no distillation returned");

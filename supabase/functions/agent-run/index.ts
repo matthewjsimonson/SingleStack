@@ -24,7 +24,7 @@ import Anthropic from "npm:@anthropic-ai/sdk@0.69.0";
 import { createClient, type SupabaseClient } from "npm:@supabase/supabase-js@2";
 import { resolveModelPolicy } from "../_shared/ai_policy.ts";
 import { FIELD_WRITING_RULES } from "../_shared/field_writing.ts";
-import { PRICING } from "../_shared/ai_usage.ts";
+import { addUsage, costOf, emptyUsage, logUsage, type UsageTotals } from "../_shared/ai_usage.ts";
 import { noProgress, type Progress, progress } from "../_shared/progress.ts";
 
 const DEFAULT_MODEL = "claude-opus-5";
@@ -333,10 +333,10 @@ Deno.serve(async (req: Request) => {
   };
 
   // ---- the bounded agent loop, narrating itself through `p` ------------------
-  async function runLoop(p: Progress): Promise<{ answer: string; inTok: number; outTok: number }> {
+  async function runLoop(p: Progress): Promise<{ answer: string; usage: UsageTotals }> {
     // deno-lint-ignore no-explicit-any
     const messages: any[] = convo.map((m) => ({ role: m.role, content: m.content }));
-    let inTok = 0, outTok = 0;
+    let usage = emptyUsage();
     // Connectors can be flaky/down — if one is unreachable, we drop them and carry
     // on with our own tools rather than failing the whole run (see the model call).
     let mcpActive = mcpServers.length > 0;
@@ -373,7 +373,9 @@ Deno.serve(async (req: Request) => {
           resp = await callModel(false);
         } else throw e;
       }
-      inTok += resp.usage.input_tokens; outTok += resp.usage.output_tokens;
+      // All four counters, not two: the loop re-sends the same cached prefix
+      // every step, so cache reads are most of this call's input volume.
+      usage = addUsage(usage, resp.usage);
 
       // surface the officer's real reasoning + any connector calls for this step
       for (const b of resp.content) {
@@ -397,7 +399,7 @@ Deno.serve(async (req: Request) => {
 
       if (resp.stop_reason !== "tool_use") {
         const answer = resp.content.filter((b) => b.type === "text").map((b) => (b.type === "text" ? b.text : "")).join("").trim();
-        return { answer, inTok, outTok };
+        return { answer, usage };
       }
 
       // execute every tool the officer asked for, in order
@@ -424,7 +426,7 @@ Deno.serve(async (req: Request) => {
       }
       messages.push({ role: "user", content: results });
     }
-    return { answer: "I reached my step limit before finishing — here's where I got to. Ask me to continue if you'd like.", inTok, outTok };
+    return { answer: "I reached my step limit before finishing — here's where I got to. Ask me to continue if you'd like.", usage };
   }
 
   // ---- tool implementations (RLS-scoped) ------------------------------------
@@ -534,14 +536,16 @@ Deno.serve(async (req: Request) => {
   }
 
   // ---- run + respond --------------------------------------------------------
-  const finish = async (answer: string, inTok: number, outTok: number) => {
-    const price = PRICING[model];
-    const cost = price ? (inTok * price.input + outTok * price.output) / 1_000_000 : null;
+  const finish = async (answer: string, usage: UsageTotals) => {
+    const cost = costOf(model, usage);
     await supabase.from("agent_runs").insert({
       org_id: orgId, agent_id: agent.id, status: "succeeded",
       input: { kind: "agent-run", agent_key, turns: convo.length }, output: answer.slice(0, 2000),
-      model, input_tokens: inTok, output_tokens: outTok, cost_usd: cost, finished_at: new Date().toISOString(),
+      model, input_tokens: usage.input_tokens, output_tokens: usage.output_tokens, cost_usd: cost, finished_at: new Date().toISOString(),
     });
+    // The run row is observability; this is the spend ledger the dashboard reads.
+    // Without it the most expensive path in the product was invisible there.
+    await logUsage(supabase, { task: "agent_run", model, usage, agentId: agent.id as string });
   };
 
   if (input.stream) {
@@ -549,9 +553,9 @@ Deno.serve(async (req: Request) => {
       async start(controller) {
         const p = progress(controller);
         try {
-          const { answer, inTok, outTok } = await runLoop(p);
+          const { answer, usage } = await runLoop(p);
           p.answer(answer);
-          await finish(answer, inTok, outTok);
+          await finish(answer, usage);
         } catch (e) {
           p.error(e instanceof Error ? e.message : String(e));
         } finally { controller.close(); }
@@ -561,8 +565,8 @@ Deno.serve(async (req: Request) => {
   }
 
   try {
-    const { answer, inTok, outTok } = await runLoop(noProgress());
-    await finish(answer, inTok, outTok);
+    const { answer, usage } = await runLoop(noProgress());
+    await finish(answer, usage);
     return json({ reply: answer });
   } catch (e) {
     return json({ error: e instanceof Error ? e.message : String(e) }, 500);

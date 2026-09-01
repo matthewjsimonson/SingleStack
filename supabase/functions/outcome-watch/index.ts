@@ -107,7 +107,7 @@ async function checkOne(supabase: SupabaseClient, anthropic: Anthropic, o: Outco
     messages: [{ role: "user", content: userText }],
     // deno-lint-ignore no-explicit-any
   } as any)) as Anthropic.Message;
-  await logUsage(supabase, { task: "outcome_watch", model: pol.model, usage: resp.usage });
+  await logUsage(supabase, { task: "outcome_watch", model: pol.model, usage: resp.usage, orgId: o.org_id as string });
 
   const block = resp.content.find((b) => b.type === "text");
   if (!block || block.type !== "text") return { error: "no verdict returned" };

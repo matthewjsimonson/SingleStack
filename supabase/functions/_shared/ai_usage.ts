@@ -31,6 +31,43 @@ type Usage = {
   cache_creation_input_tokens?: number | null;
 } | null | undefined;
 
+/**
+ * Running totals for a call that spans several model requests (a tool loop).
+ *
+ * Loops used to accumulate input/output only and drop the cache counters at the
+ * source, which made a cached read bill as a full-price input token and left
+ * cache hit rate unmeasurable on exactly the runs where caching matters most.
+ * Carry all four, and costOf() prices them correctly.
+ */
+export type UsageTotals = {
+  input_tokens: number;
+  output_tokens: number;
+  cache_read_input_tokens: number;
+  cache_creation_input_tokens: number;
+};
+
+export const emptyUsage = (): UsageTotals => ({
+  input_tokens: 0,
+  output_tokens: 0,
+  cache_read_input_tokens: 0,
+  cache_creation_input_tokens: 0,
+});
+
+/** Fold one response's usage into the running total. Absent counters read as 0. */
+export function addUsage(acc: UsageTotals, u: Usage): UsageTotals {
+  return {
+    input_tokens: acc.input_tokens + (u?.input_tokens ?? 0),
+    output_tokens: acc.output_tokens + (u?.output_tokens ?? 0),
+    cache_read_input_tokens: acc.cache_read_input_tokens + (u?.cache_read_input_tokens ?? 0),
+    cache_creation_input_tokens: acc.cache_creation_input_tokens + (u?.cache_creation_input_tokens ?? 0),
+  };
+}
+
+/**
+ * The ONLY place model cost arithmetic lives. Seven functions used to import
+ * PRICING and rewrite this expression by hand, all of them omitting the cache
+ * terms — see ai_usage.test.ts, whose drift guard fails if that comes back.
+ */
 export function costOf(model: string, u: Usage): number | null {
   const p = PRICING[model];
   if (!p) return null;
@@ -39,10 +76,23 @@ export function costOf(model: string, u: Usage): number | null {
   return (inT * p.input + outT * p.output + cr * p.input * CACHE_READ_MULT + cw * p.input * CACHE_WRITE_MULT) / 1_000_000;
 }
 
+/**
+ * Record one call in the spend ledger. Best-effort — never breaks the response.
+ *
+ * `orgId` is not optional in spirit, only in signature. current_org_id() resolves
+ * from memberships via auth.uid(), so it returns NULL for a service-role bearer:
+ * every machine-invoked call (the heartbeat's connector pulls, outcome-watch)
+ * silently logged nothing, which is precisely the unattended population whose
+ * spend most needs watching. Pass the org explicitly wherever it is known.
+ */
 // deno-lint-ignore no-explicit-any
-export async function logUsage(supabase: any, opts: { task: string; model: string; usage: Usage; agentId?: string | null }): Promise<void> {
+export async function logUsage(supabase: any, opts: { task: string; model: string; usage: Usage; agentId?: string | null; orgId?: string | null }): Promise<void> {
   try {
-    const { data: org } = await supabase.rpc("current_org_id");
+    let org = opts.orgId ?? null;
+    if (!org) {
+      const { data } = await supabase.rpc("current_org_id");
+      org = data ?? null;
+    }
     if (!org) return;
     const u = opts.usage ?? {};
     await supabase.from("ai_usage").insert({

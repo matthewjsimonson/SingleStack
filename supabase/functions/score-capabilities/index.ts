@@ -24,7 +24,7 @@
 import Anthropic from "npm:@anthropic-ai/sdk@0.69.0";
 import { createClient, type SupabaseClient } from "npm:@supabase/supabase-js@2";
 import { resolveModelPolicy } from "../_shared/ai_policy.ts";
-import { PRICING } from "../_shared/ai_usage.ts";
+import { costOf, logUsage } from "../_shared/ai_usage.ts";
 
 const MODEL = "claude-opus-5";
 const CORS = {
@@ -193,10 +193,14 @@ Deno.serve(async (req: Request) => {
       if (!error) proposed++;
     }
 
-    const usage = { input_tokens: resp.usage?.input_tokens ?? 0, output_tokens: resp.usage?.output_tokens ?? 0 };
-    const price = PRICING[model];
-    const cost = price ? (usage.input_tokens * price.input + usage.output_tokens * price.output) / 1_000_000 : null;
-    if (runId) await supabase.from("agent_runs").update({ status: "succeeded", output: JSON.stringify(out), input_tokens: usage.input_tokens, output_tokens: usage.output_tokens, cost_usd: cost, finished_at: new Date().toISOString() }).eq("id", runId);
+    // Keep the whole usage object: narrowing it to two fields dropped the cache
+    // counters, so a cached read billed as full-price input and the hit rate was
+    // invisible. costOf() prices all four; logUsage() puts this call in the spend
+    // ledger the dashboard reads — agent_runs alone never reached it.
+    const usage = resp.usage;
+    const cost = costOf(model, usage);
+    if (runId) await supabase.from("agent_runs").update({ status: "succeeded", output: JSON.stringify(out), input_tokens: usage?.input_tokens ?? 0, output_tokens: usage?.output_tokens ?? 0, cost_usd: cost, finished_at: new Date().toISOString() }).eq("id", runId);
+    await logUsage(supabase, { task: "score_capabilities", model, usage, agentId: agent.id });
 
     return json({ proposed, skipped, message: proposed
       ? `${proposed} capability score${proposed === 1 ? "" : "s"} proposed for ${comp.name} — review them in Signals → Review, then the matrix updates.`

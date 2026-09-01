@@ -25,7 +25,7 @@
 import Anthropic from "npm:@anthropic-ai/sdk@0.69.0";
 import { createClient, type SupabaseClient } from "npm:@supabase/supabase-js@2";
 import { resolveModelPolicy } from "../_shared/ai_policy.ts";
-import { PRICING } from "../_shared/ai_usage.ts";
+import { costOf, logUsage } from "../_shared/ai_usage.ts";
 import { progress } from "../_shared/progress.ts";
 
 const DEFAULT_MODEL = "claude-opus-5";
@@ -80,6 +80,9 @@ Deno.serve(async (req: Request) => {
   if (aErr) return json({ error: `agent lookup failed: ${aErr.message}` }, 500);
   if (!agent) return json({ error: `no active agent with key '${agent_key}'` }, 404);
 
+  // Captured past the null-check: TS re-widens `agent` inside the streaming
+  // closure below, so agent.id would read as possibly-null there.
+  const agentId = agent.id as string;
   const pol = await resolveModelPolicy(supabase, { task: "agent_chat", agentId: agent.id as string, fallback: { model: (agent.model as string) || DEFAULT_MODEL, effort: "high" } });
   const model = pol.model;
   const orgId = agent.org_id as string;
@@ -329,8 +332,8 @@ Deno.serve(async (req: Request) => {
             }
             const finalMsg = await s.finalMessage();
             const u = finalMsg.usage;
-            const price = PRICING[model];
-            const cost = price ? (u.input_tokens * price.input + u.output_tokens * price.output) / 1_000_000 : null;
+            const cost = costOf(model, u);
+            await logUsage(supabase, { task: "agent_chat", model, usage: u, agentId });
             const { data: runRow } = await supabase.from("agent_runs").insert({
               org_id: orgId, agent_id: agent.id, status: "succeeded",
               input: { kind: "chat", messages, context: context ?? null, skills: skills.length, areas }, output: full, model,
@@ -365,8 +368,8 @@ Deno.serve(async (req: Request) => {
     const reply = text && text.type === "text" ? text.text : "(no response)";
 
     // Log the turn.
-    const price = PRICING[model];
-    const cost = price ? (resp.usage.input_tokens * price.input + resp.usage.output_tokens * price.output) / 1_000_000 : null;
+    const cost = costOf(model, resp.usage);
+    await logUsage(supabase, { task: "agent_chat", model, usage: resp.usage, agentId });
     const { data: run } = await supabase.from("agent_runs").insert({
       org_id: orgId, agent_id: agent.id, status: "succeeded",
       input: { kind: "chat", messages, context: context ?? null, skills: skills.length, areas }, output: reply, model,
