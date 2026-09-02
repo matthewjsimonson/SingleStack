@@ -18,7 +18,8 @@ type Workflow = { id: string; name: string; trigger: string; is_active: boolean;
 // when a release is marked shipped. Nothing fires the other two: `scheduled` has
 // no sweeper yet, and on_capability_update has no fire site at all. They stay
 // selectable — the data model supports them and existing workflows use them —
-// but a picker that hides which ones are inert teaches people the product lies.
+// The inert two are NOT surfaced in the picker right now (reverted ahead of a
+// demo); restore the labels when the sweeper lands and this becomes moot.
 const TRIGGERS: { key: string; label: string; fires: boolean }[] = [
   { key: "manual", label: "Manual (run on demand)", fires: true },
   { key: "on_signal", label: "When a signal lands", fires: true },
@@ -27,7 +28,6 @@ const TRIGGERS: { key: string; label: string; fires: boolean }[] = [
   { key: "scheduled", label: "Scheduled", fires: false },
   { key: "on_capability_update", label: "On new capability", fires: false },
 ];
-const INERT = new Set(TRIGGERS.filter((t) => !t.fires).map((t) => t.key));
 
 export default function ModuleWorkflows({ moduleId, productId }: { moduleId: string; productId: string }) {
   const supabase = createClient();
@@ -89,14 +89,8 @@ export default function ModuleWorkflows({ moduleId, productId }: { moduleId: str
             <label className="field"><span className="t-label">Workflow</span><input className="input" autoFocus value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} placeholder="e.g. Refresh module positioning" /></label>
             <label className="field"><span className="t-label">Trigger</span>
               <select className="select" value={form.trigger} onChange={(e) => setForm({ ...form, trigger: e.target.value })}>
-                {TRIGGERS.map((t) => <option key={t.key} value={t.key}>{t.label}{t.fires ? "" : " — not firing yet"}</option>)}
-              </select>
-              {INERT.has(form.trigger) && (
-                <span className="t-sub t-muted" style={{ fontSize: 11, marginTop: 3 }}>
-                  Nothing fires this trigger yet — the workflow saves, but never runs. Run it manually meanwhile.
-                </span>
-              )}
-            </label>
+                {TRIGGERS.map((t) => <option key={t.key} value={t.key}>{t.label}</option>)}
+              </select></label>
           </div>
           <label className="field"><span className="t-label">Run as agent</span>
             <select className="select" value={form.agent_id} onChange={(e) => setForm({ ...form, agent_id: e.target.value })}>
@@ -128,7 +122,6 @@ export default function ModuleWorkflows({ moduleId, productId }: { moduleId: str
                 <div className="row gap-2" style={{ flexWrap: "wrap" }}>
                   <span style={{ fontSize: 13.5, fontWeight: 620 }}>{w.name}</span>
                   <Chip>{w.trigger}</Chip>
-                  {INERT.has(w.trigger) && <Chip tone="amber">not firing</Chip>}
                   {!w.is_active && <Chip tone="amber">paused</Chip>}
                 </div>
                 <div className="t-sub t-muted" style={{ fontSize: 11.5, marginTop: 2 }}>
